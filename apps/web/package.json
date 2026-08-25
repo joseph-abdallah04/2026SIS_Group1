@@ -14,7 +14,7 @@
     "@roundtable/shared": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "^7.18.2",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
