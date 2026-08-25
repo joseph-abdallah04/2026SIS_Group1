@@ -1,6 +1,13 @@
 # RoundTable — Setup Checklist (Week 1 Gate)
 
 > Before feature module owners begin their work, the setup phase must establish shared rails. This checklist defines the "ready to split work" line.
+>
+> **What's still open (as of 2026-08-26):**
+> 1. **§3 Render auto-deploy** — verifies itself right after this PR merges; confirm `<service-url>/api/health` returns `{ ok: true }`, then tick it.
+> 2. **§9 team-side** — record the 7 module owners + create the Jira stories under each epic.
+> 3. **§10 integration smoke test** — runs after merge, doubling as the Auth/Session owners' first acceptance test.
+>
+> Everything else is done.
 
 ## 1. Repo + Tooling Foundations
 
@@ -154,10 +161,6 @@
   - Module owner authors migration in their PR
   - Platform steward reviews + approves schema changes
   - Migration PR merged before feature PR
-- [ ] PR template created (`.github/pull_request_template.md`):
-  - Checklist: tests added, CI passing, no console.logs, env vars documented
-  - Link to feature ticket(s) (e.g. "Closes F07, F08")
-  - Link to any architectural/schema changes
 - [ ] Jira board setup:
   - 1 Epic per module owner
   - Epics linked to docs/02 module boundaries
