@@ -30,7 +30,7 @@
 
 ## 2. Environment + Secrets Discipline
 
-- [ ] `.env.example` committed with all required keys (never commit `.env`):
+- [x] `.env.example` committed with all required keys (never commit `.env`):
   ```
   PORT=3001
   JWT_SECRET=
@@ -41,12 +41,12 @@
   LLM_KEY_ENCRYPTION_SECRET=
   CLIENT_ORIGIN=
   ```
-- [ ] Config loader module created (`apps/server/src/env.ts`):
+- [x] Config loader module created (`apps/server/src/env.ts`):
   - Uses zod to validate env at startup
   - Fails fast with clear error message if any key is missing/invalid
   - Exported singleton available to all modules
-- [ ] `.env` added to `.gitignore`.
-- [ ] External accounts created + documented:
+- [x] `.env` added to `.gitignore`.
+- [ ] External accounts created + documented *(deferred to a team meeting — do these together, then paste secrets into Render env vars / local `.env`; never commit them)*:
   - [ ] Neon Postgres project; connection string in `.env.example`
   - [ ] LiveKit Cloud project; API key/secret/URL in `.env.example`
   - [ ] Render account linked to GitHub repo
