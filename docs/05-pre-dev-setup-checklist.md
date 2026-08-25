@@ -91,123 +91,54 @@
 
 ## 5. Backend Skeleton (Express + Socket.IO, no feature logic)
 
-- [ ] Express server boots on `PORT` (default 3001):
+> **Scope note (agreed):** setup provides only the shared rails below. Feature-shaped pieces — socket auth handshake, realtime gateway, SSE streaming — belong to module owners (see "Deferred during setup").
+
+- [x] Express server boots on `PORT` (default 3001):
   - `GET /api/health` returns `{ ok: true, service: "roundtable-server" }`
   - CORS configured to allow web app origin
   - JSON body parser wired with 256KB limit
-- [ ] Global error handler in place:
-  - Catches uncaught errors
-  - Returns consistent shape: `{ error: string, code?: string }`
-- [ ] Socket.IO server boots with:
-  - JWT auth handshake via `socket.handshake.auth.token`
-  - Rejects unauthenticated sockets
-  - Logs connection/disconnect
-- [ ] Module folders created (empty, ready for owners):
-  - `apps/server/src/modules/auth/`
-  - `apps/server/src/modules/sessions/`
-  - `apps/server/src/modules/pinboard/`
-  - `apps/server/src/modules/tools/` (back-end helpers, if any)
-  - `apps/server/src/modules/voting/`
-  - `apps/server/src/modules/summary/`
-  - `apps/server/src/modules/voice/`
-  - `apps/server/src/modules/assistant/`
-- [ ] Module registration pattern documented:
-  - Each module exports an `index.ts` with its public surface
-  - Routes file per module, mounted in main `index.ts`
-  - Socket event handlers per module in `realtime/` folder
-- [ ] Auth middleware stub exists: `requireAuth(req, res, next)` returns 401 for now.
-- [ ] `apps/server/src/realtime/gateway.ts` exists:
-  - Listens for socket connections
-  - Routes events to module handlers (empty for now)
-  - Implements room join/leave patterns documented in architecture
-- [ ] SSE helper function scaffolded for assistant module style streaming.
+- [x] Socket.IO server boots with connection/disconnect logging.
+- [ ] Global error handler: returns consistent `{ error: string, code?: string }` shape.
+- [ ] Auth middleware stub `requireAuth(req, res, next)` returns 401 (real JWT check = Auth owner).
+- [ ] Module registration convention documented (docs/02 §6): module `index.ts` public surface, routes mounted in main `index.ts`, socket handlers under `realtime/`.
+
+**Cut from setup:** empty module folder tree, `realtime/gateway.ts` implementation, SSE helper, socket JWT handshake.
 
 ## 6. Shared Contracts Package (`packages/shared`)
 
-- [ ] Exports from `src/index.ts`:
-  - Domain types: `User`, `Session`, `Question`, `Proposal`, etc. (as in docs/02 §3)
-  - Proposal artifact subtypes: `StickyArtifact`, `DrawingArtifact`, `DiagramArtifact`
-  - All types are concrete, not `any`
-- [ ] Exports from `src/events.ts`:
-  - `ClientToServerEvents` type (Socket.IO C→S)
-  - `ServerToClientEvents` type (Socket.IO S→C)
-  - Event payload types
-- [ ] Exports from `src/schemas.ts`:
-  - zod schemas for API DTOs (signup, login, createSession, joinSession, etc.)
-  - zod schemas for proposal types and artifacts
-  - Validators used consistently on backend
-- [ ] Both `apps/server` and `apps/web` successfully import shared types.
-- [ ] No duplicate type definitions between web/server.
-- [ ] `packages/shared/package.json` exports are correct (exports field points to `src/`).
+> **Scope note (agreed):** DB row types come free from the generated Prisma client — don't hand-mirror the whole data model here. Setup ships only what prevents web/server drift: event types + validation patterns.
+
+- [ ] `src/events.ts`: typed `ClientToServerEvents` + `ServerToClientEvents` maps with payload types, seeded with core events (`member:join`, room join/leave); module owners extend.
+- [ ] `src/schemas.ts`: zod pattern established with 1–2 example schemas (signup, login); owners follow it for their DTOs.
+- [ ] Both apps successfully import from `@roundtable/shared`; no duplicate type definitions; package exports point to `src/`.
+
+**Cut from setup:** full domain-type mirror of docs/02 §3, proposal/artifact subtypes.
 
 ## 7. Frontend Shell (React + Vite, no feature logic)
 
-- [ ] React app boots with Vite:
+> **Scope note (agreed):** setup ships plumbing + route targets only. Page layouts and UI design wait for the frontend mockup; session-page layout skeleton is dropped entirely (Pinboard/UI owners).
+
+- [x] React app boots with Vite:
   - `npm run dev` starts Vite on port 5173
   - `npm run build` produces optimized SPA in `dist/`
   - Vite proxy routes `/api` and `/socket.io` to `localhost:3001`
-- [ ] React Router configured:
-  - Root layout wrapper (App component)
-  - Public routes: `/login`, `/signup`
-  - Protected routes: `/dashboard`, `/sessions/:id`, `/settings`
-  - 404 fallback
-- [ ] Page shells created (placeholder content acceptable):
-  - [ ] **Login page** (`/login`): form + link to signup
-  - [ ] **Signup page** (`/signup`): form + link to login
-  - [ ] **Dashboard** (`/dashboard`): "My Sessions" list + "Create Session" button (stubs only)
-  - [ ] **Session page** (`/sessions/:id`): layout with placeholders for all UI sections
-  - [ ] **Settings page** (`/settings`): placeholder for LLM config, profile settings
-- [ ] Session page layout skeleton:
-  - Left sidebar: agenda panel placeholder (expandable/collapsible)
-  - Center: pinboard placeholder (canvas-like area)
-  - Bottom: toolbar placeholder (floating buttons for tools)
-  - Bottom-right: AI assistant bubble placeholder (animated circle)
-- [ ] Right-side assistant panel:
-  - Initially hidden / off-canvas
-  - Can toggle open/close (UI-only, no logic)
-  - Layout: chat-like area at top, empty for now
-- [ ] API client wrapper exists (`apps/web/src/lib/api.ts`):
-  - `api.get(path)` and `api.post(path, body)` methods
-  - Handles JSON serialization
-  - Graceful error handling (shows error message, doesn't crash)
-- [ ] Socket.IO client wrapper exists (`apps/web/src/lib/socket.ts`):
-  - Exports `useSocket()` hook (or singleton client)
-  - Automatically passes JWT token on connect
-  - Implements reconnect with backoff
-  - Type-safe event emitters/listeners
-- [ ] Tailwind CSS v4 configured + working:
-  - `npm run build` includes Tailwind output
-  - Dev server has hot reload for CSS
-- [ ] Basic component library folder created:
-  - `apps/web/src/components/ui/Button.tsx`
-  - `apps/web/src/components/ui/Modal.tsx`
-  - `apps/web/src/components/ui/Input.tsx`
-  - Enough to unblock page building; no full component library needed yet
+- [x] Tailwind CSS v4 configured + working.
+- [ ] React Router configured: public (`/login`, `/signup`), protected (`/dashboard`, `/sessions/:id`, `/settings`), 404 fallback; auth guard redirects unauthenticated users to `/login`.
+- [ ] Placeholder pages for those routes (one line of content each — smoke-test targets only).
+- [ ] API client wrapper `apps/web/src/lib/api.ts`: `get`/`post`, JSON handling, graceful errors.
+- [ ] Socket.IO client wrapper `apps/web/src/lib/socket.ts`: singleton/hook, JWT passed on connect, reconnect with backoff, typed events.
 
-## 8. Security + Data Handling Baseline
+**Cut from setup:** page shells with real layout content, session-page layout skeleton, assistant panel UI, Button/Modal/Input component library.
 
-- [ ] Password hashing strategy documented + implemented:
-  - bcryptjs rounds: 10+ (recommended for MVP)
-  - Hash generated on signup; never log plaintext
-  - Verification implemented (auth module)
-- [ ] JWT strategy documented:
-  - Secret stored in `JWT_SECRET` env var
-  - Expiry: 7 days for MVP (no refresh for simplicity)
-  - Payload includes: `userId`, `iat`, `exp`
-  - Verified in auth middleware
-- [ ] LLM API key storage strategy implemented:
-  - Encryption: AES-256-GCM or similar, keyed by `LLM_KEY_ENCRYPTION_SECRET`
-  - Encrypted at rest in `UserLLMConfig.apiKeyEncrypted`
-  - Decrypted only in memory when making assistant API calls
-  - Never returned in API responses (config GET returns `{ baseUrl, model }` only)
-- [ ] Input validation pattern documented:
-  - All mutating endpoints and socket events use zod schemas
-  - Failed validation returns 400 with error details
-  - Schema violations logged (never proceed)
-- [ ] CORS + XSS baseline:
-  - CORS header allows web app origin only (not `*` in production)
-  - No inline scripts in HTML
-  - CSP headers considered (nice-to-have for MVP)
+## 8. Security Baseline (decisions documented — implementation owned by module devs)
+
+> **Scope note (agreed):** setup *decides and documents*; the Auth owner implements signup/login against these rules. These decisions block the §4 schema (`passwordHash`, `apiKeyEncrypted` columns) and match the env vars already provisioned.
+
+- [x] Password hashing: bcryptjs, 10+ rounds; hash on signup; never log plaintext.
+- [x] JWT: secret in `JWT_SECRET`; 7-day expiry, no refresh for MVP; payload `{ userId, iat, exp }`; verified by auth middleware.
+- [x] LLM API keys: encrypted at rest with AES-256-GCM keyed by `LLM_KEY_ENCRYPTION_SECRET` (AES-256-GCM = standard authenticated encryption: encrypts AND detects tampering); decrypted only in memory during assistant calls; never returned in API responses.
+- [x] Input validation: all mutating endpoints + socket events validate with zod schemas from `packages/shared`; failures → 400 with details.
+- [x] CORS locked to web app origin (done in server); no inline scripts; CSP = nice-to-have post-MVP.
 
 ## 9. Ownership + Workflow Operating System
 
@@ -240,32 +171,13 @@
 
 ## 10. Integration Smoke Test (must pass before declaring setup done)
 
-- [ ] Two separate users can sign up and log in:
-  - Signup form works (no real validation needed yet, minimal)
-  - Passwords are hashed (check DB)
-  - JWT issued on login
-  - Login persists JWT (localStorage acceptable for MVP)
-- [ ] Both logged-in users can navigate to `/dashboard`:
-  - Auth guard redirects unauthenticated users to `/login`
-  - Dashboard loads (content stub OK)
-- [ ] Both users can access `/sessions/:id` (e.g. a demo session seed):
-  - Session page renders layout shells
-  - Agenda sidebar present (placeholder)
-  - Pinboard canvas present (placeholder)
-  - Toolbar present (placeholder)
-- [ ] Socket connection established:
-  - Open DevTools → Network → WS
-  - Connect to session page
-  - Confirm WebSocket connection to `/socket.io`
-  - Send a dummy socket event (e.g. `member:join`)
-  - Receive acknowledgment or broadcast (log to console to verify)
-- [ ] Render deploy succeeds:
-  - Push dummy commit to `main`
-  - GitHub Actions CI runs and passes
-  - Render auto-deploys
-  - Visit `https://<render-app-url>/api/health` → returns `{ ok: true }`
-  - Login works on deployed app
-  - Render logs show no startup errors
+> **Scope note:** runs after merge, using the Auth/Session owners' first tickets — it doubles as their acceptance test. Items below assume those tickets are done.
+
+- [ ] Two users can sign up and log in; passwords hashed in DB; JWT issued and persisted (localStorage OK).
+- [ ] Logged-in users reach `/dashboard`; auth guard redirects unauthenticated users to `/login`.
+- [ ] Users can open `/sessions/:id` for a seeded demo session.
+- [ ] Socket connection established (`member:join` event → ack/broadcast visible in console).
+- [ ] Render deploy succeeds: CI green on `main`, auto-deploy fires, `/api/health` returns `{ ok: true }`, login works on the deployed app, logs clean.
 
 ---
 
@@ -282,6 +194,19 @@
 ❌ LLM provider config form (except placeholder) (Auth + Assistant owners own this)
 
 **If any of the above gets implemented in setup, move it to that module owner's backlog immediately.**
+
+---
+
+## Deferred during setup — must land via module tickets (docs/06)
+
+Scope was deliberately trimmed on 2026-08-25: setup ships shared rails only; the items below were cut from setup and **must be covered by tickets in docs/06 with explicit success criteria** so nothing falls through:
+
+1. **Socket auth handshake + realtime gateway** (`realtime/gateway.ts`, JWT handshake, room join/leave, routing events to module handlers) → Session Lifecycle owner.
+2. **SSE streaming helper** for assistant responses → AI Assistant owner.
+3. **Shared domain types** (full mirror of docs/02 §3 data model incl. proposal/artifact subtypes) → grows per-module as owners build; Prisma client covers DB row types meanwhile.
+4. **Frontend page layouts + session-page UI skeleton + assistant panel + base UI components** (Button/Input/Modal) → after mockup exists; split across relevant owners.
+5. **Security implementation** per §8 decisions (bcryptjs hashing, JWT sign/verify + real `requireAuth`, AES-256-GCM helpers for LLM keys, zod `validate()` wiring) → Auth owner (+ Assistant owner for decryption usage).
+6. **CSP headers** (nice-to-have, post-MVP).
 
 ---
 
