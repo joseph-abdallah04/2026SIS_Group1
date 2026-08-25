@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
+import { errorHandler } from './middleware/error.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -18,6 +19,11 @@ app.use(express.json({ limit: '256kb' }));
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
+
+// Module owners mount their routers here (docs/02 §6):
+//   app.use('/api/auth', authRoutes) etc. Each module exports an index.ts with its public surface.
+
+app.use(errorHandler);
 
 // Serve the built SPA in production (docs/02 §9). No-op in dev, where Vite serves the frontend.
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');

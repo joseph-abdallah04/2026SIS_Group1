@@ -97,9 +97,9 @@
   - CORS configured to allow web app origin
   - JSON body parser wired with 256KB limit
 - [x] Socket.IO server boots with connection/disconnect logging.
-- [ ] Global error handler: returns consistent `{ error: string, code?: string }` shape.
-- [ ] Auth middleware stub `requireAuth(req, res, next)` returns 401 (real JWT check = Auth owner).
-- [ ] Module registration convention documented (docs/02 §6): module `index.ts` public surface, routes mounted in main `index.ts`, socket handlers under `realtime/`.
+- [x] Global error handler: returns consistent `{ error: string, code?: string }` shape (`src/middleware/error.ts`; throw `ApiError` from handlers).
+- [x] Auth middleware stub `requireAuth(req, res, next)` returns 401 (real JWT check = Auth owner).
+- [x] Module registration convention documented (docs/02 §6): module `index.ts` public surface, routes mounted in main `index.ts`, socket handlers under `realtime/`.
 
 **Cut from setup:** empty module folder tree, `realtime/gateway.ts` implementation, SSE helper, socket JWT handshake.
 
@@ -107,9 +107,9 @@
 
 > **Scope note (agreed):** DB row types come free from the generated Prisma client — don't hand-mirror the whole data model here. Setup ships only what prevents web/server drift: event types + validation patterns.
 
-- [ ] `src/events.ts`: typed `ClientToServerEvents` + `ServerToClientEvents` maps with payload types, seeded with core events (`member:join`, room join/leave); module owners extend.
-- [ ] `src/schemas.ts`: zod pattern established with 1–2 example schemas (signup, login); owners follow it for their DTOs.
-- [ ] Both apps successfully import from `@roundtable/shared`; no duplicate type definitions; package exports point to `src/`.
+- [x] `src/events.ts`: typed `ClientToServerEvents` + `ServerToClientEvents` maps with payload types, seeded with core events (`member:join`, room join/leave); module owners extend.
+- [x] `src/schemas.ts`: zod pattern established with 1–2 example schemas (signup, login); owners follow it for their DTOs.
+- [x] Both apps successfully import from `@roundtable/shared`; no duplicate type definitions; package exports point to `src/`.
 
 **Cut from setup:** full domain-type mirror of docs/02 §3, proposal/artifact subtypes.
 
@@ -122,10 +122,10 @@
   - `npm run build` produces optimized SPA in `dist/`
   - Vite proxy routes `/api` and `/socket.io` to `localhost:3001`
 - [x] Tailwind CSS v4 configured + working.
-- [ ] React Router configured: public (`/login`, `/signup`), protected (`/dashboard`, `/sessions/:id`, `/settings`), 404 fallback; auth guard redirects unauthenticated users to `/login`.
-- [ ] Placeholder pages for those routes (one line of content each — smoke-test targets only).
-- [ ] API client wrapper `apps/web/src/lib/api.ts`: `get`/`post`, JSON handling, graceful errors.
-- [ ] Socket.IO client wrapper `apps/web/src/lib/socket.ts`: singleton/hook, JWT passed on connect, reconnect with backoff, typed events.
+- [x] React Router configured: public (`/login`, `/signup`), protected (`/dashboard`, `/sessions/:id`, `/settings`), 404 fallback; auth guard redirects unauthenticated users to `/login` (`lib/auth.tsx` checks localStorage token — swap logic for real JWT validation later).
+- [x] Placeholder pages for those routes (one line of content each — smoke-test targets only).
+- [x] API client wrapper `apps/web/src/lib/api.ts`: `get`/`post`, JSON handling, graceful errors.
+- [x] Socket.IO client wrapper `apps/web/src/lib/socket.ts`: singleton/hook, JWT passed on connect, reconnect with backoff, typed events.
 
 **Cut from setup:** page shells with real layout content, session-page layout skeleton, assistant panel UI, Button/Modal/Input component library.
 
