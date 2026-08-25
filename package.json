@@ -7,6 +7,9 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
+  },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm run dev --workspace @roundtable/server\" \"npm run dev --workspace @roundtable/web\"",
     "build": "npm run build --workspaces --if-present",
