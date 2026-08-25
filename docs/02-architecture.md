@@ -36,7 +36,7 @@ flowchart LR
 
 Three moving parts only:
 
-1. **The app server** — one Node process serving the built React frontend *and* the REST API *and* WebSocket events. Deployed to Render.
+1. **The app server** — one Node process serving the built React frontend _and_ the REST API _and_ WebSocket events. Deployed to Render.
 2. **Neon Postgres** — all persistent data.
 3. **LiveKit Cloud** — voice audio only (WebRTC). Our server merely issues join tokens.
 
@@ -53,16 +53,16 @@ One process, but strict internal boundaries. Each **module**:
 
 ### Module map
 
-| Module | Owns | Public surface (used by others) |
-| --- | --- | --- |
-| `auth` | Users, signup/login, JWT verification, `requireAuth` middleware | `requireAuth`, `getCurrentUser(req)` |
-| `sessions` | Session CRUD, questions/agenda, membership, invite codes, session state machine (lobby→discussion→voting→results→ended) | `getSession(sessionId)`, `requireLeader(sessionId, userId)`, `getActiveQuestion(sessionId)`, state-change emitter |
-| `pinboard` | Proposals (sticky/drawing/diagram artifacts), positions, reactions, extend-linkage | `listProposals(questionId)`, `createProposal(...)`, event emitters |
-| `tools` *(frontend-only concern)* | Sticky note / drawing / diagram editors in React; produces artifact payloads consumed by `pinboard` | — (frontend module under `apps/web/src/features/tools/`) |
-| `voting` | Voting rounds, shortlists, ballots, tallies, winners | `startVotingRound(...)`, `closeRound(...)` |
-| `summary` | Session summary generation + storage of per-question outcomes | `buildSummary(sessionId)` |
-| `voice` | LiveKit room lifecycle, token issuance | `issueToken(sessionId, user)` |
-| `assistant` | Per-user LLM config (encrypted), context assembly, tool-calling chat loop, artifact generation | `getLLMConfig(userId)`, `buildSessionContext(sessionId)` |
+| Module                            | Owns                                                                                                                    | Public surface (used by others)                                                                                   |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `auth`                            | Users, signup/login, JWT verification, `requireAuth` middleware                                                         | `requireAuth`, `getCurrentUser(req)`                                                                              |
+| `sessions`                        | Session CRUD, questions/agenda, membership, invite codes, session state machine (lobby→discussion→voting→results→ended) | `getSession(sessionId)`, `requireLeader(sessionId, userId)`, `getActiveQuestion(sessionId)`, state-change emitter |
+| `pinboard`                        | Proposals (sticky/drawing/diagram artifacts), positions, reactions, extend-linkage                                      | `listProposals(questionId)`, `createProposal(...)`, event emitters                                                |
+| `tools` _(frontend-only concern)_ | Sticky note / drawing / diagram editors in React; produces artifact payloads consumed by `pinboard`                     | — (frontend module under `apps/web/src/features/tools/`)                                                          |
+| `voting`                          | Voting rounds, shortlists, ballots, tallies, winners                                                                    | `startVotingRound(...)`, `closeRound(...)`                                                                        |
+| `summary`                         | Session summary generation + storage of per-question outcomes                                                           | `buildSummary(sessionId)`                                                                                         |
+| `voice`                           | LiveKit room lifecycle, token issuance                                                                                  | `issueToken(sessionId, user)`                                                                                     |
+| `assistant`                       | Per-user LLM config (encrypted), context assembly, tool-calling chat loop, artifact generation                          | `getLLMConfig(userId)`, `buildSessionContext(sessionId)`                                                          |
 
 Dependency rule (arrows may only point this way):
 
@@ -96,6 +96,7 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 ```
 
 Notes:
+
 - `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[],edges:[]}`. Typed in `packages/shared`.
 - Deleting a proposal that has reactions/votes/extends children: MVP = soft delete flag `deletedAt` on Proposal.
 
@@ -107,36 +108,36 @@ Notes:
 
 ### Event catalogue (shared types live in `packages/shared/src/events.ts`)
 
-| Direction | Event | Payload | Notes |
-| --- | --- | --- | --- |
-| C→S | `member:join` | `{sessionId}` | joins socket to room, triggers snapshot |
-| S→C | `session:state` | full snapshot | on join/reconnect |
-| S→C | `member:joined` | `{user}` | presence list update |
-| S→C | `session:phase` | `{questionId, phase}` | leader-driven transitions |
-| S→C | `session:skipped` | `{questionId}` | leader skipped |
-| C→S | `proposal:create` | `{type, artifactJson, x, y, extendsProposalId?}` | validated vs phase=discussion |
-| S→C | `proposal:created` | `{proposal}` | broadcast |
-| C→S | `proposal:update` | `{id, artifactJson?, x?, y?}` | author-only, phase=discussion |
-| S→C | `proposal:updated` | `{proposal}` | broadcast |
-| C→S | `proposal:delete` | `{id}` | author-or-leader |
-| S→C | `proposal:deleted` | `{id}` | broadcast |
-| C→S | `reaction:toggle` | `{proposalId, emoji}` | any member, discussion phase |
-| S→C | `reaction:toggled` | `{proposalId, emoji, counts, byUser}` | broadcast |
-| C→S | `vote:cast` | `{roundId, proposalId}` | one ballot per user |
-| S→C | `vote:progress` | `{roundId, votedCount, totalVoters}` | no vote contents |
-| S→C | `vote:result` | `{questionId, winnerProposalId}` | when round closes |
+| Direction | Event              | Payload                                          | Notes                                   |
+| --------- | ------------------ | ------------------------------------------------ | --------------------------------------- |
+| C→S       | `member:join`      | `{sessionId}`                                    | joins socket to room, triggers snapshot |
+| S→C       | `session:state`    | full snapshot                                    | on join/reconnect                       |
+| S→C       | `member:joined`    | `{user}`                                         | presence list update                    |
+| S→C       | `session:phase`    | `{questionId, phase}`                            | leader-driven transitions               |
+| S→C       | `session:skipped`  | `{questionId}`                                   | leader skipped                          |
+| C→S       | `proposal:create`  | `{type, artifactJson, x, y, extendsProposalId?}` | validated vs phase=discussion           |
+| S→C       | `proposal:created` | `{proposal}`                                     | broadcast                               |
+| C→S       | `proposal:update`  | `{id, artifactJson?, x?, y?}`                    | author-only, phase=discussion           |
+| S→C       | `proposal:updated` | `{proposal}`                                     | broadcast                               |
+| C→S       | `proposal:delete`  | `{id}`                                           | author-or-leader                        |
+| S→C       | `proposal:deleted` | `{id}`                                           | broadcast                               |
+| C→S       | `reaction:toggle`  | `{proposalId, emoji}`                            | any member, discussion phase            |
+| S→C       | `reaction:toggled` | `{proposalId, emoji, counts, byUser}`            | broadcast                               |
+| C→S       | `vote:cast`        | `{roundId, proposalId}`                          | one ballot per user                     |
+| S→C       | `vote:progress`    | `{roundId, votedCount, totalVoters}`             | no vote contents                        |
+| S→C       | `vote:result`      | `{questionId, winnerProposalId}`                 | when round closes                       |
 
 ## 5. REST API surface
 
 REST handles non-realtime concerns (all prefixed `/api`):
 
-| Area | Endpoints |
-| --- | --- |
-| auth | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me` |
-| sessions | `POST /api/sessions` (with questions), `GET /api/sessions/mine`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id`, `POST /api/sessions/:id/join {code}` |
-| summary | `GET /api/sessions/:id/summary` |
-| voice | `POST /api/sessions/:id/voice-token` |
-| assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config *without* key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream) |
+| Area      | Endpoints                                                                                                                                                                              |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                             |
+| sessions  | `POST /api/sessions` (with questions), `GET /api/sessions/mine`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id`, `POST /api/sessions/:id/join {code}`                       |
+| summary   | `GET /api/sessions/:id/summary`                                                                                                                                                        |
+| voice     | `POST /api/sessions/:id/voice-token`                                                                                                                                                   |
+| assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config _without_ key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream) |
 
 Phase transitions, proposals, reactions, and votes go over WebSockets (see §4). Assistant chat streams over **SSE** because it's a request-scoped, one-directional response — no need for a socket room per private chat.
 
@@ -187,5 +188,5 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 5. **Drawings/diagrams are stored as JSON/SVG strings** — no file uploads in MVP, keeping infra minimal. Size-limit artifacts (~100KB) at validation time.
 6. **Reconnects:** Socket.IO reconnect + `session:state` resnapshot makes refreshes safe; LiveKit SDK auto-reconnects audio independently.
 7. **Render free tier sleeps** after ~15 min idle; first request pays a cold start (~30s). Acceptable for MVP demo; document it.
-8. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can *read* shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
+8. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can _read_ shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
 9. **LLM provider abstraction:** the assistant talks to any OpenAI-compatible `/chat/completions` endpoint using the user's stored config. Tool-calling loop lives server-side in the `assistant` module; API keys are AES-encrypted at rest and never sent back to the client after save.

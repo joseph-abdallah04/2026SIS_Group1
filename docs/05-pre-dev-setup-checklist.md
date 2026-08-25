@@ -279,7 +279,7 @@
 ❌ Session summary generation (Summary owner owns this)  
 ❌ Voice chat / LiveKit integration (Voice owner owns this)  
 ❌ Assistant chat / tool-calling loop (Assistant owner owns this)  
-❌ LLM provider config form (except placeholder) (Auth + Assistant owners own this)  
+❌ LLM provider config form (except placeholder) (Auth + Assistant owners own this)
 
 **If any of the above gets implemented in setup, move it to that module owner's backlog immediately.**
 
@@ -288,24 +288,28 @@
 ## Practical team split for setup week (prevents idle time)
 
 **Group 1 (2 people): Platform skeleton**
+
 - Monorepo structure, CI, deploy pipeline
 - Prisma baseline, migrations setup
 - Backend app boot, module wiring skeleton
 - Env config loading
 
 **Group 2 (2 people): Frontend shell**
+
 - React pages (login, dashboard, session, settings)
 - Routing setup
 - Layout placeholders + UI component folder
 - API/socket client wrappers
 
 **Group 3 (2 people): Shared contracts + types**
+
 - `packages/shared` domain types + schemas
 - Socket event type definitions
 - Validation rules
 - Web + server both import successfully
 
 **Group 4 (1 person): Jira + workflows + hygiene**
+
 - Create Jira board structure + epics
 - PR template + commit convention docs
 - Team wiki for migration governance

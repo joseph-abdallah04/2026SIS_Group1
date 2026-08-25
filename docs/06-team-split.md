@@ -21,28 +21,21 @@
 
 ---
 
-
-
 ## Quick Reference
-
 
 | #   | Module                | Owner Focus                    | Features         | Primary Files          | Database Tables                        |
 | --- | --------------------- | ------------------------------ | ---------------- | ---------------------- | -------------------------------------- |
 | 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33     | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
 | 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
 | 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18          | `pinboard/`            | `Proposal`, `Reaction`                 |
-| 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | *(none — artifacts in JSON)*           |
+| 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
 | 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32          | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
-| 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | *(none — LiveKit-managed)*             |
-| 7   | **AI Assistant**      | LLM chat + tool-calling        | F34–F37          | `assistant/`           | *(none — config in Auth)*              |
-
+| 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | _(none — LiveKit-managed)_             |
+| 7   | **AI Assistant**      | LLM chat + tool-calling        | F34–F37          | `assistant/`           | _(none — config in Auth)_              |
 
 ---
 
-
-
 ## Module Ownership Map
-
 
 | Frontend                                                   | Backend                                                                  | Database                               |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------- |
@@ -52,9 +45,6 @@
 | Tools: `tools/` (editors), `toolbar/` (buttons)            | [none - validation only]                                                 | [none]                                 |
 | Voting: `voting/` (ballot UI), `summary/` (view/export)    | `voting/` (internal service functions, vote logic), `summary/` (tally)   | `VotingRound`, `Vote`, `Answer`        |
 | Voice: `voice/` (mute, presence)                           | `voice/` (internal service functions, token issuance)                    | [none]                                 |
-
-
-
 
 ## Auth + Profile Owner
 
@@ -69,16 +59,12 @@ Frontend: apps/web/src/features/auth/
           apps/web/src/features/settings/
 ```
 
-
-
 ### Database tables
 
 ```
 User (email, passwordHash, displayName, createdAt)
 UserLLMConfig (userId, baseUrl, apiKeyEncrypted, model, updatedAt)
 ```
-
-
 
 ### API surface
 
@@ -92,14 +78,10 @@ GET    /api/me/llm-config             → { baseUrl, model } (no key)
 POST   /api/me/llm-config/test        → { ok: boolean, error? }
 ```
 
-
-
 ### Dependencies
 
 - [x] No dependencies - start immediately
 - [x] All other modules depend on `User` type (shared)
-
-
 
 ### Notes
 
@@ -107,8 +89,6 @@ POST   /api/me/llm-config/test        → { ok: boolean, error? }
 - Password hash via bcrypt; no plaintext storage
 
 ---
-
-
 
 ## Session Lifecycle Owner
 
@@ -123,8 +103,6 @@ Frontend: apps/web/src/features/sessions/
           apps/web/src/features/agenda/
 ```
 
-
-
 ### Database tables
 
 ```
@@ -132,8 +110,6 @@ Session (id, code, title, leaderId, status, createdAt, endedAt)
 Question (id, sessionId, text, position, phase)
 SessionMember (sessionId, userId, joinedAt) — who's in this session
 ```
-
-
 
 ### API surface
 
@@ -145,7 +121,6 @@ PATCH  /api/sessions/:id               → { title? } → Session
 DELETE /api/sessions/:id               → { ok }
 POST   /api/sessions/:id/join          → { code } → { ok }
 ```
-
 
 ### Socket events
 
@@ -162,8 +137,6 @@ session:skipped            → { questionId }
 member:joined              → { user: User }
 ```
 
-
-
 ### Socket events (outbound)
 
 ```
@@ -173,8 +146,6 @@ session:skipped            → { questionId }
 member:joined              → { user: User }
 ```
 
-
-
 ### Dependencies
 
 - [x] Depends on `User` type from auth (shared)
@@ -182,16 +153,12 @@ member:joined              → { user: User }
 - [!] Phase values (`lobby`, `discussion`, `voting`, `results`) must be centrally defined in `packages/shared/types.ts`
 - Other modules consume phase events; don't drive them
 
-
-
 ### Notes
 
 - Session leader is **not a type** — the person who creates/starts a session becomes leader for that session
 - Invite codes are auto-generated 6-char alphanumeric; never expire (one-time use per code)
 
 ---
-
-
 
 ## Pinboard Core Owner
 
@@ -207,16 +174,12 @@ Frontend: apps/web/src/features/pinboard/
           apps/web/src/components/ProposalContextMenu.tsx
 ```
 
-
-
 ### Database tables
 
 ```
 Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
 Reaction (id, proposalId, userId, emoji) — unique(proposalId, userId, emoji)
 ```
-
-
 
 ### Socket events
 
@@ -234,16 +197,12 @@ proposal:deleted           → { proposalId }
 reaction:toggled           → { proposalId, emoji, counts, byUser }
 ```
 
-
-
 ### UI: Right-click context menu
 
 - **Extend** → Opens tools editor pre-filled with this proposal's artifact
 - **Edit** → (author-only) Opens editor, user modifies, clicks "Update" → sends `proposal:update`
 - **Delete** → (author or leader) Removes proposal
 - **React** → Quick emoji reactions
-
-
 
 ### Dependencies
 
@@ -252,16 +211,12 @@ reaction:toggled           → { proposalId, emoji, counts, byUser }
 
 - **No dependency on tools owner** — tools owner integrates via this module's socket pipeline
 
-
-
 ### Integration points
 
 - **Tools owner:** When user proposes from an editor, sends `proposal:create` (this module validates + broadcasts)
 - **Tools owner (extend flow):** Right-click menu opens tools editor; tools owner gets artifact shape from this table's schema
 - **Voting owner:** Reads proposals to build shortlist (read-only query)
 - **Assistant owner:** Proposes from chat by sending `proposal:create`
-
-
 
 ### Notes
 
@@ -270,8 +225,6 @@ reaction:toggled           → { proposalId, emoji, counts, byUser }
 - Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction
 
 ---
-
-
 
 ## Creative Tools Owner
 
@@ -289,15 +242,11 @@ Frontend: apps/web/src/features/tools/
 Backend:  [NONE — validation only, in pinboard schema]
 ```
 
-
-
 ### Database tables
 
 ```
 [NONE] — Artifacts stored as JSON in Proposal.artifactJson by pinboard owner
 ```
-
-
 
 ### UI: Editors (all local, no backend)
 
@@ -323,8 +272,6 @@ Backend:  [NONE — validation only, in pinboard schema]
 5. Clicks "Propose" → creates new proposal with `extendsProposalId` linking to parent
 6. Pinboard owner handles the socket event (you pass artifact shape)
 
-
-
 ### Artifact JSON shapes (coordinate with pinboard owner)
 
 ```ts
@@ -349,16 +296,12 @@ Backend:  [NONE — validation only, in pinboard schema]
 }
 ```
 
-
-
 ### Dependencies
 
 - [x] No backend dependencies - fully local
 - [x] Depends on pinboard owner's `proposal:create` socket pipeline (already exists)
 
 - **Coordinate with pinboard owner:** Artifact shapes, extend modal integration point
-
-
 
 ### Notes
 
@@ -368,8 +311,6 @@ Backend:  [NONE — validation only, in pinboard schema]
 - No backend validation — only client-side preview
 
 ---
-
-
 
 ## Voting + Summary Owner
 
@@ -385,8 +326,6 @@ Frontend: apps/web/src/features/voting/
           apps/web/src/features/summary/
 ```
 
-
-
 ### Database tables
 
 ```
@@ -394,8 +333,6 @@ VotingRound (id, sessionId, questionId, status, createdAt, closedAt)
 Vote (id, roundId, voterId, proposalId) — unique(roundId, voterId)
 Answer (id, questionId, winningProposalId, decidedAt) — unique(questionId)
 ```
-
-
 
 ### Socket events
 
@@ -416,16 +353,12 @@ REST (read-only):
 GET    /api/sessions/:id/summary          → { questions: [...], answers: [...] }
 ```
 
-
-
 ### Socket events (outbound)
 
 ```
 vote:progress              → { roundId, votedCount, totalVoters }
 vote:result                → { questionId, winnerProposalId }
 ```
-
-
 
 ### UI flows
 
@@ -452,16 +385,12 @@ vote:result                → { questionId, winnerProposalId }
 - List all questions + winning proposals
 - Export button (PDF or JSON)
 
-
-
 ### Dependencies
 
 - [x] Depends on `Session`, `Question`, `Proposal` existing (read-only queries)
 - [x] Depends on phase machine from session owner
 
 - [!] Coordinate phase values: Trigger shortlist UI only when `phase === "voting"`
-
-
 
 ### Notes
 
@@ -471,8 +400,6 @@ vote:result                → { questionId, winnerProposalId }
 - Summary is generated on-demand (not pre-computed)
 
 ---
-
-
 
 ## Voice Owner
 
@@ -487,23 +414,17 @@ Frontend: apps/web/src/features/voice/
           apps/web/src/components/VoiceToolbar.tsx
 ```
 
-
-
 ### Database tables
 
 ```
 [NONE] — Room identity derived from sessionId; LiveKit manages participant state
 ```
 
-
-
 ### API surface
 
 ```
 POST   /api/sessions/:id/voice-token     → { token: string, url: string }
 ```
-
-
 
 ### Frontend interactions
 
@@ -514,16 +435,12 @@ POST   /api/sessions/:id/voice-token     → { token: string, url: string }
   - Name + avatar
   - Speaking indicator (from LiveKit SDK)
 
-
-
 ### Dependencies
 
 - [x] Depends on `Session` existing (session owner)
 - [x] Depends on auth (JWT for token generation)
 
 - [!] No database changes needed; no blocking dependencies
-
-
 
 ### Notes
 
@@ -533,8 +450,6 @@ POST   /api/sessions/:id/voice-token     → { token: string, url: string }
 - Voice is **optional** — joining session doesn't require microphone permission
 
 ---
-
-
 
 ## AI Assistant Owner
 
@@ -549,23 +464,17 @@ Frontend: apps/web/src/features/assistant/
           apps/web/src/components/AssistantBubble.tsx
 ```
 
-
-
 ### Database tables
 
 ```
 [NONE] — LLM config stored in UserLLMConfig by auth owner
 ```
 
-
-
 ### API surface
 
 ```
 POST   /api/sessions/:id/assistant/chat   → SSE stream of messages, tool calls, artifacts
 ```
-
-
 
 ### Request (sent once, one-directional)
 
@@ -581,8 +490,6 @@ POST   /api/sessions/:id/assistant/chat   → SSE stream of messages, tool calls
 }
 ```
 
-
-
 ### Response stream (Server-Sent Events)
 
 ```
@@ -594,8 +501,6 @@ data: {"type":"artifact","type":"diagram","nodes":[...],"edges":[...]}
 data: {"type":"done"}
 ```
 
-
-
 ### UI: Floating assistant bubble
 
 - Bottom-right corner (fixed position)
@@ -605,8 +510,6 @@ data: {"type":"done"}
 - **Propose button** appears below artifacts (sticky, diagram)
   - Click → creates new proposal via pinboard owner's API
   - No backend round-trip; client creates proposal
-
-
 
 ### Tool implementations (all in backend)
 
@@ -628,8 +531,6 @@ data: {"type":"done"}
 - Output multiple `{ type: "sticky", text, color }`
 - User picks one or proposes all
 
-
-
 ### Dependencies
 
 - [x] Depends on `UserLLMConfig` (auth owner) - fetch user's LLM provider
@@ -637,16 +538,12 @@ data: {"type":"done"}
 
 - [!] Coordinate with auth owner: LLM config encryption/decryption, testing endpoint
 
-
-
 ### Integration: Propose-from-chat
 
 1. User clicks "Propose" on an artifact in chat
 2. Frontend sends `proposal:create` (pinboard owner's pipeline)
 3. Proposal created; pinboard broadcasts via socket
 4. Chat panel shows confirmation
-
-
 
 ### Notes
 
@@ -658,18 +555,14 @@ data: {"type":"done"}
 
 ---
 
-
-
 ## 🔗 Coordination Points
-
-
 
 ### 1. Type contracts (lock in Week 1, rarely change)
 
 **What:** `packages/shared/src/types.ts`  
 **Content:** All domain types (User, Session, Question, Proposal, VotingRound, Answer, etc.)  
 **Why:** Frontend + backend import same types; zero duplication, fewer bugs  
-**Owners:** All 7 (agree upfront; very few changes after Week 1)  
+**Owners:** All 7 (agree upfront; very few changes after Week 1)
 
 ### 2. Phase values (session owner defines, all others consume)
 
@@ -682,13 +575,11 @@ data: {"type":"done"}
 - Tools owner: allows proposals only in `"discussion"` phase
 - Voice owner: auto-joins in `"discussion"` phase
 
-
-
 ### 3. Artifact shapes (tools owner + pinboard owner)
 
 **Shapes defined in:** `packages/shared/src/types.ts`  
 **Who cares:** Tools owner (builds editors), Pinboard owner (stores in DB), Assistant owner (outputs artifacts)  
-**Coordinate:** Before Week 1, agree on exact JSON structure for sticky/drawing/diagram  
+**Coordinate:** Before Week 1, agree on exact JSON structure for sticky/drawing/diagram
 
 ### 4. Socket events (each owner documents their own)
 
@@ -696,13 +587,13 @@ data: {"type":"done"}
 **Pattern:**
 
 **When to add:** Before you start streaming that event  
-**Who reviews:** All developers (quick slack thread)  
+**Who reviews:** All developers (quick slack thread)
 
 ### 5. Database migrations (platform steward reviews)
 
 **Timing:** Merge migration PR **before** merging feature PR  
 **Naming:** `YYYYMMDD_HH_<module>_<description>.sql` (chronological, no conflicts)  
-**Who reviews:** Platform steward (checks for naming, constraints, indexes)  
+**Who reviews:** Platform steward (checks for naming, constraints, indexes)
 
 ### 6. Route + event namespace isolation (each module owns its path)
 
@@ -715,14 +606,14 @@ data: {"type":"done"}
 
 **Rule:** No two modules own the same REST prefix or the same socket event namespace (`proposal:*` = pinboard, `vote:*`/`voting:*` = voting, `session:*` = sessions)  
 **Exception:** Session owner defines `/api/sessions/:id/`* but pinboard owner defines `/api/sessions/:id/proposals/`*
-  → Pinboard path is more specific; no conflict
+→ Pinboard path is more specific; no conflict
 
 Live/shared-state actions go over Socket.IO events instead (see each module's socket section): proposals/reactions (pinboard), voting rounds + ballots (voting), start/phase transitions (sessions).
 
 ### 7. Read-only cross-module queries
 
 **Pattern:** Module A (voting) needs to read module B (proposals) for summary  
-**Solution:** Voting owner calls a **public query function** from pinboard owner, never direct table access  
+**Solution:** Voting owner calls a **public query function** from pinboard owner, never direct table access
 
 ```ts
 // pinboard/queries.ts (public)
@@ -732,35 +623,27 @@ export async function getProposalsForQuestion(questionId) { ... }
 const proposals = await pinboard.getProposalsForQuestion(questionId);
 ```
 
-**Benefits:** Pinboard owner can refactor schema without breaking voting; clear contract  
+**Benefits:** Pinboard owner can refactor schema without breaking voting; clear contract
 
 ---
 
-
-
 ## Independence Proof
 
-
-| Module    | Owns tables                      | Owns routes                             | Can start    | Blockers                               |
-| --------- | -------------------------------- | --------------------------------------- | ------------ | -------------------------------------- |
-| Auth      | User, UserLLMConfig              | /api/auth/*, /api/users/me/*, /api/me/* | Week 1 Day 1 | None                                   |
-| Session   | Session, Question, SessionMember | /api/sessions/*                         | Week 1 Day 1 | Auth (imports User type)               |
-| Pinboard  | Proposal, Reaction               | socket `proposal:*`, `reaction:*`       | Week 1 Day 1 | Session (reads session state)          |
-| Tools     | [none]                           | [none]                                  | Week 1 Day 1 | Pinboard pipeline exists (already designed) |
-| Voting    | VotingRound, Vote, Answer        | socket `vote:*`/`voting:*`; GET /api/sessions/:id/summary | Week 1 Day 2 | Phase values defined                   |
-| Voice     | [none]                           | /api/voice-token                        | Week 1 Day 1 | Auth, Session (imports types)          |
-| Assistant | [none]                           | /api/assistant/chat                     | Week 1 Day 2 | Auth (LLM config), Pinboard pipeline   |
-
+| Module    | Owns tables                      | Owns routes                                               | Can start    | Blockers                                    |
+| --------- | -------------------------------- | --------------------------------------------------------- | ------------ | ------------------------------------------- |
+| Auth      | User, UserLLMConfig              | /api/auth/_, /api/users/me/_, /api/me/*                   | Week 1 Day 1 | None                                        |
+| Session   | Session, Question, SessionMember | /api/sessions/*                                           | Week 1 Day 1 | Auth (imports User type)                    |
+| Pinboard  | Proposal, Reaction               | socket `proposal:*`, `reaction:*`                         | Week 1 Day 1 | Session (reads session state)               |
+| Tools     | [none]                           | [none]                                                    | Week 1 Day 1 | Pinboard pipeline exists (already designed) |
+| Voting    | VotingRound, Vote, Answer        | socket `vote:*`/`voting:*`; GET /api/sessions/:id/summary | Week 1 Day 2 | Phase values defined                        |
+| Voice     | [none]                           | /api/voice-token                                          | Week 1 Day 1 | Auth, Session (imports types)               |
+| Assistant | [none]                           | /api/assistant/chat                                       | Week 1 Day 2 | Auth (LLM config), Pinboard pipeline        |
 
 **Outcome:** No hard blockers; soft dependencies on type definitions (all locked in setup week)
 
 ---
 
-
-
 ## Git Workflow
-
-
 
 ### Branch naming
 
@@ -773,8 +656,6 @@ Examples:
   mk/f34-assistant-chat
 ```
 
-
-
 ### Process
 
 1. Create branch off `main`
@@ -782,8 +663,6 @@ Examples:
 3. One story per branch
 4. Commit message: `[F##] Brief description`
 5. Push; open PR
-
-
 
 ### PR requirements
 
@@ -793,8 +672,6 @@ Examples:
 - Link to Jira ticket in PR description
 - **Migrations:** Platform steward approves before merge
 
-
-
 ### Merge strategy
 
 - Squash merge to `main` (clean history)
@@ -803,11 +680,7 @@ Examples:
 
 ---
 
-
-
 ## Jira Board Setup
-
-
 
 ### Epic structure (mirrors 7 modules)
 
@@ -819,8 +692,6 @@ Examples:
 6. **Voice** — F11–F13
 7. **AI Assistant** — F34–F37
 
-
-
 ### Story format
 
 ```
@@ -831,8 +702,6 @@ Description:  Feature acceptance criteria (from docs/01-feature-list.md)
 Dependencies: If any (e.g., "Blocked by F04")
 Estimate:     3–5 points (rough)
 ```
-
-
 
 ### Board columns
 
@@ -852,12 +721,9 @@ Done
 
 ---
 
-
-
 ## 📅 Example Week 1 Timeline
 
 All 7 owners start immediately after setup, in parallel:
-
 
 | Module    | F##     | Task                                     | Dependencies    | Outcome       |
 | --------- | ------- | ---------------------------------------- | --------------- | ------------- |
@@ -869,12 +735,9 @@ All 7 owners start immediately after setup, in parallel:
 | Voice     | F11     | LiveKit token endpoint + SDK integration | Session exists  | API + UI      |
 | Assistant | F35     | Chat backend + basic web search tool     | LLM config      | API + UI      |
 
-
 **Result:** 7 PRs merged by Friday. Zero blockers. Smoke test: signup → create session → join → see pinboard.
 
 ---
-
-
 
 ## Parallelism Guarantees
 
@@ -887,10 +750,7 @@ All 7 owners start immediately after setup, in parallel:
 
 ---
 
-
-
 ## Decision Tree (When Unsure)
-
 
 | Situation                             | Who decides?                     | Action                                                              |
 | ------------------------------------- | -------------------------------- | ------------------------------------------------------------------- |
@@ -902,10 +762,7 @@ All 7 owners start immediately after setup, in parallel:
 | **Phase machine question**            | Session owner                    | They drive; others just consume phase values                        |
 | **LLM config format**                 | Auth + Assistant owners together | Lock in Week 1; test connection endpoint first                      |
 
-
 ---
-
-
 
 ## Definition of Done (Per Feature)
 
