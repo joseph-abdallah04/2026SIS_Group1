@@ -25,6 +25,20 @@ npm run db:seed      # seed demo users + session DEMO-0001 (local only)
 
 Conventions: tables snake_case + plural via `@@map`; add your module's tables under its labeled comment. Module owners author migrations in their own PRs (see docs/05 §9).
 
+### Migrations — team workflow
+
+Every migration is a numbered SQL folder in git (`apps/server/prisma/migrations/`); Prisma tracks which have run in a `_prisma_migrations` table inside the database. The DB's history lives in the repo, ordered by folder name.
+
+1. `git pull` latest `main` **before** touching the schema.
+2. Edit `schema.prisma` — only under your module's labeled section.
+3. Run `npm run db:migrate` (in `apps/server/`), give it a clear name.
+4. Commit schema + new migration folder together in your PR.
+
+If two people migrate at once, whoever merges first sets the order. After pulling main, Prisma replays their migration before applying yours. Conflicts only happen if you changed the same table — keep to your own module's tables and this is rare. Rules of thumb:
+
+- Never edit a merged migration — fix forward with a new one.
+- Local state gone weird? `npx prisma migrate reset` (wipes local data, replays all migrations) then `npm run db:seed`.
+
 ## Development
 
 ```bash
