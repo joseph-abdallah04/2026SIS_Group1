@@ -3,8 +3,10 @@ import express from 'express';
 import http from 'node:http';
 import { Server as SocketServer } from 'socket.io';
 
-const PORT = Number(process.env.PORT ?? 3001);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+import { env } from './env.js';
+
+const PORT = env.PORT;
+const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
