@@ -181,8 +181,7 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 
 ## 8. Key technical decisions & gotchas
 
-1. **Serving the SPA from the same Express process** avoids CORS entirely in production; in dev, Vite's proxy forwards `/api` and `/socket.io` to the server port.
-2. **Socket auth:** client passes JWT in the handshake (`auth.token`); server rejects unauthenticated/membership-less joins before adding to rooms.
+1. **Serving the SPA from the same Express process** avoids CORS entirely in production; in dev, Vite's proxy forwards `/api` and `/socket.io` to the server port.2. **Socket auth:** client passes JWT in the handshake (`auth.token`); server rejects unauthenticated/membership-less joins before adding to rooms.
 3. **Leader authority is enforced server-side** — hiding buttons in the UI is cosmetic only; every mutating event checks role + current phase.
 4. **Vote privacy:** individual ballots are never broadcast; only aggregate progress. Results computed server-side on close.
 5. **Drawings/diagrams are stored as JSON/SVG strings** — no file uploads in MVP, keeping infra minimal. Size-limit artifacts (~100KB) at validation time.
@@ -190,3 +189,29 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 7. **Render free tier sleeps** after ~15 min idle; first request pays a cold start (~30s). Acceptable for MVP demo; document it.
 8. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can _read_ shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
 9. **LLM provider abstraction:** the assistant talks to any OpenAI-compatible `/chat/completions` endpoint using the user's stored config. Tool-calling loop lives server-side in the `assistant` module; API keys are AES-encrypted at rest and never sent back to the client after save.
+
+## 9. Deployment topology: single-process serving (decided)
+
+**Decision (Week 1):** one Render **Web Service** runs the Node process, which serves the built React SPA, the REST API, and Socket.IO from the same port. (Pattern A below.)
+
+### The two patterns we considered
+
+**Pattern A — single process (chosen).** Express serves everything: static frontend files from `apps/web/dist`, `/api` routes, and WebSocket upgrades. One deploy, one URL, no CORS in production.
+
+**Pattern B — split frontend/CDN + API.** The built SPA is served from a static host/CDN (Render Static Site, Vercel, Cloudflare Pages); the API runs as a separate service. Standard at larger scale: the CDN serves files globally with no cold starts, and frontend/API scale independently. Costs more coordination: two services to deploy, CORS configuration (`CLIENT_ORIGIN`), and keeping the two releases in sync.
+
+### Why Pattern A for RoundTable
+
+- **Scale reality:** our load is a handful of concurrent sessions. The actual scaling bottleneck is WebSocket fan-out (multiple server instances need sticky sessions) — Pattern B does not solve that, so it buys us nothing today.
+- **Operational simplicity for a 7-person team:** one service, one deploy pipeline, one URL, no cross-service version skew.
+- **Free tier:** one service to babysit; Render Static Sites don't sleep, but our API would still cold-start either way.
+
+### Evolution path (if we outgrow it)
+
+The split is deliberately cheap later:
+
+1. Deploy `apps/web/dist` to any static host (it's a plain Vite build with no server coupling).
+2. Point the static host's proxy (or the SPA's API base URL) at the API service; `CLIENT_ORIGIN`/CORS wiring already exists for exactly this.
+3. Delete the static-serving block in `apps/server/src/index.ts` (isolated to a few lines, marked below).
+
+No data model, contract, or module changes are required — the frontend already treats the API as a separate logical layer.

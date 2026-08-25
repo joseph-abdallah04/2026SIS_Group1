@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm run dev --workspace @roundtable/server\" \"npm run dev --workspace @roundtable/web\"",
     "build": "npm run build --workspaces --if-present",
+    "start": "node apps/server/dist/index.js",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -23,5 +24,8 @@
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.2"
+  },
+  "dependencies": {
+    "react-router-dom": "^7.18.2"
   }
 }

@@ -1,6 +1,9 @@
 import cors from 'cors';
 import express from 'express';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
 import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
@@ -15,6 +18,16 @@ app.use(express.json({ limit: '256kb' }));
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
+
+// Serve the built SPA in production (docs/02 §9). No-op in dev, where Vite serves the frontend.
+const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
+if (fs.existsSync(webDist)) {
+  app.use(express.static(webDist));
+  // SPA fallback: non-API GETs get index.html so client-side routes (/login, /sessions/:id) work.
+  app.get(/^\/(?!api|socket\.io).*/, (_req, res) => {
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
+}
 
 const httpServer = http.createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
