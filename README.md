@@ -14,6 +14,17 @@ npm install
 cp .env.example .env   # fill in values (see docs/05-pre-dev-setup-checklist.md section 2)
 ```
 
+## Database (Prisma + Neon)
+
+Schema lives in `apps/server/prisma/schema.prisma`. From `apps/server/`:
+
+```bash
+npm run db:migrate   # create/apply a dev migration (prompts for a name)
+npm run db:seed      # seed demo users + session DEMO-0001 (local only)
+```
+
+Conventions: tables snake_case + plural via `@@map`; add your module's tables under its labeled comment. Module owners author migrations in their own PRs (see docs/05 §9).
+
 ## Development
 
 ```bash
@@ -40,6 +51,8 @@ Deployed to [Render](https://render.com) (auto-deploys on push to `main`). The E
 | `npm run lint`      | ESLint across the monorepo           |
 | `npm run typecheck` | TypeScript check across the monorepo |
 | `npm run format`    | Prettier write                       |
+
+In `apps/server/`: `npm run db:migrate` (dev migration), `npm run db:deploy` (apply committed migrations — used by Render pre-deploy), `npm run db:seed` (demo data).
 
 ## Documentation
 

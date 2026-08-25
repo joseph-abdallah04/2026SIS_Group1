@@ -1,0 +1,73 @@
+// RoundTable database schema.
+//
+// Conventions (docs/05 §4):
+//   - Tables: snake_case, plural (`users`, `sessions`) via `@@map`.
+//   - Columns: snake_case via `@map`; relation fields keep camelCase (e.g. `leaderId`).
+//   - Each module owns its section — add tables under the labeled comment for your module.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// === auth module ===
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  createdAt    DateTime @default(now())
+
+  ledSessions Session[]       @relation("SessionLeader")
+  llmConfig   UserLLMConfig?
+
+  @@map("users")
+}
+
+// === sessions module ===
+
+model Session {
+  id        String   @id @default(cuid())
+  code      String   @unique // short join code, e.g. "ABCD-1234"
+  title     String
+  leaderId  String
+  leader    User     @relation("SessionLeader", fields: [leaderId], references: [id])
+  status    String   @default("lobby") // lobby | brainstorming | voting | summary | closed
+  createdAt DateTime @default(now())
+
+  @@index([leaderId])
+  @@map("sessions")
+}
+
+// === pinboard module ===
+// (pinboard owner adds Proposal + reaction tables here)
+
+// === creative tools module ===
+// (tools owner adds artifact storage here if server-persisted)
+
+// === voting + summary module ===
+// (voting/summary owner adds vote + summary tables here)
+
+// === voice module ===
+// (voice owner adds participant/track state tables here, if needed)
+
+// === assistant module ===
+
+model UserLLMConfig {
+  id              String @id @default(cuid())
+  userId          String @unique
+  baseUrl         String
+  model           String
+  apiKeyEncrypted String // AES-256-GCM ciphertext keyed by LLM_KEY_ENCRYPTION_SECRET (docs/05 §8)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_llm_configs")
+}
+

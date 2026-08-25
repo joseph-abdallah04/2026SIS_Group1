@@ -69,20 +69,19 @@
 
 ## 4. Database + Migration Setup (Prisma)
 
-- [ ] Prisma installed (`@prisma/client` + `prisma` CLI).
-- [ ] Prisma initialized with Neon connection string.
-- [ ] Initial `schema.prisma` created with:
+- [x] Prisma installed (`@prisma/client` + `prisma` CLI, pinned to v6 — v7 changed config model, not worth it for setup).
+- [x] Prisma initialized with Neon connection string (`DATABASE_URL` from root `.env`; schema in `apps/server/prisma/`).
+- [x] Initial `schema.prisma` created with:
   - Module sections labeled (e.g. `// === auth module ===`)
   - `User` model outlined (id, email, passwordHash, displayName, createdAt)
   - `Session` model outlined (id, code, title, leaderId, status, createdAt)
   - Comments indicating where each module will add their tables
-- [ ] First migration generated: `prisma migrate dev --name init`
-- [ ] Migration file committed to repo.
-- [ ] `.gitignore` updated: `prisma/migrations/` is committed; `.env` is not.
-- [ ] Seed script scaffolded (`prisma/seed.ts`):
-  - Can run locally via `node --loader ts-node/esm prisma/seed.ts`
-  - Populates dummy users + one demo session (used locally only)
-- [ ] Database naming conventions documented in team wiki or README:
+- [x] First migration generated: `prisma migrate dev --name init` (applied to Neon).
+- [x] Migration file committed to repo.
+- [x] `.gitignore`: `prisma/migrations/` committed; generated client + `.env` ignored.
+- [x] Seed script scaffolded (`apps/server/prisma/seed.ts`, run via `npm run db:seed`):
+  - Populates dummy users + one demo session (`DEMO-0001`, local only).
+- [x] Database naming conventions documented in README:
   - Table names: snake_case, plural (e.g. `users`, `sessions`, `proposals`)
   - FK columns: `{table}Id` (e.g. `userId`, `sessionId`)
   - Indexes: `idx_{table}_{field}` or `idx_{table}_{field1}_{field2}`
