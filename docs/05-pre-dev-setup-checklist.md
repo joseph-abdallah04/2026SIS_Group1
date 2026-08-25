@@ -200,12 +200,12 @@
 
 Scope was deliberately trimmed on 2026-08-25: setup ships shared rails only; the items below were cut from setup and **must be covered by tickets in docs/06 with explicit success criteria** so nothing falls through:
 
-1. **Socket auth handshake + realtime gateway** (`realtime/gateway.ts`, JWT handshake, room join/leave, routing events to module handlers) → Session Lifecycle owner.
-2. **SSE streaming helper** for assistant responses → AI Assistant owner.
-3. **Shared domain types** (full mirror of docs/02 §3 data model incl. proposal/artifact subtypes) → grows per-module as owners build; Prisma client covers DB row types meanwhile.
-4. **Frontend page layouts + session-page UI skeleton + assistant panel + base UI components** (Button/Input/Modal) → after mockup exists; split across relevant owners.
-5. **Security implementation** per §8 decisions (bcryptjs hashing, JWT sign/verify + real `requireAuth`, AES-256-GCM helpers for LLM keys, zod `validate()` wiring) → Auth owner (+ Assistant owner for decryption usage).
-6. **CSP headers** (nice-to-have, post-MVP).
+1. **Socket auth handshake + realtime gateway** (`realtime/gateway.ts`, JWT handshake, room join/leave, routing events to module handlers) → Session Lifecycle owner. ✅ Written into docs/06 Session section ("Also owns").
+2. **SSE streaming helper** for assistant responses → AI Assistant owner. ✅ Written into docs/06 Assistant section ("Also owns").
+3. **Shared domain types** (full mirror of docs/02 §3 data model incl. proposal/artifact subtypes) → grows per-module as owners build; Prisma client covers DB row types meanwhile. ✅ Noted in docs/06 Coordination Point 1.
+4. **Frontend page layouts + session-page UI skeleton + assistant panel + base UI components** (Button/Input/Modal) → after mockup exists; split across relevant owners. ✅ Noted in docs/06 Week 1 timeline.
+5. **Security implementation** per §8 decisions (bcryptjs hashing, JWT sign/verify + real `requireAuth`, AES-256-GCM helpers for LLM keys, zod `validate()` wiring) → Auth owner (+ Assistant owner for decryption usage). ✅ Written into docs/06 Auth section ("Also owns").
+6. **CSP headers** (nice-to-have, post-MVP). — Not ticketed; revisit after MVP if desired.
 
 ---
 

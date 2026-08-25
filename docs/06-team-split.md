@@ -88,6 +88,20 @@ POST   /api/me/llm-config/test        → { ok: boolean, error? }
 - Coordinate **LLM config schema** with assistant owner before starting
 - Password hash via bcrypt; no plaintext storage
 
+### Also owns (deferred from setup)
+
+Setup decided how security works but deliberately did not build it — implementation lands in your stories:
+
+1. **Password hashing:** on signup, hash passwords with bcrypt (10+ rounds) before storing; never store or log a plain-text password anywhere.
+2. **JWT login tokens:** on signup/login, issue a JWT (a signed token that proves who the user is) — signed with `JWT_SECRET`, valid for 7 days, payload `{ userId, iat, exp }`.
+3. **Real auth middleware:** replace the placeholder middleware (which currently rejects everything with 401) so protected API routes require an `Authorization: Bearer <token>` header and verify the JWT before handling the request.
+4. **Input validation:** check every mutating endpoint's body against zod schemas from `@roundtable/shared`; bad input gets a 400 response with details.
+
+**Acceptance criteria:**
+- Database contains password hashes only — no plain text.
+- Missing, expired, or tampered tokens → 401 with the standard `{ error, code }` JSON shape; valid token reaches the route.
+- GET llm-config responses return `baseUrl` + `model` only — never key material.
+
 ---
 
 ## Session Lifecycle Owner
@@ -157,6 +171,19 @@ member:joined              → { user: User }
 
 - Session leader is **not a type** — the person who creates/starts a session becomes leader for that session
 - Invite codes are auto-generated 6-char alphanumeric; never expire (one-time use per code)
+
+### Also owns (deferred from setup)
+
+The socket server currently accepts any connection and only logs connect/disconnect — there is no gateway yet. You own it:
+
+1. **Socket authentication:** when a client connects, verify the JWT they pass in the handshake (`auth.token`); disconnect sockets without a valid token.
+2. **Room management:** on join, put each authenticated socket into a room named after the session (`session:<id>`) so broadcasts only reach that session's members; handle clean leave/disconnect.
+3. **Event routing:** receive `member:join`, broadcast `memberJoined`/`memberLeft` to the room, and send the joining user the full `session:state` snapshot as an ack. Later module owners plug their handlers into this same gateway.
+
+**Acceptance criteria:**
+- Socket without valid JWT is disconnected during handshake.
+- Two clients in the same session: one joins → the other receives `memberJoined`; joiner's ack contains full state.
+- A client cannot receive events for a session it hasn't joined.
 
 ---
 
@@ -553,6 +580,16 @@ data: {"type":"done"}
 - **Context is read-only:** Assistant never modifies session/proposal state
 - **SSE (not Socket.IO):** One-directional stream per request; results private to requester
 
+### Also owns (deferred from setup)
+
+1. **Streaming responses (SSE):** the chat endpoint streams its reply as Server-Sent Events — plain text chunks sent over a normal HTTP response, in this order: message content → tool status/result updates (if any) → artifact payloads (if any) → a final `done` event. The web client reads it with an `EventSource`/fetch stream. A small shared helper for writing these events is fine to add.
+2. **Decrypting LLM keys at call time:** when making an LLM call, decrypt the user's stored API key in memory using the helper from the Auth owner; use it for that call only and discard it.
+
+**Acceptance criteria:**
+- Assistant reply appears incrementally in the chat panel while the LLM generates (not all-at-once after completion).
+- Stream always ends with a `done` event, even on error mid-stream (send an error event then `done`).
+- Decrypted keys exist only inside a single request's lifetime; nothing logs or persists decrypted key material.
+
 ---
 
 ## 🔗 Coordination Points
@@ -563,6 +600,8 @@ data: {"type":"done"}
 **Content:** All domain types (User, Session, Question, Proposal, VotingRound, Answer, etc.)  
 **Why:** Frontend + backend import same types; zero duplication, fewer bugs  
 **Owners:** All 7 (agree upfront; very few changes after Week 1)
+
+> **Note (from setup):** `packages/shared/src/index.ts` currently holds only User/Session/Question basics; the Prisma client already generates exact DB row types. Each owner adds their module's domain types here as they build — don't hand-mirror what Prisma already gives you.
 
 ### 2. Phase values (session owner defines, all others consume)
 
@@ -585,9 +624,10 @@ data: {"type":"done"}
 
 **Definition:** `packages/shared/src/events.ts`  
 **Pattern:**
-
 **When to add:** Before you start streaming that event  
 **Who reviews:** All developers (quick slack thread)
+
+> **Note (from setup):** `events.ts` is a typed map — add your event name to the client→server or server→client interface with its payload type, and TypeScript enforces it at every emit/listen. The join/leave events are already there as the pattern to follow.
 
 ### 5. Database migrations (platform steward reviews)
 
@@ -724,6 +764,8 @@ Done
 ## 📅 Example Week 1 Timeline
 
 All 7 owners start immediately after setup, in parallel:
+
+> **Deferred UI work (agreed during setup):** page layouts, the session-page layout, the assistant chat panel, and base components (Button/Input/Modal) were intentionally **not** built — the frontend mockup doesn't exist yet. Whoever builds the first real screen for their module starts from the placeholder pages in `apps/web/src/pages/` and creates these shared components as part of their story, following the mockup once it lands.
 
 | Module    | F##     | Task                                     | Dependencies    | Outcome       |
 | --------- | ------- | ---------------------------------------- | --------------- | ------------- |
