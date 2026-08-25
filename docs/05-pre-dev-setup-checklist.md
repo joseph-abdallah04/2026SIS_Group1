@@ -46,11 +46,11 @@
     - Fails fast with clear error message if any key is missing/invalid
     - Exported singleton available to all modules
 - [x] `.env` added to `.gitignore`.
-- [ ] External accounts created + documented *(do these together, then paste secrets into Render env vars / local `.env`; never commit them)*:
-    - [ ] Neon Postgres project; connection string in `.env.example`
-    - [ ] LiveKit Cloud project; API key/secret/URL in `.env.example`
-    - [ ] Render account linked to GitHub repo
-    - [ ] GitHub secrets set for Render env vars
+- [x] External accounts created + documented *(secrets live in local `.env` + Render env vars; never committed)*:
+    - [x] Neon Postgres project; connection string in `.env`
+    - [x] LiveKit Cloud project; API key/secret/URL in `.env`
+    - [x] Render account linked to GitHub repo (web service `roundtable` created)
+    - [x] Render env vars set (DATABASE_URL, JWT_SECRET, LIVEKIT_*, LLM_KEY_ENCRYPTION_SECRET; CLIENT_ORIGIN pending service URL)
 
 ## 3. CI/CD Baseline
 
