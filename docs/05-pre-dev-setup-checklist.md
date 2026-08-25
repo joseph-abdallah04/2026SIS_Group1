@@ -4,35 +4,35 @@
 
 ## 1. Repo + Tooling Foundations
 
-- [ ] Monorepo created with structure:
-  - `apps/web`
-  - `apps/server`
-  - `packages/shared`
-- [ ] Root `package.json` scripts working:
-  - `npm run dev` (concurrent dev servers)
-  - `npm run build` (all workspaces)
-  - `npm run test` (all workspaces)
-  - `npm run lint` (all workspaces)
-  - `npm run typecheck` (all workspaces)
-- [ ] TypeScript strict mode: `"strict": true` in all `tsconfig.json` files.
-- [ ] ESLint configured with flat config; `npm run lint` passes.
-- [ ] Prettier configured; `npm run format` available.
-- [ ] `.editorconfig` in place for consistent formatting.
-- [ ] `.nvmrc` specifies Node.js version (20+; required by Tailwind v4).
-- [ ] `.gitignore` covers dependencies, builds, env files, editor files, test artifacts.
-- [ ] `README.md` updated with:
-  - Brief project description
-  - Prerequisites (Node version, git)
-  - Setup: `npm install`
-  - Dev: `npm run dev`
-  - Build/deploy: `npm run build` + render instructions
-  - Links to docs/
+- [x] Monorepo created with structure:
+    - `apps/web`
+    - `apps/server`
+    - `packages/shared`
+- [x] Root `package.json` scripts working:
+    - `npm run dev` (concurrent dev servers)
+    - `npm run build` (all workspaces)
+    - `npm run test` (all workspaces)
+    - `npm run lint` (all workspaces)
+    - `npm run typecheck` (all workspaces)
+- [x] TypeScript strict mode: `"strict": true` in all `tsconfig.json` files.
+- [x] ESLint configured with flat config; `npm run lint` passes.
+- [x] Prettier configured; `npm run format` available.
+- [x] `.editorconfig` in place for consistent formatting.
+- [x] `.nvmrc` specifies Node.js version (20+; required by Tailwind v4).
+- [x] `.gitignore` covers dependencies, builds, env files, editor files, test artifacts.
+- [x] `README.md` updated with:
+    - Brief project description
+    - Prerequisites (Node version, git)
+    - Setup: `npm install`
+    - Dev: `npm run dev`
+    - Build/deploy: `npm run build` + render instructions
+    - Links to docs/
 
 ## 2. Environment + Secrets Discipline
 
 - [x] `.env.example` committed with all required keys (never commit `.env`):
-  ```
-  PORT=3001
+```
+ PORT=3001
   JWT_SECRET=
   DATABASE_URL=
   LIVEKIT_URL=
@@ -40,31 +40,31 @@
   LIVEKIT_API_SECRET=
   LLM_KEY_ENCRYPTION_SECRET=
   CLIENT_ORIGIN=
-  ```
+```
 - [x] Config loader module created (`apps/server/src/env.ts`):
-  - Uses zod to validate env at startup
-  - Fails fast with clear error message if any key is missing/invalid
-  - Exported singleton available to all modules
+    - Uses zod to validate env at startup
+    - Fails fast with clear error message if any key is missing/invalid
+    - Exported singleton available to all modules
 - [x] `.env` added to `.gitignore`.
-- [ ] External accounts created + documented *(deferred to a team meeting — do these together, then paste secrets into Render env vars / local `.env`; never commit them)*:
-  - [ ] Neon Postgres project; connection string in `.env.example`
-  - [ ] LiveKit Cloud project; API key/secret/URL in `.env.example`
-  - [ ] Render account linked to GitHub repo
-  - [ ] GitHub secrets set for Render env vars
+- [ ] External accounts created + documented *(do these together, then paste secrets into Render env vars / local `.env`; never commit them)*:
+    - [ ] Neon Postgres project; connection string in `.env.example`
+    - [ ] LiveKit Cloud project; API key/secret/URL in `.env.example`
+    - [ ] Render account linked to GitHub repo
+    - [ ] GitHub secrets set for Render env vars
 
 ## 3. CI/CD Baseline
 
-- [ ] GitHub Actions workflow (`.github/workflows/ci.yml`):
+- [x] GitHub Actions workflow (`.github/workflows/ci.yml`):
   - Runs on PR to `main` and push to `main`
   - Steps: lint → typecheck → build → test
   - All steps must pass before merge
-- [ ] Existing Trivy security scan workflow preserved.
+- [x] Existing Trivy security scan workflow preserved.
 - [ ] Render auto-deploy connected:
   - Deploys on push to `main` automatically
   - Env vars set in Render console (JWT_SECRET, DB_URL, LiveKit keys, LLM encryption key)
-- [ ] Branch protection on `main`:
+- [x] Branch protection on `main` (via ruleset "Protect Main Branch"):
   - Require PR reviews (≥1)
-  - Require CI to pass
+  - Require CI + Trivy checks to pass
   - Dismiss stale reviews on push
 
 ## 4. Database + Migration Setup (Prisma)
