@@ -153,7 +153,8 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 │   │       └── App.tsx         # router + providers
 │   └── server/                 # Express + Socket.IO
 │       └── src/
-│           ├── modules/        # auth/, sessions/, pinboard/, voting/, summary/, voice/
+│           ├── modules/        # auth/, sessions/, pinboard/, voting/, summary/, voice/, assistant/
+│           │                   # (tools is frontend-only under apps/web/src/features/tools/)
 │           ├── realtime/       # Socket.IO wiring, room management, event dispatch
 │           └── index.ts        # boots http + ws + serves ../web/dist in production
 ├── packages/

@@ -58,6 +58,7 @@ JWT_SECRET=
 LIVEKIT_URL=
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
+LLM_KEY_ENCRYPTION_SECRET=   # AES key for encrypting user LLM API keys at rest
 PORT=3001
 CLIENT_ORIGIN=         # dev only, for Vite proxy alternative
 ```

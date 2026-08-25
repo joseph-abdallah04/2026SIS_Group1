@@ -18,7 +18,7 @@
 - [ ] ESLint configured with flat config; `npm run lint` passes.
 - [ ] Prettier configured; `npm run format` available.
 - [ ] `.editorconfig` in place for consistent formatting.
-- [ ] `.nvmrc` specifies Node.js version (18+).
+- [ ] `.nvmrc` specifies Node.js version (20+; required by Tailwind v4).
 - [ ] `.gitignore` covers dependencies, builds, env files, editor files, test artifacts.
 - [ ] `README.md` updated with:
   - Brief project description
@@ -39,6 +39,7 @@
   LIVEKIT_API_KEY=
   LIVEKIT_API_SECRET=
   LLM_KEY_ENCRYPTION_SECRET=
+  CLIENT_ORIGIN=
   ```
 - [ ] Config loader module created (`apps/server/src/env.ts`):
   - Uses zod to validate env at startup
@@ -86,6 +87,7 @@
   - FK columns: `{table}Id` (e.g. `userId`, `sessionId`)
   - Indexes: `idx_{table}_{field}` or `idx_{table}_{field1}_{field2}`
   - Constraints enforced in schema (unique, required, cascades)
+  - Note: Prisma models are camelCase by default — use `@@map`/`@map` to map them onto the snake_case table/column names
 
 ## 5. Backend Skeleton (Express + Socket.IO, no feature logic)
 
