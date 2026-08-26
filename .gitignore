@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Editor/OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+npm-debug.log*
