@@ -1,0 +1,106 @@
+/*
+ * Animations for the assistant bubble and panel (F34).
+ *
+ * Kept in the feature folder rather than the global stylesheet so the assistant owns its
+ * own presentation, and so deleting the feature deletes its CSS with it.
+ *
+ * Everything here respects prefers-reduced-motion at the bottom of the file: an idle
+ * bubble that never stops moving is exactly the kind of thing that hurts to sit next to
+ * for an hour-long session.
+ */
+
+@keyframes rt-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes rt-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+@keyframes rt-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes rt-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rt-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.rt-bubble {
+  animation: rt-float 4.5s ease-in-out infinite;
+}
+
+/* Pulses only while the agent is working, so the idle state is calm. */
+.rt-bubble-ring {
+  animation: rt-ring 2s ease-out infinite;
+}
+
+.rt-sparkle {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: rt-twinkle 3.4s ease-in-out infinite;
+}
+
+.rt-sparkle--delayed {
+  animation-delay: 1.1s;
+}
+
+.rt-panel {
+  animation: rt-panel-in 180ms ease-out;
+}
+
+.rt-caret {
+  animation: rt-caret 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-bubble,
+  .rt-bubble-ring,
+  .rt-sparkle,
+  .rt-panel,
+  .rt-caret {
+    animation: none;
+  }
+}

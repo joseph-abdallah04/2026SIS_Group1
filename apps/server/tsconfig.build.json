@@ -1,0 +1,6 @@
+{
+  // Production build. Same settings as tsconfig.json (which typechecks everything,
+  // tests included) minus the test files, so `dist/` ships only runtime code.
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts", "src/**/__fixtures__/**"]
+}

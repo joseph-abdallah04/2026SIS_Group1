@@ -8,6 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
+import { assistantRouter } from './modules/assistant/index.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -22,7 +23,13 @@ app.get('/api/health', (_req, res) => {
 
 // Module owners mount their routers here (docs/02 §6):
 //   app.use('/api/auth', authRoutes) etc. Each module exports an index.ts with its public surface.
+//
+// The assistant owns `/api/me/llm-config*` and `/api/sessions/:id/assistant/*`; both live
+// under one router, so it mounts at `/api` rather than a module-shaped prefix.
+app.use('/api', assistantRouter);
 
+// Error handler goes after every route: Express only reaches it for requests the routes
+// above threw on.
 app.use(errorHandler);
 
 // Serve the built SPA in production (docs/02 §9). No-op in dev, where Vite serves the frontend.

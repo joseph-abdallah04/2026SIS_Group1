@@ -23,6 +23,11 @@ export interface Session {
 
 // === pinboard module ===
 
+// Artifact shapes for sticky / drawing / diagram proposals, plus their zod schemas and
+// the shared size ceiling. Authored by the assistant owner (F36 needed them first);
+// tools + pinboard owners own the contract going forward (docs/06 Coordination Point 3).
+export * from './artifacts.js';
+
 // === voting module ===
 
 // === summary module ===
@@ -30,3 +35,7 @@ export interface Session {
 // === voice module ===
 
 // === assistant module ===
+
+// Per-user LLM config (F33), session context (F35), agent tools (F36) and the SSE stream
+// event union consumed by the chat panel.
+export * from './assistant.js';

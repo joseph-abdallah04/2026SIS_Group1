@@ -18,7 +18,11 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "generate": "prisma generate --schema apps/server/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema apps/server/prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema apps/server/prisma/schema.prisma",
+    "db:seed": "tsx apps/server/prisma/seed.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

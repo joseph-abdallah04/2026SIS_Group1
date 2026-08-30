@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./events": "./src/events.ts",
-    "./schemas": "./src/schemas.ts"
+    "./schemas": "./src/schemas.ts",
+    "./artifacts": "./src/artifacts.ts",
+    "./assistant": "./src/assistant.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
