@@ -8,9 +8,9 @@
     "generate": "prisma generate",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "db:seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "echo \"No tests yet\""
@@ -28,6 +28,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
+    "dotenv-cli": "^11.0.0",
     "prisma": "^6.19.3",
     "tsx": "^4.23.12",
     "typescript": "^5.7.2"
