@@ -53,7 +53,7 @@ Total: **$0/month** for us to run. Known limits: Render sleeps after ~15 min idl
 All secrets go in Render env vars / local `.env` (never committed). `.env.example` documents every variable:
 
 ```
-DATABASE_URL=          # Neon connection string
+DATABASE_URL=          # local dev: Docker Postgres (see README); prod: Neon's pooled string, set only in Render env vars — never in a local .env
 JWT_SECRET=
 LIVEKIT_URL=
 LIVEKIT_API_KEY=
@@ -62,3 +62,5 @@ LLM_KEY_ENCRYPTION_SECRET=   # AES key for encrypting user LLM API keys at rest
 PORT=3001
 CLIENT_ORIGIN=         # dev only, for Vite proxy alternative
 ```
+
+**Local development doesn't touch Neon at all.** `docker-compose.yml` runs a local Postgres for everyone; `npm run db:up`/`db:down` start and stop it. Neon is production-only — its connection string lives in Render's environment, never in anyone's `.env`. On deploy, Render runs `prisma migrate deploy` automatically before booting the server, so merged migrations apply to Neon with no manual step. See the README's "Database (local development)" section for the full workflow.

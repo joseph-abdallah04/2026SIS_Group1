@@ -24,25 +24,78 @@ model User {
   displayName  String
   createdAt    DateTime @default(now())
 
-  ledSessions Session[]       @relation("SessionLeader")
-  llmConfig   UserLLMConfig?
+  ledSessions        Session[]       @relation("SessionLeader")
+  sessionMemberships SessionMember[]
+  llmConfig          UserLLMConfig?
 
   @@map("users")
 }
 
 // === sessions module ===
 
+enum SessionStatus {
+  lobby
+  active
+  ended
+}
+
+// Per-question progression through discussion → voting → answered, or skipped.
+// This is the value docs/06 Coordination Point 2 refers to — name is `status`
+// (not `phase`) to match this table's column and mirror Session.status.
+enum QuestionStatus {
+  pending
+  discussion
+  voting
+  answered
+  skipped
+}
+
 model Session {
-  id        String   @id @default(cuid())
-  code      String   @unique // short join code, e.g. "ABCD-1234"
+  id        String        @id @default(cuid())
+  code      String        @unique // short join code, e.g. "ABCD-1234"
   title     String
   leaderId  String
-  leader    User     @relation("SessionLeader", fields: [leaderId], references: [id])
-  status    String   @default("lobby") // lobby | brainstorming | voting | summary | closed
-  createdAt DateTime @default(now())
+  leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])
+  status    SessionStatus @default(lobby)
+  createdAt DateTime      @default(now())
+  endedAt   DateTime?
+
+  questions Question[]
+  members   SessionMember[]
 
   @@index([leaderId])
   @@map("sessions")
+}
+
+model Question {
+  id        String         @id @default(cuid())
+  sessionId String
+  session   Session        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  text      String
+  position  Int
+  status    QuestionStatus @default(pending)
+  createdAt DateTime       @default(now())
+
+  // Index (not unique) on (sessionId, position): reordering questions needs
+  // two rows to briefly share a position mid-swap. Ordering correctness is
+  // enforced in service code, not the database.
+  @@index([sessionId, position])
+  @@map("questions")
+}
+
+model SessionMember {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  // History of who joined this session — not live presence (that's socket-room
+  // state, kept in memory; see docs/02 §4 "What gets persisted vs kept in memory").
+  @@unique([sessionId, userId])
+  @@index([userId])
+  @@map("session_members")
 }
 
 // === pinboard module ===

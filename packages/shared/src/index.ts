@@ -15,11 +15,33 @@ export interface Session {
   leaderId: string;
   status: SessionStatus;
   createdAt: Date;
+  endedAt: Date | null;
 }
 
 // === auth module ===
 
 // === sessions module ===
+
+// Per-question progression through discussion → voting → answered, or skipped.
+// This is the canonical name/value list (docs/06 Coordination Point 2) —
+// import this rather than hand-typing the union; Prisma's QuestionStatus enum
+// is kept in sync with it via a compile-time check in apps/server.
+export type QuestionStatus = 'pending' | 'discussion' | 'voting' | 'answered' | 'skipped';
+
+export interface Question {
+  id: string;
+  sessionId: string;
+  text: string;
+  position: number;
+  status: QuestionStatus;
+  createdAt: Date;
+}
+
+export interface SessionMember {
+  sessionId: string;
+  userId: string;
+  joinedAt: Date;
+}
 
 // === pinboard module ===
 
