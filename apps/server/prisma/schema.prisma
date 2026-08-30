@@ -26,6 +26,7 @@ model User {
 
   ledSessions Session[]       @relation("SessionLeader")
   llmConfig   UserLLMConfig?
+  proposals   Proposal[]
 
   @@map("users")
 }
@@ -41,12 +42,46 @@ model Session {
   status    String   @default("lobby") // lobby | brainstorming | voting | summary | closed
   createdAt DateTime @default(now())
 
+  questions Question[]
+
   @@index([leaderId])
   @@map("sessions")
 }
 
+model Question {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  text      String
+  position  Int
+  status    String   @default("pending") // pending | discussion | voting | answered | skipped
+  proposals Proposal[]
+
+  @@index([sessionId])
+  @@map("questions")
+}
+
 // === pinboard module ===
-// (pinboard owner adds Proposal + reaction tables here)
+
+model Proposal {
+  id                String    @id @default(cuid())
+  questionId        String
+  question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  authorId          String
+  author            User      @relation(fields: [authorId], references: [id])
+  type              String // sticky | drawing | diagram
+  artifactJson      Json
+  x                 Float
+  y                 Float
+  extendsProposalId String?
+  extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
+  extensions        Proposal[] @relation("ProposalExtends")
+  createdAt         DateTime  @default(now())
+  deletedAt         DateTime?
+
+  @@index([questionId, createdAt])
+  @@map("proposals")
+}
 
 // === creative tools module ===
 // (tools owner adds artifact storage here if server-persisted)

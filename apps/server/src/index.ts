@@ -8,6 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
+import { pinboardRoutes, registerPinboardHandlers } from './modules/pinboard/index.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -20,8 +21,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
-// Module owners mount their routers here (docs/02 §6):
-//   app.use('/api/auth', authRoutes) etc. Each module exports an index.ts with its public surface.
+app.use('/api/sessions', pinboardRoutes);
 
 app.use(errorHandler);
 
@@ -38,6 +38,8 @@ if (fs.existsSync(webDist)) {
 const httpServer = http.createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
 
+registerPinboardHandlers(io);
+
 io.on('connection', (socket) => {
   console.log(`socket connected: ${socket.id}`);
   socket.on('disconnect', (reason) => {
@@ -45,6 +47,12 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
+httpServer.on('error', (err) => {
+  console.error('HTTP server failed to start:', err);
+  process.exit(1);
+});
+
+httpServer.listen(PORT, '127.0.0.1', () => {
   console.log(`roundtable-server listening on :${PORT}`);
 });
+
