@@ -14,7 +14,7 @@ async function main() {
       displayName: 'Alice (demo leader)',
     },
   });
-  await prisma.user.upsert({
+  const bob = await prisma.user.upsert({
     where: { email: 'bob@example.com' },
     update: {},
     create: {
@@ -24,7 +24,7 @@ async function main() {
     },
   });
 
-  await prisma.session.upsert({
+  const session = await prisma.session.upsert({
     where: { code: 'DEMO-0001' },
     update: {},
     create: {
@@ -35,7 +35,41 @@ async function main() {
     },
   });
 
-  console.log('Seeded: alice@example.com, bob@example.com, session DEMO-0001');
+  // Fixed ids so re-running the seed stays idempotent (upsert needs a unique key).
+  await prisma.question.upsert({
+    where: { id: 'seed-question-1' },
+    update: {},
+    create: {
+      id: 'seed-question-1',
+      sessionId: session.id,
+      text: 'What are our core features for the MVP?',
+      position: 0,
+      status: 'pending',
+    },
+  });
+  await prisma.question.upsert({
+    where: { id: 'seed-question-2' },
+    update: {},
+    create: {
+      id: 'seed-question-2',
+      sessionId: session.id,
+      text: 'Which tech stack should we commit to?',
+      position: 1,
+      status: 'pending',
+    },
+  });
+
+  for (const user of [alice, bob]) {
+    await prisma.sessionMember.upsert({
+      where: { sessionId_userId: { sessionId: session.id, userId: user.id } },
+      update: {},
+      create: { sessionId: session.id, userId: user.id },
+    });
+  }
+
+  console.log(
+    'Seeded: alice@example.com, bob@example.com, session DEMO-0001 (2 questions, 2 members)',
+  );
 }
 
 main()
