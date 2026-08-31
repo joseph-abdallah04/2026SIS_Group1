@@ -27,6 +27,7 @@ model User {
   ledSessions        Session[]       @relation("SessionLeader")
   sessionMemberships SessionMember[]
   llmConfig          UserLLMConfig?
+  proposals          Proposal[]
 
   @@map("users")
 }
@@ -76,6 +77,8 @@ model Question {
   status    QuestionStatus @default(pending)
   createdAt DateTime       @default(now())
 
+  proposals Proposal[]
+
   // Index (not unique) on (sessionId, position): reordering questions needs
   // two rows to briefly share a position mid-swap. Ordering correctness is
   // enforced in service code, not the database.
@@ -99,7 +102,34 @@ model SessionMember {
 }
 
 // === pinboard module ===
-// (pinboard owner adds Proposal + reaction tables here)
+
+// Artifact kind for a proposal. Kept in sync with the `ProposalType` union in
+// packages/shared by a compile-time check (src/prismaSharedSync.ts).
+enum ProposalType {
+  sticky
+  drawing
+  diagram
+}
+
+model Proposal {
+  id                String    @id @default(cuid())
+  questionId        String
+  question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  authorId          String
+  author            User      @relation(fields: [authorId], references: [id])
+  type              ProposalType
+  artifactJson      Json
+  x                 Float
+  y                 Float
+  extendsProposalId String?
+  extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
+  extensions        Proposal[] @relation("ProposalExtends")
+  createdAt         DateTime  @default(now())
+  deletedAt         DateTime?
+
+  @@index([questionId, createdAt])
+  @@map("proposals")
+}
 
 // === creative tools module ===
 // (tools owner adds artifact storage here if server-persisted)
@@ -123,4 +153,3 @@ model UserLLMConfig {
 
   @@map("user_llm_configs")
 }
-

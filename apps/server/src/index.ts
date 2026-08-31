@@ -8,6 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
+import { pinboardRoutes } from './modules/pinboard/index.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -20,8 +21,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
-// Module owners mount their routers here (docs/02 §6):
-//   app.use('/api/auth', authRoutes) etc. Each module exports an index.ts with its public surface.
+app.use('/api/sessions', pinboardRoutes);
 
 app.use(errorHandler);
 
@@ -45,6 +45,14 @@ io.on('connection', (socket) => {
   });
 });
 
+httpServer.on('error', (err) => {
+  console.error('HTTP server failed to start:', err);
+  process.exit(1);
+});
+
+// Bind all interfaces: Render's health check reaches the container on
+// 0.0.0.0:$PORT, so a loopback-only bind fails to deploy.
 httpServer.listen(PORT, () => {
   console.log(`roundtable-server listening on :${PORT}`);
 });
+

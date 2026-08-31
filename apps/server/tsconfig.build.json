@@ -1,0 +1,7 @@
+// Build config: same as tsconfig.json but without the test files, so `dist`
+// holds only shipped code. `npm run typecheck` still uses tsconfig.json, which
+// includes the tests.
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts"]
+}

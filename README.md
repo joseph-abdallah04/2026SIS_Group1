@@ -75,6 +75,21 @@ npm run dev
 - Web app: http://localhost:5173
 - Server: http://localhost:3001 (`GET /api/health` to verify)
 
+### Opening a session board before auth exists
+
+`/sessions/:id` sits behind the auth guard, which looks for a token in
+`localStorage`. Signup/login are the Auth owner's tickets and aren't built yet,
+so until they land, fake the token once in the browser console:
+
+```js
+localStorage.setItem('rt_token', 'dev');
+```
+
+Then run `npm run db:seed --workspace @roundtable/server` and open the
+`/sessions/<id>` URL it prints. The board API (`GET /api/sessions/:id/proposals`)
+is likewise unauthenticated in development only — in production it stays behind
+`requireAuth`, which rejects everything until the real middleware lands.
+
 ## Build & Deploy
 
 ```bash
