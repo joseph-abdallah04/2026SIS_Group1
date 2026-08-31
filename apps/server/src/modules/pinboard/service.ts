@@ -65,8 +65,11 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
   if (!question) {
     return {
       sessionId,
+      sessionTitle: session.title,
       questionId: null,
       questionText: null,
+      questionPosition: null,
+      questionStatus: null,
       items: [],
     };
   }
@@ -75,8 +78,11 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
 
   return {
     sessionId,
+    sessionTitle: session.title,
     questionId: question.id,
     questionText: question.text,
+    questionPosition: question.position,
+    questionStatus: question.status,
     items,
   };
 }

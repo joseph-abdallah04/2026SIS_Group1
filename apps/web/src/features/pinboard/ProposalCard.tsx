@@ -1,13 +1,20 @@
-import type { BoardItem, StickyColor } from '@roundtable/shared';
+import type { BoardItem } from '@roundtable/shared';
 
-const STICKY_COLORS: Record<StickyColor, string> = {
-  yellow: 'bg-yellow-200 border-yellow-400',
-  pink: 'bg-pink-200 border-pink-400',
-  blue: 'bg-sky-200 border-sky-400',
-  green: 'bg-emerald-200 border-emerald-400',
-};
+import {
+  CARD_RADIUS,
+  CARD_SHADOW,
+  STICKY_RADIUS,
+  STICKY_THEMES,
+  cardWidthPx,
+} from './pinboardTokens';
 
-function formatTimestamp(iso: string): string {
+interface ProposalCardProps {
+  item: BoardItem;
+  zoom: 100 | 80 | 60 | 40;
+  isOwnedByViewer?: boolean;
+}
+
+function formatMetaTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -16,101 +23,187 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-function CardMeta({ item }: { item: BoardItem }) {
+function SoftMeta({ item, compact }: { item: BoardItem; compact: boolean }) {
   return (
-    <footer className="mt-2 border-t border-black/10 pt-2 text-xs text-slate-600">
-      <span className="font-medium text-slate-800">{item.authorName}</span>
+    <footer
+      className="text-rt-ink-faint"
+      style={{
+        padding: compact ? '6px 10px 8px' : '8px 12px 10px',
+        fontSize: compact ? '8px' : '11px',
+      }}
+    >
+      <span className="font-medium text-rt-ink-muted">{item.authorName}</span>
       <span className="mx-1">·</span>
-      <time dateTime={item.createdAt}>{formatTimestamp(item.createdAt)}</time>
+      <time dateTime={item.createdAt}>{formatMetaTime(item.createdAt)}</time>
     </footer>
   );
 }
 
-function StickyCard({ item }: { item: BoardItem }) {
+function StickyCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'sticky') return null;
-  const colorClass = STICKY_COLORS[item.artifactJson.color];
+  const compact = zoom <= 60;
+  const theme = STICKY_THEMES[item.artifactJson.color];
+  const bg = isOwnedByViewer ? '#FDF4E5' : theme.bg;
+  const border = isOwnedByViewer ? '#E0A33C' : theme.border;
+  const width = cardWidthPx('sticky', zoom);
 
   return (
     <article
-      className={`flex h-full w-56 flex-col rounded-md border p-3 shadow-md ${colorClass}`}
+      className="flex shrink-0 flex-col overflow-hidden border"
+      style={{
+        width,
+        borderRadius: STICKY_RADIUS,
+        borderColor: border,
+        background: bg,
+        boxShadow: CARD_SHADOW,
+      }}
     >
-      <p className="flex-1 whitespace-pre-wrap text-sm text-slate-900">{item.artifactJson.text}</p>
-      <CardMeta item={item} />
+      <p
+        className="line-clamp-4 font-medium text-rt-ink"
+        style={{
+          padding: compact ? '10px 12px 6px' : '16px 14px 10px',
+          fontSize: compact ? '10px' : '14px',
+          lineHeight: compact ? 1.35 : 1.45,
+          minHeight: compact ? 80 : 128,
+        }}
+      >
+        {item.artifactJson.text}
+      </p>
+      <SoftMeta item={item} compact={compact} />
     </article>
   );
 }
 
-function DrawingCard({ item }: { item: BoardItem }) {
+function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'drawing') return null;
+  const compact = zoom <= 60;
+  const hasSvg = item.artifactJson.svg.trim().length > 0;
+  const width = cardWidthPx('drawing', zoom);
 
   return (
-    <article className="flex w-64 flex-col rounded-md border border-slate-300 bg-white p-3 shadow-md">
+    <article
+      className="flex shrink-0 flex-col overflow-hidden border bg-rt-surface"
+      style={{
+        width,
+        borderRadius: CARD_RADIUS,
+        borderColor: isOwnedByViewer ? '#E0A33C' : '#CFCFCF',
+        background: isOwnedByViewer ? '#FDF4E5' : '#FFFFFF',
+        boxShadow: CARD_SHADOW,
+      }}
+    >
       <div
-        className="flex min-h-24 items-center justify-center overflow-hidden rounded bg-slate-50"
-        // SVG is produced by our own tools module; sanitized rendering is a later hardening pass.
-        dangerouslySetInnerHTML={{ __html: item.artifactJson.svg }}
-      />
-      <CardMeta item={item} />
+        className="m-2.5 overflow-hidden rounded-lg"
+        style={{
+          height: compact ? 100 : 160,
+          background: hasSvg
+            ? '#F7F7F8'
+            : 'repeating-linear-gradient(-45deg, #EEF2F4 0 8px, #F7F7F8 8px 16px)',
+        }}
+      >
+        {hasSvg ? (
+          <div
+            className="flex h-full w-full items-center justify-center [&_svg]:max-h-full [&_svg]:max-w-full"
+            dangerouslySetInnerHTML={{ __html: item.artifactJson.svg }}
+          />
+        ) : null}
+      </div>
+      <SoftMeta item={item} compact={compact} />
     </article>
   );
 }
 
-function DiagramCard({ item }: { item: BoardItem }) {
+function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'diagram') return null;
+  const compact = zoom <= 60;
   const { nodes, edges } = item.artifactJson;
-  const width = Math.max(...nodes.map((n) => n.x), 0) + 120;
-  const height = Math.max(...nodes.map((n) => n.y), 0) + 80;
-  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const previewNodes = nodes.slice(0, 4);
+  const nodeById = new Map(previewNodes.map((n) => [n.id, n]));
+  const svgWidth = Math.max(...previewNodes.map((n) => n.x), 0) + 100;
+  const svgHeight = Math.max(...previewNodes.map((n) => n.y), 0) + 56;
+  const width = cardWidthPx('diagram', zoom);
 
   return (
-    <article className="flex w-80 flex-col rounded-md border border-slate-300 bg-white p-3 shadow-md">
-      <div className="overflow-hidden rounded bg-slate-50">
-        <svg viewBox={`0 0 ${width} ${height}`} className="h-40 w-full">
-          {edges.map((edge) => {
-            const from = nodeById.get(edge.from);
-            const to = nodeById.get(edge.to);
-            if (!from || !to) return null;
-            return (
-              <line
-                key={`${edge.from}-${edge.to}`}
-                x1={from.x + 40}
-                y1={from.y + 16}
-                x2={to.x}
-                y2={to.y + 16}
-                stroke="#94a3b8"
-                strokeWidth={2}
-                markerEnd="url(#arrow)"
-              />
-            );
-          })}
-          <defs>
-            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8" />
-            </marker>
-          </defs>
-          {nodes.map((node) => (
-            <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-              <rect width="80" height="32" rx="6" fill="#e2e8f0" stroke="#cbd5e1" />
-              <text x="40" y="20" textAnchor="middle" className="fill-slate-700 text-[11px]">
-                {node.label}
-              </text>
-            </g>
-          ))}
-        </svg>
+    <article
+      className="flex shrink-0 flex-col overflow-hidden border bg-rt-surface"
+      style={{
+        width,
+        borderRadius: CARD_RADIUS,
+        borderColor: isOwnedByViewer ? '#E0A33C' : '#CFCFCF',
+        background: isOwnedByViewer ? '#FDF4E5' : '#FFFFFF',
+        boxShadow: CARD_SHADOW,
+      }}
+    >
+      <div
+        className="m-2.5 overflow-hidden rounded-lg bg-rt-surface-alt"
+        style={{ minHeight: compact ? 64 : 96 }}
+      >
+        {previewNodes.length === 0 ? (
+          <div className="m-2 flex h-[80px] items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
+        ) : (
+          <svg
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            className="h-full w-full"
+            style={{ minHeight: compact ? 64 : 96 }}
+          >
+            <defs>
+              <marker id="rt-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#8CA4AC" />
+              </marker>
+            </defs>
+            {edges.map((edge) => {
+              const from = nodeById.get(edge.from);
+              const to = nodeById.get(edge.to);
+              if (!from || !to) return null;
+              return (
+                <line
+                  key={`${edge.from}-${edge.to}`}
+                  x1={from.x + 72}
+                  y1={from.y + 16}
+                  x2={to.x}
+                  y2={to.y + 16}
+                  stroke="#8CA4AC"
+                  strokeWidth={1.5}
+                  markerEnd="url(#rt-arrow)"
+                />
+              );
+            })}
+            {previewNodes.map((node, index) => (
+              <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                <rect
+                  width="72"
+                  height="32"
+                  rx="8"
+                  fill={index === 0 ? '#EEF2F4' : '#FFFFFF'}
+                  stroke={index === 0 ? '#8CA4AC' : '#CFCFCF'}
+                  strokeWidth={1}
+                />
+                <text
+                  x="36"
+                  y="20"
+                  textAnchor="middle"
+                  fill="#080C15"
+                  style={{ fontSize: '11px', fontFamily: 'Inter, system-ui, sans-serif' }}
+                >
+                  {node.label}
+                </text>
+              </g>
+            ))}
+          </svg>
+        )}
       </div>
-      <CardMeta item={item} />
+      <SoftMeta item={item} compact={compact} />
     </article>
   );
 }
 
-export function ProposalCard({ item }: { item: BoardItem }) {
+export function ProposalCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
   switch (item.type) {
     case 'sticky':
-      return <StickyCard item={item} />;
+      return <StickyCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
     case 'drawing':
-      return <DrawingCard item={item} />;
+      return <DrawingCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
     case 'diagram':
-      return <DiagramCard item={item} />;
+      return <DiagramCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
     default:
       return null;
   }

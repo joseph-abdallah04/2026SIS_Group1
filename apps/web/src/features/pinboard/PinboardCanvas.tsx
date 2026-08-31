@@ -1,99 +1,208 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { BoardResponse } from '@roundtable/shared';
 
+import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { ProposalCard } from './ProposalCard';
-
-const CANVAS_WIDTH = 2400;
-const CANVAS_HEIGHT = 1600;
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2;
+import { ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
 
 interface PinboardCanvasProps {
   board: BoardResponse;
 }
 
-export function PinboardCanvas({ board }: PinboardCanvasProps) {
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
+function EmptyBoardPlate() {
+  return (
+    <div
+      className="relative w-[400px] overflow-hidden border border-rt-tertiary bg-rt-surface shadow-sm"
+      style={{ borderRadius: '16px' }}
+    >
+      <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
+        Empty board
+      </div>
 
-  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
+      <div className="p-5">
+        <h2 className="text-[19px] leading-[1.3] font-semibold tracking-[-0.01em] text-rt-ink">
+          Nothing proposed yet
+        </h2>
+        <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">
+          Anything anyone proposes appears here for the whole room, in the same order for everyone.
+        </p>
+
+        <div className="mt-[18px] border-t border-rt-tertiary">
+          <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
+            <div
+              className="h-[26px] w-[26px] rounded-md border border-[#F1C881]"
+              style={{ background: '#FDF4E5' }}
+            />
+            <p className="text-[12.5px] font-medium text-rt-ink">
+              Sticky note
+              <span className="font-normal text-rt-ink-faint"> — text, up to 140 characters</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
+            <div
+              className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-white"
+              style={{
+                background:
+                  'repeating-linear-gradient(-45deg, #EEF2F4 0 5px, #FFFFFF 5px 10px)',
+              }}
+            />
+            <p className="text-[12.5px] font-medium text-rt-ink">
+              Drawing
+              <span className="font-normal text-rt-ink-faint"> — soft border, image thumbnail</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-3 py-2.5">
+            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-primary-tint" />
+            <p className="text-[12.5px] font-medium text-rt-ink">
+              Diagram
+              <span className="font-normal text-rt-ink-faint"> — soft border, box preview</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 border-t border-rt-tertiary px-5 py-3">
+        <p className="flex-1 text-[11px] text-rt-ink-faint">Toolbar lives at the foot of the board (F22)</p>
+        <button
+          type="button"
+          disabled
+          className="rounded-full bg-rt-primary px-[18px] py-[9px] text-[12px] font-semibold text-white opacity-90"
+          title="Coming in F22"
+        >
+          Propose the first idea
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ZoomControl({
+  zoom,
+  onZoomIn,
+  onZoomOut,
+  onFit,
+}: {
+  zoom: ZoomLevel;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFit: () => void;
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-full border border-rt-tertiary bg-white">
+      <button
+        type="button"
+        onClick={onZoomOut}
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+      >
+        −
+      </button>
+      <span className="border-r border-rt-tertiary px-3.5 py-[7px] text-[11px] font-semibold text-rt-ink">
+        {zoom}%
+      </span>
+      <button
+        type="button"
+        onClick={onZoomIn}
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+      >
+        +
+      </button>
+      <button
+        type="button"
+        onClick={onFit}
+        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+      >
+        Fit
+      </button>
+    </div>
+  );
+}
+
+export function PinboardCanvas({ board }: PinboardCanvasProps) {
+  const [zoom, setZoom] = useState<ZoomLevel>(100);
+  const grid = ZOOM_GRID[zoom];
+  const isEmpty = board.items.length === 0;
+
+  const onZoomIn = useCallback(() => {
     setZoom((z) => {
-      const delta = event.deltaY > 0 ? -0.1 : 0.1;
-      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((z + delta) * 10) / 10));
+      const idx = ZOOM_LEVELS.indexOf(z);
+      return ZOOM_LEVELS[Math.max(0, idx - 1)] ?? z;
     });
   }, []);
 
-  const isEmpty = board.items.length === 0;
+  const onZoomOut = useCallback(() => {
+    setZoom((z) => {
+      const idx = ZOOM_LEVELS.indexOf(z);
+      return ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, idx + 1)] ?? z;
+    });
+  }, []);
+
+  const onFit = useCallback(() => {
+    if (board.items.length > 12) setZoom(40);
+    else if (board.items.length > 8) setZoom(60);
+    else if (board.items.length > 4) setZoom(80);
+    else setZoom(100);
+  }, [board.items.length]);
+
+  const dotBackground = `radial-gradient(rgba(140,164,172,${grid.dotOpacity}) ${grid.dotRadius}, transparent ${grid.dotRadius})`;
+
+  const phaseLabel =
+    board.questionPosition != null && board.questionStatus
+      ? `Q${board.questionPosition + 1} · ${board.questionStatus}`
+      : 'Discussion';
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-100">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900">Pinboard</h1>
+    <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
+      <header className="flex shrink-0 items-center gap-3 border-b border-rt-primary-tint bg-rt-primary px-6 py-3 text-white">
+        <RoundTableLogo />
+        <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-white/25 bg-white px-3.5 py-1.5 shadow-sm">
+          <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-primary-deep uppercase">
+            {phaseLabel}
+          </span>
           {board.questionText ? (
-            <p className="text-sm text-slate-600">{board.questionText}</p>
+            <p className="truncate text-[12.5px] text-rt-ink">
+              &ldquo;{board.questionText}&rdquo;
+            </p>
           ) : (
-            <p className="text-sm text-slate-500">No active question</p>
+            <h1 className="truncate text-[12.5px] font-semibold text-rt-ink">{board.sessionTitle}</h1>
           )}
         </div>
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <span>{board.items.length} items</span>
-          <span className="text-slate-300">|</span>
-          <button
-            type="button"
-            className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50"
-            onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z - 0.1))}
-          >
-            −
-          </button>
-          <span className="w-12 text-center">{Math.round(zoom * 100)}%</span>
-          <button
-            type="button"
-            className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50"
-            onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z + 0.1))}
-          >
-            +
-          </button>
+        <div className="ml-auto flex items-center gap-2.5">
+          <span className="rounded-full border border-rt-primary-tint bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-primary-deep shadow-sm">
+            {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
+          </span>
+          <div className="flex items-center gap-[7px] rounded-full border border-rt-primary-tint bg-white px-2.5 py-1 shadow-sm">
+            <div className="h-[7px] w-[7px] rounded-full bg-rt-primary" />
+            <span className="text-[10.5px] font-medium text-rt-primary-deep">live</span>
+          </div>
         </div>
       </header>
 
-      <div
-        ref={viewportRef}
-        className="relative min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle,_#cbd5e1_1px,_transparent_1px)] [background-size:24px_24px]"
-        onWheel={onWheel}
-      >
+      <div className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-rt-surface">
         <div
-          className="relative origin-top-left"
+          className="pointer-events-none absolute inset-0"
           style={{
-            width: CANVAS_WIDTH,
-            height: CANVAS_HEIGHT,
-            transform: `scale(${zoom})`,
+            backgroundImage: dotBackground,
+            backgroundSize: `${grid.dotSize} ${grid.dotSize}`,
           }}
-        >
+        />
+        <div className="relative" style={{ padding: grid.padding }}>
           {isEmpty ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white/80 px-8 py-6 text-center shadow-sm">
-                <p className="text-lg font-medium text-slate-800">No proposals yet</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  Ideas from sticky notes, drawings, and diagrams will appear here.
-                </p>
-              </div>
+            <div className="flex min-h-[480px] items-center justify-center">
+              <EmptyBoardPlate />
             </div>
           ) : (
-            board.items.map((item) => (
-              <div
-                key={item.id}
-                className="absolute"
-                style={{ left: item.x, top: item.y }}
-              >
-                <ProposalCard item={item} />
-              </div>
-            ))
+            <div className="flex flex-wrap items-start" style={{ gap: grid.gap }}>
+              {board.items.map((item) => (
+                <ProposalCard key={item.id} item={item} zoom={zoom} />
+              ))}
+            </div>
           )}
         </div>
       </div>
+
+      <footer className="flex shrink-0 items-center justify-end border-t border-rt-tertiary px-6 py-[11px]">
+        <ZoomControl zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
+      </footer>
     </div>
   );
 }

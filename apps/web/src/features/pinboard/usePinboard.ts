@@ -9,13 +9,21 @@ export function usePinboard(sessionId: string) {
   const [board, setBoard] = useState<BoardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const reload = useCallback(() => {
+    setReloadToken((n) => n + 1);
+  }, []);
 
   const applySnapshot = useCallback((snapshot: SessionStatePayload) => {
     if (snapshot.sessionId !== sessionId) return;
     setBoard((prev) => ({
       sessionId,
+      sessionTitle: prev?.sessionTitle ?? 'Session',
       questionId: snapshot.questionId,
       questionText: prev?.questionText ?? null,
+      questionPosition: prev?.questionPosition ?? null,
+      questionStatus: prev?.questionStatus ?? null,
       items: snapshot.proposals,
     }));
   }, [sessionId]);
@@ -59,7 +67,7 @@ export function usePinboard(sessionId: string) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, reloadToken]);
 
   useEffect(() => {
     const token = localStorage.getItem('rt_token') ?? undefined;
@@ -89,5 +97,5 @@ export function usePinboard(sessionId: string) {
     };
   }, [applySnapshot, removeItem, upsertItem]);
 
-  return { board, loading, error };
+  return { board, loading, error, reload };
 }

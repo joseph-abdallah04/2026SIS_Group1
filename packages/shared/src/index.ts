@@ -97,8 +97,11 @@ export interface BoardItem {
 
 export interface BoardResponse {
   sessionId: string;
+  sessionTitle: string;
   questionId: string | null;
   questionText: string | null;
+  questionPosition: number | null;
+  questionStatus: string | null;
   items: BoardItem[];
 }
 
