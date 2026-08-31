@@ -9,7 +9,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(here, '../../../.env') });
 dotenv.config({ path: path.resolve(here, '../../.env') });
 
-
 const prisma = new PrismaClient();
 
 async function main() {
@@ -43,24 +42,44 @@ async function main() {
     },
   });
 
-  const question = await prisma.question.upsert({
-    where: { id: `${session.id}-q1` },
+  // Fixed ids so re-running the seed stays idempotent (upsert needs a unique key).
+  const question1 = await prisma.question.upsert({
+    where: { id: 'seed-question-1' },
     update: { status: 'discussion' },
     create: {
-      id: `${session.id}-q1`,
+      id: 'seed-question-1',
       sessionId: session.id,
-      text: 'What should we build first?',
+      text: 'What are our core features for the MVP?',
       position: 0,
       status: 'discussion',
     },
   });
+  await prisma.question.upsert({
+    where: { id: 'seed-question-2' },
+    update: {},
+    create: {
+      id: 'seed-question-2',
+      sessionId: session.id,
+      text: 'Which tech stack should we commit to?',
+      position: 1,
+      status: 'pending',
+    },
+  });
 
-  await prisma.proposal.deleteMany({ where: { questionId: question.id } });
+  for (const user of [alice, bob]) {
+    await prisma.sessionMember.upsert({
+      where: { sessionId_userId: { sessionId: session.id, userId: user.id } },
+      update: {},
+      create: { sessionId: session.id, userId: user.id },
+    });
+  }
+
+  await prisma.proposal.deleteMany({ where: { questionId: question1.id } });
 
   await prisma.proposal.createMany({
     data: [
       {
-        questionId: question.id,
+        questionId: question1.id,
         authorId: alice.id,
         type: 'sticky',
         artifactJson: {
@@ -72,7 +91,7 @@ async function main() {
         y: 60,
       },
       {
-        questionId: question.id,
+        questionId: question1.id,
         authorId: bob.id,
         type: 'drawing',
         artifactJson: {
@@ -83,7 +102,7 @@ async function main() {
         y: 80,
       },
       {
-        questionId: question.id,
+        questionId: question1.id,
         authorId: alice.id,
         type: 'diagram',
         artifactJson: {
@@ -104,8 +123,9 @@ async function main() {
     ],
   });
 
-  console.log('Seeded: alice@example.com, bob@example.com');
-  console.log(`Demo session: ${session.id} (code ${session.code})`);
+  console.log(
+    'Seeded: alice@example.com, bob@example.com, session DEMO-0001 (2 questions, 2 members, 3 proposals)',
+  );
   console.log(`Open: /sessions/${session.id}`);
 }
 

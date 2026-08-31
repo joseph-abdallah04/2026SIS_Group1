@@ -1,15 +1,4 @@
 -- CreateTable
-CREATE TABLE "questions" (
-    "id" TEXT NOT NULL,
-    "sessionId" TEXT NOT NULL,
-    "text" TEXT NOT NULL,
-    "position" INTEGER NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'pending',
-
-    CONSTRAINT "questions_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "proposals" (
     "id" TEXT NOT NULL,
     "questionId" TEXT NOT NULL,
@@ -26,13 +15,7 @@ CREATE TABLE "proposals" (
 );
 
 -- CreateIndex
-CREATE INDEX "questions_sessionId_idx" ON "questions"("sessionId");
-
--- CreateIndex
 CREATE INDEX "proposals_questionId_createdAt_idx" ON "proposals"("questionId", "createdAt");
-
--- AddForeignKey
-ALTER TABLE "questions" ADD CONSTRAINT "questions_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "proposals" ADD CONSTRAINT "proposals_questionId_fkey" FOREIGN KEY ("questionId") REFERENCES "questions"("id") ON DELETE CASCADE ON UPDATE CASCADE;

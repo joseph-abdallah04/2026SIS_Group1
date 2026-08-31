@@ -2,12 +2,11 @@
 
 > Before feature module owners begin their work, the setup phase must establish shared rails. This checklist defines the "ready to split work" line.
 >
-> **What's still open (as of 2026-08-26):**
-> 1. **§3 Render auto-deploy** — verifies itself right after this PR merges; confirm `<service-url>/api/health` returns `{ ok: true }`, then tick it.
-> 2. **§9 team-side** — record the 7 module owners + create the Jira stories under each epic.
-> 3. **§10 integration smoke test** — runs after merge, doubling as the Auth/Session owners' first acceptance test.
+> **What's still open (as of 2026-08-30):**
+> 1. **§9 team-side** — record the 7 module owners + create the Jira stories under each epic (Jira epics for all 7 modules exist; owner assignment not yet confirmed here).
+> 2. **§10 integration smoke test** — runs once the Auth/Session owners' first tickets land, doubling as their acceptance test.
 >
-> Everything else is done.
+> **§3 Render auto-deploy is done, but note the gotcha:** the initial build failed with `Cannot find module './generated/prisma/client.js'` because Render's build command never ran `prisma generate` (that output is gitignored, correctly, since it's regenerated code). Fixed via a `postinstall` script in `apps/server/package.json` so the Prisma client is generated automatically after every `npm install` — local, CI, and Render. Also, local development no longer uses Neon at all — see the README's "Database (local development)" section; Neon's connection string lives only in Render's env vars now, and `prisma migrate deploy` runs automatically on every Render boot.
 
 ## 1. Repo + Tooling Foundations
 
@@ -66,9 +65,10 @@
   - Steps: lint → typecheck → build → test
   - All steps must pass before merge
 - [x] Existing Trivy security scan workflow preserved.
-- [ ] Render auto-deploy connected:
+- [x] Render auto-deploy connected:
   - Deploys on push to `main` automatically
   - Env vars set in Render console (JWT_SECRET, DB_URL, LiveKit keys, LLM encryption key)
+  - Confirmed working end-to-end (see "What's still open" note above for the `postinstall` fix that was required)
 - [x] Branch protection on `main` (via ruleset "Protect Main Branch"):
   - Require PR reviews (≥1)
   - Require CI + Trivy checks to pass
@@ -77,7 +77,7 @@
 ## 4. Database + Migration Setup (Prisma)
 
 - [x] Prisma installed (`@prisma/client` + `prisma` CLI, pinned to v6 — v7 changed config model, not worth it for setup).
-- [x] Prisma initialized with Neon connection string (`DATABASE_URL` from root `.env`; schema in `apps/server/prisma/`).
+- [x] Prisma initialized (schema in `apps/server/prisma/`). **Updated since initial setup:** local development runs against a Dockerised Postgres, not Neon directly — `DATABASE_URL` in the root `.env` points at `localhost:5433` (see README). Neon is production-only; its connection string lives only in Render's env vars.
 - [x] Initial `schema.prisma` created with:
   - Module sections labeled (e.g. `// === auth module ===`)
   - `User` model outlined (id, email, passwordHash, displayName, createdAt)
