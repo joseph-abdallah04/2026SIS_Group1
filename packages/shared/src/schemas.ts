@@ -59,12 +59,19 @@ export const artifactJsonSchema = z.discriminatedUnion('type', [
 
 export const proposalTypeSchema = z.enum(['sticky', 'drawing', 'diagram']);
 
-export const proposalCreateSchema = z.object({
-  type: proposalTypeSchema,
-  artifactJson: artifactJsonSchema,
-  x: z.number(),
-  y: z.number(),
-  extendsProposalId: z.string().optional(),
-});
+// Write contract for F15/tools — the column and the artifact must agree, so a
+// `sticky` proposal can never carry a diagram payload.
+export const proposalCreateSchema = z
+  .object({
+    type: proposalTypeSchema,
+    artifactJson: artifactJsonSchema,
+    x: z.number(),
+    y: z.number(),
+    extendsProposalId: z.string().optional(),
+  })
+  .refine((v) => v.type === v.artifactJson.type, {
+    message: 'type must match artifactJson.type',
+    path: ['type'],
+  });
 
 export type ProposalCreateInput = z.infer<typeof proposalCreateSchema>;

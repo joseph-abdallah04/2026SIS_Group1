@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { BoardItem, BoardResponse } from '@roundtable/shared';
+import { compareBoardItems, type BoardItem, type BoardResponse } from '@roundtable/shared';
 import type { SessionStatePayload } from '@roundtable/shared/events';
 
 import { api } from '../../lib/api';
@@ -33,7 +33,7 @@ export function usePinboard(sessionId: string) {
       if (!prev || proposal.questionId !== prev.questionId) return prev;
       const items = prev.items.filter((item) => item.id !== proposal.id);
       items.push(proposal);
-      items.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      items.sort(compareBoardItems);
       return { ...prev, items };
     });
   }, []);
@@ -52,7 +52,7 @@ export function usePinboard(sessionId: string) {
       setLoading(true);
       setError(null);
       try {
-        const data = await api.get<BoardResponse>(`/api/sessions/${sessionId}/board`);
+        const data = await api.get<BoardResponse>(`/api/sessions/${sessionId}/proposals`);
         if (!cancelled) setBoard(data);
       } catch (err) {
         if (!cancelled) {
@@ -69,6 +69,10 @@ export function usePinboard(sessionId: string) {
     };
   }, [sessionId, reloadToken]);
 
+  // Receive side of F15. These listeners are correct but currently inert: no
+  // socket joins `session:{id}` yet, because the room gateway (JWT handshake +
+  // membership + `memberJoin`) belongs to the sessions owner. Once that lands
+  // and F15 starts broadcasting, the board updates with no change here.
   useEffect(() => {
     const token = localStorage.getItem('rt_token') ?? undefined;
     const socket = getSocket(token);

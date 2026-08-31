@@ -8,7 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
-import { pinboardRoutes, registerPinboardHandlers } from './modules/pinboard/index.js';
+import { pinboardRoutes } from './modules/pinboard/index.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -38,8 +38,6 @@ if (fs.existsSync(webDist)) {
 const httpServer = http.createServer(app);
 const io = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
 
-registerPinboardHandlers(io);
-
 io.on('connection', (socket) => {
   console.log(`socket connected: ${socket.id}`);
   socket.on('disconnect', (reason) => {
@@ -52,7 +50,9 @@ httpServer.on('error', (err) => {
   process.exit(1);
 });
 
-httpServer.listen(PORT, '127.0.0.1', () => {
+// Bind all interfaces: Render's health check reaches the container on
+// 0.0.0.0:$PORT, so a loopback-only bind fails to deploy.
+httpServer.listen(PORT, () => {
   console.log(`roundtable-server listening on :${PORT}`);
 });
 

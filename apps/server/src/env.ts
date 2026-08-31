@@ -13,6 +13,7 @@ dotenv.config({ path: path.resolve(here, '../../.env') }); // apps/server/.env
 const emptyToUndefined = (v: unknown) => (v === '' || v === undefined ? undefined : v);
 
 const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
   CLIENT_ORIGIN: z.string().url().default('http://localhost:5173'),
   JWT_SECRET: z.preprocess(emptyToUndefined, z.string().min(32).optional()),

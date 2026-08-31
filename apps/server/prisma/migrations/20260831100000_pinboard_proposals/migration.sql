@@ -1,9 +1,12 @@
+-- CreateEnum
+CREATE TYPE "ProposalType" AS ENUM ('sticky', 'drawing', 'diagram');
+
 -- CreateTable
 CREATE TABLE "proposals" (
     "id" TEXT NOT NULL,
     "questionId" TEXT NOT NULL,
     "authorId" TEXT NOT NULL,
-    "type" TEXT NOT NULL,
+    "type" "ProposalType" NOT NULL,
     "artifactJson" JSONB NOT NULL,
     "x" DOUBLE PRECISION NOT NULL,
     "y" DOUBLE PRECISION NOT NULL,

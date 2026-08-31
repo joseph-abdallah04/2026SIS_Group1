@@ -103,13 +103,21 @@ model SessionMember {
 
 // === pinboard module ===
 
+// Artifact kind for a proposal. Kept in sync with the `ProposalType` union in
+// packages/shared by a compile-time check (src/prismaSharedSync.ts).
+enum ProposalType {
+  sticky
+  drawing
+  diagram
+}
+
 model Proposal {
   id                String    @id @default(cuid())
   questionId        String
   question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
   authorId          String
   author            User      @relation(fields: [authorId], references: [id])
-  type              String // sticky | drawing | diagram
+  type              ProposalType
   artifactJson      Json
   x                 Float
   y                 Float

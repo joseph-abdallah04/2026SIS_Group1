@@ -43,9 +43,11 @@ async function main() {
   });
 
   // Fixed ids so re-running the seed stays idempotent (upsert needs a unique key).
+  // `update: {}` on purpose: question status is session-owned state, and a
+  // re-seed must not reset a question the sessions phase machine has moved on.
   const question1 = await prisma.question.upsert({
     where: { id: 'seed-question-1' },
-    update: { status: 'discussion' },
+    update: {},
     create: {
       id: 'seed-question-1',
       sessionId: session.id,

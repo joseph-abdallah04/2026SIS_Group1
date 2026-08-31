@@ -11,6 +11,11 @@ import {
 interface ProposalCardProps {
   item: BoardItem;
   zoom: 100 | 80 | 60 | 40;
+  /**
+   * Highlights the viewer's own cards. Nothing passes it yet — the canvas has
+   * no viewer identity until auth lands, and F16 (author-only edit/delete) is
+   * what makes the distinction actionable.
+   */
   isOwnedByViewer?: boolean;
 }
 
@@ -77,8 +82,14 @@ function StickyCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) 
 function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'drawing') return null;
   const compact = zoom <= 60;
-  const hasSvg = item.artifactJson.svg.trim().length > 0;
+  const svg = item.artifactJson.svg.trim();
+  const hasSvg = svg.length > 0;
   const width = cardWidthPx('drawing', zoom);
+  // Never inject a peer's SVG into this document: it is arbitrary user-authored
+  // markup, so inline <svg> would run any <script>/onload it carries in every
+  // viewer's session. An <img> renders SVG with scripting and external fetches
+  // disabled, so a hostile drawing is inert.
+  const src = hasSvg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : null;
 
   return (
     <article
@@ -100,10 +111,12 @@ function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
             : 'repeating-linear-gradient(-45deg, #EEF2F4 0 8px, #F7F7F8 8px 16px)',
         }}
       >
-        {hasSvg ? (
-          <div
-            className="flex h-full w-full items-center justify-center [&_svg]:max-h-full [&_svg]:max-w-full"
-            dangerouslySetInnerHTML={{ __html: item.artifactJson.svg }}
+        {src ? (
+          <img
+            src={src}
+            alt={`Drawing by ${item.authorName}`}
+            loading="lazy"
+            className="h-full w-full object-contain"
           />
         ) : null}
       </div>
@@ -121,6 +134,9 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
   const svgWidth = Math.max(...previewNodes.map((n) => n.x), 0) + 100;
   const svgHeight = Math.max(...previewNodes.map((n) => n.y), 0) + 56;
   const width = cardWidthPx('diagram', zoom);
+  // SVG ids are document-global: an unsuffixed "rt-arrow" would collide across
+  // every diagram card on the board and all of them would resolve to the first.
+  const arrowId = `rt-arrow-${item.id}`;
 
   return (
     <article
@@ -146,7 +162,7 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
             style={{ minHeight: compact ? 64 : 96 }}
           >
             <defs>
-              <marker id="rt-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <marker id={arrowId} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
                 <path d="M0,0 L6,3 L0,6 Z" fill="#8CA4AC" />
               </marker>
             </defs>
@@ -163,7 +179,7 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                   y2={to.y + 16}
                   stroke="#8CA4AC"
                   strokeWidth={1.5}
-                  markerEnd="url(#rt-arrow)"
+                  markerEnd={`url(#${arrowId})`}
                 />
               );
             })}

@@ -11,7 +11,7 @@
     "deepmerge-ts": "^8.0.0"
   },
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @roundtable/server\" \"npm run dev -w @roundtable/web\"",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev --workspace @roundtable/server\" \"npm run dev --workspace @roundtable/web\"",
     "build": "npm run build --workspaces --if-present",
     "start": "npm run db:deploy --workspace @roundtable/server && node apps/server/dist/index.js",
     "test": "npm run test --workspaces --if-present",

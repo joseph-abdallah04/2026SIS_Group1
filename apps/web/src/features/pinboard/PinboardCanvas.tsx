@@ -35,7 +35,7 @@ function EmptyBoardPlate() {
             />
             <p className="text-[12.5px] font-medium text-rt-ink">
               Sticky note
-              <span className="font-normal text-rt-ink-faint"> — text, up to 140 characters</span>
+              <span className="font-normal text-rt-ink-faint"> — a short line of text</span>
             </p>
           </div>
           <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
@@ -191,6 +191,10 @@ export function PinboardCanvas({ board }: PinboardCanvasProps) {
               <EmptyBoardPlate />
             </div>
           ) : (
+            // Flow layout, in the server's order — item.x/item.y are persisted
+            // but deliberately not honoured yet. Free positioning arrives with
+            // F16 (drag to move); until then every participant sees the same
+            // reading order, which is what F14 promises.
             <div className="flex flex-wrap items-start" style={{ gap: grid.gap }}>
               {board.items.map((item) => (
                 <ProposalCard key={item.id} item={item} zoom={zoom} />

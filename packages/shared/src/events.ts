@@ -23,17 +23,9 @@ export interface ClientToServerEvents {
   // === sessions module ===
 
   // === pinboard module ===
-  proposalCreate(
-    payload: {
-      sessionId: string;
-      type: BoardItem['type'];
-      artifactJson: BoardItem['artifactJson'];
-      x: number;
-      y: number;
-      extendsProposalId?: string;
-    },
-    ack?: (res: { ok: boolean; error?: string; proposal?: BoardItem }) => void,
-  ): void;
+  // Proposal writes (`proposalCreate` / `proposalUpdate` / `proposalDelete`)
+  // arrive with F15 — they need an authenticated socket, which the sessions
+  // gateway owns. F14 ships the read side only.
 
   // === voting module ===
   // === summary module ===
@@ -51,6 +43,8 @@ export interface ServerToClientEvents {
   // === sessions module ===
 
   // === pinboard module ===
+  // Emitted by F15; the F14 board already listens so it stays in sync the
+  // moment those broadcasts start arriving.
   proposalCreated(payload: { proposal: BoardItem }): void;
   proposalUpdated(payload: { proposal: BoardItem }): void;
   proposalDeleted(payload: { proposalId: string; questionId: string }): void;
