@@ -17,6 +17,8 @@ interface ProposalCardProps {
    * what makes the distinction actionable.
    */
   isOwnedByViewer?: boolean;
+  /** Arrived on a live broadcast just now, so it gets a one-off highlight (F15). */
+  isNew?: boolean;
 }
 
 function formatMetaTime(iso: string): string {
@@ -212,15 +214,33 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
   );
 }
 
-export function ProposalCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
-  switch (item.type) {
-    case 'sticky':
-      return <StickyCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
-    case 'drawing':
-      return <DrawingCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
-    case 'diagram':
-      return <DiagramCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
-    default:
-      return null;
-  }
+export function ProposalCard({
+  item,
+  zoom,
+  isOwnedByViewer = false,
+  isNew = false,
+}: ProposalCardProps) {
+  const card = (() => {
+    switch (item.type) {
+      case 'sticky':
+        return <StickyCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
+      case 'drawing':
+        return <DrawingCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
+      case 'diagram':
+        return <DiagramCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
+      default:
+        return null;
+    }
+  })();
+
+  // Always wrapped, highlighted or not: toggling the wrapper in and out would
+  // remount the card and make drawings refetch their image mid-animation.
+  return (
+    <div
+      className={isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}
+      style={{ borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS }}
+    >
+      {card}
+    </div>
+  );
 }

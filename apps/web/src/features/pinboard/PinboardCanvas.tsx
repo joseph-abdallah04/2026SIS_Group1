@@ -1,12 +1,20 @@
 import { useCallback, useState } from 'react';
 import type { BoardResponse } from '@roundtable/shared';
 
+import type { ProposalCreateInput } from '@roundtable/shared/schemas';
+
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { DevProposeButton } from './DevProposeButton';
 import { ProposalCard } from './ProposalCard';
 import { ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
 
 interface PinboardCanvasProps {
   board: BoardResponse;
+  /** True once this client has joined the session room and is receiving events. */
+  isLive: boolean;
+  /** Proposals that arrived on a live broadcast moments ago (F15). */
+  newItemIds: ReadonlySet<string>;
+  propose: (input: ProposalCreateInput) => Promise<void>;
 }
 
 function EmptyBoardPlate() {
@@ -117,7 +125,7 @@ function ZoomControl({
   );
 }
 
-export function PinboardCanvas({ board }: PinboardCanvasProps) {
+export function PinboardCanvas({ board, isLive, newItemIds, propose }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const grid = ZOOM_GRID[zoom];
   const isEmpty = board.items.length === 0;
@@ -170,9 +178,20 @@ export function PinboardCanvas({ board }: PinboardCanvasProps) {
           <span className="rounded-full border border-rt-primary-tint bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-primary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
           </span>
-          <div className="flex items-center gap-[7px] rounded-full border border-rt-primary-tint bg-white px-2.5 py-1 shadow-sm">
-            <div className="h-[7px] w-[7px] rounded-full bg-rt-primary" />
-            <span className="text-[10.5px] font-medium text-rt-primary-deep">live</span>
+          <div
+            className="flex items-center gap-[7px] rounded-full border border-rt-primary-tint bg-white px-2.5 py-1 shadow-sm"
+            title={
+              isLive
+                ? 'Connected — new proposals appear here as they are made'
+                : 'Not receiving live updates; reconnecting'
+            }
+          >
+            <div
+              className={`h-[7px] w-[7px] rounded-full ${isLive ? 'bg-rt-primary' : 'bg-rt-tertiary'}`}
+            />
+            <span className="text-[10.5px] font-medium text-rt-primary-deep">
+              {isLive ? 'live' : 'offline'}
+            </span>
           </div>
         </div>
       </header>
@@ -197,15 +216,23 @@ export function PinboardCanvas({ board }: PinboardCanvasProps) {
             // reading order, which is what F14 promises.
             <div className="flex flex-wrap items-start" style={{ gap: grid.gap }}>
               {board.items.map((item) => (
-                <ProposalCard key={item.id} item={item} zoom={zoom} />
+                <ProposalCard
+                  key={item.id}
+                  item={item}
+                  zoom={zoom}
+                  isNew={newItemIds.has(item.id)}
+                />
               ))}
             </div>
           )}
         </div>
       </div>
 
-      <footer className="flex shrink-0 items-center justify-end border-t border-rt-tertiary px-6 py-[11px]">
-        <ZoomControl zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
+      <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
+        {import.meta.env.DEV ? <DevProposeButton propose={propose} /> : null}
+        <div className="ml-auto">
+          <ZoomControl zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
+        </div>
       </footer>
     </div>
   );

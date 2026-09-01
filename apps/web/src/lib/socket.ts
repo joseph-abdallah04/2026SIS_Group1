@@ -5,16 +5,32 @@ export type RoundTableSocket = Socket<ServerToClientEvents, ClientToServerEvents
 
 let socket: RoundTableSocket | null = null;
 
+function handshakeAuth(): Record<string, string> {
+  const auth: Record<string, string> = {};
+
+  const token = localStorage.getItem('rt_token');
+  if (token) auth.token = token;
+
+  // Dev-only escape hatch, matching the stand-in gateway on the server: with no
+  // login yet there is no JWT to identify anyone, so `rt_dev_user_id` lets two
+  // browser windows act as two different seeded members. Never sent from a
+  // production build, and the server ignores it there regardless.
+  if (import.meta.env.DEV) {
+    const devUserId = localStorage.getItem('rt_dev_user_id');
+    if (devUserId) auth.devUserId = devUserId;
+  }
+
+  return auth;
+}
+
 /**
- * Singleton socket connection. Pass the JWT after login so it rides the
- * handshake (`auth.token`) — the server rejects unauthenticated sockets.
- * Socket.IO reconnects automatically with backoff.
+ * Singleton socket connection. Socket.IO reconnects automatically with backoff;
+ * callers must re-emit `memberJoin` on every `connect`, because a reconnected
+ * socket is a new socket that belongs to no rooms.
  */
-export function getSocket(token?: string): RoundTableSocket {
+export function getSocket(): RoundTableSocket {
   if (!socket) {
-    socket = io('/', { auth: token ? { token } : {}, autoConnect: true });
-  } else if (token && !socket.auth) {
-    socket.auth = { token };
+    socket = io('/', { auth: handshakeAuth(), autoConnect: true });
   }
   return socket;
 }

@@ -2,3 +2,4 @@
 // folder is private — other modules import from here, never from a file inside.
 export { pinboardRoutes } from './routes.js';
 export { getBoardForSession, listProposals } from './service.js';
+export { registerPinboardSocketHandlers, emitProposalCreated } from './socket.js';

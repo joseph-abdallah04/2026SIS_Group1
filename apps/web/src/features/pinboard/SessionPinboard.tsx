@@ -28,7 +28,7 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
 export function SessionPinboard() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { board, loading, error, reload } = usePinboard(sessionId);
+  const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
 
   if (!sessionId) {
     return (
@@ -83,7 +83,7 @@ export function SessionPinboard() {
 
   return (
     <main className="h-screen">
-      <PinboardCanvas board={board} />
+      <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} propose={propose} />
     </main>
   );
 }

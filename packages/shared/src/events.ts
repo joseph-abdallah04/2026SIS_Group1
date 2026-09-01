@@ -4,10 +4,18 @@
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
 import type { BoardItem } from './index.js';
+import type { ProposalCreateInput } from './schemas.js';
 
 export interface SessionUserPayload {
   id: string;
   displayName: string;
+}
+
+/** Result of a write intent: the fact itself arrives on the broadcast, not here. */
+export interface WriteAck {
+  ok: boolean;
+  error?: string;
+  code?: string;
 }
 
 export interface SessionStatePayload {
@@ -23,9 +31,18 @@ export interface ClientToServerEvents {
   // === sessions module ===
 
   // === pinboard module ===
-  // Proposal writes (`proposalCreate` / `proposalUpdate` / `proposalDelete`)
-  // arrive with F15 — they need an authenticated socket, which the sessions
-  // gateway owns. F14 ships the read side only.
+  /**
+   * Propose an item onto the board of the session this socket has already
+   * joined (docs/06 Pinboard §Socket events). The target session, its active
+   * question and the author are all taken from the server's view of the socket
+   * — never from this payload — so a client can neither write to a board it has
+   * not joined nor forge authorship.
+   *
+   * Sent by the tool editors (F19–F21) and propose-from-chat (F37); this module
+   * validates, persists, then broadcasts `proposalCreated` to the room.
+   */
+  proposalCreate(payload: ProposalCreateInput, ack?: (res: WriteAck) => void): void;
+  // `proposalUpdate` / `proposalDelete` arrive with F16 (author CRUD).
 
   // === voting module ===
   // === summary module ===
@@ -43,8 +60,11 @@ export interface ServerToClientEvents {
   // === sessions module ===
 
   // === pinboard module ===
-  // Emitted by F15; the F14 board already listens so it stays in sync the
-  // moment those broadcasts start arriving.
+  /**
+   * A proposal became part of the board (F15). Broadcast to the whole
+   * `session:{id}` room including the author, so every client — proposer
+   * included — renders the same server-authored row.
+   */
   proposalCreated(payload: { proposal: BoardItem }): void;
   proposalUpdated(payload: { proposal: BoardItem }): void;
   proposalDeleted(payload: { proposalId: string; questionId: string }): void;
