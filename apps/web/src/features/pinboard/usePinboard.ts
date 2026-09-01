@@ -11,13 +11,18 @@ const HIGHLIGHT_MS = 2400;
 
 export function usePinboard(sessionId: string) {
   const [board, setBoard] = useState<BoardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [isLive, setIsLive] = useState(false);
   const [newItemIds, setNewItemIds] = useState<ReadonlySet<string>>(() => new Set());
 
+  // Derived, not stored: whichever source produces a board first ends the load.
+  // As state it had to be flipped back to `true` by every refetch, which made a
+  // momentary disconnect blank a perfectly good board behind a spinner.
+  const loading = board === null && error === null;
+
   const reload = useCallback(() => {
+    setError(null);
     setReloadToken((n) => n + 1);
   }, []);
 
@@ -48,18 +53,19 @@ export function usePinboard(sessionId: string) {
     };
   }, []);
 
+  /**
+   * Replace the board with the server's join snapshot.
+   *
+   * This is the resync path (docs/02 §4/§8.6): the server reads the board when
+   * the socket joins, so the snapshot already contains anything broadcast while
+   * this client was away. It carries the whole board, so nothing here falls
+   * back to a placeholder title or a missing question.
+   */
   const applySnapshot = useCallback(
-    (snapshot: SessionStatePayload) => {
-      if (snapshot.sessionId !== sessionId) return;
-      setBoard((prev) => ({
-        sessionId,
-        sessionTitle: prev?.sessionTitle ?? 'Session',
-        questionId: snapshot.questionId,
-        questionText: prev?.questionText ?? null,
-        questionPosition: prev?.questionPosition ?? null,
-        questionStatus: prev?.questionStatus ?? null,
-        items: [...snapshot.proposals].sort(compareBoardItems),
-      }));
+    ({ proposals, ...meta }: SessionStatePayload) => {
+      if (meta.sessionId !== sessionId) return;
+      setError(null);
+      setBoard({ ...meta, items: [...proposals].sort(compareBoardItems) });
     },
     [sessionId],
   );
@@ -87,18 +93,19 @@ export function usePinboard(sessionId: string) {
   useEffect(() => {
     let cancelled = false;
 
+    // First paint, and the only path that works with no socket at all. It never
+    // replaces a board that is already on screen: the socket's join snapshot is
+    // always at least as fresh, and a live event can only reach this client
+    // after that snapshot, so overwriting with an older read could silently
+    // drop a proposal that arrived while this request was in flight.
     async function load() {
-      setLoading(true);
-      setError(null);
       try {
         const data = await api.get<BoardResponse>(`/api/sessions/${sessionId}/proposals`);
-        if (!cancelled) setBoard(data);
+        if (!cancelled) setBoard((prev) => prev ?? data);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load board');
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     }
 
@@ -112,7 +119,6 @@ export function usePinboard(sessionId: string) {
     if (!sessionId) return;
     const socket = getSocket();
     let cancelled = false;
-    let hasConnectedBefore = false;
 
     const join = () => {
       socket.emit('memberJoin', { sessionId }, (res) => {
@@ -124,16 +130,13 @@ export function usePinboard(sessionId: string) {
       });
     };
 
-    const onConnect = () => {
-      // A reconnected socket is a brand-new socket belonging to no rooms, so
-      // every connect must rejoin. On a *re*connect we also refetch over REST:
-      // whatever was broadcast while we were away went to a room we were not
-      // in, so those events are gone and the snapshot is the only way to catch
-      // up (F15 — "reconnects after missing 2–3 events").
-      join();
-      if (hasConnectedBefore) reload();
-      hasConnectedBefore = true;
-    };
+    // A reconnected socket is a brand-new socket belonging to no rooms, so every
+    // connect must rejoin. Rejoining is also the catch-up: events broadcast
+    // while this client was away went to a room it was not in and are gone, and
+    // the server answers a join with a fresh full board (F15 — "reconnects after
+    // missing 2–3 events"). No REST refetch, which would race the live events
+    // arriving behind it.
+    const onConnect = () => join();
 
     const onDisconnect = () => setIsLive(false);
     const onSessionState = (snapshot: SessionStatePayload) => applySnapshot(snapshot);
@@ -162,7 +165,7 @@ export function usePinboard(sessionId: string) {
       socket.off('proposalUpdated', onUpdated);
       socket.off('proposalDeleted', onDeleted);
     };
-  }, [sessionId, applySnapshot, highlight, reload, removeItem, upsertItem]);
+  }, [sessionId, applySnapshot, highlight, removeItem, upsertItem]);
 
   /**
    * Send a proposal intent. Nothing is inserted locally on success — the card

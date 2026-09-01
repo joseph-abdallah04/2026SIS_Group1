@@ -3,7 +3,7 @@
 // Client: `io<ServerToClientEvents, ClientToServerEvents>(...)`
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
-import type { BoardItem } from './index.js';
+import type { BoardItem, BoardResponse } from './index.js';
 import type { ProposalCreateInput } from './schemas.js';
 
 export interface SessionUserPayload {
@@ -18,9 +18,16 @@ export interface WriteAck {
   code?: string;
 }
 
-export interface SessionStatePayload {
-  sessionId: string;
-  questionId: string | null;
+/**
+ * Everything a client needs to render a session from cold (docs/02 §4 — "full
+ * snapshot"). It must stay a superset of `BoardResponse`: a reconnecting client
+ * resyncs from this alone, so anything missing here is something the header
+ * would render as a placeholder until a REST call happened to fill it in.
+ *
+ * Sessions-owned fields (phase, presence, vote progress) get added here as
+ * those modules land.
+ */
+export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
 }
 

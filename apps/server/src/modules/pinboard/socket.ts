@@ -50,17 +50,12 @@ export function registerPinboardSocketHandlers(io: RealtimeServer, socket: Realt
           return;
         }
 
+        // Which board this lands on is a socket-level question; whether the
+        // write is allowed at all is `createProposal`'s, so that a server-side
+        // caller cannot skip the phase check by not using a socket.
         const question = await getActiveQuestion(sessionId);
         if (!question) {
           ack?.({ ok: false, error: 'No question is open yet', code: 'NO_ACTIVE_QUESTION' });
-          return;
-        }
-        if (question.status !== 'discussion') {
-          ack?.({
-            ok: false,
-            error: `This question is ${question.status} — proposals are closed`,
-            code: 'QUESTION_CLOSED',
-          });
           return;
         }
 

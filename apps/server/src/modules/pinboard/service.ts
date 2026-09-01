@@ -3,7 +3,7 @@ import { artifactJsonSchema, type ProposalCreateInput } from '@roundtable/shared
 import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
-import { getActiveQuestion, getSession } from './sessionsAdapter.js';
+import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
 // agreed order) and its create side (F15: proposals land for everyone at once).
@@ -59,12 +59,30 @@ export interface CreateProposalArgs {
  * this the single write path for every producer — the tool editors (F19–F21)
  * and propose-from-chat (F37) all land here, so validation and ownership work
  * the same way regardless of who proposed (docs/02 §8.8).
+ *
+ * Every rule that decides whether a write is *allowed* lives here rather than
+ * in the socket handler, so a server-side caller (the assistant proposing on a
+ * user's behalf) cannot bypass them by not going through a socket.
  */
 export async function createProposal({
   questionId,
   authorId,
   input,
 }: CreateProposalArgs): Promise<BoardItem> {
+  const question = await getQuestion(questionId);
+  if (!question) {
+    throw new ApiError(404, 'Question not found', 'QUESTION_NOT_FOUND');
+  }
+  // Proposals belong to the ideation phase. Once a question moves to voting or
+  // is answered the board is the thing being voted on, so it must stop moving.
+  if (question.status !== 'discussion') {
+    throw new ApiError(
+      409,
+      `This question is ${question.status} — proposals are closed`,
+      'QUESTION_CLOSED',
+    );
+  }
+
   if (input.extendsProposalId) {
     const parent = await prisma.proposal.findFirst({
       where: { id: input.extendsProposalId, questionId, deletedAt: null },

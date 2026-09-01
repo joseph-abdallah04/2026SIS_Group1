@@ -1,12 +1,17 @@
-import { useCallback, useState } from 'react';
+import { Suspense, lazy, useCallback, useState } from 'react';
 import type { BoardResponse } from '@roundtable/shared';
-
 import type { ProposalCreateInput } from '@roundtable/shared/schemas';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
-import { DevProposeButton } from './DevProposeButton';
 import { ProposalCard } from './ProposalCard';
 import { ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
+
+// Gate the import itself, not just the render: in a production build this whole
+// expression folds to `null`, so the module is never reachable and never gets a
+// chunk — rather than being emitted and relying on tree-shaking to remove it.
+const DevProposeButton = import.meta.env.DEV
+  ? lazy(() => import('./DevProposeButton').then((m) => ({ default: m.DevProposeButton })))
+  : null;
 
 interface PinboardCanvasProps {
   board: BoardResponse;
@@ -229,7 +234,11 @@ export function PinboardCanvas({ board, isLive, newItemIds, propose }: PinboardC
       </div>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
-        {import.meta.env.DEV ? <DevProposeButton propose={propose} /> : null}
+        {DevProposeButton ? (
+          <Suspense fallback={null}>
+            <DevProposeButton propose={propose} />
+          </Suspense>
+        ) : null}
         <div className="ml-auto">
           <ZoomControl zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
         </div>

@@ -46,7 +46,9 @@ export function SessionPinboard() {
     );
   }
 
-  if (error) {
+  // Only when there is nothing to show: if the REST load failed but the socket
+  // snapshot produced a board, the board is what the user wants to see.
+  if (error && !board) {
     return (
       <BoardFrame>
         <div className="relative w-[400px] border border-rt-ink bg-rt-surface">

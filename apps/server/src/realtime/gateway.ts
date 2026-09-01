@@ -39,17 +39,23 @@ async function authenticateJoin(
 
   const claimedId = socket.handshake.auth?.devUserId;
 
+  // A claimed id is checked, never trusted-then-downgraded: an id that is not a
+  // member of this session is refused outright. Silently substituting the
+  // leader would attribute one member's proposals to another, and would hide a
+  // typo'd `rt_dev_user_id` behind a board that looks like it works.
   if (typeof claimedId === 'string' && claimedId.length > 0) {
     const membership = await prisma.sessionMember.findUnique({
       where: { sessionId_userId: { sessionId, userId: claimedId } },
       select: { user: { select: { id: true, displayName: true } } },
     });
-    if (membership) return membership.user;
-    console.warn(
-      `[realtime] dev user ${claimedId} is not a member of ${sessionId} — falling back to the leader`,
-    );
+    if (!membership) {
+      console.warn(`[realtime] rejected join: ${claimedId} is not a member of ${sessionId}`);
+      return null;
+    }
+    return membership.user;
   }
 
+  // No id at all: fall back to the leader so a single-window demo just works.
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     select: { leader: { select: { id: true, displayName: true } } },
@@ -99,14 +105,12 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
           socket.data.sessionId = sessionId;
           await socket.join(sessionRoom(sessionId));
 
-          // Snapshot on join (docs/02 §4) — a reconnecting client is back in
-          // sync from the socket alone, without waiting for the next event.
-          const board = await getBoardForSession(sessionId);
-          const snapshot: SessionStatePayload = {
-            sessionId,
-            questionId: board.questionId,
-            proposals: board.items,
-          };
+          // Snapshot on join (docs/02 §4). It carries the whole board, not just
+          // the proposals: a reconnecting client resyncs from this alone, so
+          // anything left out would render as a placeholder until some other
+          // request happened to fill it in.
+          const { items, ...meta } = await getBoardForSession(sessionId);
+          const snapshot: SessionStatePayload = { ...meta, proposals: items };
           socket.emit('sessionState', snapshot);
           socket.to(sessionRoom(sessionId)).emit('memberJoined', { user });
 

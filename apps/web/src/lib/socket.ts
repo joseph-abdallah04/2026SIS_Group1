@@ -27,6 +27,11 @@ function handshakeAuth(): Record<string, string> {
  * Singleton socket connection. Socket.IO reconnects automatically with backoff;
  * callers must re-emit `memberJoin` on every `connect`, because a reconnected
  * socket is a new socket that belongs to no rooms.
+ *
+ * The handshake is read once, when the socket is first created. Logging in — or
+ * changing `rt_dev_user_id` — after that needs `disconnectSocket()` (or a page
+ * refresh) before the new identity is used. Re-authenticating a live socket is
+ * the auth owner's call, so this deliberately does not guess at it.
  */
 export function getSocket(): RoundTableSocket {
   if (!socket) {
