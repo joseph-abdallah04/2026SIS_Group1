@@ -3,10 +3,19 @@ import { diagramEdgeGeometry, diagramNodeSize, type BoardItem } from '@roundtabl
 import {
   CARD_RADIUS,
   CARD_SHADOW,
+  OWNED_OUTLINE,
+  OWNED_OUTLINE_OFFSET,
   STICKY_RADIUS,
   STICKY_THEMES,
   cardWidthPx,
 } from './pinboardTokens';
+
+/** Draws the ownership ring without disturbing a card's own colours. */
+function ownedRing(isOwnedByViewer: boolean) {
+  return isOwnedByViewer
+    ? { outline: OWNED_OUTLINE, outlineOffset: OWNED_OUTLINE_OFFSET }
+    : undefined;
+}
 
 interface ProposalCardProps {
   item: BoardItem;
@@ -50,8 +59,6 @@ function StickyCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) 
   if (item.artifactJson.type !== 'sticky') return null;
   const compact = zoom <= 60;
   const theme = STICKY_THEMES[item.artifactJson.color];
-  const bg = isOwnedByViewer ? '#FDF4E5' : theme.bg;
-  const border = isOwnedByViewer ? '#E0A33C' : theme.border;
   const width = cardWidthPx('sticky', zoom);
 
   return (
@@ -60,9 +67,10 @@ function StickyCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) 
       style={{
         width,
         borderRadius: STICKY_RADIUS,
-        borderColor: border,
-        background: bg,
+        borderColor: theme.border,
+        background: theme.bg,
         boxShadow: CARD_SHADOW,
+        ...ownedRing(isOwnedByViewer),
       }}
     >
       <p
@@ -99,9 +107,10 @@ function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
       style={{
         width,
         borderRadius: CARD_RADIUS,
-        borderColor: isOwnedByViewer ? '#E0A33C' : '#CFCFCF',
-        background: isOwnedByViewer ? '#FDF4E5' : '#FFFFFF',
+        borderColor: '#CFCFCF',
+        background: '#FFFFFF',
         boxShadow: CARD_SHADOW,
+        ...ownedRing(isOwnedByViewer),
       }}
     >
       <div
@@ -118,6 +127,8 @@ function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
             src={src}
             alt={`Drawing by ${item.authorName}`}
             loading="lazy"
+            // Images are natively draggable, which would hijack a card drag.
+            draggable={false}
             className="h-full w-full object-contain"
           />
         ) : null}
@@ -147,9 +158,10 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
       style={{
         width,
         borderRadius: CARD_RADIUS,
-        borderColor: isOwnedByViewer ? '#E0A33C' : '#CFCFCF',
-        background: isOwnedByViewer ? '#FDF4E5' : '#FFFFFF',
+        borderColor: '#CFCFCF',
+        background: '#FFFFFF',
         boxShadow: CARD_SHADOW,
+        ...ownedRing(isOwnedByViewer),
       }}
     >
       <div

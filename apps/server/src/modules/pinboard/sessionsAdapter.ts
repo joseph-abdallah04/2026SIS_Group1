@@ -14,26 +14,46 @@ import type { QuestionStatus } from '@roundtable/shared';
 export interface SessionRef {
   id: string;
   title: string;
+  /**
+   * Who runs this session. Leadership is per-session, not a user role
+   * (docs/00 personas), so it can only ever be answered against a session.
+   */
+  leaderId: string;
 }
 
 export interface QuestionRef {
   id: string;
+  /**
+   * Which session this question belongs to. Carried so the pinboard can check
+   * that a proposal a client names actually sits on the board that client
+   * joined — without that, knowing an id would be enough to reach across
+   * sessions (F16).
+   */
+  sessionId: string;
   text: string;
   position: number;
   status: QuestionStatus;
 }
 
+const QUESTION_FIELDS = {
+  id: true,
+  sessionId: true,
+  text: true,
+  position: true,
+  status: true,
+} as const;
+
 export async function getQuestion(questionId: string): Promise<QuestionRef | null> {
   return prisma.question.findUnique({
     where: { id: questionId },
-    select: { id: true, text: true, position: true, status: true },
+    select: QUESTION_FIELDS,
   });
 }
 
 export async function getSession(sessionId: string): Promise<SessionRef | null> {
   const row = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { id: true, title: true },
+    select: { id: true, title: true, leaderId: true },
   });
   return row;
 }
@@ -52,7 +72,7 @@ export async function getActiveQuestion(sessionId: string): Promise<QuestionRef 
   const questions = await prisma.question.findMany({
     where: { sessionId },
     orderBy: { position: 'asc' },
-    select: { id: true, text: true, position: true, status: true },
+    select: QUESTION_FIELDS,
   });
 
   return questions.find((q) => q.status === 'discussion') ?? questions[0] ?? null;

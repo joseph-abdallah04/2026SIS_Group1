@@ -19,6 +19,14 @@ export const STICKY_THEMES: Record<StickyColor, { bg: string; border: string; in
   green: { bg: '#EEF4F0', border: '#4D6A74', ink: '#080C15' },
 };
 
+/**
+ * Ring marking a card the viewer authored (F16). An outline rather than a fill
+ * swap: a sticky's colour is the author's choice and carries meaning, so
+ * ownership is drawn around the card instead of painted over it.
+ */
+export const OWNED_OUTLINE = '2px solid #E0A33C';
+export const OWNED_OUTLINE_OFFSET = '2px';
+
 /** Intrinsic widths — types differ on purpose. */
 export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
   sticky: 210,

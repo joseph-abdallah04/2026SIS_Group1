@@ -1,10 +1,20 @@
-import { useCallback, useState } from 'react';
-import type { BoardResponse } from '@roundtable/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { BoardItem, BoardResponse } from '@roundtable/shared';
+import type { ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
-import { ProposalCard } from './ProposalCard';
-import { ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
+import { PositionedProposal } from './PositionedProposal';
+import { useProposalDrag } from './useProposalDrag';
+import { CARD_WIDTH, ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
+
+/**
+ * Board units reserved below a card when measuring how far the board extends.
+ * Card heights vary with their content and are only known after layout; this
+ * decides scroll extents and the Fit zoom, where erring large simply means a
+ * little slack at the bottom.
+ */
+const CARD_FOOTPRINT_H = 260;
 
 interface PinboardCanvasProps {
   board: BoardResponse;
@@ -12,6 +22,13 @@ interface PinboardCanvasProps {
   isLive: boolean;
   /** Proposals that arrived on a live broadcast moments ago (F15). */
   newItemIds: ReadonlySet<string>;
+  /**
+   * Who the server believes this client is, or null before the join snapshot.
+   * Author-only affordances key off this; the server re-checks regardless (F16).
+   */
+  viewerId: string | null;
+  editProposal: (input: ProposalUpdateInput) => Promise<void>;
+  deleteProposal: (proposalId: string) => Promise<void>;
 }
 
 function EmptyBoardPlate() {
@@ -47,8 +64,7 @@ function EmptyBoardPlate() {
             <div
               className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-white"
               style={{
-                background:
-                  'repeating-linear-gradient(-45deg, #EEF2F4 0 5px, #FFFFFF 5px 10px)',
+                background: 'repeating-linear-gradient(-45deg, #EEF2F4 0 5px, #FFFFFF 5px 10px)',
               }}
             />
             <p className="text-[12.5px] font-medium text-rt-ink">
@@ -67,7 +83,9 @@ function EmptyBoardPlate() {
       </div>
 
       <div className="flex items-center gap-3 border-t border-rt-tertiary px-5 py-3">
-        <p className="flex-1 text-[11px] text-rt-ink-faint">Toolbar lives at the foot of the board (F22)</p>
+        <p className="flex-1 text-[11px] text-rt-ink-faint">
+          Toolbar lives at the foot of the board (F22)
+        </p>
         <button
           type="button"
           disabled
@@ -122,10 +140,74 @@ function ZoomControl({
   );
 }
 
-export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProps) {
+export function PinboardCanvas({
+  board,
+  isLive,
+  newItemIds,
+  viewerId,
+  editProposal,
+  deleteProposal,
+}: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const grid = ZOOM_GRID[zoom];
+  const scale = grid.scale;
   const isEmpty = board.items.length === 0;
+  // Leadership is per-session and decided by the server; this only decides
+  // what the UI offers, and every write is re-checked server-side regardless.
+  const isLeader = viewerId !== null && viewerId === board.leaderId;
+
+  // A rejected write is the one thing the board cannot show by itself: the card
+  // simply stays where it was, which on its own looks like nothing happened.
+  useEffect(() => {
+    if (!writeError) return;
+    const timer = setTimeout(() => setWriteError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [writeError]);
+
+  const { positionOf, draggingId, dragHandlers } = useProposalDrag({
+    items: board.items,
+    scale,
+    onCommit: (proposalId, at) => editProposal({ id: proposalId, x: at.x, y: at.y }),
+    onError: setWriteError,
+  });
+
+  // How far the board reaches, in board units — drives both the scroll area and
+  // Fit. Recomputed mid-drag so the surface grows as a card is pulled outward.
+  const extent = useMemo(() => {
+    let width = 0;
+    let height = 0;
+    for (const item of board.items) {
+      const at = positionOf(item);
+      width = Math.max(width, at.x + CARD_WIDTH[item.type]);
+      height = Math.max(height, at.y + CARD_FOOTPRINT_H);
+    }
+    return { width, height };
+  }, [board.items, positionOf]);
+
+  const onEditText = useCallback(
+    async (item: BoardItem, text: string) => {
+      if (item.artifactJson.type !== 'sticky') return;
+      try {
+        await editProposal({ id: item.id, artifactJson: { ...item.artifactJson, text } });
+      } catch (err) {
+        setWriteError(err instanceof Error ? err.message : 'Could not save that edit');
+      }
+    },
+    [editProposal],
+  );
+
+  const onDelete = useCallback(
+    async (item: BoardItem) => {
+      try {
+        await deleteProposal(item.id);
+      } catch (err) {
+        setWriteError(err instanceof Error ? err.message : 'Could not remove that proposal');
+      }
+    },
+    [deleteProposal],
+  );
 
   const onZoomIn = useCallback(() => {
     setZoom((z) => {
@@ -141,12 +223,22 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
     });
   }, []);
 
+  // Fit means "show everything that is out there", which since F16 depends on
+  // where cards have been dragged, not how many there are.
   const onFit = useCallback(() => {
-    if (board.items.length > 12) setZoom(40);
-    else if (board.items.length > 8) setZoom(60);
-    else if (board.items.length > 4) setZoom(80);
-    else setZoom(100);
-  }, [board.items.length]);
+    const viewport = viewportRef.current;
+    if (!viewport || extent.width === 0 || extent.height === 0) {
+      setZoom(100);
+      return;
+    }
+    const padding = parseInt(grid.padding, 10) * 2;
+    const room = Math.min(
+      (viewport.clientWidth - padding) / extent.width,
+      (viewport.clientHeight - padding) / extent.height,
+    );
+    // Levels run largest first, so the first that fits is the closest zoom in.
+    setZoom(ZOOM_LEVELS.find((level) => ZOOM_GRID[level].scale <= room) ?? 40);
+  }, [extent, grid.padding]);
 
   const dotBackground = `radial-gradient(rgba(140,164,172,${grid.dotOpacity}) ${grid.dotRadius}, transparent ${grid.dotRadius})`;
 
@@ -164,11 +256,11 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
             {phaseLabel}
           </span>
           {board.questionText ? (
-            <p className="truncate text-[12.5px] text-rt-ink">
-              &ldquo;{board.questionText}&rdquo;
-            </p>
+            <p className="truncate text-[12.5px] text-rt-ink">&ldquo;{board.questionText}&rdquo;</p>
           ) : (
-            <h1 className="truncate text-[12.5px] font-semibold text-rt-ink">{board.sessionTitle}</h1>
+            <h1 className="truncate text-[12.5px] font-semibold text-rt-ink">
+              {board.sessionTitle}
+            </h1>
           )}
         </div>
         <div className="ml-auto flex items-center gap-2.5">
@@ -179,7 +271,7 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
             className="flex items-center gap-[7px] rounded-full border border-rt-primary-tint bg-white px-2.5 py-1 shadow-sm"
             title={
               isLive
-                ? 'Connected — new proposals appear here as they are made'
+                ? 'Connected: new proposals appear here as they are made'
                 : 'Not receiving live updates; reconnecting'
             }
           >
@@ -193,7 +285,7 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
         </div>
       </header>
 
-      <div className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-rt-surface">
+      <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-auto bg-rt-surface">
         <div
           className="pointer-events-none absolute inset-0"
           style={{
@@ -207,17 +299,34 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
               <EmptyBoardPlate />
             </div>
           ) : (
-            // Flow layout, in the server's order — item.x/item.y are persisted
-            // but deliberately not honoured yet. Free positioning arrives with
-            // F16 (drag to move); until then every participant sees the same
-            // reading order, which is what F14 promises.
-            <div className="flex flex-wrap items-start" style={{ gap: grid.gap }}>
+            // x/y are where a card actually sits, and the board is one shared
+            // coordinate space: a card dragged here is in that spot for
+            // everyone. The surface is sized to its contents so dragging
+            // outward extends the scroll area rather than clipping the card.
+            <div
+              className="relative"
+              style={{
+                width: extent.width * scale,
+                height: extent.height * scale,
+                minWidth: '100%',
+                minHeight: 420,
+              }}
+            >
               {board.items.map((item) => (
-                <ProposalCard
+                <PositionedProposal
                   key={item.id}
                   item={item}
                   zoom={zoom}
+                  scale={scale}
+                  position={positionOf(item)}
                   isNew={newItemIds.has(item.id)}
+                  isOwn={viewerId !== null && item.authorId === viewerId}
+                  canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
+                  canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
+                  isDragging={draggingId === item.id}
+                  dragHandlers={dragHandlers}
+                  onEditText={onEditText}
+                  onDelete={onDelete}
                 />
               ))}
             </div>
@@ -227,6 +336,11 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
         <CreativeToolbar />
+        {writeError ? (
+          <p role="status" className="text-[11px] font-medium text-rt-secondary-deep">
+            {writeError}
+          </p>
+        ) : null}
         <div className="ml-auto">
           <ZoomControl zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
         </div>
