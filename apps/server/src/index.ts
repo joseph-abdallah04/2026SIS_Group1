@@ -9,6 +9,8 @@ import { Server as SocketServer } from 'socket.io';
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
+import { registerRealtimeGateway } from './realtime/gateway.js';
+import type { RealtimeServer } from './realtime/types.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -36,14 +38,9 @@ if (fs.existsSync(webDist)) {
 }
 
 const httpServer = http.createServer(app);
-const io = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
+const io: RealtimeServer = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
 
-io.on('connection', (socket) => {
-  console.log(`socket connected: ${socket.id}`);
-  socket.on('disconnect', (reason) => {
-    console.log(`socket disconnected: ${socket.id} (${reason})`);
-  });
-});
+registerRealtimeGateway(io);
 
 httpServer.on('error', (err) => {
   console.error('HTTP server failed to start:', err);

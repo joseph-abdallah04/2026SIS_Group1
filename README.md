@@ -90,6 +90,32 @@ Then run `npm run db:seed --workspace @roundtable/server` and open the
 is likewise unauthenticated in development only — in production it stays behind
 `requireAuth`, which rejects everything until the real middleware lands.
 
+### Watching proposals appear live (two windows)
+
+Sockets identify a user from a verified JWT, which doesn't exist yet either, so
+in development the handshake carries `rt_dev_user_id` instead. Without it a
+socket joins as the session's leader, which is fine for one window — but two
+windows would then be the same person. To act as someone else, set it to a
+seeded member's id:
+
+```js
+// Bob's id — read it off any of his seeded cards, or query the users table
+localStorage.setItem('rt_dev_user_id', '<user id>');
+```
+
+The id must belong to a member of that session or the join is refused; it is
+never sent from a production build. Reconnect the socket after changing it —
+the handshake is read once, so a page refresh is the simplest way.
+
+Open the same `/sessions/<id>` in two windows and propose from one: the card
+appears in both, highlighted briefly. Until F19 ships the sticky note tool, the
+dev-only **`dev: propose sticky`** button in the board footer stands in for it.
+
+**None of this works in production yet.** With no JWT verification, the gateway
+refuses every socket: joins fail, the board shows `offline`, and proposing
+returns `NOT_IN_SESSION` — the same closed-by-default posture as `requireAuth`.
+Realtime starts working on Render once auth and the sessions gateway land.
+
 ## Build & Deploy
 
 ```bash

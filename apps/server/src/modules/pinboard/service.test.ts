@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compareBoardItems, type BoardItem } from '@roundtable/shared';
+import { proposalCreateSchema } from '@roundtable/shared/schemas';
 
 import { toBoardItem } from './service.js';
 
@@ -110,5 +111,75 @@ describe('compareBoardItems', () => {
 
   it('treats an item as equal to itself', () => {
     expect(compareBoardItems(item(), item())).toBe(0);
+  });
+});
+
+describe('board convergence under live events (F15)', () => {
+  // Sockets give no cross-client delivery-order guarantee, so two participants
+  // can receive the same burst of proposals in different orders. Applying the
+  // shared comparator after each insert is what makes their boards identical
+  // anyway — "multiple rapid submissions render in consistent order everywhere".
+  function applyLive(existing: BoardItem[], incoming: BoardItem): BoardItem[] {
+    return [...existing.filter((i) => i.id !== incoming.id), incoming].sort(compareBoardItems);
+  }
+
+  const burst: BoardItem[] = [
+    item({ id: 'c', createdAt: '2026-08-31T10:00:00.000Z' }),
+    item({ id: 'a', createdAt: '2026-08-31T10:00:00.000Z' }),
+    item({ id: 'b', createdAt: '2026-08-31T10:00:00.001Z' }),
+  ];
+
+  it('is insensitive to the order events arrive in', () => {
+    const arrivals = [
+      [burst[0], burst[1], burst[2]],
+      [burst[2], burst[0], burst[1]],
+      [burst[1], burst[2], burst[0]],
+    ] as BoardItem[][];
+
+    const boards = arrivals.map((order) => order.reduce(applyLive, []).map((i) => i.id));
+
+    expect(boards).toEqual([
+      ['a', 'c', 'b'],
+      ['a', 'c', 'b'],
+      ['a', 'c', 'b'],
+    ]);
+  });
+
+  it('is idempotent, so a redelivered event cannot duplicate a card', () => {
+    const once = burst.reduce(applyLive, [] as BoardItem[]);
+    const twice = burst.reduce(applyLive, once);
+    expect(twice.map((i) => i.id)).toEqual(once.map((i) => i.id));
+  });
+
+  it('matches what a reconnecting client gets from a fresh server snapshot', () => {
+    const live = burst.reduce(applyLive, [] as BoardItem[]);
+    const refetched = [...burst].sort(compareBoardItems);
+    expect(live).toEqual(refetched);
+  });
+});
+
+describe('proposalCreateSchema', () => {
+  const sticky = {
+    type: 'sticky',
+    artifactJson: { type: 'sticky', text: 'Hello', color: 'yellow' },
+    x: 0,
+    y: 0,
+  };
+
+  it('accepts the payload the tool editors send', () => {
+    expect(proposalCreateSchema.safeParse(sticky).success).toBe(true);
+  });
+
+  it('rejects a proposal whose column type contradicts its artifact', () => {
+    const mismatched = { ...sticky, type: 'drawing' };
+    expect(proposalCreateSchema.safeParse(mismatched).success).toBe(false);
+  });
+
+  it('drops fields the server owns, so a client cannot forge authorship', () => {
+    const forged = { ...sticky, authorId: 'someone-else', questionId: 'another-board' };
+    const parsed = proposalCreateSchema.safeParse(forged);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data).not.toHaveProperty('authorId');
+    expect(parsed.success && parsed.data).not.toHaveProperty('questionId');
   });
 });

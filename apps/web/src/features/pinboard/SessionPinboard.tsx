@@ -28,7 +28,7 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
 export function SessionPinboard() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { board, loading, error, reload } = usePinboard(sessionId);
+  const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
 
   if (!sessionId) {
     return (
@@ -46,7 +46,9 @@ export function SessionPinboard() {
     );
   }
 
-  if (error) {
+  // Only when there is nothing to show: if the REST load failed but the socket
+  // snapshot produced a board, the board is what the user wants to see.
+  if (error && !board) {
     return (
       <BoardFrame>
         <div className="relative w-[400px] border border-rt-ink bg-rt-surface">
@@ -83,7 +85,7 @@ export function SessionPinboard() {
 
   return (
     <main className="h-screen">
-      <PinboardCanvas board={board} />
+      <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} propose={propose} />
     </main>
   );
 }

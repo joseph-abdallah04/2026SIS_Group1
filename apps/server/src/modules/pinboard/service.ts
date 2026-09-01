@@ -1,13 +1,13 @@
 import type { BoardItem, BoardResponse } from '@roundtable/shared';
-import { artifactJsonSchema } from '@roundtable/shared/schemas';
+import { artifactJsonSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
-import { getActiveQuestion, getSession } from './sessionsAdapter.js';
+import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js';
 
-// F14 is the read side of the pinboard: the board every participant loads, in
-// one agreed order. Writes (proposal:create/update/delete, reactions) are F15+
-// and land once the sessions socket gateway can authenticate a socket.
+// The pinboard's read side (F14: the board every participant loads, in one
+// agreed order) and its create side (F15: proposals land for everyone at once).
+// Edit/delete/reactions are F16–F18.
 
 type ProposalRow = Prisma.ProposalGetPayload<{
   include: { author: { select: { displayName: true } } };
@@ -43,6 +43,70 @@ export async function listProposals(questionId: string): Promise<BoardItem[]> {
   });
 
   return rows.map(toBoardItem);
+}
+
+export interface CreateProposalArgs {
+  questionId: string;
+  /** Resolved from the authenticated socket by the caller — never client-supplied. */
+  authorId: string;
+  input: ProposalCreateInput;
+}
+
+/**
+ * Persist a proposal and return it in board shape.
+ *
+ * Deliberately knows nothing about sockets: the caller broadcasts. That keeps
+ * this the single write path for every producer — the tool editors (F19–F21)
+ * and propose-from-chat (F37) all land here, so validation and ownership work
+ * the same way regardless of who proposed (docs/02 §8.8).
+ *
+ * Every rule that decides whether a write is *allowed* lives here rather than
+ * in the socket handler, so a server-side caller (the assistant proposing on a
+ * user's behalf) cannot bypass them by not going through a socket.
+ */
+export async function createProposal({
+  questionId,
+  authorId,
+  input,
+}: CreateProposalArgs): Promise<BoardItem> {
+  const question = await getQuestion(questionId);
+  if (!question) {
+    throw new ApiError(404, 'Question not found', 'QUESTION_NOT_FOUND');
+  }
+  // Proposals belong to the ideation phase. Once a question moves to voting or
+  // is answered the board is the thing being voted on, so it must stop moving.
+  if (question.status !== 'discussion') {
+    throw new ApiError(
+      409,
+      `This question is ${question.status} — proposals are closed`,
+      'QUESTION_CLOSED',
+    );
+  }
+
+  if (input.extendsProposalId) {
+    const parent = await prisma.proposal.findFirst({
+      where: { id: input.extendsProposalId, questionId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!parent) {
+      throw new ApiError(400, 'Cannot extend a proposal that is not on this board', 'INVALID_EXTENDS');
+    }
+  }
+
+  const row = await prisma.proposal.create({
+    data: {
+      questionId,
+      authorId,
+      type: input.type,
+      artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
+      x: input.x,
+      y: input.y,
+      extendsProposalId: input.extendsProposalId ?? null,
+    },
+    include: { author: { select: { displayName: true } } },
+  });
+
+  return toBoardItem(row);
 }
 
 export async function getBoardForSession(sessionId: string): Promise<BoardResponse> {

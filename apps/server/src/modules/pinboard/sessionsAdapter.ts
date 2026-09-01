@@ -23,6 +23,13 @@ export interface QuestionRef {
   status: QuestionStatus;
 }
 
+export async function getQuestion(questionId: string): Promise<QuestionRef | null> {
+  return prisma.question.findUnique({
+    where: { id: questionId },
+    select: { id: true, text: true, position: true, status: true },
+  });
+}
+
 export async function getSession(sessionId: string): Promise<SessionRef | null> {
   const row = await prisma.session.findUnique({
     where: { id: sessionId },
