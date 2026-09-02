@@ -63,6 +63,7 @@ model Session {
 
   questions Question[]
   members   SessionMember[]
+  shortlist SessionShortlist[]
 
   @@index([leaderId])
   @@map("sessions")
@@ -127,6 +128,8 @@ model Proposal {
   createdAt         DateTime  @default(now())
   deletedAt         DateTime?
 
+  shortlist SessionShortlist[]
+
   @@index([questionId, createdAt])
   @@map("proposals")
 }
@@ -136,6 +139,18 @@ model Proposal {
 
 // === voting + summary module ===
 // (voting/summary owner adds vote + summary tables here)
+
+model SessionShortlist {
+  id          String   @id @default(cuid())
+  sessionId   String
+  proposalId  String
+
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@map("session_shortlist")
+}
+
 
 // === voice module ===
 // (voice owner adds participant/track state tables here, if needed)
