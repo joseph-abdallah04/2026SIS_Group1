@@ -1,17 +1,10 @@
-import { Suspense, lazy, useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { BoardResponse } from '@roundtable/shared';
-import type { ProposalCreateInput } from '@roundtable/shared/schemas';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { CreativeToolbar } from '../toolbar/CreativeToolbar';
 import { ProposalCard } from './ProposalCard';
 import { ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
-
-// Gate the import itself, not just the render: in a production build this whole
-// expression folds to `null`, so the module is never reachable and never gets a
-// chunk — rather than being emitted and relying on tree-shaking to remove it.
-const DevProposeButton = import.meta.env.DEV
-  ? lazy(() => import('./DevProposeButton').then((m) => ({ default: m.DevProposeButton })))
-  : null;
 
 interface PinboardCanvasProps {
   board: BoardResponse;
@@ -19,7 +12,6 @@ interface PinboardCanvasProps {
   isLive: boolean;
   /** Proposals that arrived on a live broadcast moments ago (F15). */
   newItemIds: ReadonlySet<string>;
-  propose: (input: ProposalCreateInput) => Promise<void>;
 }
 
 function EmptyBoardPlate() {
@@ -130,7 +122,7 @@ function ZoomControl({
   );
 }
 
-export function PinboardCanvas({ board, isLive, newItemIds, propose }: PinboardCanvasProps) {
+export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const grid = ZOOM_GRID[zoom];
   const isEmpty = board.items.length === 0;
@@ -234,11 +226,7 @@ export function PinboardCanvas({ board, isLive, newItemIds, propose }: PinboardC
       </div>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
-        {DevProposeButton ? (
-          <Suspense fallback={null}>
-            <DevProposeButton propose={propose} />
-          </Suspense>
-        ) : null}
+        <CreativeToolbar />
         <div className="ml-auto">
           <ZoomControl zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onFit={onFit} />
         </div>
