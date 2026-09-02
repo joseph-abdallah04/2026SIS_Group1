@@ -4,7 +4,8 @@ import { proposalErrorMessage } from './proposeErrors';
 
 describe('proposalErrorMessage', () => {
   it('maps a known acknowledgement code to useful copy', () => {
-    expect(proposalErrorMessage({ code: 'QUESTION_CLOSED', message: 'Conflict' })).toBe(
+    const error = Object.assign(new Error('Conflict'), { code: 'QUESTION_CLOSED' });
+    expect(proposalErrorMessage(error)).toBe(
       'This question is no longer accepting proposals.',
     );
   });
