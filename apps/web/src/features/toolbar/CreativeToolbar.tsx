@@ -1,4 +1,4 @@
-import { StickyNote } from 'lucide-react';
+import { Pencil, StickyNote } from 'lucide-react';
 
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 
@@ -21,6 +21,17 @@ export function CreativeToolbar() {
       >
         <StickyNote aria-hidden="true" size={17} strokeWidth={1.8} />
         <span className="hidden sm:inline">New sticky</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={activeTool === 'drawing'}
+        disabled={disabled}
+        onClick={() => openTool('drawing')}
+        title={isLive ? 'New drawing' : 'Reconnect to create a drawing'}
+        className="flex h-9 items-center gap-2 rounded-full px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:ring-offset-2 focus-visible:outline-none aria-pressed:bg-rt-primary-tint aria-pressed:text-rt-ink disabled:cursor-not-allowed disabled:opacity-45 sm:px-3.5"
+      >
+        <Pencil aria-hidden="true" size={17} strokeWidth={1.8} />
+        <span className="hidden sm:inline">Draw</span>
       </button>
     </nav>
   );

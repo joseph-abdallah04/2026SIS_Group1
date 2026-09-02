@@ -1,6 +1,7 @@
 import { Construction } from 'lucide-react';
 
 import { Button } from '../../components/ui/Button';
+import { DrawingEditor } from './drawing/DrawingEditor';
 import { StickyEditor } from './sticky/StickyEditor';
 import { StudioOverlay } from './StudioOverlay';
 import { TOOL_LABELS } from './toolRegistry';
@@ -15,9 +16,9 @@ export function CreativeStudio() {
 
   return (
     <StudioOverlay isLive={isLive} onClose={closeTool} title={title}>
-      {activeTool === 'sticky' ? (
-        <StickyEditor />
-      ) : (
+      {activeTool === 'sticky' ? <StickyEditor /> : null}
+      {activeTool === 'drawing' ? <DrawingEditor /> : null}
+      {activeTool === 'diagram' ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 bg-rt-surface-sunken px-6 text-center">
           <Construction aria-hidden="true" className="text-rt-primary-deep" size={30} />
           <h2 className="text-[18px] font-semibold text-rt-ink">
@@ -27,7 +28,7 @@ export function CreativeStudio() {
             Back to pinboard
           </Button>
         </div>
-      )}
+      ) : null}
     </StudioOverlay>
   );
 }
