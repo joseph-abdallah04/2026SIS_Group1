@@ -178,7 +178,10 @@ export function usePinboard(sessionId: string) {
       new Promise<void>((resolve, reject) => {
         getSocket().emit('proposalCreate', input, (res) => {
           if (res.ok) resolve();
-          else reject(new Error(res.error ?? 'Proposal was rejected'));
+          else {
+            const error = new Error(res.error ?? 'Proposal was rejected');
+            reject(Object.assign(error, res.code ? { code: res.code } : {}));
+          }
         });
       }),
     [],
