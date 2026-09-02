@@ -33,6 +33,7 @@ export function findOpenProposalPosition(
   items: readonly PositionedProposal[],
   type: ProposalType,
 ): ProposalPosition {
+  // Persist coordinates for F16; the current flex-wrap pinboard does not render them.
   const candidateCount = Math.max(1, items.length + 1) * GRID_COLUMNS;
 
   for (let index = 0; index < candidateCount; index += 1) {
