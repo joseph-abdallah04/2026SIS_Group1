@@ -1,4 +1,16 @@
-import { diagramEdgeGeometry, diagramNodeSize, type BoardItem } from '@roundtable/shared';
+import {
+  DIAGRAM_LABEL_INK,
+  diagramEdgeDash,
+  diagramEdgeGeometry,
+  diagramEdgeStroke,
+  diagramEdgeStrokeWidth,
+  diagramNodeFill,
+  diagramNodeLabelLayout,
+  diagramNodeStroke,
+  diagramNodeStrokeWidth,
+  effectiveDiagramNodeSize,
+  type BoardItem,
+} from '@roundtable/shared';
 
 import {
   CARD_RADIUS,
@@ -134,12 +146,16 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
   const diagramNodes = nodes;
   const nodeById = new Map(diagramNodes.map((node) => [node.id, node]));
   const svgWidth =
-    Math.max(...diagramNodes.map((node) => node.x + diagramNodeSize(node.shape).width), 72) + 28;
+    Math.max(...diagramNodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + 28;
   const svgHeight =
-    Math.max(...diagramNodes.map((node) => node.y + diagramNodeSize(node.shape).height), 32) + 24;
+    Math.max(...diagramNodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) +
+    24;
   const width = cardWidthPx('diagram', zoom);
-  // Proposal-scoped marker ids prevent arrows in separate diagram cards from colliding.
-  const arrowId = `rt-arrow-${item.id}`;
+  // Proposal-scoped marker ids prevent arrows in separate diagram cards from
+  // colliding, and one marker per resolved colour keeps every arrowhead matching
+  // the line it terminates.
+  const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
+  const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
 
   return (
     <article
@@ -165,23 +181,29 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
             style={{ minHeight: compact ? 64 : 96 }}
           >
             <defs>
-              <marker
-                id={arrowId}
-                markerWidth="8"
-                markerHeight="8"
-                refX="6"
-                refY="3"
-                orient="auto"
-                markerUnits="strokeWidth"
-              >
-                <path d="M0,0 L6,3 L0,6 Z" fill="#8CA4AC" />
-              </marker>
+              {arrowColors.map((color) => (
+                <marker
+                  key={color}
+                  id={arrowId(color)}
+                  markerWidth="8"
+                  markerHeight="8"
+                  refX="6"
+                  refY="3"
+                  orient="auto"
+                  markerUnits="strokeWidth"
+                >
+                  <path d="M0,0 L6,3 L0,6 Z" fill={color} />
+                </marker>
+              ))}
             </defs>
             {edges.map((edge) => {
               const from = nodeById.get(edge.from);
               const to = nodeById.get(edge.to);
               if (!from || !to) return null;
               const geometry = diagramEdgeGeometry(from, to);
+              const stroke = diagramEdgeStroke(edge);
+              // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
+              const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
               return (
                 <g key={`${edge.from}-${edge.to}`}>
                   <line
@@ -189,9 +211,10 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                     y1={geometry.y1}
                     x2={geometry.x2}
                     y2={geometry.y2}
-                    stroke="#8CA4AC"
-                    strokeWidth={1.5}
-                    markerEnd={`url(#${arrowId})`}
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                    markerEnd={`url(#${arrowId(stroke)})`}
+                    {...diagramEdgeDash(edge, strokeWidth)}
                   />
                   {edge.label ? (
                     <text
@@ -212,35 +235,41 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
             })}
             {diagramNodes.map((node) => {
               const shape = node.shape ?? 'box';
-              const size = diagramNodeSize(node.shape);
+              const size = effectiveDiagramNodeSize(node);
+              const label = diagramNodeLabelLayout(node);
 
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                  {shape === 'text' ? null : (
+                  {shape === 'text' && !node.fillColor ? null : (
                     <rect
                       width={size.width}
                       height={size.height}
                       rx={shape === 'container' ? 3 : 8}
-                      fill={shape === 'container' ? '#FAFAFA' : '#EEF2F4'}
-                      stroke="#8CA4AC"
+                      fill={diagramNodeFill(node)}
+                      // '#8CA4AC' and 1 are this preview's own pre-v2 border.
+                      stroke={shape === 'text' ? 'none' : diagramNodeStroke(node, '#8CA4AC')}
                       strokeDasharray={shape === 'container' ? '4 3' : undefined}
-                      strokeWidth={1}
+                      strokeWidth={diagramNodeStrokeWidth(node, 1)}
                     />
                   )}
                   <text
-                    x={size.width / 2}
-                    y={size.height / 2 + 4}
                     textAnchor="middle"
-                    fill="#080C15"
-                    textLength={node.label.length > 10 ? size.width - 12 : undefined}
-                    lengthAdjust={node.label.length > 10 ? 'spacingAndGlyphs' : undefined}
+                    fill={DIAGRAM_LABEL_INK}
                     style={{
-                      fontSize: '11px',
+                      fontSize: `${label.fontSize}px`,
                       fontFamily: 'Inter, system-ui, sans-serif',
                       fontWeight: shape === 'text' ? 600 : 400,
                     }}
                   >
-                    {node.label}
+                    {label.lines.map((line, index) => (
+                      <tspan
+                        key={line + String(index)}
+                        x={size.width / 2}
+                        y={label.firstBaselineY + index * label.lineHeight}
+                      >
+                        {line}
+                      </tspan>
+                    ))}
                   </text>
                 </g>
               );

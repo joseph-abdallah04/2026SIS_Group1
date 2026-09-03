@@ -2,6 +2,7 @@ import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
+import { DIAGRAM_FILL_COLORS, DIAGRAM_STROKE_COLORS } from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -997,5 +998,284 @@ describe('diagram viewport and productivity', () => {
     await user.click(screen.getByRole('button', { name: 'Show grid' }));
 
     expect(screen.queryByTestId('diagram-grid')).not.toBeInTheDocument();
+  });
+});
+
+describe('diagram resize and style', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  function styledParent(): BoardItem {
+    return {
+      id: 'v2-parent',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [
+          // One pre-v2 node and one fully styled v2 node on the same board.
+          { id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' },
+          {
+            id: 'n2',
+            label: 'Server',
+            x: 300,
+            y: 24,
+            shape: 'box',
+            width: 200,
+            height: 96,
+            fillColor: 'violet',
+            strokeColor: 'violet',
+            strokeWidthPreset: 'thick',
+            fontSizePreset: 'large',
+          },
+        ],
+        edges: [{ from: 'n1', to: 'n2', strokeColor: 'rose', strokeStyle: 'dashed' }],
+      },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+      extendsProposalId: null,
+    };
+  }
+
+  function nodeRect(name: string) {
+    return screen
+      .getByRole('button', { name })
+      .querySelector<SVGRectElement>('rect:not([stroke-dasharray="4 3"])');
+  }
+
+  it('resizes a node from its corner as one undoable step', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
+      button: 0,
+      pointerId: 70,
+      clientX: 144,
+      clientY: 80,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 70, clientX: 224, clientY: 128 });
+    fireEvent.pointerUp(canvas, { pointerId: 70, clientX: 224, clientY: 128 });
+
+    const node = screen.getByRole('button', { name: 'Box: Box' });
+    expect(node.querySelector('rect[width="200"][height="104"]')).not.toBeNull();
+    expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(node.querySelector('rect[width="120"][height="56"]')).not.toBeNull();
+  });
+
+  it('proposes the resized geometry through the real contract', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
+      button: 0,
+      pointerId: 71,
+      clientX: 144,
+      clientY: 80,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 71, clientX: 224, clientY: 128 });
+    fireEvent.pointerUp(canvas, { pointerId: 71, clientX: 224, clientY: 128 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const input = send.mock.calls[0]?.[0];
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ width: 200, height: 104 });
+  });
+
+  it('resets a resized node back to its shape default', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    expect(screen.getByRole('button', { name: 'Reset size' })).toBeDisabled();
+
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
+      button: 0,
+      pointerId: 72,
+      clientX: 144,
+      clientY: 80,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 72, clientX: 224, clientY: 128 });
+    fireEvent.pointerUp(canvas, { pointerId: 72, clientX: 224, clientY: 128 });
+    expect(screen.getByText('200 × 104')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Reset size' }));
+
+    expect(screen.getByText('120 × 56 (default)')).toBeInTheDocument();
+  });
+
+  it('blocks a proposal while a resize is still in flight', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
+      button: 0,
+      pointerId: 73,
+      clientX: 144,
+      clientY: 80,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 73, clientX: 224, clientY: 128 });
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Finish resizing the element before proposing.',
+    );
+  });
+
+  it('styles the whole selection at once and proposes the palette keys', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+    await user.click(screen.getByRole('button', { name: 'Fill blue' }));
+    await user.click(screen.getByRole('button', { name: 'Border rose' }));
+
+    expect(nodeRect('Box: Box')).toHaveAttribute('fill', DIAGRAM_FILL_COLORS.blue);
+    expect(nodeRect('Container: Container')).toHaveAttribute('fill', DIAGRAM_FILL_COLORS.blue);
+    expect(nodeRect('Box: Box')).toHaveAttribute('stroke', DIAGRAM_STROKE_COLORS.rose);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    for (const node of artifact.nodes) {
+      expect(node).toMatchObject({ fillColor: 'blue', strokeColor: 'rose' });
+    }
+  });
+
+  it('marks a swatch active only when the whole selection shares it', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Fill green' }));
+    expect(screen.getByRole('button', { name: 'Fill green' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // The second node is unstyled, so the shared value disappears.
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+    expect(screen.getByRole('button', { name: 'Fill green' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('resets a styled node back to the pre-v2 appearance', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Fill amber' }));
+    await user.click(screen.getByRole('button', { name: 'Text size large' }));
+
+    await user.click(screen.getByRole('button', { name: 'Reset element style' }));
+
+    expect(nodeRect('Box: Box')).toHaveAttribute('fill', '#EEF2F4');
+    expect(nodeRect('Box: Box')).toHaveAttribute('stroke', '#4D6A74');
+    expect(nodeRect('Box: Box')).toHaveAttribute('stroke-width', '1.5');
+  });
+
+  it('styles an arrow and keeps its dash geometry in step with its width', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness propose={propose()}>
+        <ExtendButton proposal={styledParent()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    const arrow = screen.getByRole('button', { name: 'Arrow from Client to Server' });
+    fireEvent.pointerDown(arrow, { button: 0, pointerId: 74 });
+
+    await user.click(screen.getByRole('button', { name: 'Arrow width thick' }));
+    await user.click(screen.getByRole('button', { name: 'Arrow style dotted' }));
+
+    // Selected arrows draw in the selection accent; the dash still scales.
+    const line = arrow.querySelector('line[stroke-dasharray]');
+    expect(line).toHaveAttribute('stroke-dasharray', '0.01 8.75');
+    expect(line).toHaveAttribute('stroke-linecap', 'round');
+  });
+
+  it('renders an inherited pre-v2 node exactly as it always did', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness propose={propose()}>
+        <ExtendButton proposal={styledParent()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    const legacy = nodeRect('Box: Client');
+    expect(legacy).toHaveAttribute('width', '120');
+    expect(legacy).toHaveAttribute('height', '56');
+    expect(legacy).toHaveAttribute('fill', '#EEF2F4');
+    expect(legacy).toHaveAttribute('stroke', '#4D6A74');
+    expect(legacy).toHaveAttribute('stroke-width', '1.5');
+  });
+
+  it('preserves inherited v2 size and style through an extend and re-propose', async () => {
+    const user = userEvent.setup();
+    const send = propose();
+    render(
+      <Harness propose={send}>
+        <ExtendButton proposal={styledParent()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    const styled = nodeRect('Box: Server');
+    expect(styled).toHaveAttribute('width', '200');
+    expect(styled).toHaveAttribute('fill', DIAGRAM_FILL_COLORS.violet);
+    expect(styled).toHaveAttribute('stroke-width', '3');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes.find((node) => node.label === 'Server')).toMatchObject({
+      width: 200,
+      height: 96,
+      fillColor: 'violet',
+      strokeWidthPreset: 'thick',
+      fontSizePreset: 'large',
+    });
+    // The pre-v2 sibling is re-proposed without acquiring any style fields.
+    const legacy = artifact.nodes.find((node) => node.label === 'Client');
+    expect(legacy).not.toHaveProperty('fillColor');
+    expect(legacy).not.toHaveProperty('width');
+    expect(artifact.edges[0]).toMatchObject({ strokeColor: 'rose', strokeStyle: 'dashed' });
+  });
+
+  it('wraps a long label into bounded lines instead of overflowing the node', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
+    const inlineInput = screen.getByLabelText('Edit box label');
+    await user.clear(inlineInput);
+    await user.type(inlineInput, 'Payment reconciliation{Enter}');
+
+    const label = screen
+      .getByRole('button', { name: 'Box: Payment reconciliation' })
+      .querySelector('text');
+    expect(label?.querySelectorAll('tspan').length).toBeGreaterThan(1);
+    expect(label?.getAttribute('textLength')).toBeNull();
   });
 });

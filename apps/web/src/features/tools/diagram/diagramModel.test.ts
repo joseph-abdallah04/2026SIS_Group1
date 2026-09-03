@@ -11,6 +11,9 @@ import {
   DIAGRAM_NODE_WIDTH,
   DIAGRAM_GRID,
   addNode,
+  clearEdgeStyle,
+  clearNodeSize,
+  clearNodeStyle,
   alignNodes,
   autoLayoutNodes,
   clientPointToDiagramPoint,
@@ -28,7 +31,10 @@ import {
   prepareDiagram,
   prepareNodeLabel,
   renameNode,
+  resizeNode,
   snapNodePosition,
+  styleEdge,
+  styleNodes,
 } from './diagramModel';
 
 function buildNodes(count: number): DiagramNode[] {
@@ -453,6 +459,162 @@ describe('placement without snapping', () => {
     expect(free.ok && free.nodes[0]).toMatchObject({
       x: DIAGRAM_CANVAS_WIDTH - DIAGRAM_NODE_WIDTH,
       y: 0,
+    });
+  });
+});
+
+describe('resizeNode', () => {
+  const start = { x: 100, y: 100, width: 120, height: 56 };
+  const node: DiagramNode = { id: 'n1', label: 'A', x: 100, y: 100, shape: 'box' };
+
+  it('grows from the bottom-right without moving the origin', () => {
+    const [resized] = resizeNode([node], 'n1', 'se', start, { x: 40, y: 24 });
+    expect(resized).toMatchObject({ x: 100, y: 100, width: 160, height: 80 });
+  });
+
+  it('moves the origin when the top-left corner is dragged', () => {
+    const [resized] = resizeNode([node], 'n1', 'nw', start, { x: -40, y: -24 });
+    // The bottom-right stays pinned at (220, 156).
+    expect(resized).toMatchObject({ x: 60, y: 76, width: 160, height: 80 });
+    expect(resized!.x + resized!.width!).toBe(start.x + start.width);
+    expect(resized!.y + resized!.height!).toBe(start.y + start.height);
+  });
+
+  it('never shrinks below the readable minimum', () => {
+    const [resized] = resizeNode([node], 'n1', 'se', start, { x: -1_000, y: -1_000 });
+    expect(resized).toMatchObject({ width: 56, height: 32 });
+  });
+
+  it('never grows past the maximum or off the sheet', () => {
+    const [huge] = resizeNode([node], 'n1', 'se', start, { x: 5_000, y: 5_000 });
+    expect(huge).toMatchObject({ width: 480, height: 320 });
+
+    const atEdge = { x: 900, y: 560, width: 56, height: 32 };
+    const [clamped] = resizeNode(
+      [{ ...node, x: 900, y: 560, width: 56, height: 32 }],
+      'n1',
+      'se',
+      atEdge,
+      { x: 5_000, y: 5_000 },
+    );
+    expect(clamped!.x + clamped!.width!).toBe(DIAGRAM_CANVAS_WIDTH);
+    expect(clamped!.y + clamped!.height!).toBe(DIAGRAM_CANVAS_HEIGHT);
+  });
+
+  it('holds the aspect ratio when it is locked, and skips the grid to do it', () => {
+    const [locked] = resizeNode([node], 'n1', 'se', start, { x: 120, y: 0 }, true, true);
+    expect(locked).toMatchObject({ width: 240, height: 112 });
+    expect(locked!.width! / locked!.height!).toBeCloseTo(start.width / start.height, 6);
+  });
+
+  it('snaps the new size to the grid, or lands exactly with snapping off', () => {
+    const [snapped] = resizeNode([node], 'n1', 'se', start, { x: 41, y: 25 }, true);
+    expect(snapped).toMatchObject({ width: 160, height: 80 });
+
+    const [free] = resizeNode([node], 'n1', 'se', start, { x: 41, y: 25 }, false);
+    expect(free).toMatchObject({ width: 161, height: 81 });
+  });
+
+  it('produces a size the write contract accepts', () => {
+    const resized = resizeNode([node], 'n1', 'se', start, { x: 40, y: 24 });
+    expect(prepareDiagram(resized, []).ok).toBe(true);
+  });
+
+  it('drops the stored size again on reset', () => {
+    const resized = resizeNode([node], 'n1', 'se', start, { x: 40, y: 24 });
+    const [reset] = clearNodeSize(resized, 'n1');
+    expect(reset).not.toHaveProperty('width');
+    expect(reset).not.toHaveProperty('height');
+  });
+
+  it('clamps a resized node against its own size, not its shape default', () => {
+    const wide: DiagramNode = {
+      id: 'w',
+      label: 'W',
+      x: 0,
+      y: 0,
+      shape: 'box',
+      width: 400,
+      height: 56,
+    };
+
+    const [moved] = moveNodesBy([wide], { w: { x: 0, y: 0 } }, { x: 5_000, y: 0 }, 'w');
+
+    expect(moved!.x).toBe(DIAGRAM_CANVAS_WIDTH - 400);
+  });
+});
+
+describe('style setters', () => {
+  const nodes: DiagramNode[] = [
+    { id: 'n1', label: 'A', x: 0, y: 0, shape: 'box' },
+    { id: 'n2', label: 'B', x: 200, y: 0, shape: 'box' },
+  ];
+  const edges = [{ from: 'n1', to: 'n2', label: 'calls' }];
+
+  it('styles every node in the selection and leaves the rest alone', () => {
+    const styled = styleNodes(nodes, ['n1'], { fillColor: 'blue', fontSizePreset: 'large' });
+    expect(styled[0]).toMatchObject({ fillColor: 'blue', fontSizePreset: 'large' });
+    expect(styled[1]).not.toHaveProperty('fillColor');
+  });
+
+  it('clears only the style fields, keeping identity, position and size', () => {
+    const styled = styleNodes([{ ...nodes[0]!, width: 200, height: 90 }], ['n1'], {
+      fillColor: 'rose',
+      strokeColor: 'rose',
+      strokeWidthPreset: 'thick',
+      fontSizePreset: 'small',
+    });
+
+    const [cleared] = clearNodeStyle(styled, ['n1']);
+
+    expect(cleared).toEqual({
+      id: 'n1',
+      label: 'A',
+      x: 0,
+      y: 0,
+      shape: 'box',
+      width: 200,
+      height: 90,
+    });
+  });
+
+  it('styles and clears one arrow without touching its endpoints or label', () => {
+    const styled = styleEdge(
+      edges,
+      { from: 'n1', to: 'n2' },
+      {
+        strokeColor: 'violet',
+        strokeStyle: 'dashed',
+      },
+    );
+    expect(styled[0]).toMatchObject({ strokeColor: 'violet', strokeStyle: 'dashed' });
+
+    expect(clearEdgeStyle(styled, { from: 'n1', to: 'n2' })[0]).toEqual({
+      from: 'n1',
+      to: 'n2',
+      label: 'calls',
+    });
+  });
+
+  it('carries v2 fields through to the proposed artifact unchanged', () => {
+    const styled = styleNodes([{ ...nodes[0]!, width: 200, height: 90 }], ['n1'], {
+      fillColor: 'green',
+      strokeColor: 'green',
+      strokeWidthPreset: 'thin',
+      fontSizePreset: 'large',
+    });
+
+    const prepared = prepareDiagram(styled, []);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+
+    expect(prepared.artifact.nodes[0]).toMatchObject({
+      width: 200,
+      height: 90,
+      fillColor: 'green',
+      strokeColor: 'green',
+      strokeWidthPreset: 'thin',
+      fontSizePreset: 'large',
     });
   });
 });

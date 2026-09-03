@@ -3,8 +3,16 @@ import type {
   DiagramEdge,
   DiagramNode,
   DiagramNodeShape,
+  DiagramNodeSize,
 } from '@roundtable/shared';
-import { diagramNodeSize } from '@roundtable/shared';
+import {
+  DIAGRAM_MAX_NODE_HEIGHT,
+  DIAGRAM_MAX_NODE_WIDTH,
+  DIAGRAM_MIN_NODE_HEIGHT,
+  DIAGRAM_MIN_NODE_WIDTH,
+  diagramNodeSize,
+  effectiveDiagramNodeSize,
+} from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
@@ -78,6 +86,15 @@ export const DIAGRAM_FULL_VIEW_BOX: DiagramRect = {
 
 export type DiagramAlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
 export type DiagramDistributeAxis = 'horizontal' | 'vertical';
+export type DiagramResizeCorner = 'nw' | 'ne' | 'se' | 'sw';
+
+export type DiagramNodeStyle = Partial<
+  Pick<DiagramNode, 'fillColor' | 'strokeColor' | 'strokeWidthPreset' | 'fontSizePreset'>
+>;
+
+export type DiagramEdgeStyle = Partial<
+  Pick<DiagramEdge, 'strokeColor' | 'strokeWidthPreset' | 'strokeStyle'>
+>;
 
 export type PasteFragment = { nodes: DiagramNode[]; edges: DiagramEdge[] };
 
@@ -123,14 +140,14 @@ export function snapNodePosition(
 
 // With snapping off, positions still stay whole numbers inside the sheet so the
 // artifact never carries drifting floats or out-of-bounds coordinates.
-// `shape` is deliberately not defaulted: a legacy node stores no shape and must
-// keep the smaller 72x32 bounds that `diagramNodeSize(undefined)` gives it.
+// Takes a resolved size rather than a shape: a legacy node keeps the smaller
+// 72x32 bounds `diagramNodeSize(undefined)` gives it, and a resized node is
+// clamped against the size it actually stores.
 export function placeNodePosition(
   point: DiagramPoint,
-  shape: DiagramNodeShape | undefined,
+  size: DiagramNodeSize,
   snap = true,
 ): DiagramPoint {
-  const size = diagramNodeSize(shape);
   if (snap) return snapPositionForSize(point, size);
   const clamped = clampPositionForSize(point, size);
   return { x: Math.round(clamped.x), y: Math.round(clamped.y) };
@@ -151,7 +168,7 @@ export function clientPointToDiagramPoint(
 }
 
 export function nodeBounds(node: DiagramNode): DiagramRect {
-  const size = diagramNodeSize(node.shape);
+  const size = effectiveDiagramNodeSize(node);
   return { x: node.x, y: node.y, width: size.width, height: size.height };
 }
 
@@ -206,7 +223,7 @@ function isFree(
 ): boolean {
   const candidateSize = diagramNodeSize(shape);
   return nodes.every((node) => {
-    const nodeSize = diagramNodeSize(node.shape);
+    const nodeSize = effectiveDiagramNodeSize(node);
     return (
       candidate.x + candidateSize.width + NODE_GAP <= node.x ||
       node.x + nodeSize.width + NODE_GAP <= candidate.x ||
@@ -227,17 +244,17 @@ export function findFreeNodePosition(
   const rows = Math.max(1, Math.floor(DIAGRAM_CANVAS_HEIGHT / rowStep));
 
   for (let index = 0; index < columns * rows; index += 1) {
-    const candidate = snapNodePosition(
+    const candidate = snapPositionForSize(
       {
         x: (index % columns) * columnStep + NODE_GAP,
         y: Math.floor(index / columns) * rowStep + NODE_GAP,
       },
-      shape,
+      diagramNodeSize(shape),
     );
     if (isFree(nodes, candidate, shape)) return candidate;
   }
 
-  return snapNodePosition({ x: NODE_GAP, y: NODE_GAP }, shape);
+  return snapPositionForSize({ x: NODE_GAP, y: NODE_GAP }, diagramNodeSize(shape));
 }
 
 export function addNode(
@@ -251,7 +268,9 @@ export function addNode(
   }
 
   const id = createNodeId(nodes);
-  const position = at ? placeNodePosition(at, shape, snap) : findFreeNodePosition(nodes, shape);
+  const position = at
+    ? placeNodePosition(at, diagramNodeSize(shape), snap)
+    : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
     label: DIAGRAM_SHAPE_LABELS[shape],
@@ -270,7 +289,9 @@ export function moveNode(
   snap = true,
 ): DiagramNode[] {
   return nodes.map((node) =>
-    node.id === id ? { ...node, ...placeNodePosition(at, node.shape, snap) } : node,
+    node.id === id
+      ? { ...node, ...placeNodePosition(at, effectiveDiagramNodeSize(node), snap) }
+      : node,
   );
 }
 
@@ -290,7 +311,7 @@ export function moveNodesBy(
   const anchorNode = nodes.find((node) => node.id === anchorId);
   const anchorTarget = placeNodePosition(
     { x: anchorOrigin.x + delta.x, y: anchorOrigin.y + delta.y },
-    anchorNode?.shape,
+    anchorNode ? effectiveDiagramNodeSize(anchorNode) : diagramNodeSize(undefined),
     snap,
   );
   let applied = { x: anchorTarget.x - anchorOrigin.x, y: anchorTarget.y - anchorOrigin.y };
@@ -298,7 +319,7 @@ export function moveNodesBy(
   for (const node of nodes) {
     const origin = origins[node.id];
     if (!origin) continue;
-    const size = diagramNodeSize(node.shape);
+    const size = effectiveDiagramNodeSize(node);
     applied = {
       x: Math.min(DIAGRAM_CANVAS_WIDTH - size.width - origin.x, Math.max(-origin.x, applied.x)),
       y: Math.min(DIAGRAM_CANVAS_HEIGHT - size.height - origin.y, Math.max(-origin.y, applied.y)),
@@ -312,7 +333,11 @@ export function moveNodesBy(
     if (!origin) return node;
     return {
       ...node,
-      ...placeNodePosition({ x: origin.x + applied.x, y: origin.y + applied.y }, node.shape, false),
+      ...placeNodePosition(
+        { x: origin.x + applied.x, y: origin.y + applied.y },
+        effectiveDiagramNodeSize(node),
+        false,
+      ),
     };
   });
 }
@@ -336,7 +361,7 @@ export function alignNodes(
 
   return nodes.map((node) => {
     if (!ids.includes(node.id)) return node;
-    const size = diagramNodeSize(node.shape);
+    const size = effectiveDiagramNodeSize(node);
     const target = { x: node.x, y: node.y };
     switch (mode) {
       case 'left':
@@ -358,7 +383,7 @@ export function alignNodes(
         target.y = bottom - size.height;
         break;
     }
-    return { ...node, ...placeNodePosition(target, node.shape, false) };
+    return { ...node, ...placeNodePosition(target, effectiveDiagramNodeSize(node), false) };
   });
 }
 
@@ -374,7 +399,7 @@ export function distributeNodes(
 
   const horizontal = axis === 'horizontal';
   const extent = (node: DiagramNode) =>
-    horizontal ? diagramNodeSize(node.shape).width : diagramNodeSize(node.shape).height;
+    horizontal ? effectiveDiagramNodeSize(node).width : effectiveDiagramNodeSize(node).height;
   const start = (node: DiagramNode) => (horizontal ? node.x : node.y);
 
   const ordered = [...selected].sort((a, b) => start(a) - start(b));
@@ -396,8 +421,131 @@ export function distributeNodes(
     const position = placed.get(node.id);
     if (position === undefined) return node;
     const target = horizontal ? { x: position, y: node.y } : { x: node.x, y: position };
-    return { ...node, ...placeNodePosition(target, node.shape, false) };
+    return { ...node, ...placeNodePosition(target, effectiveDiagramNodeSize(node), false) };
   });
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * One resize gesture, expressed against the bounds the node had when the handle
+ * was grabbed. The result is bounded by the size limits and by the sheet, so a
+ * node can never be dragged smaller than readable or off the canvas.
+ *
+ * Grid snapping is skipped while the aspect ratio is locked — rounding either
+ * side onto the grid is exactly what breaks the ratio.
+ */
+export function resizeNode(
+  nodes: readonly DiagramNode[],
+  id: string,
+  corner: DiagramResizeCorner,
+  start: DiagramRect,
+  delta: DiagramPoint,
+  snap = true,
+  lockAspect = false,
+): DiagramNode[] {
+  const movesLeftEdge = corner === 'nw' || corner === 'sw';
+  const movesTopEdge = corner === 'nw' || corner === 'ne';
+
+  const maxWidth = Math.max(
+    DIAGRAM_MIN_NODE_WIDTH,
+    Math.min(
+      DIAGRAM_MAX_NODE_WIDTH,
+      movesLeftEdge ? start.x + start.width : DIAGRAM_CANVAS_WIDTH - start.x,
+    ),
+  );
+  const maxHeight = Math.max(
+    DIAGRAM_MIN_NODE_HEIGHT,
+    Math.min(
+      DIAGRAM_MAX_NODE_HEIGHT,
+      movesTopEdge ? start.y + start.height : DIAGRAM_CANVAS_HEIGHT - start.y,
+    ),
+  );
+
+  let width = start.width + (movesLeftEdge ? -delta.x : delta.x);
+  let height = start.height + (movesTopEdge ? -delta.y : delta.y);
+
+  if (lockAspect) {
+    const scale = clampNumber(
+      Math.max(width / start.width, height / start.height),
+      Math.max(DIAGRAM_MIN_NODE_WIDTH / start.width, DIAGRAM_MIN_NODE_HEIGHT / start.height),
+      Math.min(maxWidth / start.width, maxHeight / start.height),
+    );
+    width = start.width * scale;
+    height = start.height * scale;
+  } else {
+    width = clampNumber(snap ? snapToGrid(width) : width, DIAGRAM_MIN_NODE_WIDTH, maxWidth);
+    height = clampNumber(snap ? snapToGrid(height) : height, DIAGRAM_MIN_NODE_HEIGHT, maxHeight);
+  }
+
+  width = Math.round(width);
+  height = Math.round(height);
+  const x = Math.round(movesLeftEdge ? start.x + start.width - width : start.x);
+  const y = Math.round(movesTopEdge ? start.y + start.height - height : start.y);
+
+  return nodes.map((node) => (node.id === id ? { ...node, x, y, width, height } : node));
+}
+
+/** Drops the stored size so the node returns to its shape's fixed geometry. */
+export function clearNodeSize(nodes: readonly DiagramNode[], id: string): DiagramNode[] {
+  return nodes.map((node) => {
+    if (node.id !== id || node.width === undefined) return node;
+    const next: DiagramNode = { ...node };
+    delete next.width;
+    delete next.height;
+    return next;
+  });
+}
+
+export function styleNodes(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+  style: DiagramNodeStyle,
+): DiagramNode[] {
+  const selected = new Set(ids);
+  return nodes.map((node) => (selected.has(node.id) ? { ...node, ...style } : node));
+}
+
+export function clearNodeStyle(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+): DiagramNode[] {
+  const selected = new Set(ids);
+  return nodes.map((node) => {
+    if (!selected.has(node.id)) return node;
+    const next: DiagramNode = { ...node };
+    delete next.fillColor;
+    delete next.strokeColor;
+    delete next.strokeWidthPreset;
+    delete next.fontSizePreset;
+    return next;
+  });
+}
+
+export function clearEdgeStyle(
+  edges: readonly DiagramEdge[],
+  target: Pick<DiagramEdge, 'from' | 'to'>,
+): DiagramEdge[] {
+  return edges.map((edge) => {
+    if (edge.from !== target.from || edge.to !== target.to) return edge;
+    const next: DiagramEdge = { ...edge };
+    delete next.strokeColor;
+    delete next.strokeWidthPreset;
+    delete next.strokeStyle;
+    return next;
+  });
+}
+
+export function styleEdge(
+  edges: readonly DiagramEdge[],
+  target: Pick<DiagramEdge, 'from' | 'to'>,
+  style: DiagramEdgeStyle,
+): DiagramEdge[] {
+  return edges.map((edge) =>
+    edge.from === target.from && edge.to === target.to ? { ...edge, ...style } : edge,
+  );
 }
 
 export function copyDiagramFragment(
@@ -440,7 +588,11 @@ export function pasteDiagramFragment(
     nextNodes.push({
       ...source,
       id,
-      ...placeNodePosition({ x: source.x + offset.x, y: source.y + offset.y }, source.shape, snap),
+      ...placeNodePosition(
+        { x: source.x + offset.x, y: source.y + offset.y },
+        effectiveDiagramNodeSize(source),
+        snap,
+      ),
     });
   }
 
@@ -512,6 +664,14 @@ export function addEdge(
   return { ok: true, edges: [...edges, edge], edge };
 }
 
+// An empty label removes the key without disturbing the edge's style fields.
+function withEdgeLabel(edge: DiagramEdge, label: string): DiagramEdge {
+  const next: DiagramEdge = { ...edge };
+  if (label) next.label = label;
+  else delete next.label;
+  return next;
+}
+
 export function renameEdge(
   edges: readonly DiagramEdge[],
   target: Pick<DiagramEdge, 'from' | 'to'>,
@@ -520,7 +680,7 @@ export function renameEdge(
   const nextLabel = label.slice(0, DIAGRAM_EDGE_LABEL_LIMIT);
   return edges.map((edge) => {
     if (edge.from !== target.from || edge.to !== target.to) return edge;
-    return nextLabel ? { ...edge, label: nextLabel } : { from: edge.from, to: edge.to };
+    return withEdgeLabel(edge, nextLabel);
   });
 }
 
@@ -534,8 +694,8 @@ export function deleteEdge(
 export function autoLayoutNodes(nodes: readonly DiagramNode[]): DiagramNode[] {
   if (nodes.length === 0) return [];
 
-  const largestWidth = Math.max(...nodes.map((node) => diagramNodeSize(node.shape).width));
-  const largestHeight = Math.max(...nodes.map((node) => diagramNodeSize(node.shape).height));
+  const largestWidth = Math.max(...nodes.map((node) => effectiveDiagramNodeSize(node).width));
+  const largestHeight = Math.max(...nodes.map((node) => effectiveDiagramNodeSize(node).height));
   const columns = Math.min(
     Math.ceil(Math.sqrt(nodes.length)),
     Math.max(1, Math.floor(DIAGRAM_CANVAS_WIDTH / (largestWidth + NODE_GAP))),
@@ -560,7 +720,7 @@ export function autoLayoutNodes(nodes: readonly DiagramNode[]): DiagramNode[] {
           x: horizontalGap + column * (largestWidth + horizontalGap),
           y: verticalGap + row * (largestHeight + verticalGap),
         },
-        diagramNodeSize(node.shape),
+        effectiveDiagramNodeSize(node),
       ),
     };
   });
@@ -570,8 +730,10 @@ export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): Diag
   if (nodes.length === 0) return [];
   const minX = Math.min(...nodes.map((node) => node.x));
   const minY = Math.min(...nodes.map((node) => node.y));
-  const maxRight = Math.max(...nodes.map((node) => node.x + diagramNodeSize(node.shape).width));
-  const maxBottom = Math.max(...nodes.map((node) => node.y + diagramNodeSize(node.shape).height));
+  const maxRight = Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width));
+  const maxBottom = Math.max(
+    ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
+  );
   const deltaX = Math.min(DIAGRAM_PREVIEW_PADDING - minX, DIAGRAM_CANVAS_WIDTH - maxRight);
   const deltaY = Math.min(DIAGRAM_PREVIEW_PADDING - minY, DIAGRAM_CANVAS_HEIGHT - maxBottom);
 
@@ -613,10 +775,9 @@ export function prepareDiagram(
     return { ok: false, error: 'A diagram cannot contain duplicate arrows.' };
   }
 
-  const normalizedEdges = edges.map((edge) => {
-    const label = edge.label ? prepareEdgeLabel(edge.label) : '';
-    return label ? { ...edge, label } : { from: edge.from, to: edge.to };
-  });
+  const normalizedEdges = edges.map((edge) =>
+    withEdgeLabel(edge, edge.label ? prepareEdgeLabel(edge.label) : ''),
+  );
 
   const parsed = diagramWriteArtifactSchema.safeParse({
     type: 'diagram',

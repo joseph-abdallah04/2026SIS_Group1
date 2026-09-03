@@ -37,11 +37,34 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { DiagramEdge, DiagramNode, DiagramNodeShape } from '@roundtable/shared';
+import type {
+  DiagramEdge,
+  DiagramFontSizePreset,
+  DiagramNode,
+  DiagramNodeShape,
+  DiagramStrokeStyle,
+  DiagramStrokeWidthPreset,
+} from '@roundtable/shared';
 import {
+  DIAGRAM_FILL_COLORS,
+  DIAGRAM_FILL_KEYS,
+  DIAGRAM_FONT_SIZE_PRESETS,
+  DIAGRAM_LABEL_INK,
+  DIAGRAM_STROKE_COLORS,
+  DIAGRAM_STROKE_KEYS,
+  DIAGRAM_STROKE_STYLES,
+  DIAGRAM_STROKE_WIDTH_PRESETS,
+  diagramEdgeDash,
   diagramEdgeGeometry,
+  diagramEdgeStroke,
+  diagramEdgeStrokeWidth,
   diagramEdgeToPointGeometry,
+  diagramNodeFill,
+  diagramNodeLabelLayout,
   diagramNodeSize,
+  diagramNodeStroke,
+  diagramNodeStrokeWidth,
+  effectiveDiagramNodeSize,
 } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
@@ -61,6 +84,9 @@ import {
   addNode,
   alignNodes,
   autoLayoutNodes,
+  clearEdgeStyle,
+  clearNodeSize,
+  clearNodeStyle,
   clientPointToDiagramPoint,
   copyDiagramFragment,
   deleteEdge,
@@ -76,10 +102,14 @@ import {
   prepareNodeLabel,
   renameEdge,
   renameNode,
+  resizeNode,
+  styleEdge,
+  styleNodes,
   type DiagramAlignMode,
   type DiagramDistributeAxis,
   type DiagramPoint,
   type DiagramRect,
+  type DiagramResizeCorner,
   type PasteFragment,
 } from './diagramModel';
 import { type DiagramSnapshot } from './diagramHistory';
@@ -107,6 +137,15 @@ interface DragSession {
 
 // Below this the press reads as a click rather than a drag, in sheet units.
 const DRAG_THRESHOLD = 1;
+
+interface ResizeSession {
+  pointerId: number;
+  nodeId: string;
+  corner: DiagramResizeCorner;
+  start: DiagramRect;
+  origin: DiagramPoint;
+  previous: DiagramSnapshot;
+}
 
 interface PanSession {
   pointerId: number;
@@ -151,6 +190,43 @@ const NODE_DOUBLE_PRESS_SLOP_PX = 16;
 // distinct from their source instead of hiding exactly on top of it.
 const DIAGRAM_PASTE_OFFSET: DiagramPoint = { x: DIAGRAM_GRID * 2, y: DIAGRAM_GRID * 2 };
 
+// Editor-side pre-v2 appearance. Unstyled elements keep exactly these, so an
+// inherited diagram is untouched until someone actually picks a style.
+const LEGACY_NODE_STROKES: Record<DiagramNodeShape, string> = {
+  box: '#4D6A74',
+  container: '#8CA4AC',
+  text: 'transparent',
+};
+const LEGACY_NODE_STROKE_WIDTH = 1.5;
+const LEGACY_EDGE_STROKE_WIDTH = 2;
+
+const SELECTION_ACCENT = '#E0A33C';
+
+const RESIZE_CORNERS: { corner: DiagramResizeCorner; label: string; cursor: string }[] = [
+  { corner: 'nw', label: 'Resize from the top left', cursor: 'nwse-resize' },
+  { corner: 'ne', label: 'Resize from the top right', cursor: 'nesw-resize' },
+  { corner: 'se', label: 'Resize from the bottom right', cursor: 'nwse-resize' },
+  { corner: 'sw', label: 'Resize from the bottom left', cursor: 'nesw-resize' },
+];
+
+const STROKE_WIDTH_LABELS: Record<DiagramStrokeWidthPreset, string> = {
+  thin: 'Thin',
+  regular: 'Regular',
+  thick: 'Thick',
+};
+
+const FONT_SIZE_LABELS: Record<DiagramFontSizePreset, string> = {
+  small: 'S',
+  medium: 'M',
+  large: 'L',
+};
+
+const STROKE_STYLE_LABELS: Record<DiagramStrokeStyle, string> = {
+  solid: 'Solid',
+  dashed: 'Dashed',
+  dotted: 'Dotted',
+};
+
 const ALIGN_ACTIONS: { mode: DiagramAlignMode; label: string; Icon: typeof AlignStartVertical }[] =
   [
     { mode: 'left', label: 'Align left edges', Icon: AlignStartVertical },
@@ -160,6 +236,70 @@ const ALIGN_ACTIONS: { mode: DiagramAlignMode; label: string; Icon: typeof Align
     { mode: 'centerY', label: 'Align vertical centres', Icon: AlignCenterHorizontal },
     { mode: 'bottom', label: 'Align bottom edges', Icon: AlignEndHorizontal },
   ];
+
+// Sized by its grid column rather than fixed: seven fixed 28px swatches overflow
+// the 260px sidebar.
+function SwatchButton({
+  label,
+  color,
+  active,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  color: string;
+  active: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onSelect}
+      className={`aspect-square w-full rounded-full border-2 transition-shadow disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
+        active ? 'border-rt-ink shadow-[0_0_0_2px_rgba(224,163,60,0.45)]' : 'border-rt-tertiary'
+      }`}
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
+function PresetButton({
+  label,
+  name,
+  active,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  /** Accessible name; the visible label alone ("L", "Thick") does not identify the control. */
+  name: string;
+  active: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={name}
+      title={name}
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onSelect}
+      className={`min-h-8 flex-1 rounded-lg border px-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
+        active
+          ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
+          : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:bg-rt-surface-alt'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
 function displayShape(node: DiagramNode): DiagramNodeShape {
   return node.shape ?? 'box';
@@ -236,6 +376,7 @@ export function DiagramEditor() {
   const edgeLabelInputRef = useRef<HTMLInputElement>(null);
   const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
+  const resizeRef = useRef<ResizeSession | null>(null);
   const panRef = useRef<PanSession | null>(null);
   const marqueeRef = useRef<MarqueeSession | null>(null);
   const lastNodePressRef = useRef<NodePress | null>(null);
@@ -257,7 +398,23 @@ export function DiagramEditor() {
         : null
     : null;
   const isSubmitting = submissionStatus === 'submitting';
+  const styledNodes = nodes.filter((node) => selectedIds.includes(node.id));
+  // A swatch reads as active only when every selected node already carries it.
+  const sharedNodeStyle = <
+    Key extends 'fillColor' | 'strokeColor' | 'strokeWidthPreset' | 'fontSizePreset',
+  >(
+    key: Key,
+  ): DiagramNode[Key] | undefined => {
+    const first = styledNodes[0]?.[key];
+    return first !== undefined && styledNodes.every((node) => node[key] === first)
+      ? first
+      : undefined;
+  };
   const zoomPercent = Math.round(diagramViewZoom(view) * 100);
+  // The default marker keeps its id for the connection preview; every distinct
+  // edge colour gets its own so an arrowhead always matches its line.
+  const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
+  const edgeArrowId = (color: string) => `diagram-editor-arrow-${color.replace('#', '')}`;
   const marqueeRect: DiagramRect | null = marquee
     ? normalizeRect(marquee.origin, marquee.current)
     : null;
@@ -448,6 +605,41 @@ export function DiagramEditor() {
     pasteFragment(copySelection());
   }
 
+  function applyNodeStyle(style: Parameters<typeof styleNodes>[2]) {
+    if (selectedIds.length === 0) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({ nodes: styleNodes(graph.nodes, selectedIds, style), edges: graph.edges });
+  }
+
+  function resetNodeStyle() {
+    if (selectedIds.length === 0) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({ nodes: clearNodeStyle(graph.nodes, selectedIds), edges: graph.edges });
+  }
+
+  function applyEdgeStyle(style: Parameters<typeof styleEdge>[2]) {
+    if (!selectedEdge) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({ nodes: graph.nodes, edges: styleEdge(graph.edges, selectedEdge, style) });
+  }
+
+  function resetEdgeStyle() {
+    if (!selectedEdge) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({ nodes: graph.nodes, edges: clearEdgeStyle(graph.edges, selectedEdge) });
+  }
+
+  function resetSelectedNodeSize() {
+    if (!selectedNode) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({ nodes: clearNodeSize(graph.nodes, selectedNode.id), edges: graph.edges });
+  }
+
   function normalizeSelectedLabel() {
     if (!selectedNode) return;
     const graph = history.snapshotRef.current;
@@ -592,6 +784,62 @@ export function DiagramEditor() {
     clearError();
   }
 
+  function onResizePointerDown(
+    event: PointerEvent<SVGGElement>,
+    node: DiagramNode,
+    corner: DiagramResizeCorner,
+  ) {
+    if (event.button !== 0 || isSubmitting) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.focus({ preventScroll: true });
+    lastNodePressRef.current = null;
+
+    const size = effectiveDiagramNodeSize(node);
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      nodeId: node.id,
+      corner,
+      start: { x: node.x, y: node.y, width: size.width, height: size.height },
+      origin: surfacePoint(event),
+      previous: history.snapshotRef.current,
+    };
+    canvas.setPointerCapture(event.pointerId);
+  }
+
+  function updateResize(event: PointerEvent<SVGSVGElement>): boolean {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    const point = surfacePoint(event);
+    const graph = history.snapshotRef.current;
+    history.preview({
+      nodes: resizeNode(
+        graph.nodes,
+        resize.nodeId,
+        resize.corner,
+        resize.start,
+        { x: point.x - resize.origin.x, y: point.y - resize.origin.y },
+        snapEnabled,
+        event.shiftKey,
+      ),
+      edges: graph.edges,
+    });
+    return true;
+  }
+
+  function endResize(event: PointerEvent<SVGSVGElement>): boolean {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return false;
+    updateResize(event);
+    history.recordPreview(resize.previous);
+    resizeRef.current = null;
+    releaseCapture(event);
+    return true;
+  }
+
   function onCanvasPointerDown(event: PointerEvent<SVGSVGElement>) {
     if (isSubmitting) return;
     lastNodePressRef.current = null;
@@ -656,6 +904,7 @@ export function DiagramEditor() {
 
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
     if (updatePan(event)) return;
+    if (updateResize(event)) return;
 
     const session = marqueeRef.current;
     if (session && session.pointerId === event.pointerId) {
@@ -715,6 +964,7 @@ export function DiagramEditor() {
 
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
     if (endPan(event)) return;
+    if (endResize(event)) return;
     if (endMarquee(event)) return;
 
     const drag = dragRef.current;
@@ -735,6 +985,11 @@ export function DiagramEditor() {
     if (panRef.current?.pointerId === event.pointerId) {
       panRef.current = null;
       setIsPanning(false);
+    }
+    const resize = resizeRef.current;
+    if (resize?.pointerId === event.pointerId) {
+      history.recordPreview(resize.previous);
+      resizeRef.current = null;
     }
     if (marqueeRef.current?.pointerId === event.pointerId) {
       marqueeRef.current = null;
@@ -882,6 +1137,10 @@ export function DiagramEditor() {
     event.preventDefault();
     if (dragRef.current) {
       setValidationError('Finish moving the element before proposing.');
+      return;
+    }
+    if (resizeRef.current) {
+      setValidationError('Finish resizing the element before proposing.');
       return;
     }
     if (connectionMode) {
@@ -1090,6 +1349,82 @@ export function DiagramEditor() {
           </div>
         </section>
 
+        {selectedIds.length > 0 ? (
+          <section className="mt-4" aria-label="Element style">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+                Element style
+              </p>
+              <Button
+                variant="quiet"
+                className="min-h-7 px-2 text-[11px]"
+                aria-label="Reset element style"
+                disabled={isSubmitting}
+                title="Return the selection to the default appearance"
+                onClick={resetNodeStyle}
+              >
+                Reset
+              </Button>
+            </div>
+
+            <p className="mt-2 text-[11px] font-medium text-rt-ink-muted">Fill</p>
+            <div className="mt-1 grid grid-cols-7 gap-1.5">
+              {DIAGRAM_FILL_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`Fill ${key}`}
+                  color={DIAGRAM_FILL_COLORS[key]}
+                  active={sharedNodeStyle('fillColor') === key}
+                  disabled={isSubmitting}
+                  onSelect={() => applyNodeStyle({ fillColor: key })}
+                />
+              ))}
+            </div>
+
+            <p className="mt-2.5 text-[11px] font-medium text-rt-ink-muted">Border</p>
+            <div className="mt-1 grid grid-cols-7 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`Border ${key}`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={sharedNodeStyle('strokeColor') === key}
+                  disabled={isSubmitting}
+                  onSelect={() => applyNodeStyle({ strokeColor: key })}
+                />
+              ))}
+            </div>
+
+            <p className="mt-2.5 text-[11px] font-medium text-rt-ink-muted">Border width</p>
+            <div className="mt-1 flex gap-1.5">
+              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={STROKE_WIDTH_LABELS[preset]}
+                  name={`Border width ${preset}`}
+                  active={sharedNodeStyle('strokeWidthPreset') === preset}
+                  disabled={isSubmitting}
+                  onSelect={() => applyNodeStyle({ strokeWidthPreset: preset })}
+                />
+              ))}
+            </div>
+
+            <p className="mt-2.5 text-[11px] font-medium text-rt-ink-muted">Text size</p>
+            <div className="mt-1 flex gap-1.5">
+              {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={FONT_SIZE_LABELS[preset]}
+                  name={`Text size ${preset}`}
+                  active={sharedNodeStyle('fontSizePreset') === preset}
+                  disabled={isSubmitting}
+                  onSelect={() => applyNodeStyle({ fontSizePreset: preset })}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         <section className="mt-4" aria-label="Arrows">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -1178,6 +1513,22 @@ export function DiagramEditor() {
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {selectedNode.label.length}/{DIAGRAM_LABEL_LIMIT}
             </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] tabular-nums text-rt-ink-faint">
+                {Math.round(effectiveDiagramNodeSize(selectedNode).width)} ×{' '}
+                {Math.round(effectiveDiagramNodeSize(selectedNode).height)}
+                {selectedNode.width === undefined ? ' (default)' : ''}
+              </span>
+              <Button
+                variant="quiet"
+                className="min-h-7 px-2 text-[11px]"
+                disabled={selectedNode.width === undefined || isSubmitting}
+                title="Return this element to its default size"
+                onClick={resetSelectedNodeSize}
+              >
+                Reset size
+              </Button>
+            </div>
           </section>
         ) : null}
 
@@ -1236,6 +1587,56 @@ export function DiagramEditor() {
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {(selectedEdge.label ?? '').length}/{DIAGRAM_EDGE_LABEL_LIMIT}
             </p>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-[11px] font-medium text-rt-ink-muted">Arrow style</p>
+              <Button
+                variant="quiet"
+                className="min-h-7 px-2 text-[11px]"
+                aria-label="Reset arrow style"
+                disabled={isSubmitting}
+                title="Return this arrow to the default appearance"
+                onClick={resetEdgeStyle}
+              >
+                Reset
+              </Button>
+            </div>
+            <div className="mt-1 grid grid-cols-7 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`Arrow ${key}`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={selectedEdge.strokeColor === key}
+                  disabled={isSubmitting}
+                  onSelect={() => applyEdgeStyle({ strokeColor: key })}
+                />
+              ))}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={STROKE_WIDTH_LABELS[preset]}
+                  name={`Arrow width ${preset}`}
+                  active={selectedEdge.strokeWidthPreset === preset}
+                  disabled={isSubmitting}
+                  onSelect={() => applyEdgeStyle({ strokeWidthPreset: preset })}
+                />
+              ))}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_STROKE_STYLES.map((style) => (
+                <PresetButton
+                  key={style}
+                  label={STROKE_STYLE_LABELS[style]}
+                  name={`Arrow style ${style}`}
+                  active={selectedEdge.strokeStyle === style}
+                  disabled={isSubmitting}
+                  onSelect={() => applyEdgeStyle({ strokeStyle: style })}
+                />
+              ))}
+            </div>
           </section>
         ) : null}
       </aside>
@@ -1337,8 +1738,22 @@ export function DiagramEditor() {
               orient="auto"
               markerUnits="strokeWidth"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#E0A33C" />
+              <path d="M0,0 L8,4 L0,8 Z" fill={SELECTION_ACCENT} />
             </marker>
+            {edgeArrowColors.map((color) => (
+              <marker
+                key={color}
+                id={edgeArrowId(color)}
+                markerWidth="10"
+                markerHeight="10"
+                refX="8"
+                refY="4"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M0,0 L8,4 L0,8 Z" fill={color} />
+              </marker>
+            ))}
           </defs>
           {showGrid ? (
             <rect
@@ -1357,6 +1772,9 @@ export function DiagramEditor() {
             if (!from || !to) return null;
             const geometry = diagramEdgeGeometry(from, to);
             const selected = selectedEdgeKey === edgeKey(edge);
+            const strokeWidth = diagramEdgeStrokeWidth(edge, LEGACY_EDGE_STROKE_WIDTH);
+            const stroke = diagramEdgeStroke(edge);
+            const dash = diagramEdgeDash(edge, strokeWidth);
             return (
               <g
                 key={edgeKey(edge)}
@@ -1387,10 +1805,11 @@ export function DiagramEditor() {
                   y1={geometry.y1}
                   x2={geometry.x2}
                   y2={geometry.y2}
-                  stroke={selected ? '#E0A33C' : '#8CA4AC'}
-                  strokeWidth={selected ? 3 : 2}
-                  markerEnd={`url(#diagram-editor-arrow${selected ? '-selected' : ''})`}
+                  stroke={selected ? SELECTION_ACCENT : stroke}
+                  strokeWidth={selected ? Math.max(3, strokeWidth + 1) : strokeWidth}
+                  markerEnd={`url(#${selected ? 'diagram-editor-arrow-selected' : edgeArrowId(stroke)})`}
                   pointerEvents="none"
+                  {...dash}
                 />
                 {edge.label ? (
                   <text
@@ -1429,7 +1848,11 @@ export function DiagramEditor() {
 
           {nodes.map((node) => {
             const shape = displayShape(node);
-            const size = diagramNodeSize(node.shape);
+            const size = effectiveDiagramNodeSize(node);
+            const labelLayout = diagramNodeLabelLayout({
+              ...node,
+              label: node.label || 'Unlabelled',
+            });
             const selected = selectedIds.includes(node.id);
             const isOnlySelection = selectedId === node.id;
             const isConnectionSource = connectionSourceId === node.id;
@@ -1493,15 +1916,19 @@ export function DiagramEditor() {
                   />
                 ) : null}
                 {shape === 'text' ? (
-                  <rect width={size.width} height={size.height} fill="transparent" />
+                  <rect
+                    width={size.width}
+                    height={size.height}
+                    fill={node.fillColor ? diagramNodeFill(node) : 'transparent'}
+                  />
                 ) : (
                   <rect
                     width={size.width}
                     height={size.height}
                     rx={shape === 'container' ? 3 : 8}
-                    fill={shape === 'container' ? '#FAFAFA' : '#EEF2F4'}
-                    stroke={shape === 'container' ? '#8CA4AC' : '#4D6A74'}
-                    strokeWidth={1.5}
+                    fill={diagramNodeFill(node)}
+                    stroke={diagramNodeStroke(node, LEGACY_NODE_STROKES[shape])}
+                    strokeWidth={diagramNodeStrokeWidth(node, LEGACY_NODE_STROKE_WIDTH)}
                     strokeDasharray={shape === 'container' ? '5 3' : undefined}
                   />
                 )}
@@ -1549,19 +1976,23 @@ export function DiagramEditor() {
                   </foreignObject>
                 ) : (
                   <text
-                    x={size.width / 2}
-                    y={size.height / 2 + 4}
                     textAnchor="middle"
-                    fill="#080C15"
+                    fill={DIAGRAM_LABEL_INK}
                     style={{
-                      fontSize: '11px',
+                      fontSize: `${labelLayout.fontSize}px`,
                       fontFamily: 'Inter, system-ui, sans-serif',
                       fontWeight: shape === 'text' ? 600 : 500,
                     }}
-                    textLength={node.label.length > 10 ? size.width - 12 : undefined}
-                    lengthAdjust={node.label.length > 10 ? 'spacingAndGlyphs' : undefined}
                   >
-                    {node.label || 'Unlabelled'}
+                    {labelLayout.lines.map((line, index) => (
+                      <tspan
+                        key={line + String(index)}
+                        x={size.width / 2}
+                        y={labelLayout.firstBaselineY + index * labelLayout.lineHeight}
+                      >
+                        {line}
+                      </tspan>
+                    ))}
                   </text>
                 )}
                 {isOnlySelection && !connectionMode && !isEditing ? (
@@ -1597,6 +2028,37 @@ export function DiagramEditor() {
                     ))}
                   </g>
                 ) : null}
+                {isOnlySelection && !connectionMode && !isEditing
+                  ? RESIZE_CORNERS.map(({ corner, label, cursor }) => {
+                      // Sit on the selection outline so the corners stay clear of
+                      // the connection handles on the node's own edge midpoints.
+                      const x = corner === 'nw' || corner === 'sw' ? -5 : size.width + 5;
+                      const y = corner === 'nw' || corner === 'ne' ? -5 : size.height + 5;
+                      return (
+                        <g
+                          key={corner}
+                          role="button"
+                          aria-label={label}
+                          tabIndex={-1}
+                          data-testid={`resize-handle-${corner}`}
+                          style={{ cursor }}
+                          onPointerDown={(event) => onResizePointerDown(event, node, corner)}
+                        >
+                          <circle cx={x} cy={y} r={10} fill="transparent" />
+                          <rect
+                            x={x - 3.5}
+                            y={y - 3.5}
+                            width={7}
+                            height={7}
+                            fill="#FFFFFF"
+                            stroke={SELECTION_ACCENT}
+                            strokeWidth={2}
+                            pointerEvents="none"
+                          />
+                        </g>
+                      );
+                    })
+                  : null}
               </g>
             );
           })}

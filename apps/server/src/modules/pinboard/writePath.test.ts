@@ -196,6 +196,99 @@ describe('proposalCreate handler', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  // Diagram contract v2 adds optional size and style fields. The editor bounds
+  // them, but a crafted socket payload bypasses the editor entirely, so the
+  // shared write schema has to stop these before anything is persisted.
+  describe('diagram style contract v2', () => {
+    function diagram(node: Record<string, unknown>) {
+      return {
+        type: 'diagram',
+        artifactJson: {
+          type: 'diagram',
+          nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box', ...node }],
+          edges: [],
+        },
+        x: 0,
+        y: 0,
+      };
+    }
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'discussion' });
+    });
+
+    it('accepts a legitimately sized and styled diagram', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          diagram({
+            width: 200,
+            height: 90,
+            fillColor: 'blue',
+            strokeColor: 'slate',
+            strokeWidthPreset: 'thick',
+            fontSizePreset: 'large',
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a node carrying only one of width and height', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(diagram({ width: 200 }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a node sized outside the bounds', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(diagram({ width: 5_000, height: 5_000 }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(await propose(diagram({ width: 1, height: 1 }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a raw colour smuggled in place of a palette key', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(diagram({ fillColor: 'url(#evil)' }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(await propose(diagram({ strokeColor: '#ff0000' }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an arrow style outside the closed set', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose({
+          type: 'diagram',
+          artifactJson: {
+            type: 'diagram',
+            nodes: [
+              { id: 'n1', label: 'A', x: 0, y: 0 },
+              { id: 'n2', label: 'B', x: 240, y: 0 },
+            ],
+            edges: [{ from: 'n1', to: 'n2', strokeStyle: 'wavy' }],
+          },
+          x: 0,
+          y: 0,
+        }),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
   it('reports a closed board rather than failing silently', async () => {
     activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'voting' });
     question.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'voting' });

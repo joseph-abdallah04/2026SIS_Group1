@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+import {
+  DIAGRAM_FILL_KEYS,
+  DIAGRAM_FONT_SIZE_PRESETS,
+  DIAGRAM_MAX_NODE_HEIGHT,
+  DIAGRAM_MAX_NODE_WIDTH,
+  DIAGRAM_MIN_NODE_HEIGHT,
+  DIAGRAM_MIN_NODE_WIDTH,
+  DIAGRAM_STROKE_KEYS,
+  DIAGRAM_STROKE_STYLES,
+  DIAGRAM_STROKE_WIDTH_PRESETS,
+} from './index.js';
+
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
 // Use on REST bodies (server) and forms (web). Add your module's schemas under its label.
 
@@ -32,6 +44,15 @@ export const drawingArtifactSchema = z.object({
   svg: z.string().max(100_000),
 });
 
+const diagramFillKeySchema = z.enum(DIAGRAM_FILL_KEYS);
+const diagramStrokeKeySchema = z.enum(DIAGRAM_STROKE_KEYS);
+const diagramStrokeWidthPresetSchema = z.enum(DIAGRAM_STROKE_WIDTH_PRESETS);
+const diagramFontSizePresetSchema = z.enum(DIAGRAM_FONT_SIZE_PRESETS);
+const diagramStrokeStyleSchema = z.enum(DIAGRAM_STROKE_STYLES);
+
+// Structural only: size bounds and the width/height pair rule are write-path
+// invariants (see diagramWriteArtifactSchema) so a stored diagram always reads
+// back, the same way legacy dangling edges do.
 export const diagramNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string().max(200),
@@ -39,12 +60,22 @@ export const diagramNodeSchema = z.object({
   y: z.number(),
   // Optional so diagrams authored before shapes existed still parse as boxes.
   shape: z.enum(['box', 'container', 'text']).optional(),
+  // v2, all optional: absent means the pre-v2 appearance.
+  width: z.number().optional(),
+  height: z.number().optional(),
+  fillColor: diagramFillKeySchema.optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
 });
 
 export const diagramEdgeSchema = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
   label: z.string().max(200).optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  strokeStyle: diagramStrokeStyleSchema.optional(),
 });
 
 export const diagramArtifactSchema = z.object({
@@ -57,6 +88,36 @@ export const diagramWriteArtifactSchema = diagramArtifactSchema.superRefine(
   ({ nodes, edges }, context) => {
     const nodeIds = new Set<string>();
     nodes.forEach((node, index) => {
+      const hasWidth = node.width !== undefined;
+      const hasHeight = node.height !== undefined;
+      if (hasWidth !== hasHeight) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Node width and height must be set together',
+          path: ['nodes', index, hasWidth ? 'height' : 'width'],
+        });
+      }
+      if (
+        hasWidth &&
+        (node.width! < DIAGRAM_MIN_NODE_WIDTH || node.width! > DIAGRAM_MAX_NODE_WIDTH)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node width must be between ${DIAGRAM_MIN_NODE_WIDTH} and ${DIAGRAM_MAX_NODE_WIDTH}`,
+          path: ['nodes', index, 'width'],
+        });
+      }
+      if (
+        hasHeight &&
+        (node.height! < DIAGRAM_MIN_NODE_HEIGHT || node.height! > DIAGRAM_MAX_NODE_HEIGHT)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node height must be between ${DIAGRAM_MIN_NODE_HEIGHT} and ${DIAGRAM_MAX_NODE_HEIGHT}`,
+          path: ['nodes', index, 'height'],
+        });
+      }
+
       if (nodeIds.has(node.id)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,

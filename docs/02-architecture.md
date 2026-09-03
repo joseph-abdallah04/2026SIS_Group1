@@ -97,7 +97,8 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 
 Notes:
 
-- `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[{id,label,x,y,shape?}],edges:[{from,to,label?}]}`. Diagram `shape` is `box|container|text`; omitted means a legacy box. Typed in `packages/shared`.
+- `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[{id,label,x,y,shape?,…}],edges:[{from,to,label?,…}]}`. Diagram `shape` is `box|container|text`; omitted means a legacy box. Typed in `packages/shared`.
+- Diagram styling (contract v2) is additive and entirely optional: nodes may carry a bounded `width`+`height` pair (both or neither) plus closed-enum `fillColor`, `strokeColor`, `strokeWidthPreset` and `fontSizePreset`; edges may carry `strokeColor`, `strokeWidthPreset` and `strokeStyle`. Omitting a field means the pre-v2 appearance, so diagrams authored before v2 render unchanged. The palettes, size bounds and resolvers live in `packages/shared` and are shared by the editor and the board card — no raw CSS colours, arbitrary sizes or style objects are representable. Size bounds and the width/height pair rule are **write-path** invariants (`diagramWriteArtifactSchema`, enforced again at the socket boundary) so an already-stored diagram always reads back.
 - Deleting a proposal that has reactions/votes/extends children: MVP = soft delete flag `deletedAt` on Proposal.
 
 ## 4. Realtime design (Socket.IO)
@@ -196,13 +197,13 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 ## 8. Key technical decisions & gotchas
 
 1. **Serving the SPA from the same Express process** avoids CORS entirely in production; in dev, Vite's proxy forwards `/api` and `/socket.io` to the server port.2. **Socket auth:** client passes JWT in the handshake (`auth.token`); server rejects unauthenticated/membership-less joins before adding to rooms.
-3. **Leader authority is enforced server-side** — hiding buttons in the UI is cosmetic only; every mutating event checks role + current phase.
-4. **Vote privacy:** individual ballots are never broadcast; only aggregate progress. Results computed server-side on close.
-5. **Drawings/diagrams are stored as JSON/SVG strings** — no file uploads in MVP, keeping infra minimal. Size-limit artifacts (~100KB) at validation time.
-6. **Reconnects:** Socket.IO reconnect + `session:state` resnapshot makes refreshes safe; LiveKit SDK auto-reconnects audio independently.
-7. **Render free tier sleeps** after ~15 min idle; first request pays a cold start (~30s). Acceptable for MVP demo; document it.
-8. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can _read_ shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
-9. **LLM provider abstraction:** the assistant talks to any OpenAI-compatible `/chat/completions` endpoint using the user's stored config. Tool-calling loop lives server-side in the `assistant` module; API keys are AES-encrypted at rest and never sent back to the client after save.
+2. **Leader authority is enforced server-side** — hiding buttons in the UI is cosmetic only; every mutating event checks role + current phase.
+3. **Vote privacy:** individual ballots are never broadcast; only aggregate progress. Results computed server-side on close.
+4. **Drawings/diagrams are stored as JSON/SVG strings** — no file uploads in MVP, keeping infra minimal. Size-limit artifacts (~100KB) at validation time.
+5. **Reconnects:** Socket.IO reconnect + `session:state` resnapshot makes refreshes safe; LiveKit SDK auto-reconnects audio independently.
+6. **Render free tier sleeps** after ~15 min idle; first request pays a cold start (~30s). Acceptable for MVP demo; document it.
+7. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can _read_ shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
+8. **LLM provider abstraction:** the assistant talks to any OpenAI-compatible `/chat/completions` endpoint using the user's stored config. Tool-calling loop lives server-side in the `assistant` module; API keys are AES-encrypted at rest and never sent back to the client after save.
 
 ## 9. Deployment topology: single-process serving (decided)
 

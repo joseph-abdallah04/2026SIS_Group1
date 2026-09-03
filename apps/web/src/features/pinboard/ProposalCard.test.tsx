@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { diagramNodeSize, type BoardItem, type DiagramNode } from '@roundtable/shared';
+import type { BoardItem, DiagramNode } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
@@ -37,7 +37,10 @@ describe('diagram proposal card', () => {
     const fittedText = [...container.querySelectorAll('text')].find(
       (element) => element.textContent === 'Architecture boundary',
     );
-    expect(fittedText?.getAttribute('textLength')).toBe(String(diagramNodeSize('text').width - 12));
+    // Diagram contract v2 wraps labels into bounded lines instead of squeezing
+    // them onto one line with textLength.
+    expect(fittedText?.getAttribute('textLength')).toBeNull();
+    expect(fittedText?.querySelectorAll('tspan')).toHaveLength(1);
   });
 
   it('renders a legacy node without shape as a box', () => {
