@@ -9,6 +9,9 @@ import { Server as SocketServer } from 'socket.io';
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { assistantRouter } from './modules/assistant/index.js';
+import { pinboardRoutes } from './modules/pinboard/index.js';
+import { registerRealtimeGateway } from './realtime/gateway.js';
+import type { RealtimeServer } from './realtime/types.js';
 
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
@@ -21,11 +24,14 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
-// Module owners mount their routers here (docs/02 §6):
-//   app.use('/api/auth', authRoutes) etc. Each module exports an index.ts with its public surface.
-//
+// Module owners mount their routers here (docs/02 §6). Each module exports an index.ts
+// with its public surface.
+app.use('/api/sessions', pinboardRoutes);
+
 // The assistant owns `/api/me/llm-config*` and `/api/sessions/:id/assistant/*`; both live
-// under one router, so it mounts at `/api` rather than a module-shaped prefix.
+// under one router, so it mounts at `/api` rather than a module-shaped prefix. It goes
+// after the pinboard router — Express tries each in turn, and the pinboard's more specific
+// `/api/sessions` paths should match first.
 app.use('/api', assistantRouter);
 
 // Error handler goes after every route: Express only reaches it for requests the routes
@@ -43,15 +49,18 @@ if (fs.existsSync(webDist)) {
 }
 
 const httpServer = http.createServer(app);
-const io = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
+const io: RealtimeServer = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
 
-io.on('connection', (socket) => {
-  console.log(`socket connected: ${socket.id}`);
-  socket.on('disconnect', (reason) => {
-    console.log(`socket disconnected: ${socket.id} (${reason})`);
-  });
+registerRealtimeGateway(io);
+
+httpServer.on('error', (err) => {
+  console.error('HTTP server failed to start:', err);
+  process.exit(1);
 });
 
+// Bind all interfaces: Render's health check reaches the container on
+// 0.0.0.0:$PORT, so a loopback-only bind fails to deploy.
 httpServer.listen(PORT, () => {
   console.log(`roundtable-server listening on :${PORT}`);
 });
+

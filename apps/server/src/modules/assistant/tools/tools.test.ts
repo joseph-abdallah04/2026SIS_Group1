@@ -1,12 +1,12 @@
-import type { AssistantToolName, ProposalArtifact } from '@roundtable/shared';
+import type { AssistantToolName, ArtifactJson } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import { assistantTools, findTool, type ToolRunContext } from './index.js';
 
 function harness(): ToolRunContext & {
-  artifacts: Array<{ artifact: ProposalArtifact; source: AssistantToolName }>;
+  artifacts: Array<{ artifact: ArtifactJson; source: AssistantToolName }>;
 } {
-  const artifacts: Array<{ artifact: ProposalArtifact; source: AssistantToolName }> = [];
+  const artifacts: Array<{ artifact: ArtifactJson; source: AssistantToolName }> = [];
   return {
     artifacts,
     signal: new AbortController().signal,
@@ -40,7 +40,6 @@ describe('create_diagram', () => {
     const context = harness();
     const result = await assistantTools.create_diagram.run(
       {
-        title: 'Vote flow',
         nodes: [
           { id: 'leader', label: 'Leader picks shortlist' },
           { id: 'vote', label: 'Members vote' },
@@ -59,8 +58,9 @@ describe('create_diagram', () => {
     const artifact = context.artifacts[0]?.artifact;
     expect(artifact?.type).toBe('diagram');
     if (artifact?.type === 'diagram') {
-      expect(artifact.title).toBe('Vote flow');
       expect(artifact.nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y))).toBe(true);
+      // Boxes, not the 72x32 default — the labels the model writes need the room.
+      expect(artifact.nodes.every((n) => n.shape === 'box')).toBe(true);
     }
   });
 

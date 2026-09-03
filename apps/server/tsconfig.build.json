@@ -1,6 +1,7 @@
+// Build config: same as tsconfig.json but without the test files, so `dist`
+// holds only shipped code. `npm run typecheck` still uses tsconfig.json, which
+// includes the tests.
 {
-  // Production build. Same settings as tsconfig.json (which typechecks everything,
-  // tests included) minus the test files, so `dist/` ships only runtime code.
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts", "src/**/__fixtures__/**"]
+  "exclude": ["src/**/*.test.ts"]
 }

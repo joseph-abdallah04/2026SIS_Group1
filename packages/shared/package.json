@@ -7,8 +7,8 @@
     ".": "./src/index.ts",
     "./events": "./src/events.ts",
     "./schemas": "./src/schemas.ts",
-    "./artifacts": "./src/artifacts.ts",
-    "./assistant": "./src/assistant.ts"
+    "./assistant": "./src/assistant.ts",
+    "./assets/roundtable-logo.svg": "./src/assets/roundtable-logo.svg"
   },
   "scripts": {
     "build": "tsc --noEmit",

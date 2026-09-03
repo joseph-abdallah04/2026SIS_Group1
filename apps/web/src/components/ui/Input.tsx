@@ -1,4 +1,8 @@
-// Base text input + labelled field wrapper. Shared component (docs/06 Week 1 note).
+// Base text input + labelled field wrapper, in the RoundTable palette.
+//
+// The shared `Button` lives next door and is the design system's; this is the matching
+// input, added by the assistant owner for the settings form. Move it into the design
+// system proper if another screen needs one.
 import { useId, type InputHTMLAttributes, type ReactNode } from 'react';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -11,11 +15,11 @@ export function Input({ invalid = false, className = '', ...rest }: InputProps) 
       {...rest}
       aria-invalid={invalid || undefined}
       className={[
-        'block w-full rounded-lg bg-white px-3 py-2 text-sm text-slate-900 shadow-sm',
-        'ring-1 ring-inset placeholder:text-slate-400',
+        'block w-full rounded-lg bg-rt-surface px-3 py-2 text-sm text-rt-ink',
+        'ring-1 ring-inset placeholder:text-rt-ink-faint',
         'focus:ring-2 focus:ring-inset focus:outline-none',
-        invalid ? 'ring-red-400 focus:ring-red-500' : 'ring-slate-300 focus:ring-indigo-500',
-        'disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500',
+        invalid ? 'ring-red-400 focus:ring-red-500' : 'ring-rt-tertiary focus:ring-rt-primary-deep',
+        'disabled:cursor-not-allowed disabled:bg-rt-surface-alt disabled:text-rt-ink-faint',
         className,
       ].join(' ')}
     />
@@ -37,14 +41,14 @@ export function Field({ label, hint, error, children }: FieldProps) {
   const id = useId();
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+      <label htmlFor={id} className="block text-sm font-medium text-rt-ink">
         {label}
       </label>
       {children({ id, invalid: Boolean(error) })}
       {error ? (
         <p className="text-xs text-red-600">{error}</p>
       ) : hint ? (
-        <p className="text-xs text-slate-500">{hint}</p>
+        <p className="text-xs text-rt-ink-muted">{hint}</p>
       ) : null}
     </div>
   );

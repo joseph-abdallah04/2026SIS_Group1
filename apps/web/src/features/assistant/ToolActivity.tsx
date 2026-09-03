@@ -23,16 +23,16 @@ export function ToolActivity({ toolName, status, summary, results }: ToolActivit
 
   return (
     <div className="space-y-1.5">
-      <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
+      <div className="inline-flex items-center gap-2 rounded-full bg-rt-primary-tint px-2.5 py-1 text-xs text-rt-ink-muted">
         {status === 'running' ? (
-          <span className="size-2 animate-pulse rounded-full bg-indigo-500" aria-hidden="true" />
+          <span className="size-2 animate-pulse rounded-full bg-rt-primary-deep" aria-hidden="true" />
         ) : status === 'failed' ? (
           <span className="size-2 rounded-full bg-red-500" aria-hidden="true" />
         ) : (
-          <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />
+          <span className="size-2 rounded-full bg-rt-primary" aria-hidden="true" />
         )}
         <span>{status === 'failed' ? `${labels.done} — failed` : label}</span>
-        {summary && status !== 'running' && <span className="text-slate-400">· {summary}</span>}
+        {summary && status !== 'running' && <span className="text-rt-ink-faint">· {summary}</span>}
       </div>
 
       {results && results.length > 0 && (
@@ -43,11 +43,11 @@ export function ToolActivity({ toolName, status, summary, results }: ToolActivit
                 href={result.url}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="font-medium text-indigo-600 hover:underline"
+                className="font-medium text-rt-primary-deep hover:underline"
               >
                 {result.title}
               </a>
-              {result.snippet && <p className="line-clamp-2 text-slate-500">{result.snippet}</p>}
+              {result.snippet && <p className="line-clamp-2 text-rt-ink-muted">{result.snippet}</p>}
             </li>
           ))}
         </ol>

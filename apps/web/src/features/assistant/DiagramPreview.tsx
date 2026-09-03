@@ -1,42 +1,35 @@
-// Renders a diagram artifact as inline SVG.
+// Renders a diagram artifact as inline SVG, at chat-panel scale.
 //
-// Inline rather than a chart library: the artifact is already laid out server-side, the
-// shapes are boxes and arrows, and a dependency-free renderer keeps the same component
-// usable by the Tools owner's diagram editor later.
+// Node sizes and edge anchors come from the shared geometry helpers the board uses
+// (`diagramNodeSize` / `diagramEdgeGeometry`), so what you see in chat is what lands on the
+// pinboard when you press Propose — same boxes, same arrows, just smaller.
 import { useId } from 'react';
-import type { DiagramArtifact } from '@roundtable/shared';
+import { diagramEdgeGeometry, diagramNodeSize, type DiagramArtifact } from '@roundtable/shared';
 
-const NODE_WIDTH = 168;
-const NODE_HEIGHT = 56;
-const PADDING = 24;
-const CHARS_PER_LINE = 22;
+const PADDING = 20;
+const CHARS_PER_LINE = 18;
 const MAX_LINES = 2;
 
 export function DiagramPreview({ diagram }: { diagram: DiagramArtifact }) {
-  const arrowId = useId().replace(/:/g, '');
-  const positions = new Map(diagram.nodes.map((node) => [node.id, node]));
+  // Marker ids must be unique per rendered diagram or arrows from one card leak into another.
+  const arrowId = `rt-assistant-arrow-${useId().replace(/:/g, '')}`;
+  const nodeById = new Map(diagram.nodes.map((node) => [node.id, node]));
 
-  const maxX = Math.max(...diagram.nodes.map((n) => n.x)) + NODE_WIDTH;
-  const maxY = Math.max(...diagram.nodes.map((n) => n.y)) + NODE_HEIGHT;
-  const minX = Math.min(...diagram.nodes.map((n) => n.x));
-  const minY = Math.min(...diagram.nodes.map((n) => n.y));
-  const viewBox = [
-    minX - PADDING,
-    minY - PADDING,
-    maxX - minX + PADDING * 2,
-    maxY - minY + PADDING * 2,
-  ].join(' ');
+  const width =
+    Math.max(...diagram.nodes.map((n) => n.x + diagramNodeSize(n.shape).width), 72) + PADDING;
+  const height =
+    Math.max(...diagram.nodes.map((n) => n.y + diagramNodeSize(n.shape).height), 32) + PADDING;
 
   return (
     <svg
-      viewBox={viewBox}
+      viewBox={`0 0 ${width} ${height}`}
       className="h-auto w-full"
       role="img"
-      aria-label={diagram.title ? `Diagram: ${diagram.title}` : 'Generated diagram'}
+      aria-label="Generated diagram"
     >
       <defs>
         <marker
-          id={`arrow-${arrowId}`}
+          id={arrowId}
           viewBox="0 0 10 10"
           refX="9"
           refY="5"
@@ -44,39 +37,35 @@ export function DiagramPreview({ diagram }: { diagram: DiagramArtifact }) {
           markerHeight="6"
           orient="auto-start-reverse"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" className="fill-slate-400" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#8CA4AC" />
         </marker>
       </defs>
 
       {diagram.edges.map((edge, index) => {
-        const from = positions.get(edge.from);
-        const to = positions.get(edge.to);
+        const from = nodeById.get(edge.from);
+        const to = nodeById.get(edge.to);
         if (!from || !to) return null;
-
-        // Anchor on the facing edge of each box so the arrow doesn't run under the label.
-        const start = anchor(from, to);
-        const end = anchor(to, from);
-        const midX = (start.x + end.x) / 2;
-        const midY = (start.y + end.y) / 2;
+        const geometry = diagramEdgeGeometry(from, to);
 
         return (
           <g key={`${edge.from}-${edge.to}-${index}`}>
             <line
-              x1={start.x}
-              y1={start.y}
-              x2={end.x}
-              y2={end.y}
-              className="stroke-slate-400"
+              x1={geometry.x1}
+              y1={geometry.y1}
+              x2={geometry.x2}
+              y2={geometry.y2}
+              stroke="#8CA4AC"
               strokeWidth={1.5}
-              markerEnd={`url(#arrow-${arrowId})`}
+              markerEnd={`url(#${arrowId})`}
             />
             {edge.label && (
               <text
-                x={midX}
-                y={midY - 6}
+                x={geometry.labelX}
+                y={geometry.labelY}
                 textAnchor="middle"
-                className="fill-slate-500 text-[11px]"
-                style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 4 }}
+                className="text-[10px]"
+                fill="#5A5F68"
+                style={{ paintOrder: 'stroke', stroke: '#FFFFFF', strokeWidth: 4 }}
               >
                 {edge.label}
               </text>
@@ -86,25 +75,28 @@ export function DiagramPreview({ diagram }: { diagram: DiagramArtifact }) {
       })}
 
       {diagram.nodes.map((node) => {
+        const size = diagramNodeSize(node.shape);
         const lines = wrap(node.label);
         return (
           <g key={node.id}>
             <rect
               x={node.x}
               y={node.y}
-              width={NODE_WIDTH}
-              height={NODE_HEIGHT}
+              width={size.width}
+              height={size.height}
               rx={10}
-              className="fill-white stroke-indigo-300"
+              fill="#FFFFFF"
+              stroke="#8CA4AC"
               strokeWidth={1.5}
             />
             {lines.map((line, i) => (
               <text
                 key={i}
-                x={node.x + NODE_WIDTH / 2}
-                y={node.y + NODE_HEIGHT / 2 + (i - (lines.length - 1) / 2) * 14 + 4}
+                x={node.x + size.width / 2}
+                y={node.y + size.height / 2 + (i - (lines.length - 1) / 2) * 13 + 4}
                 textAnchor="middle"
-                className="fill-slate-700 text-[12px] font-medium"
+                className="text-[11px] font-medium"
+                fill="#080C15"
               >
                 {line}
               </text>
@@ -114,27 +106,6 @@ export function DiagramPreview({ diagram }: { diagram: DiagramArtifact }) {
       })}
     </svg>
   );
-}
-
-/** Point on `node`'s border facing `toward`, so arrows meet boxes rather than centres. */
-function anchor(
-  node: { x: number; y: number },
-  toward: { x: number; y: number },
-): { x: number; y: number } {
-  const cx = node.x + NODE_WIDTH / 2;
-  const cy = node.y + NODE_HEIGHT / 2;
-  const tx = toward.x + NODE_WIDTH / 2;
-  const ty = toward.y + NODE_HEIGHT / 2;
-
-  const dx = tx - cx;
-  const dy = ty - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-
-  // Scale the direction vector until it hits the box edge.
-  const scaleX = dx === 0 ? Infinity : NODE_WIDTH / 2 / Math.abs(dx);
-  const scaleY = dy === 0 ? Infinity : NODE_HEIGHT / 2 / Math.abs(dy);
-  const scale = Math.min(scaleX, scaleY);
-  return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
 /** Greedy word wrap; the last visible line is ellipsised rather than overflowing the box. */

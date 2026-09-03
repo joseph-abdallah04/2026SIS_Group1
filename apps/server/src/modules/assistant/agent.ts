@@ -16,7 +16,7 @@ import type {
   AssistantHistoryMessage,
   AssistantStreamEvent,
   AssistantToolName,
-  ProposalArtifact,
+  ArtifactJson,
 } from '@roundtable/shared';
 
 import { streamChatCompletion, type LlmCredentials, type LlmMessage } from './llm.js';
@@ -144,7 +144,7 @@ async function executeToolCall(
   try {
     const result = await tool.run(parsedArguments, {
       signal,
-      emitArtifact: (artifact: ProposalArtifact, source: AssistantToolName) => {
+      emitArtifact: (artifact: ArtifactJson, source: AssistantToolName) => {
         emit({ type: 'artifact', artifactId: randomUUID(), source, artifact });
       },
     });

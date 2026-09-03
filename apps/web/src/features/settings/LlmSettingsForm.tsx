@@ -106,14 +106,14 @@ export function LlmSettingsForm() {
   };
 
   if (loading) {
-    return <p className="text-sm text-slate-500">Loading your AI settings…</p>;
+    return <p className="text-sm text-rt-ink-muted">Loading your AI settings…</p>;
   }
 
   return (
     <section className="max-w-xl space-y-5">
       <header className="space-y-1">
-        <h2 className="text-lg font-semibold text-slate-900">AI assistant provider</h2>
-        <p className="text-sm leading-relaxed text-slate-500">
+        <h2 className="text-lg font-semibold text-rt-ink">AI assistant provider</h2>
+        <p className="text-sm leading-relaxed text-rt-ink-muted">
           The assistant runs on <em>your</em> LLM account, so RoundTable never pays for or reads
           your inference. Any OpenAI-compatible endpoint works. Your key is encrypted before it is
           stored and is never sent back to the browser.
@@ -129,7 +129,7 @@ export function LlmSettingsForm() {
               setBaseUrl(preset.baseUrl);
               setModel(preset.model);
             }}
-            className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-200"
+            className="rounded-full bg-rt-primary-tint px-3 py-1 text-xs font-medium text-rt-ink-muted transition hover:bg-rt-tertiary"
           >
             {preset.label}
           </button>
@@ -186,33 +186,28 @@ export function LlmSettingsForm() {
       </Field>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={handleSave} loading={status.kind === 'saving'} disabled={!canSubmit}>
-          Save
+        <Button onClick={handleSave} disabled={!canSubmit || status.kind === 'saving'}>
+          {status.kind === 'saving' ? 'Saving…' : 'Save'}
         </Button>
-        <Button
-          variant="secondary"
-          onClick={handleTest}
-          loading={testing}
-          disabled={!draft || needsKey}
-        >
-          Test connection
+        <Button variant="secondary" onClick={handleTest} disabled={testing || (!draft && needsKey)}>
+          {testing ? 'Testing…' : 'Test connection'}
         </Button>
         {hasStoredKey && (
-          <Button variant="ghost" onClick={handleRemove}>
+          <Button variant="quiet" onClick={handleRemove}>
             Remove
           </Button>
         )}
       </div>
 
       {status.kind === 'saved' && (
-        <p className="text-sm text-emerald-600">
+        <p className="text-sm text-rt-primary-deep">
           Saved. The assistant is ready to use in a session.
         </p>
       )}
       {status.kind === 'error' && <p className="text-sm text-red-600">{status.message}</p>}
 
       {testResult && (
-        <p className={`text-sm ${testResult.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+        <p className={`text-sm ${testResult.ok ? 'text-rt-primary-deep' : 'text-red-600'}`}>
           {testResult.ok
             ? `Connected${testResult.latencyMs ? ` in ${testResult.latencyMs} ms` : ''}${
                 testResult.model ? ` · ${testResult.model}` : ''

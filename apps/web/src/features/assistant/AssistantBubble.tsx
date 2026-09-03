@@ -1,9 +1,8 @@
 // F34 — the floating assistant bubble and the panel it expands into.
 //
-// This is the one component the rest of the app mounts: drop
-// `<AssistantBubble sessionId={id} getContext={…} />` into the session page and the whole
-// assistant is present. It is fixed to the bottom-right and sits above the pinboard, with
-// enough bottom offset to clear the floating toolbar (F22).
+// Mounted by `SessionPinboard` inside `CreativeToolsProvider`, so Propose (F37) can use the
+// same submit path as the sticky and drawing editors. It sits bottom-right, above the
+// creative toolbar (F22), and never covers the board's own controls.
 //
 // It also owns the conversation. The panel unmounts when collapsed, so state kept there
 // would take the thread with it — and F34 requires history to persist across open/close,
@@ -19,8 +18,8 @@ import { useAssistantChat } from './useAssistantChat';
 export interface AssistantBubbleProps {
   sessionId: string;
   /**
-   * Called on every send so the agent sees the board as it is at that moment. The session
-   * page owns this: what question is active, what the user has selected, recent proposals.
+   * Called on every send so the agent sees the board as it is at that moment — active
+   * question, recent proposals, who wrote them.
    */
   getContext?: () => AssistantContext;
 }
@@ -83,11 +82,9 @@ export function AssistantBubble({ sessionId, getContext }: AssistantBubbleProps)
       : 'Open AI assistant';
 
   return (
-    <div className="pointer-events-none fixed right-4 bottom-20 z-50 flex flex-col items-end gap-3 sm:right-6">
+    <div className="pointer-events-none fixed right-4 bottom-24 z-50 flex flex-col items-end gap-3 sm:right-6">
       {open && (
         <AssistantPanel
-          sessionId={sessionId}
-          getContext={resolveContext}
           chat={chat}
           onClose={() => setOpen(false)}
           configured={configured}
@@ -100,12 +97,12 @@ export function AssistantBubble({ sessionId, getContext }: AssistantBubbleProps)
         onClick={() => setOpen((value) => !value)}
         aria-label={label}
         aria-expanded={open}
-        className="rt-bubble pointer-events-auto relative grid size-14 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg ring-1 ring-white/40 transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+        className="rt-bubble pointer-events-auto relative grid size-14 place-items-center rounded-full bg-rt-primary-deep text-white shadow-lg ring-1 ring-white/40 transition hover:bg-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
       >
         {/* Pulse only while the agent is working — an idle bubble stays still. */}
         {chat.streaming && (
           <span
-            className="rt-bubble-ring absolute inset-0 rounded-full bg-indigo-400"
+            className="rt-bubble-ring absolute inset-0 rounded-full bg-rt-primary"
             aria-hidden="true"
           />
         )}
@@ -115,14 +112,14 @@ export function AssistantBubble({ sessionId, getContext }: AssistantBubbleProps)
         {/* Unread beats the setup warning: if an answer is waiting, that is the news. */}
         {!open && unread ? (
           <span
-            className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-sky-400 ring-2 ring-white"
+            className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-rt-secondary ring-2 ring-white"
             title="New answer from the assistant"
             aria-hidden="true"
           />
         ) : (
           configured === false && (
             <span
-              className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-amber-400 text-[10px] font-bold text-amber-950"
+              className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-rt-secondary text-[10px] font-bold text-rt-ink"
               title="No AI provider configured"
               aria-hidden="true"
             >

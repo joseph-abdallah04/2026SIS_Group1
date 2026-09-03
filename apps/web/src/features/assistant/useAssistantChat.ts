@@ -12,7 +12,7 @@ import type {
   AssistantHistoryMessage,
   AssistantStreamEvent,
   AssistantToolName,
-  ProposalArtifact,
+  ArtifactJson,
   WebSearchResult,
 } from '@roundtable/shared';
 
@@ -35,7 +35,7 @@ export type ChatEntry =
       kind: 'artifact';
       id: string;
       source: AssistantToolName;
-      artifact: ProposalArtifact;
+      artifact: ArtifactJson;
       propose: ProposeState;
       proposeError?: string;
     }
@@ -213,7 +213,7 @@ function applyEvent(
  */
 function toHistory(entries: ChatEntry[]): AssistantHistoryMessage[] {
   const messages: AssistantHistoryMessage[] = [];
-  let pending: ProposalArtifact['type'][] = [];
+  let pending: ArtifactJson['type'][] = [];
 
   const flushPending = (trailingText: string) => {
     const content = `${artifactNote(pending)}${trailingText}`.trim();
@@ -243,7 +243,7 @@ function toHistory(entries: ChatEntry[]): AssistantHistoryMessage[] {
   return messages.slice(-HISTORY_LIMIT);
 }
 
-function artifactNote(artifacts: ProposalArtifact['type'][]): string {
+function artifactNote(artifacts: ArtifactJson['type'][]): string {
   if (artifacts.length === 0) return '';
   const counts = artifacts.reduce<Record<string, number>>((acc, type) => {
     acc[type] = (acc[type] ?? 0) + 1;

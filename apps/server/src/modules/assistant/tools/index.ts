@@ -11,7 +11,7 @@ import {
   summarizeArtifact,
   type AssistantToolName,
   type DiagramArtifact,
-  type ProposalArtifact,
+  type ArtifactJson,
   type StickyArtifact,
   type StickyColor,
   type WebSearchResult,
@@ -25,7 +25,7 @@ import { searchWeb } from './webSearch.js';
 export interface ToolRunContext {
   signal: AbortSignal;
   /** Streams an artifact to the client the moment it exists, before the model replies. */
-  emitArtifact(artifact: ProposalArtifact, source: AssistantToolName): void;
+  emitArtifact(artifact: ArtifactJson, source: AssistantToolName): void;
 }
 
 export interface ToolRunResult {
@@ -104,7 +104,6 @@ const webSearchTool: AssistantTool = {
 // ---------------------------------------------------------------------------
 
 const createDiagramArgsSchema = z.object({
-  title: z.string().max(120).optional(),
   nodes: z
     .array(
       z.object({
@@ -144,7 +143,6 @@ const createDiagramTool: AssistantTool = {
       parameters: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Short title for the diagram.' },
           nodes: {
             type: 'array',
             description: 'Boxes in the diagram, 2–24 of them.',
@@ -196,7 +194,6 @@ const createDiagramTool: AssistantTool = {
 
     const candidate: DiagramArtifact = {
       type: 'diagram',
-      ...(args.data.title ? { title: args.data.title } : {}),
       nodes: layoutDiagram(args.data.nodes, args.data.edges),
       edges: args.data.edges,
     };

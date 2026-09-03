@@ -97,7 +97,7 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 
 Notes:
 
-- `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[],edges:[]}`. Typed in `packages/shared`.
+- `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[{id,label,x,y,shape?}],edges:[{from,to,label?}]}`. Diagram `shape` is `box|container|text`; omitted means a legacy box. Typed in `packages/shared`.
 - Deleting a proposal that has reactions/votes/extends children: MVP = soft delete flag `deletedAt` on Proposal.
 
 ## 4. Realtime design (Socket.IO)
@@ -105,6 +105,20 @@ Notes:
 - **Rooms:** every connected socket joins `session:{sessionId}` after auth + membership check. All session events broadcast to that room.
 - **Authoritative server:** the browser never mutates shared state directly. Clients send intents (`proposal:create`), the server validates (membership, phase, ownership), persists, then broadcasts the resulting fact (`proposal:created`). This avoids sync bugs entirely.
 - **State snapshot:** on joining a session socket room the server sends `session:state` (current phase, active question, all proposals, votes status). Even though late-join is a stretch goal, this endpoint exists from day one because refreshes happen.
+
+### What gets persisted vs kept in memory (decided)
+
+The obvious worry with "every action writes to the database" is load. In practice a full session (6 people, 5 questions) is roughly 200 row writes over an hour — nowhere near enough to matter. Deferring all writes to session-end was considered and rejected: Render's free tier restarts on every `main` deploy and after ~15 min idle, so anything held only in memory dies mid-session with no recovery, for every ending except the clean ones. The database, not in-memory state, is also what makes running more than one server instance possible later.
+
+The real efficiency risk is **event frequency**, not session lifetime — some interactions fire far faster than a human decision. Rules:
+
+- **Persist immediately:** proposals, reactions, votes, phase transitions, memberships — anything that must survive a restart.
+- **Never persist:** who is currently connected, speaking indicators, typing state, in-progress drags/cursor positions. These live only in the socket room / LiveKit.
+- **`SessionMember` is history, not presence.** It records "joined at some point" — needed for the summary and the vote denominator. Live "who's online now" is a separate, in-memory concern (socket room membership). Don't conflate the two.
+- **Throttle high-frequency events.** Dragging a proposal fires ~60 events/second. Broadcast every move over the socket immediately for smooth motion, but persist only on drag-end or throttled to ~1/second.
+- **Derive, don't store counters.** "Who hasn't voted yet" is a count of `Vote` rows, not a stored counter that can drift from reality.
+
+If a hot-path socket handler's membership/phase check becomes a measured bottleneck, the fix is a small in-memory per-session cache (`{ activeQuestionId, status, memberIds }`) used only for validation, rebuilt from the database on first join — the database stays the write path and source of truth. Don't build this speculatively; only if profiling shows it's needed.
 
 ### Event catalogue (shared types live in `packages/shared/src/events.ts`)
 

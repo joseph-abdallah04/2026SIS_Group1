@@ -164,8 +164,8 @@ member:joined              → { user: User }
 
 - [x] Depends on `User` type from auth (shared)
 
-- [!] Phase values (`lobby`, `discussion`, `voting`, `results`) must be centrally defined in `packages/shared/types.ts`
-- Other modules consume phase events; don't drive them
+- [!] `Question.status` values (`pending`, `discussion`, `voting`, `answered`, `skipped`) must be centrally defined as `QuestionStatus` in `packages/shared` (see docs/02 §3) — supersedes any earlier `SessionPhase`/`phase` wording in this doc
+- Other modules consume status events; don't drive them
 
 ### Notes
 
@@ -318,7 +318,7 @@ Backend:  [NONE — validation only, in pinboard schema]
 // Diagram
 {
   type: "diagram",
-  nodes: Array<{ id, label, x, y }>,
+  nodes: Array<{ id, label, x, y, shape?: "box" | "container" | "text" }>,
   edges: Array<{ from, to, label? }>
 }
 ```
@@ -417,7 +417,7 @@ vote:result                → { questionId, winnerProposalId }
 - [x] Depends on `Session`, `Question`, `Proposal` existing (read-only queries)
 - [x] Depends on phase machine from session owner
 
-- [!] Coordinate phase values: Trigger shortlist UI only when `phase === "voting"`
+- [!] Coordinate status values: trigger shortlist UI only when `Question.status === "voting"` (see `QuestionStatus` in docs/02 §3)
 
 ### Notes
 
@@ -603,10 +603,10 @@ data: {"type":"done"}
 
 > **Note (from setup):** `packages/shared/src/index.ts` currently holds only User/Session/Question basics; the Prisma client already generates exact DB row types. Each owner adds their module's domain types here as they build — don't hand-mirror what Prisma already gives you.
 
-### 2. Phase values (session owner defines, all others consume)
+### 2. Question status values (session owner defines, all others consume)
 
-**Values:** `"lobby"`, `"discussion"`, `"voting"`, `"results"`  
-**Definition:** `packages/shared/src/types.ts` → export `type SessionPhase = ...`  
+**Values:** `"pending"`, `"discussion"`, `"voting"`, `"answered"`, `"skipped"` — see docs/02 §3, matches the Prisma `QuestionStatus` enum.  
+**Definition:** `packages/shared/src/index.ts` → export `type QuestionStatus = ...` (supersedes earlier `SessionPhase`/`phase` naming in this doc)  
 **Where used:**
 
 - Session owner: drives phase transitions via socket

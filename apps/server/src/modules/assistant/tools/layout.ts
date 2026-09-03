@@ -5,8 +5,8 @@
 // identical for the same input every time.
 import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
 
-export const NODE_SPACING_X = 230;
-export const NODE_SPACING_Y = 120;
+export const NODE_SPACING_X = 190;
+export const NODE_SPACING_Y = 96;
 export const ORIGIN_X = 60;
 export const ORIGIN_Y = 60;
 
@@ -82,6 +82,9 @@ export function layoutDiagram(nodes: UnpositionedNode[], edges: DiagramEdge[]): 
       positioned.push({
         id: node.id,
         label: node.label,
+        // Box geometry (120x56 via diagramNodeSize) — the default shape is a 72x32 dot,
+        // which is too small for the labels the model writes.
+        shape: 'box',
         x: ORIGIN_X + col * NODE_SPACING_X,
         y: ORIGIN_Y + offset + row * NODE_SPACING_Y,
       });

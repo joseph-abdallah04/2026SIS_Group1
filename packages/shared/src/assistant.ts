@@ -4,7 +4,73 @@
 // here is broadcast to a session room (docs/02 §8.8).
 import { z } from 'zod';
 
-import { proposalArtifactSchema, type ProposalArtifact } from './artifacts.js';
+import type { ArtifactJson, StickyColor } from './index.js';
+import { artifactJsonSchema } from './schemas.js';
+
+// ---------------------------------------------------------------------------
+// Artifact helpers the agent needs
+//
+// The artifact *shapes* belong to the pinboard/tools modules (see the pinboard section of
+// index.ts). These are the extra bits only the assistant needs: a value-level colour list
+// for the sticky tool to rotate through, and one validation gate for model-generated
+// content on its way to the board.
+// ---------------------------------------------------------------------------
+
+// `as const` matters: zod's `z.enum` needs a tuple, not a widened array, and indexing it
+// yields StickyColor rather than string.
+export const STICKY_COLORS = [
+  'yellow',
+  'pink',
+  'blue',
+  'green',
+] as const satisfies readonly StickyColor[];
+
+/** Hard ceiling on a serialized artifact (docs/02 §8.5) — keeps jsonb rows and frames sane. */
+export const MAX_ARTIFACT_BYTES = 100_000;
+
+export type ArtifactParseResult =
+  { ok: true; artifact: ArtifactJson } | { ok: false; error: string };
+
+/**
+ * Validates an artifact the model produced, before it is shown with a Propose button.
+ *
+ * The pinboard revalidates on the way in — this is not a substitute for that. It exists so
+ * a malformed tool call fails inside the chat, where the model can be told to fix it, and
+ * never reaches the point of being offered to the user.
+ */
+export function parseArtifact(input: unknown): ArtifactParseResult {
+  const parsed = artifactJsonSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues
+        .map((issue) => {
+          const path = issue.path.join('.');
+          return path ? `${path}: ${issue.message}` : issue.message;
+        })
+        .join('; '),
+    };
+  }
+
+  const size = new TextEncoder().encode(JSON.stringify(parsed.data)).length;
+  if (size > MAX_ARTIFACT_BYTES) {
+    return { ok: false, error: `Artifact is ${size} bytes; limit is ${MAX_ARTIFACT_BYTES}` };
+  }
+
+  return { ok: true, artifact: parsed.data };
+}
+
+/** One-line human summary — used in chat and in the agent's own context block. */
+export function summarizeArtifact(artifact: ArtifactJson): string {
+  switch (artifact.type) {
+    case 'sticky':
+      return artifact.text.length > 80 ? `${artifact.text.slice(0, 77)}…` : artifact.text;
+    case 'drawing':
+      return 'Freehand drawing';
+    case 'diagram':
+      return `${artifact.nodes.length} nodes, ${artifact.edges.length} edges`;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // F33 — per-user LLM provider configuration
@@ -153,7 +219,7 @@ export type AssistantStreamEvent =
       /** Client-side handle so the Propose button knows which artifact it is sending. */
       artifactId: string;
       source: AssistantToolName;
-      artifact: ProposalArtifact;
+      artifact: ArtifactJson;
     }
   | { type: 'error'; message: string; code?: string }
   | { type: 'done'; reason: 'complete' | 'error' | 'max-steps' | 'aborted' };
@@ -183,5 +249,5 @@ export const assistantArtifactFrameSchema = z.object({
   type: z.literal('artifact'),
   artifactId: z.string().min(1).max(64),
   source: z.enum(ASSISTANT_TOOL_NAMES),
-  artifact: proposalArtifactSchema,
+  artifact: artifactJsonSchema,
 });

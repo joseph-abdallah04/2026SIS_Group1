@@ -70,32 +70,32 @@ The loop runs at most `MAX_STEPS` (4) tool round trips per turn, then answers re
 
 ### Files
 
-| File                     | Responsibility                                                       |
-| ------------------------ | -------------------------------------------------------------------- |
-| `routes.ts`              | HTTP surface, request validation, SSE lifecycle                      |
-| `agent.ts`               | The tool-calling loop                                                |
-| `llm.ts`                 | OpenAI-compatible client: streaming, tool-call assembly, error shapes |
-| `context.ts`             | Session context assembly + the provider registry other modules use   |
-| `prompt.ts`              | Persona and operating rules                                          |
-| `tools/index.ts`         | The three tools and their JSON schemas                               |
-| `tools/webSearch.ts`     | DuckDuckGo HTML scrape + Instant Answer fallback                     |
-| `tools/layout.ts`        | Deterministic diagram layout                                         |
-| `llmConfig.service.ts`   | F33: save / read / test / decrypt provider config                    |
-| `../../lib/sse.ts`       | SSE writer (shared infrastructure, reusable)                         |
-| `../../lib/crypto.ts`    | AES-256-GCM encrypt/decrypt (shared infrastructure)                  |
+| File                   | Responsibility                                                        |
+| ---------------------- | --------------------------------------------------------------------- |
+| `routes.ts`            | HTTP surface, request validation, SSE lifecycle                       |
+| `agent.ts`             | The tool-calling loop                                                 |
+| `llm.ts`               | OpenAI-compatible client: streaming, tool-call assembly, error shapes |
+| `context.ts`           | Session context assembly + the provider registry other modules use    |
+| `prompt.ts`            | Persona and operating rules                                           |
+| `tools/index.ts`       | The three tools and their JSON schemas                                |
+| `tools/webSearch.ts`   | DuckDuckGo HTML scrape + Instant Answer fallback                      |
+| `tools/layout.ts`      | Deterministic diagram layout                                          |
+| `llmConfig.service.ts` | F33: save / read / test / decrypt provider config                     |
+| `../../lib/sse.ts`     | SSE writer (shared infrastructure, reusable)                          |
+| `../../lib/crypto.ts`  | AES-256-GCM encrypt/decrypt (shared infrastructure)                   |
 
 Frontend mirrors it under `apps/web/src/features/assistant/`, with the settings form in
 `apps/web/src/features/settings/`.
 
 ## API
 
-| Method   | Path                                  | Notes                                              |
-| -------- | ------------------------------------- | -------------------------------------------------- |
-| `GET`    | `/api/me/llm-config`                  | `{ baseUrl, model, hasKey }` — **never the key**   |
-| `PUT`    | `/api/me/llm-config`                  | `{ baseUrl, apiKey, model }`                       |
-| `DELETE` | `/api/me/llm-config`                  | forget the config                                  |
-| `POST`   | `/api/me/llm-config/test`             | body = config to test, or empty to test the stored one |
-| `POST`   | `/api/sessions/:id/assistant/chat`    | SSE stream (below)                                 |
+| Method   | Path                               | Notes                                                  |
+| -------- | ---------------------------------- | ------------------------------------------------------ |
+| `GET`    | `/api/me/llm-config`               | `{ baseUrl, model, hasKey }` — **never the key**       |
+| `PUT`    | `/api/me/llm-config`               | `{ baseUrl, apiKey, model }`                           |
+| `DELETE` | `/api/me/llm-config`               | forget the config                                      |
+| `POST`   | `/api/me/llm-config/test`          | body = config to test, or empty to test the stored one |
+| `POST`   | `/api/sessions/:id/assistant/chat` | SSE stream (below)                                     |
 
 ### Stream frames
 
@@ -145,16 +145,14 @@ registerAssistantContextProvider({
 The frontend half is `getAssistantContext()` in `apps/web/src/pages/index.tsx` — replace its
 body with live values from the session store.
 
-**Pinboard owner — F37.** "Propose" emits `proposalCreate` (typed in
-`packages/shared/src/events.ts`) and waits for an ack:
+**Pinboard / Creative Tools owners — F37.** "Propose" calls
+`useCreativeTools().submitArtifact(artifact)` — the same path the sticky and drawing editors
+use. The assistant does not emit `proposalCreate` itself and does not choose a position or an
+author; the board does. That is what makes an AI-suggested proposal indistinguishable from a
+hand-made one, and it means changes to the write path need nothing from this module.
 
-```ts
-{ sessionId, questionId, artifact, x, y, extendsProposalId? }
-  → ack { ok, proposalId?, error? }
-```
-
-That payload is provisional: it is yours to change. Change it there and the assistant follows.
-Until a handler exists the ack times out after 6s and the card shows a clear message.
+`AssistantBubble` is mounted inside `CreativeToolsProvider` in `SessionPinboard`, which is
+what puts that context in reach.
 
 **Auth owner — F33 handover.** `llmConfig.service.ts` holds every read/write of
 `UserLLMConfig`; move the file into `modules/auth/` and re-export it, or leave it and import
@@ -163,28 +161,34 @@ JWT work can use it too.
 
 ## Shims to remove
 
-Three temporary pieces, each marked in the code:
+Two temporary pieces, each marked in the code. The artifact shapes and the propose event
+that used to be listed here are gone — the pinboard and tools modules landed and this module
+now imports theirs.
 
 1. **`DEV_USER_ID` auth bypass** (`src/middleware/auth.ts`, `src/env.ts`, `.env.example`).
    Outside production, setting `DEV_USER_ID` makes every request act as that user so the
    assistant works before login exists. Replace the body of `requireAuth` with real JWT
    verification that sets `req.userId`; every caller already reads `getUserId(req)`, so nothing
    else changes.
-2. **`proposalCreate` in `packages/shared/src/events.ts`** — the pinboard owner's contract,
-   written early because F37 needed something to send.
-3. **Artifact shapes in `packages/shared/src/artifacts.ts`** — jointly owned by tools and
-   pinboard (docs/06 Coordination Point 3), authored here because F36 needed them first.
+2. **Client-side auth bypass** (`apps/web/src/lib/auth.tsx`). Login does not exist, so every
+   protected route bounced to a page that cannot log anyone in. In dev only, a missing token
+   falls through; `import.meta.env.DEV` is false in a production build, so the real gate
+   stands there. Delete it with the server shim above.
 
 ## Known gaps
 
-- **No membership check on the chat endpoint.** `SessionMember` does not exist yet, so any
-  authenticated user can open a chat scoped to any session id. The session context they get is
-  just the session title. Add the check when the sessions module lands — one call in
-  `routes.ts`.
+- **No membership check on the chat endpoint.** `SessionMember` now exists (main added it), so
+  this is newly fixable: any authenticated user can still open a chat scoped to any session id.
+  One call in `routes.ts` against the sessions module closes it. Worth doing before the
+  assistant sees real board content in a session the caller has not joined.
 - **`UserLLMConfig` has no `updatedAt`**, although docs/02 §3 lists one. Adding it needs a
   migration, which belongs to whoever owns that table; the code does not depend on it.
-- **Questions and proposals reach the agent from the client only.** The server-side half is the
-  provider registry above, waiting for those modules.
+- **Context is assembled client-side.** `SessionPinboard` builds it from the live board
+  (`describeBoard`), which is accurate and free. The server-side provider registry in
+  `context.ts` exists for anything the client cannot see — vote state, presence — and is
+  currently unused.
+- **Generated diagrams carry no title.** The shared `DiagramArtifact` has no `title` field, so
+  `create_diagram` no longer asks for one. If the tools owner adds it, re-enable it there.
 - **Web search is unofficial.** DuckDuckGo's HTML endpoint has no API and rate-limits; there is
   an Instant Answer fallback and then a graceful "search unavailable". `webSearch.test.ts` is
   the canary if their markup changes.
