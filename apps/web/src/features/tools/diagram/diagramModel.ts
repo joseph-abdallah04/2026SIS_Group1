@@ -11,6 +11,10 @@ import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
 
 export const DIAGRAM_NODE_SHAPES = ['box', 'container', 'text'] as const;
 
+// Palette drags carry the shape in a private media type so unrelated drops
+// (files, text from other apps) are ignored by the canvas.
+export const DIAGRAM_SHAPE_MEDIA_TYPE = 'application/x-roundtable-diagram-shape';
+
 export const DIAGRAM_SHAPE_LABELS: Record<DiagramNodeShape, string> = {
   box: 'Box',
   container: 'Container',
@@ -57,6 +61,30 @@ export interface DiagramSurfaceBounds {
   height: number;
 }
 
+export interface DiagramRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// The unzoomed view: the whole fixed sheet.
+export const DIAGRAM_FULL_VIEW_BOX: DiagramRect = {
+  x: 0,
+  y: 0,
+  width: DIAGRAM_CANVAS_WIDTH,
+  height: DIAGRAM_CANVAS_HEIGHT,
+};
+
+export type DiagramAlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
+export type DiagramDistributeAxis = 'horizontal' | 'vertical';
+
+export type PasteFragment = { nodes: DiagramNode[]; edges: DiagramEdge[] };
+
+export type PasteResult =
+  | { ok: true; nodes: DiagramNode[]; edges: DiagramEdge[]; addedIds: string[] }
+  | { ok: false; error: string };
+
 export function snapToGrid(value: number): number {
   return Math.round(value / DIAGRAM_GRID) * DIAGRAM_GRID;
 }
@@ -93,15 +121,63 @@ export function snapNodePosition(
   return snapPositionForSize(point, diagramNodeSize(shape));
 }
 
+// With snapping off, positions still stay whole numbers inside the sheet so the
+// artifact never carries drifting floats or out-of-bounds coordinates.
+// `shape` is deliberately not defaulted: a legacy node stores no shape and must
+// keep the smaller 72x32 bounds that `diagramNodeSize(undefined)` gives it.
+export function placeNodePosition(
+  point: DiagramPoint,
+  shape: DiagramNodeShape | undefined,
+  snap = true,
+): DiagramPoint {
+  const size = diagramNodeSize(shape);
+  if (snap) return snapPositionForSize(point, size);
+  const clamped = clampPositionForSize(point, size);
+  return { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+}
+
+// `viewBox` is the currently visible slice of the sheet, so screen coordinates
+// stay correct under zoom and pan.
 export function clientPointToDiagramPoint(
   clientPoint: DiagramPoint,
   bounds: DiagramSurfaceBounds,
+  viewBox: DiagramRect = DIAGRAM_FULL_VIEW_BOX,
 ): DiagramPoint {
-  if (bounds.width <= 0 || bounds.height <= 0) return { x: 0, y: 0 };
+  if (bounds.width <= 0 || bounds.height <= 0) return { x: viewBox.x, y: viewBox.y };
   return {
-    x: ((clientPoint.x - bounds.left) / bounds.width) * DIAGRAM_CANVAS_WIDTH,
-    y: ((clientPoint.y - bounds.top) / bounds.height) * DIAGRAM_CANVAS_HEIGHT,
+    x: viewBox.x + ((clientPoint.x - bounds.left) / bounds.width) * viewBox.width,
+    y: viewBox.y + ((clientPoint.y - bounds.top) / bounds.height) * viewBox.height,
   };
+}
+
+export function nodeBounds(node: DiagramNode): DiagramRect {
+  const size = diagramNodeSize(node.shape);
+  return { x: node.x, y: node.y, width: size.width, height: size.height };
+}
+
+export function normalizeRect(a: DiagramPoint, b: DiagramPoint): DiagramRect {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(a.x - b.x),
+    height: Math.abs(a.y - b.y),
+  };
+}
+
+// Marquee selection takes anything the rectangle touches, matching how design
+// tools behave when you sweep across a dense diagram.
+export function nodeIdsInRect(nodes: readonly DiagramNode[], rect: DiagramRect): string[] {
+  return nodes
+    .filter((node) => {
+      const bounds = nodeBounds(node);
+      return (
+        bounds.x <= rect.x + rect.width &&
+        rect.x <= bounds.x + bounds.width &&
+        bounds.y <= rect.y + rect.height &&
+        rect.y <= bounds.y + bounds.height
+      );
+    })
+    .map((node) => node.id);
 }
 
 export function createNodeId(existing: readonly DiagramNode[]): string {
@@ -168,13 +244,14 @@ export function addNode(
   nodes: readonly DiagramNode[],
   shape: DiagramNodeShape,
   at?: DiagramPoint,
+  snap = true,
 ): AddNodeResult {
   if (nodes.length >= DIAGRAM_NODE_LIMIT) {
     return { ok: false, error: `A diagram can hold ${DIAGRAM_NODE_LIMIT} elements at most.` };
   }
 
   const id = createNodeId(nodes);
-  const position = at ? snapNodePosition(at, shape) : findFreeNodePosition(nodes, shape);
+  const position = at ? placeNodePosition(at, shape, snap) : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
     label: DIAGRAM_SHAPE_LABELS[shape],
@@ -190,10 +267,192 @@ export function moveNode(
   nodes: readonly DiagramNode[],
   id: string,
   at: DiagramPoint,
+  snap = true,
 ): DiagramNode[] {
   return nodes.map((node) =>
-    node.id === id ? { ...node, ...snapPositionForSize(at, diagramNodeSize(node.shape)) } : node,
+    node.id === id ? { ...node, ...placeNodePosition(at, node.shape, snap) } : node,
   );
+}
+
+// Dragging a multi-selection moves one rigid group: the delta is snapped against
+// the anchor node and clamped so the whole selection stays on the sheet, which
+// keeps the relative positions the author arranged.
+export function moveNodesBy(
+  nodes: readonly DiagramNode[],
+  origins: Readonly<Record<string, DiagramPoint>>,
+  delta: DiagramPoint,
+  anchorId: string,
+  snap = true,
+): DiagramNode[] {
+  const anchorOrigin = origins[anchorId];
+  if (!anchorOrigin) return [...nodes];
+
+  const anchorNode = nodes.find((node) => node.id === anchorId);
+  const anchorTarget = placeNodePosition(
+    { x: anchorOrigin.x + delta.x, y: anchorOrigin.y + delta.y },
+    anchorNode?.shape,
+    snap,
+  );
+  let applied = { x: anchorTarget.x - anchorOrigin.x, y: anchorTarget.y - anchorOrigin.y };
+
+  for (const node of nodes) {
+    const origin = origins[node.id];
+    if (!origin) continue;
+    const size = diagramNodeSize(node.shape);
+    applied = {
+      x: Math.min(DIAGRAM_CANVAS_WIDTH - size.width - origin.x, Math.max(-origin.x, applied.x)),
+      y: Math.min(DIAGRAM_CANVAS_HEIGHT - size.height - origin.y, Math.max(-origin.y, applied.y)),
+    };
+  }
+
+  // Only the anchor is snapped. Re-snapping each member individually would pull
+  // them onto different grid cells and quietly deform the arrangement.
+  return nodes.map((node) => {
+    const origin = origins[node.id];
+    if (!origin) return node;
+    return {
+      ...node,
+      ...placeNodePosition({ x: origin.x + applied.x, y: origin.y + applied.y }, node.shape, false),
+    };
+  });
+}
+
+// Alignment is an exactness operation, so it never snaps afterwards: rounding a
+// shared edge onto the grid moves differently sized nodes by different amounts
+// and breaks the very alignment that was just computed.
+export function alignNodes(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+  mode: DiagramAlignMode,
+): DiagramNode[] {
+  const selected = nodes.filter((node) => ids.includes(node.id));
+  if (selected.length < 2) return [...nodes];
+
+  const boxes = selected.map(nodeBounds);
+  const left = Math.min(...boxes.map((box) => box.x));
+  const right = Math.max(...boxes.map((box) => box.x + box.width));
+  const top = Math.min(...boxes.map((box) => box.y));
+  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
+
+  return nodes.map((node) => {
+    if (!ids.includes(node.id)) return node;
+    const size = diagramNodeSize(node.shape);
+    const target = { x: node.x, y: node.y };
+    switch (mode) {
+      case 'left':
+        target.x = left;
+        break;
+      case 'centerX':
+        target.x = (left + right) / 2 - size.width / 2;
+        break;
+      case 'right':
+        target.x = right - size.width;
+        break;
+      case 'top':
+        target.y = top;
+        break;
+      case 'centerY':
+        target.y = (top + bottom) / 2 - size.height / 2;
+        break;
+      case 'bottom':
+        target.y = bottom - size.height;
+        break;
+    }
+    return { ...node, ...placeNodePosition(target, node.shape, false) };
+  });
+}
+
+// Equal gaps between bounding boxes, with the outermost two left where they are.
+// Like alignment, the result is exact and deliberately not re-snapped.
+export function distributeNodes(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+  axis: DiagramDistributeAxis,
+): DiagramNode[] {
+  const selected = nodes.filter((node) => ids.includes(node.id));
+  if (selected.length < 3) return [...nodes];
+
+  const horizontal = axis === 'horizontal';
+  const extent = (node: DiagramNode) =>
+    horizontal ? diagramNodeSize(node.shape).width : diagramNodeSize(node.shape).height;
+  const start = (node: DiagramNode) => (horizontal ? node.x : node.y);
+
+  const ordered = [...selected].sort((a, b) => start(a) - start(b));
+  const first = ordered[0]!;
+  const last = ordered.at(-1)!;
+  const spanStart = start(first);
+  const spanEnd = start(last) + extent(last);
+  const totalExtent = ordered.reduce((sum, node) => sum + extent(node), 0);
+  const gap = (spanEnd - spanStart - totalExtent) / (ordered.length - 1);
+
+  const placed = new Map<string, number>();
+  let cursor = spanStart;
+  for (const node of ordered) {
+    placed.set(node.id, cursor);
+    cursor += extent(node) + gap;
+  }
+
+  return nodes.map((node) => {
+    const position = placed.get(node.id);
+    if (position === undefined) return node;
+    const target = horizontal ? { x: position, y: node.y } : { x: node.x, y: position };
+    return { ...node, ...placeNodePosition(target, node.shape, false) };
+  });
+}
+
+export function copyDiagramFragment(
+  nodes: readonly DiagramNode[],
+  edges: readonly DiagramEdge[],
+  ids: readonly string[],
+): PasteFragment {
+  const selected = new Set(ids);
+  return {
+    nodes: nodes.filter((node) => selected.has(node.id)).map((node) => ({ ...node })),
+    // An arrow only travels with the copy when both of its endpoints do.
+    edges: edges
+      .filter((edge) => selected.has(edge.from) && selected.has(edge.to))
+      .map((edge) => ({ ...edge })),
+  };
+}
+
+export function pasteDiagramFragment(
+  nodes: readonly DiagramNode[],
+  edges: readonly DiagramEdge[],
+  fragment: PasteFragment,
+  offset: DiagramPoint,
+  snap = true,
+): PasteResult {
+  if (fragment.nodes.length === 0) {
+    return { ok: false, error: 'Copy at least one element first.' };
+  }
+  if (nodes.length + fragment.nodes.length > DIAGRAM_NODE_LIMIT) {
+    return { ok: false, error: `A diagram can hold ${DIAGRAM_NODE_LIMIT} elements at most.` };
+  }
+  if (edges.length + fragment.edges.length > DIAGRAM_EDGE_LIMIT) {
+    return { ok: false, error: `A diagram can hold ${DIAGRAM_EDGE_LIMIT} arrows at most.` };
+  }
+
+  const nextNodes = [...nodes];
+  const idMap = new Map<string, string>();
+  for (const source of fragment.nodes) {
+    const id = createNodeId(nextNodes);
+    idMap.set(source.id, id);
+    nextNodes.push({
+      ...source,
+      id,
+      ...placeNodePosition({ x: source.x + offset.x, y: source.y + offset.y }, source.shape, snap),
+    });
+  }
+
+  const nextEdges = [...edges];
+  for (const source of fragment.edges) {
+    const from = idMap.get(source.from);
+    const to = idMap.get(source.to);
+    if (!from || !to || from === to) continue;
+    nextEdges.push(source.label ? { from, to, label: source.label } : { from, to });
+  }
+
+  return { ok: true, nodes: nextNodes, edges: nextEdges, addedIds: [...idMap.values()] };
 }
 
 export function renameNode(
@@ -214,9 +473,18 @@ export function deleteNodeWithEdges(
   edges: readonly DiagramEdge[],
   id: string,
 ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  return deleteNodesWithEdges(nodes, edges, [id]);
+}
+
+export function deleteNodesWithEdges(
+  nodes: readonly DiagramNode[],
+  edges: readonly DiagramEdge[],
+  ids: readonly string[],
+): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  const removed = new Set(ids);
   return {
-    nodes: deleteNode(nodes, id),
-    edges: edges.filter((edge) => edge.from !== id && edge.to !== id),
+    nodes: nodes.filter((node) => !removed.has(node.id)),
+    edges: edges.filter((edge) => !removed.has(edge.from) && !removed.has(edge.to)),
   };
 }
 

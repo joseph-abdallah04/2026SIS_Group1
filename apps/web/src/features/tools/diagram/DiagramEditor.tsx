@@ -2,23 +2,40 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
   AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   Box,
   CheckCircle2,
+  ClipboardPaste,
   Container,
+  Copy,
+  CopyPlus,
+  Grid3x3,
   Link2,
   LoaderCircle,
+  Magnet,
+  Maximize2,
+  RotateCcw,
   Send,
   Trash2,
   Type,
   Undo2,
   Redo2,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import type { DiagramEdge, DiagramNode, DiagramNodeShape } from '@roundtable/shared';
 import {
@@ -39,29 +56,69 @@ import {
   DIAGRAM_LABEL_LIMIT,
   DIAGRAM_NODE_SHAPES,
   DIAGRAM_SHAPE_LABELS,
+  DIAGRAM_SHAPE_MEDIA_TYPE,
   addEdge,
   addNode,
+  alignNodes,
   autoLayoutNodes,
   clientPointToDiagramPoint,
+  copyDiagramFragment,
   deleteEdge,
-  deleteNodeWithEdges,
+  deleteNodesWithEdges,
+  distributeNodes,
   edgeKey,
-  moveNode,
+  moveNodesBy,
+  nodeIdsInRect,
+  normalizeRect,
+  pasteDiagramFragment,
   prepareDiagram,
   prepareEdgeLabel,
   prepareNodeLabel,
   renameEdge,
   renameNode,
+  type DiagramAlignMode,
+  type DiagramDistributeAxis,
   type DiagramPoint,
+  type DiagramRect,
+  type PasteFragment,
 } from './diagramModel';
 import { type DiagramSnapshot } from './diagramHistory';
+import {
+  DIAGRAM_DEFAULT_VIEW,
+  DIAGRAM_ZOOM_STEP,
+  diagramViewBoxAttribute,
+  diagramViewZoom,
+  fitDiagramView,
+  isDefaultDiagramView,
+  panDiagramView,
+  zoomDiagramView,
+  type DiagramView,
+} from './diagramView';
 import { useDiagramHistory } from './useDiagramHistory';
 
 interface DragSession {
   pointerId: number;
-  nodeId: string;
-  offset: DiagramPoint;
+  anchorId: string;
+  origins: Record<string, DiagramPoint>;
+  start: DiagramPoint;
   previous: DiagramSnapshot;
+  moved: boolean;
+}
+
+// Below this the press reads as a click rather than a drag, in sheet units.
+const DRAG_THRESHOLD = 1;
+
+interface PanSession {
+  pointerId: number;
+  startClient: DiagramPoint;
+  startView: DiagramView;
+}
+
+interface MarqueeSession {
+  pointerId: number;
+  origin: DiagramPoint;
+  current: DiagramPoint;
+  base: string[];
 }
 
 interface NodePress {
@@ -90,6 +147,20 @@ const DIAGRAM_VERTICAL_CHROME_REM = 14;
 const NODE_DOUBLE_PRESS_MS = 400;
 const NODE_DOUBLE_PRESS_SLOP_PX = 16;
 
+// Pasted and duplicated copies land one grid step down-right so they are visibly
+// distinct from their source instead of hiding exactly on top of it.
+const DIAGRAM_PASTE_OFFSET: DiagramPoint = { x: DIAGRAM_GRID * 2, y: DIAGRAM_GRID * 2 };
+
+const ALIGN_ACTIONS: { mode: DiagramAlignMode; label: string; Icon: typeof AlignStartVertical }[] =
+  [
+    { mode: 'left', label: 'Align left edges', Icon: AlignStartVertical },
+    { mode: 'centerX', label: 'Align horizontal centres', Icon: AlignCenterVertical },
+    { mode: 'right', label: 'Align right edges', Icon: AlignEndVertical },
+    { mode: 'top', label: 'Align top edges', Icon: AlignStartHorizontal },
+    { mode: 'centerY', label: 'Align vertical centres', Icon: AlignCenterHorizontal },
+    { mode: 'bottom', label: 'Align bottom edges', Icon: AlignEndHorizontal },
+  ];
+
 function displayShape(node: DiagramNode): DiagramNodeShape {
   return node.shape ?? 'box';
 }
@@ -110,6 +181,17 @@ function isNodeDoublePress(last: NodePress | null, nodeId: string, press: NodePr
     Math.abs(press.clientX - last.clientX) <= NODE_DOUBLE_PRESS_SLOP_PX &&
     Math.abs(press.clientY - last.clientY) <= NODE_DOUBLE_PRESS_SLOP_PX
   );
+}
+
+function nodeOrigins(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+): Record<string, DiagramPoint> {
+  const origins: Record<string, DiagramPoint> = {};
+  for (const node of nodes) {
+    if (ids.includes(node.id)) origins[node.id] = { x: node.x, y: node.y };
+  }
+  return origins;
 }
 
 export function DiagramEditor() {
@@ -134,7 +216,7 @@ export function DiagramEditor() {
   }
   const history = useDiagramHistory(initialSnapshotRef.current);
   const { nodes, edges } = history.snapshot;
-  const [selectedId, setSelectedId] = useState<string | null>(() => nodes[0]?.id ?? null);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => (nodes[0] ? [nodes[0].id] : []));
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
   const [connectionMode, setConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
@@ -142,14 +224,27 @@ export function DiagramEditor() {
   const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [view, setView] = useState<DiagramView>(DIAGRAM_DEFAULT_VIEW);
+  const [showGrid, setShowGrid] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [clipboard, setClipboard] = useState<PasteFragment | null>(null);
+  const [marquee, setMarquee] = useState<MarqueeSession | null>(null);
+  const [panReady, setPanReady] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
   const canvasRef = useRef<SVGSVGElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const edgeLabelInputRef = useRef<HTMLInputElement>(null);
   const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
+  const panRef = useRef<PanSession | null>(null);
+  const marqueeRef = useRef<MarqueeSession | null>(null);
   const lastNodePressRef = useRef<NodePress | null>(null);
   const nodeLabelStartRef = useRef<DiagramSnapshot | null>(null);
   const edgeLabelStartRef = useRef<DiagramSnapshot | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
   const selectedNode = selectedNodeById(nodes, selectedId);
   const selectedEdge = selectedEdgeByKey(edges, selectedEdgeKey);
   const connectionSource = selectedNodeById(nodes, connectionSourceId);
@@ -162,6 +257,10 @@ export function DiagramEditor() {
         : null
     : null;
   const isSubmitting = submissionStatus === 'submitting';
+  const zoomPercent = Math.round(diagramViewZoom(view) * 100);
+  const marqueeRect: DiagramRect | null = marquee
+    ? normalizeRect(marquee.origin, marquee.current)
+    : null;
 
   useEffect(() => {
     const shouldClose = () =>
@@ -182,29 +281,60 @@ export function DiagramEditor() {
     };
   }, [history.isDirty, setCloseGuard, submissionStatus]);
 
+  // React attaches `wheel` passively at the root, so the zoom gesture needs its
+  // own non-passive listener to be able to cancel the browser's page zoom.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onWheel = (event: WheelEvent) => {
+      // Ctrl/Cmd + wheel is also what a trackpad pinch sends; a plain wheel is
+      // left alone so the studio still scrolls normally.
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const bounds = canvas.getBoundingClientRect();
+      const anchor = clientPointToDiagramPoint(
+        { x: event.clientX, y: event.clientY },
+        { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
+        viewRef.current,
+      );
+      setView((current) => zoomDiagramView(current, Math.exp(-event.deltaY / 200), anchor));
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
   function clearError() {
     setValidationError(null);
     if (submissionError) resetSubmission();
   }
 
-  function surfacePoint(event: PointerEvent<SVGSVGElement>): DiagramPoint {
-    const bounds = event.currentTarget.getBoundingClientRect();
+  function surfacePoint(event: { clientX: number; clientY: number }): DiagramPoint {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const bounds = canvas.getBoundingClientRect();
     return clientPointToDiagramPoint(
       { x: event.clientX, y: event.clientY },
       { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
+      viewRef.current,
     );
   }
 
-  function addElement(shape: DiagramNodeShape) {
+  function selectOnly(id: string | null) {
+    setSelectedIds(id ? [id] : []);
+  }
+
+  function addElement(shape: DiagramNodeShape, at?: DiagramPoint) {
     clearError();
-    const result = addNode(history.snapshotRef.current.nodes, shape);
+    const result = addNode(history.snapshotRef.current.nodes, shape, at, snapEnabled);
     if (!result.ok) {
       setValidationError(result.error);
       return;
     }
 
     history.commit({ nodes: result.nodes, edges: history.snapshotRef.current.edges });
-    setSelectedId(result.addedId);
+    selectOnly(result.addedId);
     setSelectedEdgeKey(null);
   }
 
@@ -227,7 +357,7 @@ export function DiagramEditor() {
   function connectNode(node: DiagramNode) {
     if (!connectionSourceId) {
       setConnectionSourceId(node.id);
-      setSelectedId(node.id);
+      selectOnly(node.id);
       return;
     }
 
@@ -240,19 +370,18 @@ export function DiagramEditor() {
 
     history.commit({ nodes: graph.nodes, edges: result.edges });
     setSelectedEdgeKey(edgeKey(result.edge));
-    setSelectedId(null);
+    setSelectedIds([]);
     cancelConnection();
     queueMicrotask(() => edgeLabelInputRef.current?.focus());
   }
 
-  function removeSelectedNode() {
-    if (!selectedId) return;
+  function removeSelectedNodes() {
+    if (selectedIds.length === 0) return;
     clearError();
     const graph = history.snapshotRef.current;
-    const next = deleteNodeWithEdges(graph.nodes, graph.edges, selectedId);
-    history.commit(next);
-    setSelectedId(null);
-    if (connectionSourceId === selectedId) cancelConnection();
+    history.commit(deleteNodesWithEdges(graph.nodes, graph.edges, selectedIds));
+    if (connectionSourceId && selectedIds.includes(connectionSourceId)) cancelConnection();
+    setSelectedIds([]);
   }
 
   function removeSelectedEdge() {
@@ -261,6 +390,62 @@ export function DiagramEditor() {
     const graph = history.snapshotRef.current;
     history.commit({ nodes: graph.nodes, edges: deleteEdge(graph.edges, selectedEdge) });
     setSelectedEdgeKey(null);
+  }
+
+  function alignSelection(mode: DiagramAlignMode) {
+    if (selectedIds.length < 2) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: alignNodes(graph.nodes, selectedIds, mode),
+      edges: graph.edges,
+    });
+  }
+
+  function distributeSelection(axis: DiagramDistributeAxis) {
+    if (selectedIds.length < 3) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: distributeNodes(graph.nodes, selectedIds, axis),
+      edges: graph.edges,
+    });
+  }
+
+  function copySelection(): PasteFragment | null {
+    if (selectedIds.length === 0) return null;
+    const graph = history.snapshotRef.current;
+    const fragment = copyDiagramFragment(graph.nodes, graph.edges, selectedIds);
+    setClipboard(fragment);
+    return fragment;
+  }
+
+  function pasteFragment(fragment: PasteFragment | null) {
+    if (!fragment) {
+      setValidationError('Copy at least one element first.');
+      return;
+    }
+    clearError();
+    const graph = history.snapshotRef.current;
+    const result = pasteDiagramFragment(
+      graph.nodes,
+      graph.edges,
+      fragment,
+      DIAGRAM_PASTE_OFFSET,
+      snapEnabled,
+    );
+    if (!result.ok) {
+      setValidationError(result.error);
+      return;
+    }
+
+    history.commit({ nodes: result.nodes, edges: result.edges });
+    setSelectedIds(result.addedIds);
+    setSelectedEdgeKey(null);
+  }
+
+  function duplicateSelection() {
+    pasteFragment(copySelection());
   }
 
   function normalizeSelectedLabel() {
@@ -315,7 +500,7 @@ export function DiagramEditor() {
 
   function beginInlineNodeEdit(node: DiagramNode) {
     cancelConnection();
-    setSelectedId(node.id);
+    selectOnly(node.id);
     setSelectedEdgeKey(null);
     nodeLabelStartRef.current ??= history.snapshotRef.current;
     setEditingNodeId(node.id);
@@ -341,6 +526,18 @@ export function DiagramEditor() {
     canvasRef.current?.focus({ preventScroll: true });
   }
 
+  function zoomBy(factor: number) {
+    setView((current) => zoomDiagramView(current, factor));
+  }
+
+  function fitView() {
+    setView(fitDiagramView(history.snapshotRef.current.nodes));
+  }
+
+  function resetView() {
+    setView(DIAGRAM_DEFAULT_VIEW);
+  }
+
   function onNodePointerDown(event: PointerEvent<SVGGElement>, node: DiagramNode) {
     if (event.button !== 0 || dragRef.current || isSubmitting) return;
     event.preventDefault();
@@ -355,11 +552,6 @@ export function DiagramEditor() {
       connectNode(node);
       return;
     }
-    const bounds = canvas.getBoundingClientRect();
-    const point = clientPointToDiagramPoint(
-      { x: event.clientX, y: event.clientY },
-      { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
-    );
 
     const press: NodePress = {
       nodeId: node.id,
@@ -374,46 +566,180 @@ export function DiagramEditor() {
     }
     lastNodePressRef.current = press;
 
+    // Shift toggles membership instead of starting a drag, so a mis-drag cannot
+    // shove the rest of the selection while you are still building it.
+    if (event.shiftKey) {
+      setSelectedIds((current) =>
+        current.includes(node.id) ? current.filter((id) => id !== node.id) : [...current, node.id],
+      );
+      setSelectedEdgeKey(null);
+      clearError();
+      return;
+    }
+
+    const dragIds = selectedIds.includes(node.id) ? selectedIds : [node.id];
     dragRef.current = {
       pointerId: event.pointerId,
-      nodeId: node.id,
-      offset: { x: point.x - node.x, y: point.y - node.y },
+      anchorId: node.id,
+      origins: nodeOrigins(history.snapshotRef.current.nodes, dragIds),
+      start: surfacePoint(event),
       previous: history.snapshotRef.current,
+      moved: false,
     };
     canvas.setPointerCapture(event.pointerId);
-    setSelectedId(node.id);
+    setSelectedIds(dragIds);
     setSelectedEdgeKey(null);
     clearError();
   }
 
-  function updateDrag(event: PointerEvent<SVGSVGElement>) {
+  function onCanvasPointerDown(event: PointerEvent<SVGSVGElement>) {
+    if (isSubmitting) return;
+    lastNodePressRef.current = null;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.focus();
+
+    // Middle mouse or Space+drag pans; both leave the diagram itself untouched.
+    if (event.button === 1 || (event.button === 0 && panReady)) {
+      event.preventDefault();
+      panRef.current = {
+        pointerId: event.pointerId,
+        startClient: { x: event.clientX, y: event.clientY },
+        startView: viewRef.current,
+      };
+      setIsPanning(true);
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+
+    if (event.button !== 0) return;
+
+    if (connectionMode) {
+      setSelectedIds([]);
+      setSelectedEdgeKey(null);
+      return;
+    }
+
+    const origin = surfacePoint(event);
+    const base = event.shiftKey ? selectedIds : [];
+    const session: MarqueeSession = {
+      pointerId: event.pointerId,
+      origin,
+      current: origin,
+      base,
+    };
+    marqueeRef.current = session;
+    setMarquee(session);
+    canvas.setPointerCapture(event.pointerId);
+    if (!event.shiftKey) {
+      setSelectedIds([]);
+      setSelectedEdgeKey(null);
+    }
+  }
+
+  function updatePan(event: PointerEvent<SVGSVGElement>): boolean {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return true;
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return true;
+    setView(
+      panDiagramView(pan.startView, {
+        x: ((event.clientX - pan.startClient.x) / bounds.width) * pan.startView.width,
+        y: ((event.clientY - pan.startClient.y) / bounds.height) * pan.startView.height,
+      }),
+    );
+    return true;
+  }
+
+  function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
+    if (updatePan(event)) return;
+
+    const session = marqueeRef.current;
+    if (session && session.pointerId === event.pointerId) {
+      const next = { ...session, current: surfacePoint(event) };
+      marqueeRef.current = next;
+      setMarquee(next);
+      return;
+    }
+
     if (connectionMode) setConnectionPointer(surfacePoint(event));
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     const point = surfacePoint(event);
+    const delta = { x: point.x - drag.start.x, y: point.y - drag.start.y };
+    if (Math.abs(delta.x) >= DRAG_THRESHOLD || Math.abs(delta.y) >= DRAG_THRESHOLD) {
+      drag.moved = true;
+    }
     const graph = history.snapshotRef.current;
     history.preview({
-      nodes: moveNode(graph.nodes, drag.nodeId, {
-        x: point.x - drag.offset.x,
-        y: point.y - drag.offset.y,
-      }),
+      nodes: moveNodesBy(graph.nodes, drag.origins, delta, drag.anchorId, snapEnabled),
       edges: graph.edges,
     });
   }
 
-  function finishDrag(event: PointerEvent<SVGSVGElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    updateDrag(event);
-    history.recordPreview(drag.previous);
-    dragRef.current = null;
+  function endPan(event: PointerEvent<SVGSVGElement>): boolean {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return false;
+    updatePan(event);
+    panRef.current = null;
+    setIsPanning(false);
+    releaseCapture(event);
+    return true;
+  }
+
+  function endMarquee(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = marqueeRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    const rect = normalizeRect(session.origin, surfacePoint(event));
+    marqueeRef.current = null;
+    setMarquee(null);
+    releaseCapture(event);
+
+    // A plain click sweeps nothing; the selection was already cleared on press.
+    if (rect.width < 1 && rect.height < 1) return true;
+    const swept = nodeIdsInRect(history.snapshotRef.current.nodes, rect);
+    setSelectedIds([...new Set([...session.base, ...swept])]);
+    setSelectedEdgeKey(null);
+    return true;
+  }
+
+  function releaseCapture(event: PointerEvent<SVGSVGElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }
 
+  function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
+    if (endPan(event)) return;
+    if (endMarquee(event)) return;
+
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    onCanvasPointerMove(event);
+    history.recordPreview(drag.previous);
+    dragRef.current = null;
+    releaseCapture(event);
+
+    // Clicking one member of a multi-selection without moving it means "just
+    // this one", the same as it does in every other canvas editor.
+    if (!drag.moved && Object.keys(drag.origins).length > 1) {
+      setSelectedIds([drag.anchorId]);
+    }
+  }
+
   function onLostPointerCapture(event: PointerEvent<SVGSVGElement>) {
+    if (panRef.current?.pointerId === event.pointerId) {
+      panRef.current = null;
+      setIsPanning(false);
+    }
+    if (marqueeRef.current?.pointerId === event.pointerId) {
+      marqueeRef.current = null;
+      setMarquee(null);
+    }
     const drag = dragRef.current;
     if (drag?.pointerId === event.pointerId) {
       history.recordPreview(drag.previous);
@@ -421,8 +747,47 @@ export function DiagramEditor() {
     }
   }
 
+  function onCanvasDragOver(event: DragEvent<SVGSVGElement>) {
+    if (isSubmitting) return;
+    if (!event.dataTransfer?.types?.includes(DIAGRAM_SHAPE_MEDIA_TYPE)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onCanvasDrop(event: DragEvent<SVGSVGElement>) {
+    if (isSubmitting) return;
+    const shape = event.dataTransfer?.getData(DIAGRAM_SHAPE_MEDIA_TYPE) as DiagramNodeShape | '';
+    if (!shape || !DIAGRAM_NODE_SHAPES.includes(shape)) return;
+    event.preventDefault();
+    const point = surfacePoint(event);
+    const size = diagramNodeSize(shape);
+    addElement(shape, { x: point.x - size.width / 2, y: point.y - size.height / 2 });
+  }
+
+  function nudgeSelection(offset: DiagramPoint) {
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: moveNodesBy(
+        graph.nodes,
+        nodeOrigins(graph.nodes, selectedIds),
+        offset,
+        selectedIds[0]!,
+        snapEnabled,
+      ),
+      edges: graph.edges,
+    });
+  }
+
   function onCanvasKeyDown(event: KeyboardEvent<SVGSVGElement>) {
     if (isSubmitting) return;
+
+    // Held Space arms panning; the keyup below disarms it. Auto-repeat lands here
+    // too, which is why this returns rather than falling through to the shortcuts.
+    if (event.key === ' ') {
+      event.preventDefault();
+      setPanReady(true);
+      return;
+    }
 
     if (event.key === 'Enter' && selectedNode) {
       event.preventDefault();
@@ -433,11 +798,11 @@ export function DiagramEditor() {
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
       if (selectedEdge) removeSelectedEdge();
-      else removeSelectedNode();
+      else removeSelectedNodes();
       return;
     }
 
-    if (!selectedId) return;
+    if (selectedIds.length === 0) return;
 
     const delta = event.shiftKey ? DIAGRAM_GRID * 2 : DIAGRAM_GRID;
     const offsetByKey: Partial<Record<string, DiagramPoint>> = {
@@ -450,17 +815,11 @@ export function DiagramEditor() {
     if (!offset) return;
 
     event.preventDefault();
-    const graph = history.snapshotRef.current;
-    const selected = selectedNodeById(graph.nodes, selectedId);
-    if (selected) {
-      history.commit({
-        nodes: moveNode(graph.nodes, selectedId, {
-          x: selected.x + offset.x,
-          y: selected.y + offset.y,
-        }),
-        edges: graph.edges,
-      });
-    }
+    nudgeSelection(offset);
+  }
+
+  function onCanvasKeyUp(event: KeyboardEvent<SVGSVGElement>) {
+    if (event.key === ' ') setPanReady(false);
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -473,20 +832,47 @@ export function DiagramEditor() {
 
     const target = event.target;
     const isTextInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
-    if (!isTextInput && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    const withModifier = event.ctrlKey || event.metaKey;
+
+    if (!isTextInput && withModifier && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) redoDiagram();
       else undoDiagram();
       return;
     }
 
-    if (!isTextInput && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+    if (!isTextInput && withModifier && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       redoDiagram();
       return;
     }
 
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    if (!isTextInput && withModifier && !event.shiftKey) {
+      const key = event.key.toLowerCase();
+      if (key === 'a') {
+        event.preventDefault();
+        setSelectedIds(history.snapshotRef.current.nodes.map((node) => node.id));
+        setSelectedEdgeKey(null);
+        return;
+      }
+      if (key === 'c') {
+        event.preventDefault();
+        copySelection();
+        return;
+      }
+      if (key === 'v') {
+        event.preventDefault();
+        pasteFragment(clipboard);
+        return;
+      }
+      if (key === 'd') {
+        event.preventDefault();
+        duplicateSelection();
+        return;
+      }
+    }
+
+    if (event.key === 'Enter' && withModifier) {
       event.preventDefault();
       event.currentTarget.requestSubmit();
     }
@@ -534,6 +920,9 @@ export function DiagramEditor() {
   }
 
   const error = validationError ?? submissionError;
+  const canAlign = selectedIds.length >= 2 && !isSubmitting;
+  const canDistribute = selectedIds.length >= 3 && !isSubmitting;
+  const canvasCursor = isPanning ? 'cursor-grabbing' : panReady ? 'cursor-grab' : 'cursor-default';
 
   return (
     <form
@@ -555,12 +944,19 @@ export function DiagramEditor() {
           <div className="mt-2 grid grid-cols-3 gap-2 md:grid-cols-1">
             {DIAGRAM_NODE_SHAPES.map((shape) => {
               const ShapeIcon = SHAPE_ICONS[shape];
+              const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
               return (
                 <button
                   key={shape}
                   type="button"
+                  draggable={!disabled}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
                   onClick={() => addElement(shape)}
-                  disabled={nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting}
+                  disabled={disabled}
+                  title={`Click to place a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}, or drag it onto the canvas`}
                   className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 md:justify-start"
                 >
                   <ShapeIcon aria-hidden="true" size={16} />
@@ -579,6 +975,7 @@ export function DiagramEditor() {
             variant="quiet"
             className="min-h-8 px-2.5"
             disabled={nodes.length < 2 || isSubmitting}
+            title="Lay every element out on a tidy grid"
             onClick={() => {
               clearError();
               const graph = history.snapshotRef.current;
@@ -593,6 +990,7 @@ export function DiagramEditor() {
         <div className="mt-3 flex items-center gap-1.5">
           <IconButton
             label="Undo diagram change"
+            title="Undo (Ctrl+Z)"
             disabled={!history.canUndo || isSubmitting}
             onClick={undoDiagram}
           >
@@ -600,12 +998,97 @@ export function DiagramEditor() {
           </IconButton>
           <IconButton
             label="Redo diagram change"
+            title="Redo (Ctrl+Shift+Z)"
             disabled={!history.canRedo || isSubmitting}
             onClick={redoDiagram}
           >
             <Redo2 aria-hidden="true" size={16} />
           </IconButton>
+          <IconButton
+            label="Show grid"
+            title={showGrid ? 'Hide the grid' : 'Show the grid'}
+            aria-pressed={showGrid}
+            className={showGrid ? 'border-rt-primary bg-rt-primary-tint text-rt-ink' : ''}
+            onClick={() => setShowGrid((current) => !current)}
+          >
+            <Grid3x3 aria-hidden="true" size={16} />
+          </IconButton>
+          <IconButton
+            label="Snap to grid"
+            title={snapEnabled ? 'Turn snapping off' : 'Turn snapping on'}
+            aria-pressed={snapEnabled}
+            className={snapEnabled ? 'border-rt-primary bg-rt-primary-tint text-rt-ink' : ''}
+            onClick={() => setSnapEnabled((current) => !current)}
+          >
+            <Magnet aria-hidden="true" size={16} />
+          </IconButton>
         </div>
+
+        <section className="mt-4" aria-label="Selection">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Selection
+            </p>
+            <p className="text-[10px] text-rt-ink-faint" aria-live="polite">
+              {selectedIds.length} selected
+            </p>
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <IconButton
+              label="Duplicate selection"
+              title="Duplicate (Ctrl+D)"
+              disabled={selectedIds.length === 0 || isSubmitting}
+              onClick={duplicateSelection}
+            >
+              <CopyPlus aria-hidden="true" size={16} />
+            </IconButton>
+            <IconButton
+              label="Copy selection"
+              title="Copy (Ctrl+C)"
+              disabled={selectedIds.length === 0 || isSubmitting}
+              onClick={() => copySelection()}
+            >
+              <Copy aria-hidden="true" size={16} />
+            </IconButton>
+            <IconButton
+              label="Paste copied elements"
+              title="Paste (Ctrl+V)"
+              disabled={!clipboard || isSubmitting}
+              onClick={() => pasteFragment(clipboard)}
+            >
+              <ClipboardPaste aria-hidden="true" size={16} />
+            </IconButton>
+          </div>
+          <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+            {ALIGN_ACTIONS.map(({ mode, label, Icon }) => (
+              <IconButton
+                key={mode}
+                label={label}
+                className="h-9 w-9"
+                disabled={!canAlign}
+                onClick={() => alignSelection(mode)}
+              >
+                <Icon aria-hidden="true" size={15} />
+              </IconButton>
+            ))}
+            <IconButton
+              label="Distribute horizontally"
+              className="h-9 w-9"
+              disabled={!canDistribute}
+              onClick={() => distributeSelection('horizontal')}
+            >
+              <AlignHorizontalDistributeCenter aria-hidden="true" size={15} />
+            </IconButton>
+            <IconButton
+              label="Distribute vertically"
+              className="h-9 w-9"
+              disabled={!canDistribute}
+              onClick={() => distributeSelection('vertical')}
+            >
+              <AlignVerticalDistributeCenter aria-hidden="true" size={15} />
+            </IconButton>
+          </div>
+        </section>
 
         <section className="mt-4" aria-label="Arrows">
           <div className="flex items-center justify-between gap-2">
@@ -627,6 +1110,7 @@ export function DiagramEditor() {
                 variant="secondary"
                 className="min-h-8 px-2.5"
                 disabled={nodes.length < 2 || edges.length >= DIAGRAM_EDGE_LIMIT || isSubmitting}
+                title="Draw an arrow between two elements"
                 onClick={() => startConnection()}
               >
                 <Link2 aria-hidden="true" size={15} />
@@ -652,7 +1136,7 @@ export function DiagramEditor() {
               <span className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
                 Selected {DIAGRAM_SHAPE_LABELS[displayShape(selectedNode)].toLowerCase()}
               </span>
-              <IconButton label="Delete selected element" onClick={removeSelectedNode}>
+              <IconButton label="Delete selected element" onClick={removeSelectedNodes}>
                 <Trash2 aria-hidden="true" size={16} />
               </IconButton>
             </div>
@@ -757,27 +1241,72 @@ export function DiagramEditor() {
       </aside>
 
       <section className="relative flex min-h-0 items-center justify-center overflow-auto p-3 sm:p-6">
+        <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">
+          <IconButton
+            label="Zoom out"
+            title="Zoom out (Ctrl + scroll)"
+            className="h-8 w-8 border-transparent"
+            disabled={zoomPercent <= 100}
+            onClick={() => zoomBy(1 / DIAGRAM_ZOOM_STEP)}
+          >
+            <ZoomOut aria-hidden="true" size={15} />
+          </IconButton>
+          <span
+            className="min-w-13 text-center text-[11px] font-semibold tabular-nums text-rt-ink-muted"
+            aria-live="polite"
+          >
+            {zoomPercent}%
+          </span>
+          <IconButton
+            label="Zoom in"
+            title="Zoom in (Ctrl + scroll)"
+            className="h-8 w-8 border-transparent"
+            disabled={zoomPercent >= 400}
+            onClick={() => zoomBy(DIAGRAM_ZOOM_STEP)}
+          >
+            <ZoomIn aria-hidden="true" size={15} />
+          </IconButton>
+          <IconButton
+            label="Fit diagram to view"
+            title="Fit to content"
+            className="h-8 w-8 border-transparent"
+            disabled={nodes.length === 0}
+            onClick={fitView}
+          >
+            <Maximize2 aria-hidden="true" size={15} />
+          </IconButton>
+          <IconButton
+            label="Reset view"
+            title="Reset view to 100%"
+            className="h-8 w-8 border-transparent"
+            disabled={isDefaultDiagramView(view)}
+            onClick={resetView}
+          >
+            <RotateCcw aria-hidden="true" size={15} />
+          </IconButton>
+        </div>
+
         <svg
           ref={canvasRef}
           role="application"
           aria-label="Diagram canvas"
           tabIndex={0}
-          viewBox={`0 0 ${DIAGRAM_CANVAS_WIDTH} ${DIAGRAM_CANVAS_HEIGHT}`}
-          className="w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none"
+          viewBox={diagramViewBoxAttribute(view)}
+          className={`w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
           style={{
             maxWidth: `min(1200px, calc((100dvh - ${DIAGRAM_VERTICAL_CHROME_REM}rem) * ${DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT}))`,
             aspectRatio: `${DIAGRAM_CANVAS_WIDTH} / ${DIAGRAM_CANVAS_HEIGHT}`,
           }}
-          onPointerDown={() => {
-            lastNodePressRef.current = null;
-            setSelectedId(null);
-            setSelectedEdgeKey(null);
-          }}
-          onPointerMove={updateDrag}
-          onPointerUp={finishDrag}
-          onPointerCancel={finishDrag}
+          onPointerDown={onCanvasPointerDown}
+          onPointerMove={onCanvasPointerMove}
+          onPointerUp={onCanvasPointerUp}
+          onPointerCancel={onCanvasPointerUp}
           onLostPointerCapture={onLostPointerCapture}
           onKeyDown={onCanvasKeyDown}
+          onKeyUp={onCanvasKeyUp}
+          onBlur={() => setPanReady(false)}
+          onDragOver={onCanvasDragOver}
+          onDrop={onCanvasDrop}
         >
           <defs>
             <pattern
@@ -811,7 +1340,16 @@ export function DiagramEditor() {
               <path d="M0,0 L8,4 L0,8 Z" fill="#E0A33C" />
             </marker>
           </defs>
-          <rect width="100%" height="100%" fill="url(#diagram-grid)" />
+          {showGrid ? (
+            <rect
+              data-testid="diagram-grid"
+              x={0}
+              y={0}
+              width={DIAGRAM_CANVAS_WIDTH}
+              height={DIAGRAM_CANVAS_HEIGHT}
+              fill="url(#diagram-grid)"
+            />
+          ) : null}
 
           {edges.map((edge) => {
             const from = nodes.find((node) => node.id === edge.from);
@@ -832,7 +1370,7 @@ export function DiagramEditor() {
                   canvasRef.current?.focus();
                   lastNodePressRef.current = null;
                   cancelConnection();
-                  setSelectedId(null);
+                  setSelectedIds([]);
                   setSelectedEdgeKey(edgeKey(edge));
                 }}
               >
@@ -892,7 +1430,8 @@ export function DiagramEditor() {
           {nodes.map((node) => {
             const shape = displayShape(node);
             const size = diagramNodeSize(node.shape);
-            const selected = selectedId === node.id;
+            const selected = selectedIds.includes(node.id);
+            const isOnlySelection = selectedId === node.id;
             const isConnectionSource = connectionSourceId === node.id;
             const isConnectionTarget =
               connectionMode && hoveredTargetId === node.id && connectionSourceId !== node.id;
@@ -902,6 +1441,7 @@ export function DiagramEditor() {
                 key={node.id}
                 role="button"
                 aria-label={`${DIAGRAM_SHAPE_LABELS[shape]}: ${node.label || 'Unlabelled'}`}
+                aria-pressed={selected}
                 tabIndex={-1}
                 transform={`translate(${node.x}, ${node.y})`}
                 className={connectionMode ? 'cursor-crosshair' : 'cursor-move'}
@@ -1024,7 +1564,7 @@ export function DiagramEditor() {
                     {node.label || 'Unlabelled'}
                   </text>
                 )}
-                {selected && !connectionMode && !isEditing ? (
+                {isOnlySelection && !connectionMode && !isEditing ? (
                   <g aria-hidden="true" className="cursor-crosshair">
                     {[
                       [size.width / 2, 0],
@@ -1060,6 +1600,22 @@ export function DiagramEditor() {
               </g>
             );
           })}
+
+          {marqueeRect ? (
+            <rect
+              aria-hidden="true"
+              data-testid="selection-marquee"
+              x={marqueeRect.x}
+              y={marqueeRect.y}
+              width={marqueeRect.width}
+              height={marqueeRect.height}
+              fill="rgba(224,163,60,0.12)"
+              stroke="#E0A33C"
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              pointerEvents="none"
+            />
+          ) : null}
         </svg>
       </section>
 
