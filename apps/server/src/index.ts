@@ -12,6 +12,8 @@ import { pinboardRoutes } from './modules/pinboard/index.js';
 import { registerRealtimeGateway } from './realtime/gateway.js';
 import type { RealtimeServer } from './realtime/types.js';
 
+import { votingRoutes } from './modules/voting/shortlist.routes.js';
+
 const PORT = env.PORT;
 const CLIENT_ORIGIN = env.CLIENT_ORIGIN;
 
@@ -24,6 +26,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/sessions', pinboardRoutes);
+app.use('/api/sessions', votingRoutes);
 
 app.use(errorHandler);
 
