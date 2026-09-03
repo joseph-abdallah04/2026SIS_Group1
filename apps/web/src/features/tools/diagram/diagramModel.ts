@@ -5,7 +5,7 @@ import type {
   DiagramNodeShape,
 } from '@roundtable/shared';
 import { diagramNodeSize } from '@roundtable/shared';
-import { diagramArtifactSchema } from '@roundtable/shared/schemas';
+import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
 
@@ -350,7 +350,7 @@ export function prepareDiagram(
     return label ? { ...edge, label } : { from: edge.from, to: edge.to };
   });
 
-  const parsed = diagramArtifactSchema.safeParse({
+  const parsed = diagramWriteArtifactSchema.safeParse({
     type: 'diagram',
     nodes: normalizeDiagramCoordinates(normalizedNodes),
     edges: normalizedEdges,

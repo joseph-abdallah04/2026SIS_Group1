@@ -15,7 +15,7 @@ type ProposalRow = Prisma.ProposalGetPayload<{
 
 export function toBoardItem(row: ProposalRow): BoardItem {
   const parsed = artifactJsonSchema.safeParse(row.artifactJson);
-  if (!parsed.success) {
+  if (!parsed.success || parsed.data.type !== row.type) {
     throw new ApiError(500, 'Invalid artifact data stored for proposal', 'INVALID_ARTIFACT');
   }
 
@@ -89,7 +89,11 @@ export async function createProposal({
       select: { id: true },
     });
     if (!parent) {
-      throw new ApiError(400, 'Cannot extend a proposal that is not on this board', 'INVALID_EXTENDS');
+      throw new ApiError(
+        400,
+        'Cannot extend a proposal that is not on this board',
+        'INVALID_EXTENDS',
+      );
     }
   }
 

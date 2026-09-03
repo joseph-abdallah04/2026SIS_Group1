@@ -131,12 +131,12 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
   if (item.artifactJson.type !== 'diagram') return null;
   const compact = zoom <= 60;
   const { nodes, edges } = item.artifactJson;
-  const previewNodes = nodes;
-  const nodeById = new Map(previewNodes.map((n) => [n.id, n]));
+  const diagramNodes = nodes;
+  const nodeById = new Map(diagramNodes.map((node) => [node.id, node]));
   const svgWidth =
-    Math.max(...previewNodes.map((node) => node.x + diagramNodeSize(node.shape).width), 72) + 28;
+    Math.max(...diagramNodes.map((node) => node.x + diagramNodeSize(node.shape).width), 72) + 28;
   const svgHeight =
-    Math.max(...previewNodes.map((node) => node.y + diagramNodeSize(node.shape).height), 32) + 24;
+    Math.max(...diagramNodes.map((node) => node.y + diagramNodeSize(node.shape).height), 32) + 24;
   const width = cardWidthPx('diagram', zoom);
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from colliding.
   const arrowId = `rt-arrow-${item.id}`;
@@ -156,7 +156,7 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
         className="m-2.5 overflow-hidden rounded-lg bg-rt-surface-alt"
         style={{ minHeight: compact ? 64 : 96 }}
       >
-        {previewNodes.length === 0 ? (
+        {diagramNodes.length === 0 ? (
           <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
         ) : (
           <svg
@@ -210,10 +210,9 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                 </g>
               );
             })}
-            {previewNodes.map((node, index) => {
+            {diagramNodes.map((node) => {
               const shape = node.shape ?? 'box';
               const size = diagramNodeSize(node.shape);
-              const emphasised = shape === 'box' && index === 0;
 
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
@@ -222,8 +221,8 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                       width={size.width}
                       height={size.height}
                       rx={shape === 'container' ? 3 : 8}
-                      fill={shape === 'container' ? '#FAFAFA' : emphasised ? '#EEF2F4' : '#FFFFFF'}
-                      stroke={shape === 'container' || emphasised ? '#8CA4AC' : '#CFCFCF'}
+                      fill={shape === 'container' ? '#FAFAFA' : '#EEF2F4'}
+                      stroke="#8CA4AC"
                       strokeDasharray={shape === 'container' ? '4 3' : undefined}
                       strokeWidth={1}
                     />

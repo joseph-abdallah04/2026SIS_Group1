@@ -47,13 +47,14 @@ export const diagramEdgeSchema = z.object({
   label: z.string().max(200).optional(),
 });
 
-export const diagramArtifactSchema = z
-  .object({
-    type: z.literal('diagram'),
-    nodes: z.array(diagramNodeSchema).max(100),
-    edges: z.array(diagramEdgeSchema).max(200),
-  })
-  .superRefine(({ nodes, edges }, context) => {
+export const diagramArtifactSchema = z.object({
+  type: z.literal('diagram'),
+  nodes: z.array(diagramNodeSchema).max(100),
+  edges: z.array(diagramEdgeSchema).max(200),
+});
+
+export const diagramWriteArtifactSchema = diagramArtifactSchema.superRefine(
+  ({ nodes, edges }, context) => {
     const nodeIds = new Set<string>();
     nodes.forEach((node, index) => {
       if (nodeIds.has(node.id)) {
@@ -93,10 +94,10 @@ export const diagramArtifactSchema = z
       }
       edgeKeys.add(key);
     });
-  });
+  },
+);
 
-// Diagram invariants use `superRefine`; ZodEffects cannot participate in a discriminated union.
-export const artifactJsonSchema = z.union([
+export const artifactJsonSchema = z.discriminatedUnion('type', [
   stickyArtifactSchema,
   drawingArtifactSchema,
   diagramArtifactSchema,
@@ -114,9 +115,23 @@ export const proposalCreateSchema = z
     y: z.number(),
     extendsProposalId: z.string().optional(),
   })
-  .refine((v) => v.type === v.artifactJson.type, {
-    message: 'type must match artifactJson.type',
-    path: ['type'],
+  .superRefine((value, context) => {
+    if (value.type !== value.artifactJson.type) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'type must match artifactJson.type',
+        path: ['type'],
+      });
+    }
+
+    if (value.artifactJson.type === 'diagram') {
+      const parsed = diagramWriteArtifactSchema.safeParse(value.artifactJson);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          context.addIssue({ ...issue, path: ['artifactJson', ...issue.path] });
+        }
+      }
+    }
   });
 
 export type ProposalCreateInput = z.infer<typeof proposalCreateSchema>;

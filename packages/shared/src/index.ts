@@ -90,6 +90,34 @@ export interface DiagramEdgeGeometry {
   labelY: number;
 }
 
+export function diagramEdgeToPointGeometry(
+  from: Pick<DiagramNode, 'x' | 'y' | 'shape'>,
+  target: { x: number; y: number },
+): DiagramEdgeGeometry {
+  const fromSize = diagramNodeSize(from.shape);
+  const fromCenter = { x: from.x + fromSize.width / 2, y: from.y + fromSize.height / 2 };
+  const delta = { x: target.x - fromCenter.x, y: target.y - fromCenter.y };
+  const scale =
+    delta.x === 0 && delta.y === 0
+      ? 0
+      : 1 /
+        Math.max(
+          Math.abs(delta.x) / (fromSize.width / 2),
+          Math.abs(delta.y) / (fromSize.height / 2),
+        );
+  const x1 = fromCenter.x + delta.x * scale;
+  const y1 = fromCenter.y + delta.y * scale;
+
+  return {
+    x1,
+    y1,
+    x2: target.x,
+    y2: target.y,
+    labelX: (x1 + target.x) / 2,
+    labelY: (y1 + target.y) / 2 - 8,
+  };
+}
+
 export function diagramEdgeGeometry(
   from: Pick<DiagramNode, 'x' | 'y' | 'shape'>,
   to: Pick<DiagramNode, 'x' | 'y' | 'shape'>,

@@ -14,6 +14,7 @@ export interface CreativeToolsContextValue {
   openTool: (tool: ToolKind) => void;
   openEditorForExtend: (proposal: BoardItem) => void;
   closeTool: () => void;
+  setCloseGuard: (guard: (() => boolean) | null) => void;
   resetSubmission: () => void;
   submitArtifact: (artifact: ArtifactJson) => Promise<boolean>;
 }

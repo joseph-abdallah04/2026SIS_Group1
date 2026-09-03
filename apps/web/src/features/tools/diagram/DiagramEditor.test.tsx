@@ -34,7 +34,9 @@ function ExtendButton({ proposal }: { proposal: BoardItem }) {
   return <button onClick={() => openEditorForExtend(proposal)}>Extend diagram fixture</button>;
 }
 
-async function openDiagram() {
+async function openDiagram(
+  surface = { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT },
+) {
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: /^Diagram$/ }));
   const canvas = screen.getByRole('application', { name: 'Diagram canvas' });
@@ -43,10 +45,10 @@ async function openDiagram() {
     y: 0,
     left: 0,
     top: 0,
-    right: DIAGRAM_CANVAS_WIDTH,
-    bottom: DIAGRAM_CANVAS_HEIGHT,
-    width: DIAGRAM_CANVAS_WIDTH,
-    height: DIAGRAM_CANVAS_HEIGHT,
+    right: surface.width,
+    bottom: surface.height,
+    width: surface.width,
+    height: surface.height,
     toJSON: () => ({}),
   });
   return { user, canvas };
@@ -118,6 +120,11 @@ describe('diagram editor', () => {
 
     expect(node).toHaveAttribute('transform', 'translate(200, 128)');
     expect(canvas).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
+    expect(node).toHaveAttribute('transform', 'translate(200, 128)');
   });
 
   it('deletes the selected node from the focused canvas', async () => {
@@ -148,7 +155,159 @@ describe('diagram editor', () => {
 
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
 
-    expect(await screen.findByDisplayValue('Box')).toHaveFocus();
+    expect(await screen.findByLabelText('Edit box label')).toHaveFocus();
+  });
+
+  it('edits a node inline and undoes the whole label change in one step', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
+    const inlineInput = screen.getByLabelText('Edit box label');
+
+    await user.clear(inlineInput);
+    await user.type(inlineInput, 'API Gateway{Enter}');
+    expect(screen.getByRole('button', { name: 'Box: API Gateway' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
+    expect(screen.getByRole('button', { name: 'Box: API Gateway' })).toBeInTheDocument();
+  });
+
+  it('cancels an inline label edit with Escape without adding history', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
+    const inlineInput = screen.getByLabelText('Edit box label');
+
+    await user.clear(inlineInput);
+    await user.type(inlineInput, 'Discard me{Escape}');
+
+    expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+  });
+
+  it('shows connection handles and previews an arrow to the pointer and target', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram({ width: 480, height: 300 });
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    expect(screen.getAllByTestId('connection-handle')).toHaveLength(4);
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    fireEvent.pointerDown(screen.getAllByTestId('connection-handle')[1]!, {
+      button: 0,
+      pointerId: 21,
+    });
+
+    fireEvent.pointerMove(canvas, { pointerId: 21, clientX: 300, clientY: 150 });
+    const preview = screen.getByTestId('connection-preview');
+    expect(preview).toHaveAttribute('x2', '600');
+    expect(preview).toHaveAttribute('y2', '300');
+
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Box: Box' }));
+    expect(preview.getAttribute('x2')).not.toBe('600');
+  });
+
+  it('undoes a node deletion and its cascade-deleted arrow together', async () => {
+    const user = userEvent.setup();
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    const parent: BoardItem = {
+      id: 'history-parent',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [
+          { id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' },
+          { id: 'n2', label: 'Server', x: 240, y: 24, shape: 'container' },
+        ],
+        edges: [{ from: 'n1', to: 'n2' }],
+      },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+      extendsProposalId: null,
+    };
+    render(
+      <Harness propose={propose}>
+        <ExtendButton proposal={parent} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    await user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+    expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+
+    expect(screen.getByRole('button', { name: 'Box: Client' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Arrow from Client to Server' })).toBeInTheDocument();
+  });
+
+  it('keeps a dirty diagram open when discard confirmation is declined', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(confirm).toHaveBeenCalledWith('Discard your unsaved diagram changes?');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  it('registers beforeunload protection only while the diagram is dirty', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    const cleanEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    const dirtyEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+  });
+
+  it('blocks submission while a node drag is active', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Box: Box' }), {
+      button: 0,
+      pointerId: 31,
+      clientX: 30,
+      clientY: 30,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Finish moving the element before proposing.',
+    );
   });
 
   it('discards nodes when cancelled', async () => {
@@ -261,6 +420,44 @@ describe('diagram editor', () => {
     expect(Math.min(...payload.artifactJson.nodes.map((node) => node.y))).toBe(24);
   });
 
+  it('undoes an arrow label and connection as separate intentional changes', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    await user.click(screen.getByRole('button', { name: 'Box: Box' }));
+    const edgeLabel = screen.getByLabelText('Label (optional)');
+    await user.type(edgeLabel, 'calls');
+    await user.tab();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.getByRole('button', { name: 'Arrow from Container to Box' })).toBeInTheDocument();
+    expect(screen.queryByText('calls')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
+  });
+
+  it('undoes Arrange back to the authored positions', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+    const before = box.getAttribute('transform');
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    expect(box.getAttribute('transform')).not.toBe(before);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(box).toHaveAttribute('transform', before ?? '');
+  });
+
   it('deletes a selected arrow without deleting its nodes', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
@@ -340,6 +537,45 @@ describe('diagram editor', () => {
     expect(propose).toHaveBeenCalledTimes(1);
   });
 
+  it('commits an inline label before Ctrl+Enter proposes', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
+    const inline = screen.getByLabelText('Edit box label');
+    await user.clear(inline);
+    await user.type(inline, 'Committed label');
+
+    fireEvent.keyDown(inline, { key: 'Enter', ctrlKey: true });
+
+    const payload = propose.mock.calls[0]?.[0];
+    expect(payload?.artifactJson.type === 'diagram' && payload.artifactJson.nodes[0]?.label).toBe(
+      'Committed label',
+    );
+  });
+
+  it('does not ask to discard after a successful proposal', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, 'confirm');
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Diagram proposed' });
+    const backButtons = screen.getAllByRole('button', { name: 'Back to pinboard' });
+    await user.click(backButtons.at(-1)!);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
   it('ends a drag safely when pointer capture is lost', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
@@ -350,9 +586,12 @@ describe('diagram editor', () => {
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
     fireEvent.pointerDown(node, { button: 0, pointerId: 8, clientX: 30, clientY: 30 });
+    fireEvent.pointerMove(canvas, { pointerId: 8, clientX: 300, clientY: 200 });
     fireEvent.lostPointerCapture(canvas, { pointerId: 8 });
     fireEvent.pointerMove(canvas, { pointerId: 8, clientX: 400, clientY: 300 });
 
+    expect(node).toHaveAttribute('transform', 'translate(296, 192)');
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(node).toHaveAttribute('transform', 'translate(24, 24)');
   });
 });

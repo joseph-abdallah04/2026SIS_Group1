@@ -1,4 +1,11 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type PointerEvent,
+} from 'react';
 import {
   AlignHorizontalDistributeCenter,
   Box,
@@ -9,10 +16,16 @@ import {
   Send,
   Trash2,
   Type,
+  Undo2,
+  Redo2,
   X,
 } from 'lucide-react';
 import type { DiagramEdge, DiagramNode, DiagramNodeShape } from '@roundtable/shared';
-import { diagramEdgeGeometry, diagramNodeSize } from '@roundtable/shared';
+import {
+  diagramEdgeGeometry,
+  diagramEdgeToPointGeometry,
+  diagramNodeSize,
+} from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
 import { IconButton } from '../../../components/ui/IconButton';
@@ -41,11 +54,14 @@ import {
   renameNode,
   type DiagramPoint,
 } from './diagramModel';
+import { type DiagramSnapshot } from './diagramHistory';
+import { useDiagramHistory } from './useDiagramHistory';
 
 interface DragSession {
   pointerId: number;
   nodeId: string;
   offset: DiagramPoint;
+  previous: DiagramSnapshot;
 }
 
 const SHAPE_ICONS = {
@@ -74,32 +90,68 @@ export function DiagramEditor() {
     extensionSource,
     isLive,
     resetSubmission,
+    setCloseGuard,
     submissionError,
     submissionStatus,
     submitArtifact,
   } = useCreativeTools();
   const sourceArtifact =
     extensionSource?.artifactJson.type === 'diagram' ? extensionSource.artifactJson : null;
-  const [nodes, setNodes] = useState<DiagramNode[]>(() =>
-    (sourceArtifact?.nodes ?? []).map((node) => ({ ...node })),
-  );
-  const [edges, setEdges] = useState<DiagramEdge[]>(() =>
-    (sourceArtifact?.edges ?? []).map((edge) => ({ ...edge })),
-  );
+  const initialSnapshotRef = useRef<DiagramSnapshot | null>(null);
+  if (!initialSnapshotRef.current) {
+    initialSnapshotRef.current = {
+      nodes: (sourceArtifact?.nodes ?? []).map((node) => ({ ...node })),
+      edges: (sourceArtifact?.edges ?? []).map((edge) => ({ ...edge })),
+    };
+  }
+  const history = useDiagramHistory(initialSnapshotRef.current);
+  const { nodes, edges } = history.snapshot;
   const [selectedId, setSelectedId] = useState<string | null>(() => nodes[0]?.id ?? null);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
   const [connectionMode, setConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
+  const [connectionPointer, setConnectionPointer] = useState<DiagramPoint | null>(null);
+  const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const edgeLabelInputRef = useRef<HTMLInputElement>(null);
+  const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
+  const nodeLabelStartRef = useRef<DiagramSnapshot | null>(null);
+  const edgeLabelStartRef = useRef<DiagramSnapshot | null>(null);
   const selectedNode = selectedNodeById(nodes, selectedId);
   const selectedEdge = selectedEdgeByKey(edges, selectedEdgeKey);
+  const connectionSource = selectedNodeById(nodes, connectionSourceId);
+  const hoveredTarget = selectedNodeById(nodes, hoveredTargetId);
+  const connectionPreview = connectionSource
+    ? hoveredTarget
+      ? diagramEdgeGeometry(connectionSource, hoveredTarget)
+      : connectionPointer
+        ? diagramEdgeToPointGeometry(connectionSource, connectionPointer)
+        : null
+    : null;
   const isSubmitting = submissionStatus === 'submitting';
+
+  useEffect(() => {
+    const shouldClose = () =>
+      !history.isDirty ||
+      submissionStatus === 'success' ||
+      window.confirm('Discard your unsaved diagram changes?');
+    setCloseGuard(shouldClose);
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!history.isDirty || submissionStatus === 'success') return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      setCloseGuard(null);
+    };
+  }, [history.isDirty, setCloseGuard, submissionStatus]);
 
   function clearError() {
     setValidationError(null);
@@ -116,13 +168,13 @@ export function DiagramEditor() {
 
   function addElement(shape: DiagramNodeShape) {
     clearError();
-    const result = addNode(nodesRef.current, shape);
+    const result = addNode(history.snapshotRef.current.nodes, shape);
     if (!result.ok) {
       setValidationError(result.error);
       return;
     }
 
-    setNodes(result.nodes);
+    history.commit({ nodes: result.nodes, edges: history.snapshotRef.current.edges });
     setSelectedId(result.addedId);
     setSelectedEdgeKey(null);
   }
@@ -130,12 +182,16 @@ export function DiagramEditor() {
   function cancelConnection() {
     setConnectionMode(false);
     setConnectionSourceId(null);
+    setConnectionPointer(null);
+    setHoveredTargetId(null);
   }
 
-  function startConnection() {
+  function startConnection(sourceId: string | null = selectedId) {
     clearError();
     setConnectionMode(true);
-    setConnectionSourceId(selectedId);
+    setConnectionSourceId(sourceId);
+    setConnectionPointer(null);
+    setHoveredTargetId(null);
     setSelectedEdgeKey(null);
   }
 
@@ -146,13 +202,14 @@ export function DiagramEditor() {
       return;
     }
 
-    const result = addEdge(nodesRef.current, edges, connectionSourceId, node.id);
+    const graph = history.snapshotRef.current;
+    const result = addEdge(graph.nodes, graph.edges, connectionSourceId, node.id);
     if (!result.ok) {
       setValidationError(result.error);
       return;
     }
 
-    setEdges(result.edges);
+    history.commit({ nodes: graph.nodes, edges: result.edges });
     setSelectedEdgeKey(edgeKey(result.edge));
     setSelectedId(null);
     cancelConnection();
@@ -162,9 +219,9 @@ export function DiagramEditor() {
   function removeSelectedNode() {
     if (!selectedId) return;
     clearError();
-    const next = deleteNodeWithEdges(nodesRef.current, edges, selectedId);
-    setNodes(next.nodes);
-    setEdges(next.edges);
+    const graph = history.snapshotRef.current;
+    const next = deleteNodeWithEdges(graph.nodes, graph.edges, selectedId);
+    history.commit(next);
     setSelectedId(null);
     if (connectionSourceId === selectedId) cancelConnection();
   }
@@ -172,27 +229,87 @@ export function DiagramEditor() {
   function removeSelectedEdge() {
     if (!selectedEdge) return;
     clearError();
-    setEdges((current) => deleteEdge(current, selectedEdge));
+    const graph = history.snapshotRef.current;
+    history.commit({ nodes: graph.nodes, edges: deleteEdge(graph.edges, selectedEdge) });
     setSelectedEdgeKey(null);
   }
 
   function normalizeSelectedLabel() {
     if (!selectedNode) return;
-    setNodes((current) =>
-      renameNode(current, selectedNode.id, prepareNodeLabel(selectedNode.label)),
-    );
+    const graph = history.snapshotRef.current;
+    history.preview({
+      nodes: renameNode(graph.nodes, selectedNode.id, prepareNodeLabel(selectedNode.label)),
+      edges: graph.edges,
+    });
+    const previous = nodeLabelStartRef.current;
+    if (previous) history.recordPreview(previous);
+    nodeLabelStartRef.current = null;
   }
 
   function normalizeSelectedEdgeLabel() {
     if (!selectedEdge) return;
-    setEdges((current) =>
-      renameEdge(current, selectedEdge, prepareEdgeLabel(selectedEdge.label ?? '')),
-    );
+    const graph = history.snapshotRef.current;
+    history.preview({
+      nodes: graph.nodes,
+      edges: renameEdge(graph.edges, selectedEdge, prepareEdgeLabel(selectedEdge.label ?? '')),
+    });
+    const previous = edgeLabelStartRef.current;
+    if (previous) history.recordPreview(previous);
+    edgeLabelStartRef.current = null;
   }
 
-  function focusLabelEditor() {
-    labelInputRef.current?.focus();
-    labelInputRef.current?.select();
+  function cancelNodeLabelEdit() {
+    const previous = nodeLabelStartRef.current;
+    if (previous) history.restorePreview(previous);
+    nodeLabelStartRef.current = null;
+  }
+
+  function cancelEdgeLabelEdit() {
+    const previous = edgeLabelStartRef.current;
+    if (previous) history.restorePreview(previous);
+    edgeLabelStartRef.current = null;
+  }
+
+  function undoDiagram() {
+    cancelConnection();
+    cancelNodeLabelEdit();
+    cancelEdgeLabelEdit();
+    history.undo();
+  }
+
+  function redoDiagram() {
+    cancelConnection();
+    cancelNodeLabelEdit();
+    cancelEdgeLabelEdit();
+    history.redo();
+  }
+
+  function beginInlineNodeEdit(node: DiagramNode) {
+    cancelConnection();
+    setSelectedId(node.id);
+    setSelectedEdgeKey(null);
+    nodeLabelStartRef.current ??= history.snapshotRef.current;
+    setEditingNodeId(node.id);
+    queueMicrotask(() => {
+      inlineLabelInputRef.current?.focus();
+      inlineLabelInputRef.current?.select();
+    });
+  }
+
+  function finishInlineNodeEdit() {
+    if (!nodeLabelStartRef.current) {
+      setEditingNodeId(null);
+      return;
+    }
+    normalizeSelectedLabel();
+    setEditingNodeId(null);
+    canvasRef.current?.focus({ preventScroll: true });
+  }
+
+  function cancelInlineNodeEdit() {
+    cancelNodeLabelEdit();
+    setEditingNodeId(null);
+    canvasRef.current?.focus({ preventScroll: true });
   }
 
   function onNodePointerDown(event: PointerEvent<SVGGElement>, node: DiagramNode) {
@@ -217,6 +334,7 @@ export function DiagramEditor() {
       pointerId: event.pointerId,
       nodeId: node.id,
       offset: { x: point.x - node.x, y: point.y - node.y },
+      previous: history.snapshotRef.current,
     };
     canvas.setPointerCapture(event.pointerId);
     setSelectedId(node.id);
@@ -225,22 +343,26 @@ export function DiagramEditor() {
   }
 
   function updateDrag(event: PointerEvent<SVGSVGElement>) {
+    if (connectionMode) setConnectionPointer(surfacePoint(event));
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     const point = surfacePoint(event);
-    setNodes((current) =>
-      moveNode(current, drag.nodeId, {
+    const graph = history.snapshotRef.current;
+    history.preview({
+      nodes: moveNode(graph.nodes, drag.nodeId, {
         x: point.x - drag.offset.x,
         y: point.y - drag.offset.y,
       }),
-    );
+      edges: graph.edges,
+    });
   }
 
   function finishDrag(event: PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     updateDrag(event);
+    history.recordPreview(drag.previous);
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -248,11 +370,21 @@ export function DiagramEditor() {
   }
 
   function onLostPointerCapture(event: PointerEvent<SVGSVGElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+    const drag = dragRef.current;
+    if (drag?.pointerId === event.pointerId) {
+      history.recordPreview(drag.previous);
+      dragRef.current = null;
+    }
   }
 
   function onCanvasKeyDown(event: KeyboardEvent<SVGSVGElement>) {
     if (isSubmitting) return;
+
+    if (event.key === 'Enter' && selectedNode) {
+      event.preventDefault();
+      beginInlineNodeEdit(selectedNode);
+      return;
+    }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
@@ -274,14 +406,16 @@ export function DiagramEditor() {
     if (!offset) return;
 
     event.preventDefault();
-    const selected = selectedNodeById(nodesRef.current, selectedId);
+    const graph = history.snapshotRef.current;
+    const selected = selectedNodeById(graph.nodes, selectedId);
     if (selected) {
-      setNodes((current) =>
-        moveNode(current, selectedId, {
+      history.commit({
+        nodes: moveNode(graph.nodes, selectedId, {
           x: selected.x + offset.x,
           y: selected.y + offset.y,
         }),
-      );
+        edges: graph.edges,
+      });
     }
   }
 
@@ -293,6 +427,21 @@ export function DiagramEditor() {
       return;
     }
 
+    const target = event.target;
+    const isTextInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+    if (!isTextInput && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) redoDiagram();
+      else undoDiagram();
+      return;
+    }
+
+    if (!isTextInput && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+      event.preventDefault();
+      redoDiagram();
+      return;
+    }
+
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       event.currentTarget.requestSubmit();
@@ -301,13 +450,19 @@ export function DiagramEditor() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (dragRef.current) {
+      setValidationError('Finish moving the element before proposing.');
+      return;
+    }
     if (connectionMode) {
       setValidationError('Finish or cancel the arrow before proposing.');
       return;
     }
+    if (editingNodeId) finishInlineNodeEdit();
     normalizeSelectedLabel();
     normalizeSelectedEdgeLabel();
-    const prepared = prepareDiagram(nodesRef.current, edges);
+    const graph = history.snapshotRef.current;
+    const prepared = prepareDiagram(graph.nodes, graph.edges);
     if (!prepared.ok) {
       setValidationError(prepared.error);
       return;
@@ -382,12 +537,30 @@ export function DiagramEditor() {
             disabled={nodes.length < 2 || isSubmitting}
             onClick={() => {
               clearError();
-              setNodes((current) => autoLayoutNodes(current));
+              const graph = history.snapshotRef.current;
+              history.commit({ nodes: autoLayoutNodes(graph.nodes), edges: graph.edges });
             }}
           >
             <AlignHorizontalDistributeCenter aria-hidden="true" size={15} />
             Arrange
           </Button>
+        </div>
+
+        <div className="mt-3 flex items-center gap-1.5">
+          <IconButton
+            label="Undo diagram change"
+            disabled={!history.canUndo || isSubmitting}
+            onClick={undoDiagram}
+          >
+            <Undo2 aria-hidden="true" size={16} />
+          </IconButton>
+          <IconButton
+            label="Redo diagram change"
+            disabled={!history.canRedo || isSubmitting}
+            onClick={redoDiagram}
+          >
+            <Redo2 aria-hidden="true" size={16} />
+          </IconButton>
         </div>
 
         <section className="mt-4" aria-label="Arrows">
@@ -410,7 +583,7 @@ export function DiagramEditor() {
                 variant="secondary"
                 className="min-h-8 px-2.5"
                 disabled={nodes.length < 2 || edges.length >= DIAGRAM_EDGE_LIMIT || isSubmitting}
-                onClick={startConnection}
+                onClick={() => startConnection()}
               >
                 <Link2 aria-hidden="true" size={15} />
                 Connect
@@ -450,11 +623,28 @@ export function DiagramEditor() {
               id="diagram-node-label"
               value={selectedNode.label}
               maxLength={DIAGRAM_LABEL_LIMIT}
+              onFocus={() => {
+                nodeLabelStartRef.current ??= history.snapshotRef.current;
+              }}
               onChange={(event) => {
                 clearError();
-                setNodes((current) => renameNode(current, selectedNode.id, event.target.value));
+                const graph = history.snapshotRef.current;
+                history.preview({
+                  nodes: renameNode(graph.nodes, selectedNode.id, event.target.value),
+                  edges: graph.edges,
+                });
               }}
               onBlur={normalizeSelectedLabel}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelNodeLabelEdit();
+                  canvasRef.current?.focus();
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
               className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
             />
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
@@ -490,11 +680,28 @@ export function DiagramEditor() {
               id="diagram-edge-label"
               value={selectedEdge.label ?? ''}
               maxLength={DIAGRAM_EDGE_LABEL_LIMIT}
+              onFocus={() => {
+                edgeLabelStartRef.current ??= history.snapshotRef.current;
+              }}
               onChange={(event) => {
                 clearError();
-                setEdges((current) => renameEdge(current, selectedEdge, event.target.value));
+                const graph = history.snapshotRef.current;
+                history.preview({
+                  nodes: graph.nodes,
+                  edges: renameEdge(graph.edges, selectedEdge, event.target.value),
+                });
               }}
               onBlur={normalizeSelectedEdgeLabel}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelEdgeLabelEdit();
+                  canvasRef.current?.focus();
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
               placeholder="e.g. sends request"
               className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
             />
@@ -620,11 +827,30 @@ export function DiagramEditor() {
             );
           })}
 
+          {connectionPreview ? (
+            <line
+              aria-hidden="true"
+              data-testid="connection-preview"
+              x1={connectionPreview.x1}
+              y1={connectionPreview.y1}
+              x2={connectionPreview.x2}
+              y2={connectionPreview.y2}
+              stroke="#4D6A74"
+              strokeWidth={2}
+              strokeDasharray="6 4"
+              markerEnd="url(#diagram-editor-arrow)"
+              pointerEvents="none"
+            />
+          ) : null}
+
           {nodes.map((node) => {
             const shape = displayShape(node);
             const size = diagramNodeSize(node.shape);
             const selected = selectedId === node.id;
-            const connectionSource = connectionSourceId === node.id;
+            const isConnectionSource = connectionSourceId === node.id;
+            const isConnectionTarget =
+              connectionMode && hoveredTargetId === node.id && connectionSourceId !== node.id;
+            const isEditing = editingNodeId === node.id;
             return (
               <g
                 key={node.id}
@@ -634,10 +860,13 @@ export function DiagramEditor() {
                 transform={`translate(${node.x}, ${node.y})`}
                 className={connectionMode ? 'cursor-crosshair' : 'cursor-move'}
                 onPointerDown={(event) => onNodePointerDown(event, node)}
-                onDoubleClick={() => {
-                  setSelectedId(node.id);
-                  queueMicrotask(focusLabelEditor);
+                onPointerEnter={() => {
+                  if (connectionMode && connectionSourceId !== node.id) setHoveredTargetId(node.id);
                 }}
+                onPointerLeave={() => {
+                  if (hoveredTargetId === node.id) setHoveredTargetId(null);
+                }}
+                onDoubleClick={() => beginInlineNodeEdit(node)}
               >
                 {selected ? (
                   <rect
@@ -647,12 +876,12 @@ export function DiagramEditor() {
                     height={size.height + 10}
                     rx={7}
                     fill="none"
-                    stroke={connectionSource ? '#4D6A74' : '#E0A33C'}
+                    stroke={isConnectionSource ? '#4D6A74' : '#E0A33C'}
                     strokeWidth={2}
                     strokeDasharray="4 3"
                   />
                 ) : null}
-                {connectionSource && !selected ? (
+                {isConnectionSource && !selected ? (
                   <rect
                     x={-5}
                     y={-5}
@@ -663,6 +892,18 @@ export function DiagramEditor() {
                     stroke="#4D6A74"
                     strokeWidth={2}
                     strokeDasharray="4 3"
+                  />
+                ) : null}
+                {isConnectionTarget ? (
+                  <rect
+                    x={-7}
+                    y={-7}
+                    width={size.width + 14}
+                    height={size.height + 14}
+                    rx={9}
+                    fill="none"
+                    stroke="#E0A33C"
+                    strokeWidth={3}
                   />
                 ) : null}
                 {shape === 'text' ? (
@@ -678,22 +919,98 @@ export function DiagramEditor() {
                     strokeDasharray={shape === 'container' ? '5 3' : undefined}
                   />
                 )}
-                <text
-                  x={size.width / 2}
-                  y={size.height / 2 + 4}
-                  textAnchor="middle"
-                  fill="#080C15"
-                  style={{
-                    fontSize: '11px',
-                    fontFamily: 'Inter, system-ui, sans-serif',
-                    fontWeight: shape === 'text' ? 600 : 500,
-                    userSelect: 'none',
-                  }}
-                  textLength={node.label.length > 10 ? size.width - 12 : undefined}
-                  lengthAdjust={node.label.length > 10 ? 'spacingAndGlyphs' : undefined}
-                >
-                  {node.label || 'Unlabelled'}
-                </text>
+                {isEditing ? (
+                  <foreignObject
+                    x={4}
+                    y={4}
+                    width={Math.max(40, size.width - 8)}
+                    height={Math.max(28, size.height - 8)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex h-full w-full items-center justify-center px-1">
+                      <input
+                        ref={inlineLabelInputRef}
+                        aria-label={`Edit ${shape} label`}
+                        value={node.label}
+                        maxLength={DIAGRAM_LABEL_LIMIT}
+                        onChange={(event) => {
+                          clearError();
+                          const graph = history.snapshotRef.current;
+                          history.preview({
+                            nodes: renameNode(graph.nodes, node.id, event.target.value),
+                            edges: graph.edges,
+                          });
+                        }}
+                        onBlur={finishInlineNodeEdit}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            cancelInlineNodeEdit();
+                          } else if (event.key === 'Enter') {
+                            event.preventDefault();
+                            if (event.ctrlKey || event.metaKey) {
+                              finishInlineNodeEdit();
+                              event.currentTarget.form?.requestSubmit();
+                            } else {
+                              event.currentTarget.blur();
+                            }
+                          }
+                        }}
+                        className="h-full w-full rounded border border-rt-primary-deep bg-white px-1 text-center text-[11px] font-medium text-rt-ink outline-none ring-2 ring-rt-primary-tint"
+                      />
+                    </div>
+                  </foreignObject>
+                ) : (
+                  <text
+                    x={size.width / 2}
+                    y={size.height / 2 + 4}
+                    textAnchor="middle"
+                    fill="#080C15"
+                    style={{
+                      fontSize: '11px',
+                      fontFamily: 'Inter, system-ui, sans-serif',
+                      fontWeight: shape === 'text' ? 600 : 500,
+                      userSelect: 'none',
+                    }}
+                    textLength={node.label.length > 10 ? size.width - 12 : undefined}
+                    lengthAdjust={node.label.length > 10 ? 'spacingAndGlyphs' : undefined}
+                  >
+                    {node.label || 'Unlabelled'}
+                  </text>
+                )}
+                {selected && !connectionMode && !isEditing ? (
+                  <g aria-hidden="true" className="cursor-crosshair">
+                    {[
+                      [size.width / 2, 0],
+                      [size.width, size.height / 2],
+                      [size.width / 2, size.height],
+                      [0, size.height / 2],
+                    ].map(([x, y]) => (
+                      <g
+                        key={`${x}-${y}`}
+                        data-testid="connection-handle"
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          canvasRef.current?.focus({ preventScroll: true });
+                          startConnection(node.id);
+                        }}
+                      >
+                        <circle cx={x} cy={y} r={14} fill="transparent" />
+                        <circle
+                          cx={x}
+                          cy={y}
+                          r={6}
+                          fill="#FFFFFF"
+                          stroke="#4D6A74"
+                          strokeWidth={2}
+                          pointerEvents="none"
+                        />
+                      </g>
+                    ))}
+                  </g>
+                ) : null}
               </g>
             );
           })}
