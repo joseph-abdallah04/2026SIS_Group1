@@ -2,7 +2,13 @@
 
 import type { StickyColor } from '@roundtable/shared';
 
-export const ZOOM_LEVELS = [100, 80, 60, 40] as const;
+/**
+ * Zoom stops, largest first. Above 100% for reading a dense corner of the
+ * board; down to 25% for finding your way around a big one.
+ */
+export const ZOOM_LEVELS = [
+  400, 350, 300, 250, 200, 175, 150, 125, 110, 100, 90, 80, 70, 60, 50, 40, 30, 25,
+] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
 export const CARD_RADIUS = '12px';
@@ -34,23 +40,42 @@ export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
   diagram: 300,
 };
 
-export const ZOOM_GRID: Record<
-  ZoomLevel,
-  {
-    scale: number;
-    gap: string;
-    padding: string;
-    dotSize: string;
-    dotRadius: string;
-    dotOpacity: string;
-  }
-> = {
-  100: { scale: 1, gap: '22px', padding: '28px', dotSize: '22px', dotRadius: '1.5px', dotOpacity: '0.35' },
-  80: { scale: 0.85, gap: '18px', padding: '22px', dotSize: '18px', dotRadius: '1.3px', dotOpacity: '0.32' },
-  60: { scale: 0.7, gap: '14px', padding: '18px', dotSize: '16px', dotRadius: '1.2px', dotOpacity: '0.30' },
-  40: { scale: 0.55, gap: '12px', padding: '14px', dotSize: '14px', dotRadius: '1.1px', dotOpacity: '0.28' },
-};
+/**
+ * Zoom is a property of the view, not of the cards: the board is drawn once at
+ * its natural size and the whole scene is scaled, exactly as Figma, Miro and
+ * Lucidchart do it. So a level is simply a scale factor, and the label matches
+ * it — 80% really is 0.8 of natural size.
+ *
+ * Nothing below this line may be consulted while rendering a card. If a card
+ * asked the zoom level how big to be, zooming would re-lay-out the board rather
+ * than magnify it, and text would reflow as you zoomed.
+ */
+export const ZOOM_SCALE = Object.fromEntries(
+  ZOOM_LEVELS.map((level) => [level, level / 100]),
+) as Record<ZoomLevel, number>;
 
-export function cardWidthPx(type: 'sticky' | 'drawing' | 'diagram', zoom: ZoomLevel): number {
-  return Math.round(CARD_WIDTH[type] * ZOOM_GRID[zoom].scale);
-}
+/**
+ * The pinboard itself, in board units. A fixed sheet rather than an endless
+ * plane: zooming out shows the whole board getting smaller, which is what
+ * zooming out means, instead of revealing more and more empty space and making
+ * the board look like it grew.
+ *
+ * Big enough that a session never runs out of room — roughly nineteen sticky
+ * notes across — and every card is clamped inside it, so the board a viewer
+ * sees at 25% is all the board there is.
+ */
+export const BOARD_SIZE = { width: 4000, height: 2500 } as const;
+
+/**
+ * Desk showing around the board, in *screen* pixels rather than board units.
+ *
+ * A margin in board units would magnify with everything else, so the desk would
+ * be a hairline when zoomed out and a wide moat at 400%. Holding it in screen
+ * pixels keeps the board framed the same way at every zoom.
+ */
+export const DESK_MARGIN = 64;
+
+/** The dotted grid, in board units, so it magnifies with everything else. */
+export const DOT_SPACING = 22;
+export const DOT_RADIUS = 1.5;
+export const DOT_COLOR = 'rgba(140,164,172,0.38)';

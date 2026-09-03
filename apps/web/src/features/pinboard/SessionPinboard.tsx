@@ -107,7 +107,9 @@ export function SessionPinboard() {
 
   return (
     <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
-      <main className="h-screen">
+      {/* `overflow-hidden` so nothing on the board can produce a page-level
+          scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
+      <main className="h-dvh overflow-hidden">
         <PinboardCanvas
           board={board}
           isLive={isLive}

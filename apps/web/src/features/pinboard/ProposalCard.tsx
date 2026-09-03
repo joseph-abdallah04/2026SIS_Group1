@@ -3,11 +3,11 @@ import { diagramEdgeGeometry, diagramNodeSize, type BoardItem } from '@roundtabl
 import {
   CARD_RADIUS,
   CARD_SHADOW,
+  CARD_WIDTH,
   OWNED_OUTLINE,
   OWNED_OUTLINE_OFFSET,
   STICKY_RADIUS,
   STICKY_THEMES,
-  cardWidthPx,
 } from './pinboardTokens';
 
 /** Draws the ownership ring without disturbing a card's own colours. */
@@ -19,7 +19,6 @@ function ownedRing(isOwnedByViewer: boolean) {
 
 interface ProposalCardProps {
   item: BoardItem;
-  zoom: 100 | 80 | 60 | 40;
   /**
    * Highlights the viewer's own cards. Nothing passes it yet — the canvas has
    * no viewer identity until auth lands, and F16 (author-only edit/delete) is
@@ -39,13 +38,13 @@ function formatMetaTime(iso: string): string {
   });
 }
 
-function SoftMeta({ item, compact }: { item: BoardItem; compact: boolean }) {
+function SoftMeta({ item }: { item: BoardItem }) {
   return (
     <footer
       className="text-rt-ink-faint"
       style={{
-        padding: compact ? '6px 10px 8px' : '8px 12px 10px',
-        fontSize: compact ? '8px' : '11px',
+        padding: '8px 12px 10px',
+        fontSize: '11px',
       }}
     >
       <span className="font-medium text-rt-ink-muted">{item.authorName}</span>
@@ -55,11 +54,10 @@ function SoftMeta({ item, compact }: { item: BoardItem; compact: boolean }) {
   );
 }
 
-function StickyCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
+function StickyCard({ item, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'sticky') return null;
-  const compact = zoom <= 60;
   const theme = STICKY_THEMES[item.artifactJson.color];
-  const width = cardWidthPx('sticky', zoom);
+  const width = CARD_WIDTH.sticky;
 
   return (
     <article
@@ -76,25 +74,24 @@ function StickyCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) 
       <p
         className="line-clamp-4 font-medium text-rt-ink"
         style={{
-          padding: compact ? '10px 12px 6px' : '16px 14px 10px',
-          fontSize: compact ? '10px' : '14px',
-          lineHeight: compact ? 1.35 : 1.45,
-          minHeight: compact ? 80 : 128,
+          padding: '16px 14px 10px',
+          fontSize: '14px',
+          lineHeight: 1.45,
+          minHeight: 128,
         }}
       >
         {item.artifactJson.text}
       </p>
-      <SoftMeta item={item} compact={compact} />
+      <SoftMeta item={item} />
     </article>
   );
 }
 
-function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
+function DrawingCard({ item, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'drawing') return null;
-  const compact = zoom <= 60;
   const svg = item.artifactJson.svg.trim();
   const hasSvg = svg.length > 0;
-  const width = cardWidthPx('drawing', zoom);
+  const width = CARD_WIDTH.drawing;
   // Never inject a peer's SVG into this document: it is arbitrary user-authored
   // markup, so inline <svg> would run any <script>/onload it carries in every
   // viewer's session. An <img> renders SVG with scripting and external fetches
@@ -116,7 +113,7 @@ function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
       <div
         className="m-2.5 overflow-hidden rounded-lg"
         style={{
-          height: compact ? 100 : 160,
+          height: 160,
           background: hasSvg
             ? '#F7F7F8'
             : 'repeating-linear-gradient(-45deg, #EEF2F4 0 8px, #F7F7F8 8px 16px)',
@@ -133,14 +130,13 @@ function DrawingCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
           />
         ) : null}
       </div>
-      <SoftMeta item={item} compact={compact} />
+      <SoftMeta item={item} />
     </article>
   );
 }
 
-function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps) {
+function DiagramCard({ item, isOwnedByViewer = false }: ProposalCardProps) {
   if (item.artifactJson.type !== 'diagram') return null;
-  const compact = zoom <= 60;
   const { nodes, edges } = item.artifactJson;
   const previewNodes = nodes;
   const nodeById = new Map(previewNodes.map((n) => [n.id, n]));
@@ -148,7 +144,7 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
     Math.max(...previewNodes.map((node) => node.x + diagramNodeSize(node.shape).width), 72) + 28;
   const svgHeight =
     Math.max(...previewNodes.map((node) => node.y + diagramNodeSize(node.shape).height), 32) + 24;
-  const width = cardWidthPx('diagram', zoom);
+  const width = CARD_WIDTH.diagram;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from colliding.
   const arrowId = `rt-arrow-${item.id}`;
 
@@ -164,17 +160,14 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
         ...ownedRing(isOwnedByViewer),
       }}
     >
-      <div
-        className="m-2.5 overflow-hidden rounded-lg bg-rt-surface-alt"
-        style={{ minHeight: compact ? 64 : 96 }}
-      >
+      <div className="m-2.5 overflow-hidden rounded-lg bg-rt-surface-alt" style={{ minHeight: 96 }}>
         {previewNodes.length === 0 ? (
           <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
         ) : (
           <svg
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
             className="h-full w-full"
-            style={{ minHeight: compact ? 64 : 96 }}
+            style={{ minHeight: 96 }}
           >
             <defs>
               <marker
@@ -261,25 +254,20 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
           </svg>
         )}
       </div>
-      <SoftMeta item={item} compact={compact} />
+      <SoftMeta item={item} />
     </article>
   );
 }
 
-export function ProposalCard({
-  item,
-  zoom,
-  isOwnedByViewer = false,
-  isNew = false,
-}: ProposalCardProps) {
+export function ProposalCard({ item, isOwnedByViewer = false, isNew = false }: ProposalCardProps) {
   const card = (() => {
     switch (item.type) {
       case 'sticky':
-        return <StickyCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
+        return <StickyCard item={item} isOwnedByViewer={isOwnedByViewer} />;
       case 'drawing':
-        return <DrawingCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
+        return <DrawingCard item={item} isOwnedByViewer={isOwnedByViewer} />;
       case 'diagram':
-        return <DiagramCard item={item} zoom={zoom} isOwnedByViewer={isOwnedByViewer} />;
+        return <DiagramCard item={item} isOwnedByViewer={isOwnedByViewer} />;
       default:
         return null;
     }

@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BoardItem } from '@roundtable/shared';
 
+import { BOARD_SIZE, CARD_WIDTH } from './pinboardTokens';
+
 /** Below this many pixels a pointer gesture is a click, not a drag. */
 const DRAG_THRESHOLD_PX = 3;
+
+/** Roughly a card's height; enough to keep one wholly on the sheet. */
+const CARD_FOOTPRINT_H = 260;
 
 interface Point {
   x: number;
   y: number;
 }
 
+/** Keeps a value on the sheet: never negative, never past the far edge. */
+function clamp(value: number, max: number): number {
+  return Math.round(Math.min(Math.max(value, 0), Math.max(0, max)));
+}
+
 interface Gesture {
   proposalId: string;
+  type: BoardItem['type'];
   pointerId: number;
   /** Where the pointer went down, in screen pixels. */
   fromPointer: Point;
@@ -93,6 +104,7 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
       const from = positionOf(item);
       gesture.current = {
         proposalId: item.id,
+        type: item.type,
         pointerId: event.pointerId,
         fromPointer: { x: event.clientX, y: event.clientY },
         fromCard: from,
@@ -116,7 +128,8 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
 
       // Screen pixels divided by the zoom factor: at 60% the card must follow
       // the pointer, which means moving further in board units than on screen.
-      // Clamped at the origin so a card cannot be flung somewhere unscrollable.
+      // Kept wholly on the sheet, so a card can never be dragged off the board
+      // to somewhere nobody can pan to.
       //
       // Written to the ref as well as to state, and the ref is what gets saved:
       // pointer moves are batched, so on release the rendered value can still
@@ -124,8 +137,8 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
       // holding the position the drag *started* at, and every move would
       // faithfully save the card back to where it already was.
       active.at = {
-        x: Math.max(0, Math.round(active.fromCard.x + dx / scale)),
-        y: Math.max(0, Math.round(active.fromCard.y + dy / scale)),
+        x: clamp(active.fromCard.x + dx / scale, BOARD_SIZE.width - CARD_WIDTH[active.type]),
+        y: clamp(active.fromCard.y + dy / scale, BOARD_SIZE.height - CARD_FOOTPRINT_H),
       };
       setDragging({ proposalId: active.proposalId, at: active.at });
     },

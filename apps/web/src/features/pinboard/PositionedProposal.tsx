@@ -2,13 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
 import { ProposalCard } from './ProposalCard';
-import {
-  CARD_SHADOW,
-  STICKY_RADIUS,
-  STICKY_THEMES,
-  cardWidthPx,
-  type ZoomLevel,
-} from './pinboardTokens';
+import { CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
 
 /** Matches `stickyArtifactSchema` — the server rejects anything longer. */
 const STICKY_MAX_CHARS = 2000;
@@ -22,9 +16,11 @@ interface DragHandlers {
 
 interface PositionedProposalProps {
   item: BoardItem;
-  zoom: ZoomLevel;
-  scale: number;
-  /** Board coordinates to render at — mid-drag this is not `item.x/y`. */
+  /**
+   * Board coordinates to render at — mid-drag this is not `item.x/y`. Board
+   * units, not screen pixels: the canvas scales the whole scene, so a card is
+   * always laid out at its natural size and never consults the zoom.
+   */
   position: { x: number; y: number };
   isNew: boolean;
   /** The viewer authored this, so they get the edit/delete affordances. */
@@ -201,8 +197,6 @@ function OwnerControls({
  */
 export function PositionedProposal({
   item,
-  zoom,
-  scale,
   position,
   isNew,
   isOwn,
@@ -222,12 +216,22 @@ export function PositionedProposal({
   return (
     <div
       className="group absolute"
+      // Tells the canvas to leave this pointer gesture alone: dragging a card
+      // you may move must not also pan the board underneath it. A card you may
+      // not move carries no flag, so dragging it pans, which is what every
+      // canvas tool does with something you cannot pick up.
+      data-card-draggable={draggable ? 'true' : undefined}
       style={{
-        left: position.x * scale,
-        top: position.y * scale,
+        left: position.x,
+        top: position.y,
         // A card being dragged, or edited, belongs above its neighbours.
         zIndex: isDragging ? 30 : editing ? 20 : 1,
-        cursor: draggable ? (isDragging ? 'grabbing' : 'grab') : 'default',
+        // An arrow at rest, even on a card you may move. A hand on hover would
+        // promise that grabbing is the only thing a card does, when clicking it
+        // also reaches its Edit and Remove controls — and it would put a hand
+        // over most of a busy board. The cursor changes once a drag is actually
+        // under way, which is the moment it means something.
+        cursor: isDragging ? 'grabbing' : 'default',
         // Without this the browser claims touch drags for scrolling first.
         touchAction: draggable ? 'none' : undefined,
         // Text inside a card must not become a selection while dragging it.
@@ -244,7 +248,7 @@ export function PositionedProposal({
       {editing && item.artifactJson.type === 'sticky' ? (
         <StickyTextEditor
           artifact={item.artifactJson}
-          width={cardWidthPx('sticky', zoom)}
+          width={CARD_WIDTH.sticky}
           onCancel={() => setEditing(false)}
           onSave={(text) => {
             void onEditText(item, text).finally(() => setEditing(false));
@@ -252,7 +256,7 @@ export function PositionedProposal({
         />
       ) : (
         <>
-          <ProposalCard item={item} zoom={zoom} isNew={isNew} isOwnedByViewer={isOwn} />
+          <ProposalCard item={item} isNew={isNew} isOwnedByViewer={isOwn} />
           {canEditText || canDelete ? (
             <OwnerControls
               canEditText={canEditText}
