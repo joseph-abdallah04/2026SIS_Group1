@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -14,8 +15,7 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
       <div
         className="relative min-h-0 flex-1 bg-rt-surface"
         style={{
-          backgroundImage:
-            'radial-gradient(rgba(140,164,172,0.42) 1.4px, transparent 1.4px)',
+          backgroundImage: 'radial-gradient(rgba(140,164,172,0.42) 1.4px, transparent 1.4px)',
           backgroundSize: '24px 24px',
         }}
       >
@@ -29,6 +29,11 @@ export function SessionPinboard() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
+  // Entering the session view joins the room; leaving it (or ending the
+  // session) unmounts this and disconnects — F11's connect/disconnect points.
+  // Called before any early return so the room is not torn down and rebuilt
+  // every time the board flips between loading, error and loaded.
+  const voice = useVoiceRoom(sessionId);
 
   if (!sessionId) {
     return (
@@ -52,15 +57,25 @@ export function SessionPinboard() {
     return (
       <BoardFrame>
         <div className="relative w-[400px] border border-rt-ink bg-rt-surface">
-          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-primary">+</span>
-          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-primary">+</span>
-          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-primary">+</span>
-          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-primary">+</span>
+          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
+          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
+          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
+          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
           <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
             Load failed
           </div>
           <div className="p-5 text-center">
-            <p className="text-[19px] font-semibold tracking-[-0.01em] text-rt-ink">Could not load board</p>
+            <p className="text-[19px] font-semibold tracking-[-0.01em] text-rt-ink">
+              Could not load board
+            </p>
             <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">{error}</p>
             <button
               type="button"
@@ -84,7 +99,16 @@ export function SessionPinboard() {
   }
 
   return (
-    <main className="h-screen">
+    <main className="relative h-screen">
+      <VoiceNotice
+        status={voice.status}
+        micStatus={voice.micStatus}
+        error={voice.error}
+        audioBlocked={voice.audioBlocked}
+        retry={voice.retry}
+        requestMicrophone={voice.requestMicrophone}
+        unlockAudio={voice.unlockAudio}
+      />
       <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} propose={propose} />
     </main>
   );

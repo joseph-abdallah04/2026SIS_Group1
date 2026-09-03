@@ -150,7 +150,7 @@ REST handles non-realtime concerns (all prefixed `/api`):
 | auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                             |
 | sessions  | `POST /api/sessions` (with questions), `GET /api/sessions/mine`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id`, `POST /api/sessions/:id/join {code}`                       |
 | summary   | `GET /api/sessions/:id/summary`                                                                                                                                                        |
-| voice     | `POST /api/sessions/:id/voice-token`                                                                                                                                                   |
+| voice     | `POST /api/sessions/:id/livekit-token`                                                                                                                                                   |
 | assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config _without_ key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream) |
 
 Phase transitions, proposals, reactions, and votes go over WebSockets (see §4). Assistant chat streams over **SSE** because it's a request-scoped, one-directional response — no need for a socket room per private chat.
