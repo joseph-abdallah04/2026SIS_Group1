@@ -64,6 +64,13 @@ interface DragSession {
   previous: DiagramSnapshot;
 }
 
+interface NodePress {
+  nodeId: string;
+  time: number;
+  clientX: number;
+  clientY: number;
+}
+
 const SHAPE_ICONS = {
   box: Box,
   container: Container,
@@ -71,6 +78,17 @@ const SHAPE_ICONS = {
 } as const;
 
 const DIAGRAM_VERTICAL_CHROME_REM = 14;
+
+// A node's native dblclick never arrives: dragging needs `preventDefault()` on
+// pointerdown (which suppresses the compatibility mouse events dblclick is built
+// from) and the canvas holds pointer capture during the press (which retargets
+// any that survive). Recognise the second press from the pointer stream instead,
+// which also makes the gesture work for touch/pen. 400ms matches the platform
+// double-click window; the slop is measured in client pixels rather than diagram
+// units so it does not shrink with the canvas on small viewports, and 16px sits
+// between mouse precision and finger wobble.
+const NODE_DOUBLE_PRESS_MS = 400;
+const NODE_DOUBLE_PRESS_SLOP_PX = 16;
 
 function displayShape(node: DiagramNode): DiagramNodeShape {
   return node.shape ?? 'box';
@@ -82,6 +100,16 @@ function selectedNodeById(nodes: readonly DiagramNode[], id: string | null) {
 
 function selectedEdgeByKey(edges: readonly DiagramEdge[], key: string | null) {
   return key ? (edges.find((edge) => edgeKey(edge) === key) ?? null) : null;
+}
+
+function isNodeDoublePress(last: NodePress | null, nodeId: string, press: NodePress): boolean {
+  return (
+    last !== null &&
+    last.nodeId === nodeId &&
+    press.time - last.time <= NODE_DOUBLE_PRESS_MS &&
+    Math.abs(press.clientX - last.clientX) <= NODE_DOUBLE_PRESS_SLOP_PX &&
+    Math.abs(press.clientY - last.clientY) <= NODE_DOUBLE_PRESS_SLOP_PX
+  );
 }
 
 export function DiagramEditor() {
@@ -119,6 +147,7 @@ export function DiagramEditor() {
   const edgeLabelInputRef = useRef<HTMLInputElement>(null);
   const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
+  const lastNodePressRef = useRef<NodePress | null>(null);
   const nodeLabelStartRef = useRef<DiagramSnapshot | null>(null);
   const edgeLabelStartRef = useRef<DiagramSnapshot | null>(null);
   const selectedNode = selectedNodeById(nodes, selectedId);
@@ -321,6 +350,7 @@ export function DiagramEditor() {
     if (!canvas) return;
     canvas.focus();
     if (connectionMode) {
+      lastNodePressRef.current = null;
       setSelectedEdgeKey(null);
       connectNode(node);
       return;
@@ -330,6 +360,20 @@ export function DiagramEditor() {
       { x: event.clientX, y: event.clientY },
       { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
     );
+
+    const press: NodePress = {
+      nodeId: node.id,
+      time: event.timeStamp,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    if (isNodeDoublePress(lastNodePressRef.current, node.id, press)) {
+      lastNodePressRef.current = null;
+      beginInlineNodeEdit(node);
+      return;
+    }
+    lastNodePressRef.current = press;
+
     dragRef.current = {
       pointerId: event.pointerId,
       nodeId: node.id,
@@ -497,7 +541,7 @@ export function DiagramEditor() {
       onKeyDown={onFormKeyDown}
       onSubmit={(event) => void onSubmit(event)}
     >
-      <aside className="border-b border-rt-tertiary bg-rt-surface p-4 md:min-h-0 md:overflow-y-auto md:border-r md:border-b-0 md:p-5">
+      <aside className="border-b border-rt-tertiary bg-rt-surface p-4 select-none md:min-h-0 md:overflow-y-auto md:border-r md:border-b-0 md:p-5">
         {extensionSource ? (
           <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
             Extending {extensionSource.authorName}&apos;s diagram
@@ -645,7 +689,7 @@ export function DiagramEditor() {
                   event.currentTarget.blur();
                 }
               }}
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
+              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
             />
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {selectedNode.label.length}/{DIAGRAM_LABEL_LIMIT}
@@ -703,7 +747,7 @@ export function DiagramEditor() {
                 }
               }}
               placeholder="e.g. sends request"
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
+              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
             />
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {(selectedEdge.label ?? '').length}/{DIAGRAM_EDGE_LABEL_LIMIT}
@@ -719,12 +763,13 @@ export function DiagramEditor() {
           aria-label="Diagram canvas"
           tabIndex={0}
           viewBox={`0 0 ${DIAGRAM_CANVAS_WIDTH} ${DIAGRAM_CANVAS_HEIGHT}`}
-          className="w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none"
+          className="w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none"
           style={{
             maxWidth: `min(1200px, calc((100dvh - ${DIAGRAM_VERTICAL_CHROME_REM}rem) * ${DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT}))`,
             aspectRatio: `${DIAGRAM_CANVAS_WIDTH} / ${DIAGRAM_CANVAS_HEIGHT}`,
           }}
           onPointerDown={() => {
+            lastNodePressRef.current = null;
             setSelectedId(null);
             setSelectedEdgeKey(null);
           }}
@@ -785,6 +830,7 @@ export function DiagramEditor() {
                   event.preventDefault();
                   event.stopPropagation();
                   canvasRef.current?.focus();
+                  lastNodePressRef.current = null;
                   cancelConnection();
                   setSelectedId(null);
                   setSelectedEdgeKey(edgeKey(edge));
@@ -957,7 +1003,7 @@ export function DiagramEditor() {
                             }
                           }
                         }}
-                        className="h-full w-full rounded border border-rt-primary-deep bg-white px-1 text-center text-[11px] font-medium text-rt-ink outline-none ring-2 ring-rt-primary-tint"
+                        className="h-full w-full rounded border border-rt-primary-deep bg-white px-1 text-center text-[11px] font-medium text-rt-ink outline-none select-text ring-2 ring-rt-primary-tint"
                       />
                     </div>
                   </foreignObject>
@@ -971,7 +1017,6 @@ export function DiagramEditor() {
                       fontSize: '11px',
                       fontFamily: 'Inter, system-ui, sans-serif',
                       fontWeight: shape === 'text' ? 600 : 500,
-                      userSelect: 'none',
                     }}
                     textLength={node.label.length > 10 ? size.width - 12 : undefined}
                     lengthAdjust={node.label.length > 10 ? 'spacingAndGlyphs' : undefined}
@@ -994,6 +1039,7 @@ export function DiagramEditor() {
                           event.preventDefault();
                           event.stopPropagation();
                           canvasRef.current?.focus({ preventScroll: true });
+                          lastNodePressRef.current = null;
                           startConnection(node.id);
                         }}
                       >

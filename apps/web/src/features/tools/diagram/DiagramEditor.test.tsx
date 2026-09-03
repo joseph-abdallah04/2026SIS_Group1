@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
@@ -52,6 +52,25 @@ async function openDiagram(
     toJSON: () => ({}),
   });
   return { user, canvas };
+}
+
+// Mirrors what a browser actually delivers to the node: pointerdown/pointerup
+// pairs. The node cancels pointerdown for dragging and the canvas takes pointer
+// capture, so no native dblclick is ever dispatched there.
+function pressNode(
+  node: Element,
+  canvas: Element,
+  {
+    pointerId,
+    time,
+    clientX = 30,
+    clientY = 30,
+  }: { pointerId: number; time: number; clientX?: number; clientY?: number },
+) {
+  const down = createEvent.pointerDown(node, { button: 0, pointerId, clientX, clientY });
+  Object.defineProperty(down, 'timeStamp', { value: time });
+  fireEvent(node, down);
+  fireEvent.pointerUp(canvas, { pointerId, clientX, clientY });
 }
 
 describe('diagram editor', () => {
@@ -144,18 +163,72 @@ describe('diagram editor', () => {
     expect(screen.getByText('0/100 elements')).toBeInTheDocument();
   });
 
-  it('focuses the label editor when a node is double-clicked', async () => {
+  it('focuses the label editor on a real two-press double-click', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
+    const { user, canvas } = await openDiagram();
     await user.click(screen.getByRole('button', { name: 'Add box' }));
     await user.click(screen.getByRole('button', { name: 'Add text' }));
+    const node = screen.getByRole('button', { name: 'Box: Box' });
 
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
+    pressNode(node, canvas, { pointerId: 41, time: 1000 });
+    pressNode(node, canvas, { pointerId: 42, time: 1180 });
 
     expect(await screen.findByLabelText('Edit box label')).toHaveFocus();
+  });
+
+  it('keeps two slow presses on a node as plain selection', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    const node = screen.getByRole('button', { name: 'Box: Box' });
+
+    pressNode(node, canvas, { pointerId: 43, time: 1000 });
+    pressNode(node, canvas, { pointerId: 44, time: 1600 });
+
+    expect(screen.queryByLabelText('Edit box label')).not.toBeInTheDocument();
+  });
+
+  it('keeps a fast but visibly moved second press as a drag rather than an edit', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    const node = screen.getByRole('button', { name: 'Box: Box' });
+
+    pressNode(node, canvas, { pointerId: 47, time: 1000, clientX: 30, clientY: 30 });
+    pressNode(node, canvas, { pointerId: 48, time: 1100, clientX: 30, clientY: 90 });
+
+    expect(screen.queryByLabelText('Edit box label')).not.toBeInTheDocument();
+  });
+
+  it('does not start an inline edit when the second press lands on another node', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+
+    pressNode(screen.getByRole('button', { name: 'Box: Box' }), canvas, {
+      pointerId: 45,
+      time: 1000,
+    });
+    pressNode(screen.getByRole('button', { name: 'Container: Container' }), canvas, {
+      pointerId: 46,
+      time: 1100,
+    });
+
+    expect(screen.queryByLabelText('Edit box label')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Edit container label')).not.toBeInTheDocument();
   });
 
   it('edits a node inline and undoes the whole label change in one step', async () => {
