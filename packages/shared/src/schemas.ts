@@ -37,6 +37,8 @@ export const diagramNodeSchema = z.object({
   label: z.string().max(200),
   x: z.number(),
   y: z.number(),
+  // Optional so diagrams authored before shapes existed still parse as boxes.
+  shape: z.enum(['box', 'container', 'text']).optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -45,13 +47,56 @@ export const diagramEdgeSchema = z.object({
   label: z.string().max(200).optional(),
 });
 
-export const diagramArtifactSchema = z.object({
-  type: z.literal('diagram'),
-  nodes: z.array(diagramNodeSchema).max(100),
-  edges: z.array(diagramEdgeSchema).max(200),
-});
+export const diagramArtifactSchema = z
+  .object({
+    type: z.literal('diagram'),
+    nodes: z.array(diagramNodeSchema).max(100),
+    edges: z.array(diagramEdgeSchema).max(200),
+  })
+  .superRefine(({ nodes, edges }, context) => {
+    const nodeIds = new Set<string>();
+    nodes.forEach((node, index) => {
+      if (nodeIds.has(node.id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Node ids must be unique',
+          path: ['nodes', index, 'id'],
+        });
+      }
+      nodeIds.add(node.id);
+    });
 
-export const artifactJsonSchema = z.discriminatedUnion('type', [
+    const edgeKeys = new Set<string>();
+    edges.forEach((edge, index) => {
+      if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Edge endpoints must reference existing nodes',
+          path: ['edges', index],
+        });
+      }
+      if (edge.from === edge.to) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Edges must connect different nodes',
+          path: ['edges', index],
+        });
+      }
+
+      const key = JSON.stringify([edge.from, edge.to]);
+      if (edgeKeys.has(key)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Duplicate directed edges are not allowed',
+          path: ['edges', index],
+        });
+      }
+      edgeKeys.add(key);
+    });
+  });
+
+// Diagram invariants use `superRefine`; ZodEffects cannot participate in a discriminated union.
+export const artifactJsonSchema = z.union([
   stickyArtifactSchema,
   drawingArtifactSchema,
   diagramArtifactSchema,
