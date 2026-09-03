@@ -69,9 +69,9 @@ describe('createProposal', () => {
 
   it('rejects a write to a question that does not exist', async () => {
     question.mockResolvedValue(null);
-    await expect(createProposal({ questionId: 'gone', authorId: 'u1', input: STICKY })).rejects.toThrow(
-      /Question not found/,
-    );
+    await expect(
+      createProposal({ questionId: 'gone', authorId: 'u1', input: STICKY }),
+    ).rejects.toThrow(/Question not found/);
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -175,6 +175,24 @@ describe('proposalCreate handler', () => {
       ok: false,
       code: 'INVALID_PROPOSAL',
     });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a diagram whose arrow references a missing node', async () => {
+    activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'discussion' });
+    const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+    expect(
+      await propose({
+        type: 'diagram',
+        artifactJson: {
+          type: 'diagram',
+          nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' }],
+          edges: [{ from: 'n1', to: 'missing' }],
+        },
+        x: 0,
+        y: 0,
+      }),
+    ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
     expect(create).not.toHaveBeenCalled();
   });
 
