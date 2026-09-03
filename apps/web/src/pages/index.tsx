@@ -1,11 +1,39 @@
 // Placeholder pages — smoke-test targets (docs/05 §10). Owners replace with real UI.
-import { Link } from 'react-router-dom';
-import type { SessionStatus } from '@roundtable/shared';
+import { useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { normalizeSessionCode, type SessionStatus } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../components/RoundTableLogo';
 import { Button } from '../components/ui/Button';
 import { DevUserSwitcher } from '../features/sessions/DevUserSwitcher';
 import { useSessions } from '../features/sessions/useSessions';
+
+/** The typed-code path to `/join/:code` — pasting a link goes straight there instead. */
+function JoinByCodeForm() {
+  const [code, setCode] = useState('');
+  const navigate = useNavigate();
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const normalized = normalizeSessionCode(code);
+    if (normalized) navigate(`/join/${normalized}`);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+      <input
+        type="text"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder="Have a code? e.g. K7NP-3WQZ"
+        className="min-h-10 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-primary-deep"
+      />
+      <Button type="submit" variant="secondary">
+        Join
+      </Button>
+    </form>
+  );
+}
 
 export function LoginPage() {
   return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Log in</h1></main>;
@@ -46,6 +74,8 @@ export function DashboardPage() {
             <Button type="button">+ Create session</Button>
           </Link>
         </div>
+
+        <JoinByCodeForm />
 
         {loading && <p className="text-[13px] text-rt-ink-muted">Loading sessions…</p>}
 

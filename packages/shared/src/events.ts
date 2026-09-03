@@ -3,7 +3,7 @@
 // Client: `io<ServerToClientEvents, ClientToServerEvents>(...)`
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
-import type { BoardItem, BoardResponse } from './index.js';
+import type { BoardItem, BoardResponse, SessionStatus } from './index.js';
 import type { ProposalCreateInput } from './schemas.js';
 
 export interface SessionUserPayload {
@@ -24,11 +24,18 @@ export interface WriteAck {
  * resyncs from this alone, so anything missing here is something the header
  * would render as a placeholder until a REST call happened to fill it in.
  *
- * Sessions-owned fields (phase, presence, vote progress) get added here as
- * those modules land.
+ * F08 adds the first sessions-owned fields: `status`/`leaderId` (so the
+ * waiting room and pinboard don't need a separate REST call just to know
+ * whose session this is) and `participants` — who is *connected right now*,
+ * derived from socket rooms, not `session_members` (docs/02 §4: presence is
+ * in-memory, membership history is persisted). Vote progress etc. get added
+ * here as those modules land.
  */
 export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
+  status: SessionStatus;
+  leaderId: string;
+  participants: SessionUserPayload[];
 }
 
 export interface ClientToServerEvents {

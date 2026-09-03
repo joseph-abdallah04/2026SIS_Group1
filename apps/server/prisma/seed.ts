@@ -33,12 +33,18 @@ async function main() {
 
   const session = await prisma.session.upsert({
     where: { code: 'DEMO-0001' },
-    update: {},
+    // `active`, not `lobby`: it seeds a question already in `discussion` with
+    // proposals on it, which is what a live session looks like. `/sessions/:id`
+    // routes by status (F08), so `lobby` here would land on the waiting room
+    // instead of the pinboard this seed exists to exercise. Set on `update`
+    // too, so a re-seed of an existing local database picks up this change —
+    // an `update: {}` would silently leave an already-seeded row at `lobby`.
+    update: { status: 'active' },
     create: {
       code: 'DEMO-0001',
       title: 'Demo session (seeded)',
       leaderId: alice.id,
-      status: 'lobby',
+      status: 'active',
     },
   });
 

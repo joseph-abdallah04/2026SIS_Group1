@@ -4,10 +4,22 @@
 export { sessionsRoutes } from './routes.js';
 export {
   createSession,
+  generateSessionCode,
   getActiveQuestion,
   getQuestion,
   getSession,
+  getSessionMemberIdentity,
   getSessionWithQuestions,
+  joinSessionByCode,
+  listSessionMembers,
   listSessionsForUser,
+  openSessionForJoining,
+  resolveSessionByCode,
 } from './service.js';
-export type { QuestionRef, SessionRef } from './service.js';
+export type {
+  QuestionRef,
+  SessionMemberIdentity,
+  SessionMemberRow,
+  SessionPreview,
+  SessionRef,
+} from './service.js';

@@ -16,9 +16,15 @@ export class ApiClientError extends Error {
 // modules/sessions/routes.ts): with no login yet there is no JWT to send, so
 // `rt_dev_user_id` lets the server know who a request is acting as. Never
 // sent from a production build, and the server ignores it there regardless.
+/** The same stand-in identity `devHeaders` sends — exported so UI can compare
+ * it against a session's `leaderId` (e.g. to show the "Open for joining"
+ * button only to the leader) without duplicating the localStorage key. */
+export function getDevUserId(): string | null {
+  return import.meta.env.DEV ? localStorage.getItem('rt_dev_user_id') : null;
+}
+
 function devHeaders(): Record<string, string> {
-  if (!import.meta.env.DEV) return {};
-  const devUserId = localStorage.getItem('rt_dev_user_id');
+  const devUserId = getDevUserId();
   return devUserId ? { 'x-dev-user-id': devUserId } : {};
 }
 

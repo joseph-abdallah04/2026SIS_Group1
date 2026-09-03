@@ -1,10 +1,18 @@
 import { Router, type Request, type RequestHandler } from 'express';
-import { createSessionSchema } from '@roundtable/shared/schemas';
+import { createSessionSchema, joinSessionSchema } from '@roundtable/shared/schemas';
 
 import { env } from '../../env.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
-import { createSession, getSessionWithQuestions, listSessionsForUser } from './service.js';
+import {
+  createSession,
+  getSessionWithQuestions,
+  joinSessionByCode,
+  listSessionMembers,
+  listSessionsForUser,
+  openSessionForJoining,
+  resolveSessionByCode,
+} from './service.js';
 
 export const sessionsRoutes = Router();
 
@@ -86,6 +94,63 @@ sessionsRoutes.get<{ id: string }>('/:id', resolveDevUser, async (req, res, next
       throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
     }
     res.json(session);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// F06: draft -> lobby. Leader-only; mints the code that makes the session
+// joinable. Idempotent — re-opening an already-lobby session just returns it.
+sessionsRoutes.post<{ id: string }>('/:id/open', resolveDevUser, async (req, res, next) => {
+  try {
+    const leaderId = (req as DevAuthedRequest).devUserId as string;
+    const session = await openSessionForJoining({ sessionId: req.params.id, leaderId });
+    res.json(session);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The join page's preview, before committing to join — resolves a pasted or
+// linked code without side effects.
+sessionsRoutes.get<{ code: string }>('/code/:code', resolveDevUser, async (req, res, next) => {
+  try {
+    const preview = await resolveSessionByCode(req.params.code);
+    if (!preview) {
+      throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
+    }
+    res.json(preview);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Resolves the code, adds the caller as a member (upsert — joining twice is a
+// no-op), and hands back the id to route into the waiting room.
+sessionsRoutes.post('/join', resolveDevUser, async (req, res, next) => {
+  try {
+    const parsed = joinSessionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ApiError(
+        400,
+        parsed.error.issues[0]?.message ?? 'Invalid code',
+        'VALIDATION_ERROR',
+      );
+    }
+
+    const userId = (req as DevAuthedRequest).devUserId as string;
+    const result = await joinSessionByCode({ rawCode: parsed.data.code, userId });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The waiting room's initial render, before live presence events arrive.
+sessionsRoutes.get<{ id: string }>('/:id/members', resolveDevUser, async (req, res, next) => {
+  try {
+    const members = await listSessionMembers(req.params.id);
+    res.json(members);
   } catch (err) {
     next(err);
   }

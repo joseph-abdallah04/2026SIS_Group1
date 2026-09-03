@@ -29,6 +29,26 @@ export const createSessionSchema = z.object({
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 
+// F06: `XXXX-XXXX` from an alphabet with no `0/1/I/L/O` — nothing that could
+// be confused for another character when read aloud or typed. Kept here
+// alongside the regex so the alphabet used to generate a code and the one
+// used to validate it can never drift apart.
+export const SESSION_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+
+export const sessionCodeSchema = z
+  .string()
+  .regex(/^[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/, 'Invalid session code format');
+
+// Looser than `sessionCodeSchema` on purpose: a user might paste
+// "k7np3wqz" or "k7np 3wqz" before it's normalised, so this only bounds the
+// length. `normalizeSessionCode` (below) does the real work before either
+// side compares it against `sessionCodeSchema`.
+export const joinSessionSchema = z.object({
+  code: z.string().trim().min(1).max(20),
+});
+
+export type JoinSessionInput = z.infer<typeof joinSessionSchema>;
+
 // === pinboard module ===
 
 const stickyColorSchema = z.enum(['yellow', 'pink', 'blue', 'green']);
