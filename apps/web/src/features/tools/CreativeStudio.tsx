@@ -1,6 +1,4 @@
-import { Construction } from 'lucide-react';
-
-import { Button } from '../../components/ui/Button';
+import { DiagramEditor } from './diagram/DiagramEditor';
 import { DrawingEditor } from './drawing/DrawingEditor';
 import { StickyEditor } from './sticky/StickyEditor';
 import { StudioOverlay } from './StudioOverlay';
@@ -18,17 +16,7 @@ export function CreativeStudio() {
     <StudioOverlay isLive={isLive} onClose={closeTool} title={title}>
       {activeTool === 'sticky' ? <StickyEditor /> : null}
       {activeTool === 'drawing' ? <DrawingEditor /> : null}
-      {activeTool === 'diagram' ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 bg-rt-surface-sunken px-6 text-center">
-          <Construction aria-hidden="true" className="text-rt-primary-deep" size={30} />
-          <h2 className="text-[18px] font-semibold text-rt-ink">
-            {TOOL_LABELS[activeTool]} editor is not available yet
-          </h2>
-          <Button variant="secondary" onClick={closeTool}>
-            Back to pinboard
-          </Button>
-        </div>
-      ) : null}
+      {activeTool === 'diagram' ? <DiagramEditor /> : null}
     </StudioOverlay>
   );
 }
