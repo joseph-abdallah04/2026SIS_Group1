@@ -34,7 +34,11 @@ model User {
 
 // === sessions module ===
 
+// F04: a session starts in `draft` while the leader is still setting it up
+// (title + questions), moves to `lobby` once F06 claims a join code, `active`
+// once F09 starts it, `ended` when it's over.
 enum SessionStatus {
+  draft
   lobby
   active
   ended
@@ -52,8 +56,12 @@ enum QuestionStatus {
 }
 
 model Session {
-  id        String        @id @default(cuid())
-  code      String        @unique // short join code, e.g. "ABCD-1234"
+  id   String @id @default(cuid())
+  // Claimed on draft -> lobby (F06) and released to NULL when the session
+  // ends. NULL means "not joinable" — Postgres treats NULLs as distinct, so
+  // any number of draft/ended sessions coexist at NULL while the unique index
+  // still allows at most one *live* session per code.
+  code      String?       @unique // short join code, e.g. "K7NP-3WQZ"
   title     String
   leaderId  String
   leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])

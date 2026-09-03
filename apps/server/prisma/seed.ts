@@ -129,6 +129,11 @@ async function main() {
     'Seeded: alice@example.com, bob@example.com, session DEMO-0001 (2 questions, 2 members, 3 proposals)',
   );
   console.log(`Open: /sessions/${session.id}`);
+  // Paste either id into the dashboard's dev identity box (rt_dev_user_id) —
+  // there is no login yet, so this is how a REST request or socket says who
+  // it is acting as.
+  console.log(`Dev identity — alice (leader): ${alice.id}`);
+  console.log(`Dev identity — bob (participant): ${bob.id}`);
 }
 
 main()

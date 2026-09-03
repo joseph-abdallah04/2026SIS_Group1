@@ -17,6 +17,18 @@ export const loginSchema = z.object({
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 
+// === sessions module ===
+
+// F04: title + an ordered list of questions. Order is exactly the array
+// order — the server assigns `position` from array index, so reordering
+// client-side and resubmitting is how a question list gets reordered.
+export const createSessionSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  questions: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
+});
+
+export type CreateSessionInput = z.infer<typeof createSessionSchema>;
+
 // === pinboard module ===
 
 const stickyColorSchema = z.enum(['yellow', 'pink', 'blue', 'green']);

@@ -9,6 +9,7 @@ import { Server as SocketServer } from 'socket.io';
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
+import { sessionsRoutes } from './modules/sessions/index.js';
 import { registerRealtimeGateway } from './realtime/gateway.js';
 import type { RealtimeServer } from './realtime/types.js';
 
@@ -23,6 +24,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
+app.use('/api/sessions', sessionsRoutes);
 app.use('/api/sessions', pinboardRoutes);
 
 app.use(errorHandler);

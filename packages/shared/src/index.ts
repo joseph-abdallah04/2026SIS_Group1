@@ -6,16 +6,29 @@ export interface User {
   createdAt: Date;
 }
 
-export type SessionStatus = 'lobby' | 'active' | 'ended';
+// draft: leader is still setting the session up (F04). lobby: joinable, has a
+// code (F06). active: started (F09). ended: over, code released.
+export type SessionStatus = 'draft' | 'lobby' | 'active' | 'ended';
 
 export interface Session {
   id: string;
-  code: string;
+  // null while draft or ended — only lobby/active sessions hold a code.
+  code: string | null;
   title: string;
   leaderId: string;
   status: SessionStatus;
   createdAt: Date;
   endedAt: Date | null;
+}
+
+/** Row shape for the dashboard's session list (F04/F07). */
+export interface SessionSummary {
+  id: string;
+  code: string | null;
+  title: string;
+  status: SessionStatus;
+  createdAt: Date;
+  isLeader: boolean;
 }
 
 // === auth module ===
