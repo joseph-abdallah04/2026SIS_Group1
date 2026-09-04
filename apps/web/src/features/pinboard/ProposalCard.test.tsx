@@ -80,7 +80,7 @@ describe('diagram proposal card', () => {
       { from: 'a', to: 'b' },
       { from: 'b', to: 'a' },
     ];
-    const { container } = render(<ProposalCard item={item} zoom={100} />);
+    const { container } = render(<ProposalCard item={item} />);
 
     // The card shares the editor's routing, so both directions stay readable
     // instead of one arrow hiding under the other.

@@ -144,13 +144,14 @@ describe('proposalCreate handler', () => {
         handlers.set(event, fn);
       },
     };
-    return {
-      socket,
-      propose: (payload: unknown) =>
-        new Promise<{ ok: boolean; code?: string }>((resolve) => {
-          handlers.get('proposalCreate')?.(payload, resolve);
-        }),
-    };
+    const intent =
+      (event: string) =>
+      (payload: unknown): Promise<{ ok: boolean; code?: string }> =>
+        new Promise((resolve) => {
+          handlers.get(event)?.(payload, resolve);
+        });
+
+    return { socket, propose: intent('proposalCreate'), edit: intent('proposalUpdate') };
   }
 
   const io = { to: () => ({ emit: vi.fn() }) };
@@ -219,7 +220,7 @@ describe('proposalCreate handler', () => {
     }
 
     beforeEach(() => {
-      activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'discussion' });
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
     });
 
     it('accepts a legitimately sized and styled diagram', async () => {
@@ -304,7 +305,7 @@ describe('proposalCreate handler', () => {
     const container = { id: 'c1', label: 'Platform', x: 24, y: 24, shape: 'container' };
 
     beforeEach(() => {
-      activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'discussion' });
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
     });
 
     it('accepts a node nested in a container', async () => {
@@ -371,6 +372,76 @@ describe('proposalCreate handler', () => {
         await propose(grouping([{ id: 'n1', label: 'A', x: 0, y: 0, shape: 'hexagon' }])),
       ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
       expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  // F16 added a second way to write an artifact. The diagram contract has to
+  // hold on edits exactly as it does on creation: the editor is not the only
+  // thing that can emit one of these.
+  describe('diagram contract on edits', () => {
+    function edit(nodes: Record<string, unknown>[], edges: Record<string, unknown>[] = []) {
+      return { id: 'p1', artifactJson: { type: 'diagram', nodes, edges } };
+    }
+
+    const container = { id: 'c1', label: 'Platform', x: 24, y: 24, shape: 'container' };
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('rejects an edit whose arrow points at a node that is not there', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(edit([{ id: 'n1', label: 'A', x: 0, y: 0 }], [{ from: 'n1', to: 'ghost' }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit that duplicates a node id', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(
+          edit([
+            { id: 'n1', label: 'A', x: 0, y: 0 },
+            { id: 'n1', label: 'B', x: 200, y: 0 },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit that sizes a node outside the bounds', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(edit([{ id: 'n1', label: 'A', x: 0, y: 0, width: 5_000, height: 5_000 }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit that introduces a container cycle', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(
+          edit([
+            { id: 'a', label: 'A', x: 0, y: 0, shape: 'container', parentId: 'b' },
+            { id: 'b', label: 'B', x: 0, y: 0, shape: 'container', parentId: 'a' },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit carrying a colour outside the closed palette', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(edit([{ id: 'n1', label: 'A', x: 0, y: 0, fillColor: 'url(#evil)' }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('still accepts a legitimate edit', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const result = await send(
+        edit([container, { id: 'n1', label: 'API', x: 40, y: 40, shape: 'box', parentId: 'c1' }]),
+      );
+      // Ownership and row lookup are F16's concern; the contract check is ours,
+      // so anything other than INVALID_PROPOSAL means the artifact passed.
+      expect(result.code).not.toBe('INVALID_PROPOSAL');
     });
   });
 

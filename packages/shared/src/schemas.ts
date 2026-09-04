@@ -316,13 +316,32 @@ export type ProposalCreateInput = z.infer<typeof proposalCreateSchema>;
 export const proposalUpdateSchema = z
   .object({
     id: z.string().min(1),
-    artifactJson: artifactJsonSchema.optional(),
+    // The strict union, like `proposalCreate`: an edit is a write, so it faces
+    // exactly the same contract a create does. Parsing with the tolerant read
+    // union here would let an edit quietly launder a payload past the rules.
+    artifactJson: artifactWriteJsonSchema.optional(),
     x: z.number().min(0).max(100_000).optional(),
     y: z.number().min(0).max(100_000).optional(),
   })
-  .refine((v) => v.artifactJson !== undefined || v.x !== undefined || v.y !== undefined, {
-    message: 'An update must change the content or the position',
-    path: ['id'],
+  .superRefine((value, context) => {
+    if (value.artifactJson === undefined && value.x === undefined && value.y === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'An update must change the content or the position',
+        path: ['id'],
+      });
+    }
+
+    // Diagram graph, size and grouping invariants apply to every write path,
+    // not just creation.
+    if (value.artifactJson?.type === 'diagram') {
+      const parsed = diagramWriteArtifactSchema.safeParse(value.artifactJson);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          context.addIssue({ ...issue, path: ['artifactJson', ...issue.path] });
+        }
+      }
+    }
   });
 
 export type ProposalUpdateInput = z.infer<typeof proposalUpdateSchema>;
