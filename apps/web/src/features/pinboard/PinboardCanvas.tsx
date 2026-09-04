@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import type { BoardResponse } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
 import { ProposalCard } from './ProposalCard';
 import { ZOOM_GRID, ZOOM_LEVELS, type ZoomLevel } from './pinboardTokens';
@@ -12,6 +13,8 @@ interface PinboardCanvasProps {
   isLive: boolean;
   /** Proposals that arrived on a live broadcast moments ago (F15). */
   newItemIds: ReadonlySet<string>;
+  /** Leaders cannot leave (F07); members get Leave in this header. */
+  isLeader: boolean;
 }
 
 function EmptyBoardPlate() {
@@ -122,7 +125,7 @@ function ZoomControl({
   );
 }
 
-export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProps) {
+export function PinboardCanvas({ board, isLive, newItemIds, isLeader }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const grid = ZOOM_GRID[zoom];
   const isEmpty = board.items.length === 0;
@@ -190,6 +193,9 @@ export function PinboardCanvas({ board, isLive, newItemIds }: PinboardCanvasProp
               {isLive ? 'live' : 'offline'}
             </span>
           </div>
+          {!isLeader && (
+            <LeaveSessionControl sessionId={board.sessionId} className="text-white" />
+          )}
         </div>
       </header>
 

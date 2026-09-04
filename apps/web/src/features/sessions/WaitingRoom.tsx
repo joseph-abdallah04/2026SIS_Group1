@@ -2,6 +2,7 @@ import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
 import { getDevUserId } from '../../lib/api';
 import type { SessionDetail } from './useSessionDetail';
+import { LeaveSessionControl } from './LeaveSessionControl';
 import { useStartSession } from './useStartSession';
 import { useWaitingRoom } from './useWaitingRoom';
 
@@ -96,6 +97,8 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
             {startError && <p className="text-[13px] text-red-600">{startError}</p>}
           </div>
         )}
+
+        {!isLeader && <LeaveSessionControl sessionId={session.id} />}
       </div>
     </main>
   );

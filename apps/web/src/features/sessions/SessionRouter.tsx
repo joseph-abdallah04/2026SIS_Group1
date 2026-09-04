@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 
 import { SessionPinboard } from '../pinboard/SessionPinboard';
+import { getDevUserId } from '../../lib/api';
 import { SessionDraftPage } from './SessionDraftPage';
 import { useSessionDetail } from './useSessionDetail';
 import { WaitingRoom } from './WaitingRoom';
@@ -54,7 +55,7 @@ export function SessionRouter() {
     case 'lobby':
       return <WaitingRoom session={session} onStarted={reload} />;
     case 'active':
-      return <SessionPinboard />;
+      return <SessionPinboard isLeader={session.leaderId === getDevUserId()} />;
     case 'ended':
       return (
         <main className="flex h-screen items-center justify-center bg-rt-surface">

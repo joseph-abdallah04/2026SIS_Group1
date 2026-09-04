@@ -27,7 +27,10 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SessionPinboard() {
+/** `isLeader` decides whether the header offers "Leave session" (F07) — the
+ * leader has no leave, they end the session instead. Required, not defaulted:
+ * guessing here would silently drop a member's only way out. */
+export function SessionPinboard({ isLeader }: { isLeader: boolean }) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
@@ -88,7 +91,7 @@ export function SessionPinboard() {
   return (
     <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
       <main className="h-screen">
-        <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} />
+        <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} isLeader={isLeader} />
       </main>
       <CreativeStudio />
     </CreativeToolsProvider>

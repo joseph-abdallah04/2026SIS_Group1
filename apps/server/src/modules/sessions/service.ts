@@ -21,6 +21,42 @@ export interface CreateSessionArgs {
 }
 
 /**
+ * One live session at a time (F07): a user who is a member of some
+ * lobby/active session must leave it before joining another, opening one of
+ * their drafts, or creating a new session. `draft` and `ended` memberships
+ * don't count — unfinished setup and history are not *being in* a session.
+ *
+ * `exceptSessionId` is the session the caller is acting on, so re-joining or
+ * re-opening the one they are already in stays idempotent.
+ *
+ * Enforced here rather than only in the UI's redirect: the dashboard's
+ * redirect is a convenience, this is the rule. Two simultaneous joins could
+ * still interleave past this check — the consequence is a second membership
+ * row, not corrupt state, and the next page load resolves it by redirecting
+ * into whichever session is found first.
+ */
+async function assertNotInAnotherLiveSession(
+  userId: string,
+  exceptSessionId?: string,
+): Promise<void> {
+  const other = await prisma.session.findFirst({
+    where: {
+      status: { in: ['lobby', 'active'] },
+      members: { some: { userId } },
+      ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+    },
+    select: { title: true },
+  });
+  if (!other) return;
+
+  throw new ApiError(
+    409,
+    `Leave "${other.title}" before joining or starting another session`,
+    'ALREADY_IN_SESSION',
+  );
+}
+
+/**
  * Create a draft session: the leader's title + ordered questions, with the
  * leader recorded as both `leaderId` and a `SessionMember` from the start.
  *
@@ -32,6 +68,7 @@ export interface CreateSessionArgs {
  * session, would both be half-finished states nothing else should ever see.
  */
 export async function createSession({ leaderId, input }: CreateSessionArgs): Promise<Session> {
+  await assertNotInAnotherLiveSession(leaderId);
   const row = await prisma.$transaction(async (tx) => {
     const session = await tx.session.create({
       data: {
@@ -194,6 +231,8 @@ export async function openSessionForJoining({
     throw new ApiError(409, `Cannot open a session that is ${session.status}`, 'INVALID_TRANSITION');
   }
 
+  await assertNotInAnotherLiveSession(leaderId, sessionId);
+
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     try {
       return await prisma.session.update({
@@ -345,12 +384,18 @@ export interface JoinSessionArgs {
  * newly-joined member straight into `SessionPinboard` if the session already
  * started, and into `WaitingRoom` if it hasn't — the join itself doesn't need
  * to know which.
+ *
+ * Rejoining *this* session is a no-op (the upsert below). Joining a *different*
+ * lobby/active session while still a member of another is refused — one live
+ * session at a time; leave first (F07).
  */
 export async function joinSessionByCode({ rawCode, userId }: JoinSessionArgs): Promise<{ sessionId: string }> {
   const session = await resolveSessionByCode(rawCode);
   if (!session) {
     throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
   }
+
+  await assertNotInAnotherLiveSession(userId, session.id);
 
   await prisma.sessionMember.upsert({
     where: { sessionId_userId: { sessionId: session.id, userId } },

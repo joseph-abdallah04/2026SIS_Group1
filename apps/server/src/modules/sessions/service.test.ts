@@ -10,6 +10,7 @@ const questionDeleteMany = vi.fn();
 const questionFindMany = vi.fn();
 const sessionMemberCreate = vi.fn();
 const sessionFindUnique = vi.fn();
+const sessionFindFirst = vi.fn();
 const sessionUpdate = vi.fn();
 const sessionUpdateInTx = vi.fn();
 const sessionDelete = vi.fn();
@@ -29,7 +30,7 @@ vi.mock('../../db.js', () => ({
         sessionMember: { create: sessionMemberCreate },
       }),
     ),
-    session: { findUnique: sessionFindUnique, update: sessionUpdate, delete: sessionDelete },
+    session: { findUnique: sessionFindUnique, findFirst: sessionFindFirst, update: sessionUpdate, delete: sessionDelete },
     sessionMember: { upsert: sessionMemberUpsert, deleteMany: sessionMemberDeleteMany },
   },
 }));
@@ -53,6 +54,7 @@ const {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionFindFirst.mockResolvedValue(null);
   sessionCreate.mockResolvedValue({
     id: 's1',
     code: null,
@@ -283,6 +285,16 @@ describe('resolveSessionByCode / joinSessionByCode', () => {
         create: { sessionId: 's1', userId: 'u2' },
       });
     }
+  });
+
+  it('refuses joining a different live session while already in one', async () => {
+    sessionFindUnique.mockResolvedValueOnce(preview);
+    sessionFindFirst.mockResolvedValueOnce({ id: 'other', title: 'Already in this' });
+
+    await expect(joinSessionByCode({ rawCode: 'K7NP-3WQZ', userId: 'u2' })).rejects.toMatchObject({
+      code: 'ALREADY_IN_SESSION',
+    });
+    expect(sessionMemberUpsert).not.toHaveBeenCalled();
   });
 });
 

@@ -7,7 +7,6 @@ import { RoundTableLogo } from '../components/RoundTableLogo';
 import { Button } from '../components/ui/Button';
 import { DevUserSwitcher } from '../features/sessions/DevUserSwitcher';
 import { useDeleteSession } from '../features/sessions/useDeleteSession';
-import { useLeaveSession } from '../features/sessions/useLeaveSession';
 import { useSessions } from '../features/sessions/useSessions';
 
 /** The typed-code path to `/join/:code` — pasting a link goes straight there instead. */
@@ -54,23 +53,18 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 
 interface SessionCardProps {
   session: SessionSummary;
-  /** Draft cards get Edit/Delete; live cards a non-leader is in get Leave. Ended and the leader's own live card (unreachable — redirected away) get neither. */
-  variant: 'draft' | 'live' | 'ended';
+  /** Drafts get F05's Edit/Delete; an ended session is display-only. */
+  isDraft: boolean;
   onChanged: () => void;
 }
 
-/** One dashboard row, plus F05/F07's confirm-guarded quick actions. */
-function SessionCard({ session, variant, onChanged }: SessionCardProps) {
-  const [confirming, setConfirming] = useState<'delete' | 'leave' | null>(null);
+/** One dashboard row, plus F05's confirm-guarded edit/delete on drafts. */
+function SessionCard({ session, isDraft, onChanged }: SessionCardProps) {
+  const [confirming, setConfirming] = useState(false);
   const { remove, deleting, error: deleteError } = useDeleteSession();
-  const { leave, leaving, error: leaveError } = useLeaveSession();
 
   async function handleDelete() {
     if (await remove(session.id)) onChanged();
-  }
-
-  async function handleLeave() {
-    if (await leave(session.id)) onChanged();
   }
 
   return (
@@ -91,12 +85,12 @@ function SessionCard({ session, variant, onChanged }: SessionCardProps) {
         </span>
       </Link>
 
-      {variant === 'draft' && (
+      {isDraft && (
         <div className="flex items-center gap-3 text-[12px]">
           <Link to={`/sessions/${session.id}/edit`} className="font-semibold text-rt-primary-deep hover:underline">
             Edit
           </Link>
-          {confirming === 'delete' ? (
+          {confirming ? (
             <span className="flex items-center gap-2">
               <span className="text-rt-ink-muted">Delete this draft?</span>
               <button
@@ -109,7 +103,7 @@ function SessionCard({ session, variant, onChanged }: SessionCardProps) {
               </button>
               <button
                 type="button"
-                onClick={() => setConfirming(null)}
+                onClick={() => setConfirming(false)}
                 className="text-rt-ink-muted hover:underline"
               >
                 Cancel
@@ -118,47 +112,13 @@ function SessionCard({ session, variant, onChanged }: SessionCardProps) {
           ) : (
             <button
               type="button"
-              onClick={() => setConfirming('delete')}
+              onClick={() => setConfirming(true)}
               className="font-semibold text-red-600 hover:underline"
             >
               Delete
             </button>
           )}
           {deleteError && <span className="text-red-600">{deleteError}</span>}
-        </div>
-      )}
-
-      {variant === 'live' && !session.isLeader && (
-        <div className="flex items-center gap-3 text-[12px]">
-          {confirming === 'leave' ? (
-            <span className="flex items-center gap-2">
-              <span className="text-rt-ink-muted">Leave this session?</span>
-              <button
-                type="button"
-                onClick={() => void handleLeave()}
-                disabled={leaving}
-                className="font-semibold text-red-600 hover:underline"
-              >
-                {leaving ? 'Leaving…' : 'Yes, leave'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirming(null)}
-                className="text-rt-ink-muted hover:underline"
-              >
-                Cancel
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirming('leave')}
-              className="font-semibold text-red-600 hover:underline"
-            >
-              Leave session
-            </button>
-          )}
-          {leaveError && <span className="text-red-600">{leaveError}</span>}
         </div>
       )}
     </li>
@@ -168,11 +128,11 @@ function SessionCard({ session, variant, onChanged }: SessionCardProps) {
 interface SessionGroupProps {
   title: string;
   sessions: SessionSummary[];
-  variant: 'draft' | 'live' | 'ended';
+  isDraft: boolean;
   onChanged: () => void;
 }
 
-function SessionGroup({ title, sessions, variant, onChanged }: SessionGroupProps) {
+function SessionGroup({ title, sessions, isDraft, onChanged }: SessionGroupProps) {
   if (sessions.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
@@ -181,7 +141,7 @@ function SessionGroup({ title, sessions, variant, onChanged }: SessionGroupProps
       </span>
       <ul className="flex flex-col gap-2">
         {sessions.map((session) => (
-          <SessionCard key={session.id} session={session} variant={variant} onChanged={onChanged} />
+          <SessionCard key={session.id} session={session} isDraft={isDraft} onChanged={onChanged} />
         ))}
       </ul>
     </div>
@@ -189,28 +149,28 @@ function SessionGroup({ title, sessions, variant, onChanged }: SessionGroupProps
 }
 
 /**
- * F07: three lists by status — Draft, Lobby+Active, Ended (decision logged on
- * KAN-33) — plus the leader hard-lock: a leader whose own session is
- * lobby/active is redirected straight there, before this page ever renders
- * its content, because for them there is no dashboard to browse while that
- * session is live (the only way out is ending it — F32/KAN-54, not built
- * yet). Members are never redirected; leaving a lobby/active session they're
- * in (not leading) is the explicit "Leave session" action on its card.
+ * F07, with the one-live-session-at-a-time rule (KAN-33 decisions): being in
+ * a lobby/active session means you are *in* it, so anyone with a live
+ * membership — leader or member — is redirected straight back into it rather
+ * than being allowed to browse from here. Leaving is an action on the
+ * waiting room / pinboard, not a dashboard button; once they leave, this
+ * page is reachable again and they can join another or start their own.
+ *
+ * That is why only Draft and Ended render below: a live session is never
+ * visible from this page, because reaching this page at all means there
+ * isn't one.
  */
 export function DashboardPage() {
   const { sessions, loading, error, reload } = useSessions();
   const navigate = useNavigate();
 
-  const lockedInSession = sessions?.find(
-    (s) => s.isLeader && (s.status === 'lobby' || s.status === 'active'),
-  );
+  const liveSession = sessions?.find((s) => s.status === 'lobby' || s.status === 'active');
 
   useEffect(() => {
-    if (lockedInSession) navigate(`/sessions/${lockedInSession.id}`, { replace: true });
-  }, [lockedInSession, navigate]);
+    if (liveSession) navigate(`/sessions/${liveSession.id}`, { replace: true });
+  }, [liveSession, navigate]);
 
   const draftSessions = sessions?.filter((s) => s.status === 'draft') ?? [];
-  const liveSessions = sessions?.filter((s) => s.status === 'lobby' || s.status === 'active') ?? [];
   const endedSessions = sessions?.filter((s) => s.status === 'ended') ?? [];
 
   return (
@@ -234,7 +194,7 @@ export function DashboardPage() {
 
         {loading && <p className="text-[13px] text-rt-ink-muted">Loading sessions…</p>}
 
-        {lockedInSession && (
+        {liveSession && (
           <p className="text-[13px] text-rt-ink-muted">
             Taking you back to your live session…
           </p>
@@ -259,11 +219,10 @@ export function DashboardPage() {
           </p>
         )}
 
-        {sessions && !lockedInSession && sessions.length > 0 && (
+        {sessions && !liveSession && sessions.length > 0 && (
           <div className="flex flex-col gap-6">
-            <SessionGroup title="Draft" sessions={draftSessions} variant="draft" onChanged={reload} />
-            <SessionGroup title="Lobby & active" sessions={liveSessions} variant="live" onChanged={reload} />
-            <SessionGroup title="Ended" sessions={endedSessions} variant="ended" onChanged={reload} />
+            <SessionGroup title="Draft" sessions={draftSessions} isDraft onChanged={reload} />
+            <SessionGroup title="Ended" sessions={endedSessions} isDraft={false} onChanged={reload} />
           </div>
         )}
       </div>
