@@ -24,7 +24,11 @@ import {
   effectiveDiagramNodeSize,
   wrapDiagramLabel,
 } from '@roundtable/shared';
-import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
+import {
+  artifactJsonSchema,
+  diagramWriteArtifactSchema,
+  proposalCreateSchema,
+} from '@roundtable/shared/schemas';
 import { describe, expect, it } from 'vitest';
 
 function relativeLuminance(hex: string): number {
@@ -279,5 +283,94 @@ describe('write contract v2', () => {
       edges: [{ from: 'n1', to: 'n2', strokeStyle: 'wavy' }],
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('read contract tolerance', () => {
+  // A stored row may have been written by a different build of this app. Reading
+  // must degrade a value it does not recognise, never fail the whole board.
+  function storedDiagram(node: Record<string, unknown>, edge: Record<string, unknown> = {}) {
+    return {
+      type: 'diagram',
+      nodes: [
+        { id: 'n1', label: 'A', x: 0, y: 0, ...node },
+        { id: 'n2', label: 'B', x: 200, y: 0 },
+      ],
+      edges: [{ from: 'n1', to: 'n2', ...edge }],
+    };
+  }
+
+  it('drops a palette key this build does not know instead of failing the row', () => {
+    const parsed = artifactJsonSchema.safeParse(storedDiagram({ fillColor: 'chartreuse' }));
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success || parsed.data.type !== 'diagram') return;
+    // zod leaves the key present but empty; the value is what everything reads.
+    expect(parsed.data.nodes[0]?.fillColor).toBeUndefined();
+    // The rest of the node is untouched.
+    expect(parsed.data.nodes[0]).toMatchObject({ id: 'n1', label: 'A' });
+  });
+
+  it('drops an unknown shape back to the default box', () => {
+    const parsed = artifactJsonSchema.safeParse(storedDiagram({ shape: 'hexagon' }));
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success || parsed.data.type !== 'diagram') return;
+    expect(parsed.data.nodes[0]?.shape).toBeUndefined();
+  });
+
+  it('drops an out-of-range or malformed stored size', () => {
+    const parsed = artifactJsonSchema.safeParse(storedDiagram({ width: 'enormous', height: 90 }));
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success || parsed.data.type !== 'diagram') return;
+    // A half-pair falls back to the shape's own size downstream.
+    expect(parsed.data.nodes[0]?.width).toBeUndefined();
+  });
+
+  it('drops an unknown arrow style', () => {
+    const parsed = artifactJsonSchema.safeParse(storedDiagram({}, { strokeStyle: 'wavy' }));
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success || parsed.data.type !== 'diagram') return;
+    expect(parsed.data.edges[0]?.strokeStyle).toBeUndefined();
+    expect(parsed.data.edges[0]).toMatchObject({ from: 'n1', to: 'n2' });
+  });
+
+  it('still refuses to let any of those be written', () => {
+    expect(
+      diagramWriteArtifactSchema.safeParse(storedDiagram({ fillColor: 'chartreuse' })).success,
+    ).toBe(false);
+    expect(diagramWriteArtifactSchema.safeParse(storedDiagram({ shape: 'hexagon' })).success).toBe(
+      false,
+    );
+    expect(
+      diagramWriteArtifactSchema.safeParse(storedDiagram({}, { strokeStyle: 'wavy' })).success,
+    ).toBe(false);
+  });
+
+  it('does not let the tolerant read schema launder a crafted create payload', () => {
+    // The create schema must not parse through artifactJsonSchema: that would
+    // strip the bad value first and leave a payload the write rules then accept.
+    const payload = {
+      type: 'diagram' as const,
+      artifactJson: storedDiagram({ fillColor: 'url(#evil)' }),
+      x: 0,
+      y: 0,
+    };
+
+    expect(artifactJsonSchema.safeParse(payload.artifactJson).success).toBe(true);
+    expect(proposalCreateSchema.safeParse(payload).success).toBe(false);
+  });
+
+  it('keeps rejecting a structurally broken row on read', () => {
+    // Leniency is only about unrecognised values, not missing required ones.
+    expect(
+      artifactJsonSchema.safeParse({
+        type: 'diagram',
+        nodes: [{ label: 'no id', x: 0, y: 0 }],
+        edges: [],
+      }).success,
+    ).toBe(false);
   });
 });

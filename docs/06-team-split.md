@@ -98,6 +98,7 @@ Setup decided how security works but deliberately did not build it — implement
 4. **Input validation:** check every mutating endpoint's body against zod schemas from `@roundtable/shared`; bad input gets a 400 response with details.
 
 **Acceptance criteria:**
+
 - Database contains password hashes only — no plain text.
 - Missing, expired, or tampered tokens → 401 with the standard `{ error, code }` JSON shape; valid token reaches the route.
 - GET llm-config responses return `baseUrl` + `model` only — never key material.
@@ -181,6 +182,7 @@ The socket server currently accepts any connection and only logs connect/disconn
 3. **Event routing:** receive `member:join`, broadcast `memberJoined`/`memberLeft` to the room, and send the joining user the full `session:state` snapshot as an ack. Later module owners plug their handlers into this same gateway.
 
 **Acceptance criteria:**
+
 - Socket without valid JWT is disconnected during handshake.
 - Two clients in the same session: one joins → the other receives `memberJoined`; joiner's ack contains full state.
 - A client cannot receive events for a session it hasn't joined.
@@ -315,11 +317,20 @@ Backend:  [NONE — validation only, in pinboard schema]
   svg: string  // SVG data as serialized string
 }
 
-// Diagram
+// Diagram — see docs/02 §3 for the authoritative contract.
+// Every field after `shape` is optional and additive; omitting all of them
+// gives the original appearance, so pre-v2 diagrams still render unchanged.
 {
   type: "diagram",
-  nodes: Array<{ id, label, x, y, shape?: "box" | "container" | "text" }>,
-  edges: Array<{ from, to, label? }>
+  nodes: Array<{
+    id, label, x, y,
+    shape?: "box" | "rectangle" | "ellipse" | "diamond"
+          | "triangle" | "cylinder" | "container" | "text",
+    parentId?: string,          // container grouping; containers only, acyclic
+    width?: number, height?: number,   // bounded pair, both or neither
+    fillColor?, strokeColor?, strokeWidthPreset?, fontSizePreset?  // closed enums
+  }>,
+  edges: Array<{ from, to, label?, strokeColor?, strokeWidthPreset?, strokeStyle? }>
 }
 ```
 
@@ -586,6 +597,7 @@ data: {"type":"done"}
 2. **Decrypting LLM keys at call time:** when making an LLM call, decrypt the user's stored API key in memory using the helper from the Auth owner; use it for that call only and discard it.
 
 **Acceptance criteria:**
+
 - Assistant reply appears incrementally in the chat panel while the LLM generates (not all-at-once after completion).
 - Stream always ends with a `done` event, even on error mid-stream (send an error event then `done`).
 - Decrypted keys exist only inside a single request's lifetime; nothing logs or persists decrypted key material.

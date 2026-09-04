@@ -12,7 +12,7 @@ import {
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
   diagramCanParent,
-} from './index.js';
+} from './diagramContract.js';
 
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
 // Use on REST bodies (server) and forms (web). Add your module's schemas under its label.
@@ -52,9 +52,8 @@ const diagramStrokeWidthPresetSchema = z.enum(DIAGRAM_STROKE_WIDTH_PRESETS);
 const diagramFontSizePresetSchema = z.enum(DIAGRAM_FONT_SIZE_PRESETS);
 const diagramStrokeStyleSchema = z.enum(DIAGRAM_STROKE_STYLES);
 
-// Structural only: size bounds and the width/height pair rule are write-path
-// invariants (see diagramWriteArtifactSchema) so a stored diagram always reads
-// back, the same way legacy dangling edges do.
+// The strict node, used on the write path. Size bounds, the width/height pair
+// rule and the container rules are added on top in diagramWriteArtifactSchema.
 export const diagramNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string().max(200),
@@ -82,13 +81,53 @@ export const diagramEdgeSchema = z.object({
   strokeStyle: diagramStrokeStyleSchema.optional(),
 });
 
+/**
+ * Reading is deliberately more forgiving than writing.
+ *
+ * A stored row was written by some past or future build of this app. If it
+ * carries a value this build does not recognise — a palette key or shape added
+ * later, a size that is no longer in range — the node must still load with its
+ * default appearance rather than taking the whole board down with it. Only the
+ * write path decides what is allowed to be created, and it stays strict.
+ *
+ * This is the same rule that already applies to legacy dangling edges.
+ */
+function lenient<T extends z.ZodTypeAny>(schema: T) {
+  return schema.optional().catch(undefined);
+}
+
+const diagramReadNodeSchema = diagramNodeSchema.extend({
+  shape: lenient(z.enum(DIAGRAM_NODE_SHAPE_KEYS)),
+  parentId: lenient(z.string().min(1)),
+  width: lenient(z.number()),
+  height: lenient(z.number()),
+  fillColor: lenient(diagramFillKeySchema),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  fontSizePreset: lenient(diagramFontSizePresetSchema),
+});
+
+const diagramReadEdgeSchema = diagramEdgeSchema.extend({
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  strokeStyle: lenient(diagramStrokeStyleSchema),
+});
+
+/** Read shape. Stays a plain object so it can join a discriminated union. */
 export const diagramArtifactSchema = z.object({
+  type: z.literal('diagram'),
+  nodes: z.array(diagramReadNodeSchema).max(100),
+  edges: z.array(diagramReadEdgeSchema).max(200),
+});
+
+/** Write shape: every field must be one this build actually understands. */
+const diagramStrictArtifactSchema = z.object({
   type: z.literal('diagram'),
   nodes: z.array(diagramNodeSchema).max(100),
   edges: z.array(diagramEdgeSchema).max(200),
 });
 
-export const diagramWriteArtifactSchema = diagramArtifactSchema.superRefine(
+export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefine(
   ({ nodes, edges }, context) => {
     const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
 
@@ -210,10 +249,23 @@ export const diagramWriteArtifactSchema = diagramArtifactSchema.superRefine(
   },
 );
 
+/** What a stored row is parsed with: tolerant of values it does not recognise. */
 export const artifactJsonSchema = z.discriminatedUnion('type', [
   stickyArtifactSchema,
   drawingArtifactSchema,
   diagramArtifactSchema,
+]);
+
+/**
+ * What an incoming payload is parsed with. This deliberately does NOT reuse
+ * `artifactJsonSchema`: that one strips values it does not recognise, which
+ * would quietly launder a crafted payload into a valid one before the write
+ * invariants ever ran.
+ */
+export const artifactWriteJsonSchema = z.discriminatedUnion('type', [
+  stickyArtifactSchema,
+  drawingArtifactSchema,
+  diagramStrictArtifactSchema,
 ]);
 
 export const proposalTypeSchema = z.enum(['sticky', 'drawing', 'diagram']);
@@ -223,7 +275,7 @@ export const proposalTypeSchema = z.enum(['sticky', 'drawing', 'diagram']);
 export const proposalCreateSchema = z
   .object({
     type: proposalTypeSchema,
-    artifactJson: artifactJsonSchema,
+    artifactJson: artifactWriteJsonSchema,
     x: z.number(),
     y: z.number(),
     extendsProposalId: z.string().optional(),
