@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
 import { ProposalCard } from './ProposalCard';
-import { CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
+import { CARD_INK, CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
 
 /** Matches `stickyArtifactSchema` — the server rejects anything longer. */
 const STICKY_MAX_CHARS = 2000;
@@ -25,6 +25,8 @@ interface PositionedProposalProps {
   isNew: boolean;
   /** The viewer authored this, so they get the edit/delete affordances. */
   isOwn: boolean;
+  /** The author runs this session, marked with an L beside their name. */
+  isAuthorLeader: boolean;
   /**
    * The viewer may reposition this card: its author, or the leader arranging
    * the shared board. A move is visible to everyone.
@@ -105,8 +107,15 @@ function StickyTextEditor({
             submit();
           }
         }}
-        className="resize-none bg-transparent px-3.5 py-3 text-[14px] leading-[1.45] font-medium text-rt-ink outline-none"
-        style={{ minHeight: 110 }}
+        className="resize-none bg-transparent outline-none"
+        style={{
+          minHeight: 128,
+          padding: '16px 14px 8px',
+          fontSize: '14px',
+          fontWeight: 500,
+          lineHeight: 1.45,
+          color: CARD_INK,
+        }}
         aria-label="Edit sticky note text"
       />
       <div className="flex items-center gap-2 px-3 pb-2.5">
@@ -200,6 +209,7 @@ export function PositionedProposal({
   position,
   isNew,
   isOwn,
+  isAuthorLeader,
   canMove,
   canDelete,
   isDragging,
@@ -256,7 +266,12 @@ export function PositionedProposal({
         />
       ) : (
         <>
-          <ProposalCard item={item} isNew={isNew} isOwnedByViewer={isOwn} />
+          <ProposalCard
+            item={item}
+            isNew={isNew}
+            isOwnedByViewer={isOwn}
+            isAuthorLeader={isAuthorLeader}
+          />
           {canEditText || canDelete ? (
             <OwnerControls
               canEditText={canEditText}

@@ -11,27 +11,45 @@ export const ZOOM_LEVELS = [
 ] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
+/**
+ * Card styling. The project palette throughout — the Organic wireframes
+ * supplied the card's *structure* (body, then a footer carrying the author and
+ * the time), not its colours.
+ */
+export const CARD_INK = '#080C15';
+/** Edge for cards with no colour of their own; a sticky uses its theme's. */
+export const CARD_BORDER = '#CFCFCF';
 export const CARD_RADIUS = '12px';
-export const STICKY_RADIUS = '14px';
-
-/** Soft light border + shadow (drawing / diagram / sticky edges). */
 export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21,0.04)';
 
-/** Sticky fills from the RoundTable palette — soft tinted edges. */
-export const STICKY_THEMES: Record<StickyColor, { bg: string; border: string; ink: string }> = {
-  yellow: { bg: '#FDF4E5', border: '#F1C881', ink: '#080C15' },
-  pink: { bg: '#F9EEF2', border: '#E0A33C', ink: '#080C15' },
-  blue: { bg: '#EEF2F4', border: '#8CA4AC', ink: '#080C15' },
-  green: { bg: '#EEF4F0', border: '#4D6A74', ink: '#080C15' },
-};
+/** Soft accent for the leader mark in a card's footer. */
+export const OWNED_INK = '#7A6A4C';
+
+/** Diagram preview blocks, in the same greys the old node boxes used. */
+export const NODE_BORDER = '1px solid #CFCFCF';
+export const NODE_PLACEHOLDER_BORDER = '1px dashed #CFCFCF';
+export const NODE_ROOT_BORDER = '1px solid #8CA4AC';
+export const NODE_ROOT_FILL = '#EEF2F4';
+
+/** Plate behind a drawing's artwork. */
+export const THUMB_BACKGROUND = '#F7F7F8';
 
 /**
- * Ring marking a card the viewer authored (F16). An outline rather than a fill
- * swap: a sticky's colour is the author's choice and carries meaning, so
- * ownership is drawn around the card instead of painted over it.
+ * Sticky paper.
+ *
+ * On the board every card now shares one ink-coloured border, so the author's
+ * colour choice shows only as the paper it is written on. `border` is kept for
+ * the creative tools' own sticky editor, which draws its swatches from here.
  */
-export const OWNED_OUTLINE = '2px solid #E0A33C';
-export const OWNED_OUTLINE_OFFSET = '2px';
+export const STICKY_THEMES: Record<StickyColor, { bg: string; border: string }> = {
+  yellow: { bg: '#FDF4E5', border: '#F1C881' },
+  pink: { bg: '#F9EEF2', border: '#E0A33C' },
+  blue: { bg: '#EEF2F4', border: '#8CA4AC' },
+  green: { bg: '#EEF4F0', border: '#4D6A74' },
+};
+
+/** Kept for the tools' sticky editor; board cards use `CARD_RADIUS`. */
+export const STICKY_RADIUS = '14px';
 
 /** Intrinsic widths — types differ on purpose. */
 export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {

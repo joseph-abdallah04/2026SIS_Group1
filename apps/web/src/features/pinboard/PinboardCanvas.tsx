@@ -552,6 +552,7 @@ export function PinboardCanvas({
                   position={positionOf(item)}
                   isNew={newItemIds.has(item.id)}
                   isOwn={viewerId !== null && item.authorId === viewerId}
+                  isAuthorLeader={item.authorId === board.leaderId}
                   canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
                   canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
                   isDragging={draggingId === item.id}
