@@ -1,11 +1,13 @@
 // Placeholder pages — smoke-test targets (docs/05 §10). Owners replace with real UI.
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { normalizeSessionCode, type SessionStatus } from '@roundtable/shared';
+import { normalizeSessionCode, type SessionStatus, type SessionSummary } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../components/RoundTableLogo';
 import { Button } from '../components/ui/Button';
 import { DevUserSwitcher } from '../features/sessions/DevUserSwitcher';
+import { useDeleteSession } from '../features/sessions/useDeleteSession';
+import { useLeaveSession } from '../features/sessions/useLeaveSession';
 import { useSessions } from '../features/sessions/useSessions';
 
 /** The typed-code path to `/join/:code` — pasting a link goes straight there instead. */
@@ -50,13 +52,166 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   ended: 'Ended',
 };
 
+interface SessionCardProps {
+  session: SessionSummary;
+  /** Draft cards get Edit/Delete; live cards a non-leader is in get Leave. Ended and the leader's own live card (unreachable — redirected away) get neither. */
+  variant: 'draft' | 'live' | 'ended';
+  onChanged: () => void;
+}
+
+/** One dashboard row, plus F05/F07's confirm-guarded quick actions. */
+function SessionCard({ session, variant, onChanged }: SessionCardProps) {
+  const [confirming, setConfirming] = useState<'delete' | 'leave' | null>(null);
+  const { remove, deleting, error: deleteError } = useDeleteSession();
+  const { leave, leaving, error: leaveError } = useLeaveSession();
+
+  async function handleDelete() {
+    if (await remove(session.id)) onChanged();
+  }
+
+  async function handleLeave() {
+    if (await leave(session.id)) onChanged();
+  }
+
+  return (
+    <li className="flex flex-col gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-4 py-3">
+      <Link
+        to={`/sessions/${session.id}`}
+        className="flex items-center justify-between gap-3 hover:opacity-80"
+      >
+        <div className="flex flex-col">
+          <span className="text-[13px] font-semibold text-rt-ink">{session.title}</span>
+          <span className="text-[12px] text-rt-ink-faint">
+            {session.code ?? 'no code yet'}
+            {session.isLeader ? ' · you lead this' : ''}
+          </span>
+        </div>
+        <span className="rounded-full bg-rt-primary-tint px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rt-primary-deep">
+          {STATUS_LABELS[session.status]}
+        </span>
+      </Link>
+
+      {variant === 'draft' && (
+        <div className="flex items-center gap-3 text-[12px]">
+          <Link to={`/sessions/${session.id}/edit`} className="font-semibold text-rt-primary-deep hover:underline">
+            Edit
+          </Link>
+          {confirming === 'delete' ? (
+            <span className="flex items-center gap-2">
+              <span className="text-rt-ink-muted">Delete this draft?</span>
+              <button
+                type="button"
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+                className="font-semibold text-red-600 hover:underline"
+              >
+                {deleting ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(null)}
+                className="text-rt-ink-muted hover:underline"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming('delete')}
+              className="font-semibold text-red-600 hover:underline"
+            >
+              Delete
+            </button>
+          )}
+          {deleteError && <span className="text-red-600">{deleteError}</span>}
+        </div>
+      )}
+
+      {variant === 'live' && !session.isLeader && (
+        <div className="flex items-center gap-3 text-[12px]">
+          {confirming === 'leave' ? (
+            <span className="flex items-center gap-2">
+              <span className="text-rt-ink-muted">Leave this session?</span>
+              <button
+                type="button"
+                onClick={() => void handleLeave()}
+                disabled={leaving}
+                className="font-semibold text-red-600 hover:underline"
+              >
+                {leaving ? 'Leaving…' : 'Yes, leave'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(null)}
+                className="text-rt-ink-muted hover:underline"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming('leave')}
+              className="font-semibold text-red-600 hover:underline"
+            >
+              Leave session
+            </button>
+          )}
+          {leaveError && <span className="text-red-600">{leaveError}</span>}
+        </div>
+      )}
+    </li>
+  );
+}
+
+interface SessionGroupProps {
+  title: string;
+  sessions: SessionSummary[];
+  variant: 'draft' | 'live' | 'ended';
+  onChanged: () => void;
+}
+
+function SessionGroup({ title, sessions, variant, onChanged }: SessionGroupProps) {
+  if (sessions.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">
+        {title} ({sessions.length})
+      </span>
+      <ul className="flex flex-col gap-2">
+        {sessions.map((session) => (
+          <SessionCard key={session.id} session={session} variant={variant} onChanged={onChanged} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /**
- * F04's acceptance criterion is "sees it appear on their dashboard" — this is
- * that minimal list (title, status, code, link). The full dashboard (KAN-33 /
- * F07 — filters, richer cards, etc.) is a separate, later ticket.
+ * F07: three lists by status — Draft, Lobby+Active, Ended (decision logged on
+ * KAN-33) — plus the leader hard-lock: a leader whose own session is
+ * lobby/active is redirected straight there, before this page ever renders
+ * its content, because for them there is no dashboard to browse while that
+ * session is live (the only way out is ending it — F32/KAN-54, not built
+ * yet). Members are never redirected; leaving a lobby/active session they're
+ * in (not leading) is the explicit "Leave session" action on its card.
  */
 export function DashboardPage() {
   const { sessions, loading, error, reload } = useSessions();
+  const navigate = useNavigate();
+
+  const lockedInSession = sessions?.find(
+    (s) => s.isLeader && (s.status === 'lobby' || s.status === 'active'),
+  );
+
+  useEffect(() => {
+    if (lockedInSession) navigate(`/sessions/${lockedInSession.id}`, { replace: true });
+  }, [lockedInSession, navigate]);
+
+  const draftSessions = sessions?.filter((s) => s.status === 'draft') ?? [];
+  const liveSessions = sessions?.filter((s) => s.status === 'lobby' || s.status === 'active') ?? [];
+  const endedSessions = sessions?.filter((s) => s.status === 'ended') ?? [];
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
@@ -79,6 +234,12 @@ export function DashboardPage() {
 
         {loading && <p className="text-[13px] text-rt-ink-muted">Loading sessions…</p>}
 
+        {lockedInSession && (
+          <p className="text-[13px] text-rt-ink-muted">
+            Taking you back to your live session…
+          </p>
+        )}
+
         {error && (
           <div className="rounded-lg border border-rt-tertiary bg-rt-surface-alt p-4 text-[13px]">
             <p className="text-rt-ink-muted">{error}</p>
@@ -98,28 +259,12 @@ export function DashboardPage() {
           </p>
         )}
 
-        {sessions && sessions.length > 0 && (
-          <ul className="flex flex-col gap-2">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <Link
-                  to={`/sessions/${session.id}`}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-rt-tertiary bg-rt-surface px-4 py-3 hover:bg-rt-primary-tint"
-                >
-                  <div className="flex flex-col">
-                    <span className="text-[13px] font-semibold text-rt-ink">{session.title}</span>
-                    <span className="text-[12px] text-rt-ink-faint">
-                      {session.code ?? 'no code yet'}
-                      {session.isLeader ? ' · you lead this' : ''}
-                    </span>
-                  </div>
-                  <span className="rounded-full bg-rt-primary-tint px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rt-primary-deep">
-                    {STATUS_LABELS[session.status]}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+        {sessions && !lockedInSession && sessions.length > 0 && (
+          <div className="flex flex-col gap-6">
+            <SessionGroup title="Draft" sessions={draftSessions} variant="draft" onChanged={reload} />
+            <SessionGroup title="Lobby & active" sessions={liveSessions} variant="live" onChanged={reload} />
+            <SessionGroup title="Ended" sessions={endedSessions} variant="ended" onChanged={reload} />
+          </div>
         )}
       </div>
     </main>

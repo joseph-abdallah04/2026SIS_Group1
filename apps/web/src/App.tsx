@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { CreateSessionPage } from './features/sessions/CreateSessionPage';
+import { EditSessionPage } from './features/sessions/EditSessionPage';
 import { JoinSessionPage } from './features/sessions/JoinSessionPage';
 import { SessionRouter } from './features/sessions/SessionRouter';
 import { RequireAuth } from './lib/auth';
@@ -34,6 +35,7 @@ export default function App() {
         <Route element={<RequireAuth />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/sessions/new" element={<CreateSessionPage />} />
+          <Route path="/sessions/:id/edit" element={<EditSessionPage />} />
           <Route path="/sessions/:id" element={<SessionRouter />} />
           <Route path="/join/:code" element={<JoinSessionPage />} />
           <Route path="/settings" element={<SettingsPage />} />

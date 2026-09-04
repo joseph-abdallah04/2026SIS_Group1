@@ -52,7 +52,7 @@ export function SessionRouter() {
     case 'draft':
       return <SessionDraftPage session={session} onOpened={reload} />;
     case 'lobby':
-      return <WaitingRoom session={session} />;
+      return <WaitingRoom session={session} onStarted={reload} />;
     case 'active':
       return <SessionPinboard />;
     case 'ended':

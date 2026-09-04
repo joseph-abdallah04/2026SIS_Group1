@@ -1,149 +1,24 @@
-import { useState, type FormEvent } from 'react';
-import { createSessionSchema } from '@roundtable/shared/schemas';
-
-import { Button } from '../../components/ui/Button';
+import { SessionQuestionsForm } from './SessionQuestionsForm';
 import { useCreateSession } from './useCreateSession';
 
 interface CreateSessionFormProps {
   onCreated: (sessionId: string) => void;
 }
 
-/**
- * F04: focus/title + a dynamic, ordered list of questions. Order here is
- * exactly the order the server assigns as `position` — no separate reorder
- * step, so moving a row up/down before submitting is the whole UI for it.
- */
+/** F04: creates a new draft. See `SessionQuestionsForm` for the shared editor. */
 export function CreateSessionForm({ onCreated }: CreateSessionFormProps) {
-  const [title, setTitle] = useState('');
-  const [questions, setQuestions] = useState<string[]>(['']);
   const { create, submitting, error } = useCreateSession();
-  const [validationError, setValidationError] = useState<string | null>(null);
-
-  function updateQuestion(index: number, text: string) {
-    setQuestions((prev) => prev.map((q, i) => (i === index ? text : q)));
-  }
-
-  function addQuestion() {
-    setQuestions((prev) => [...prev, '']);
-  }
-
-  function removeQuestion(index: number) {
-    setQuestions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
-  }
-
-  function moveQuestion(index: number, direction: -1 | 1) {
-    setQuestions((prev) => {
-      const target = index + direction;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      const moved = next[index];
-      const swapped = next[target];
-      if (moved === undefined || swapped === undefined) return prev;
-      next[index] = swapped;
-      next[target] = moved;
-      return next;
-    });
-  }
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setValidationError(null);
-
-    // Client-side check mirrors the server's zod schema so a bad submission
-    // never round-trips just to be told what a glance here already shows.
-    const parsed = createSessionSchema.safeParse({
-      title,
-      questions: questions.map((q) => q.trim()).filter((q) => q.length > 0),
-    });
-    if (!parsed.success) {
-      setValidationError(parsed.error.issues[0]?.message ?? 'Invalid session');
-      return;
-    }
-
-    const session = await create(parsed.data);
-    if (session) onCreated(session.id);
-  }
 
   return (
-    <form onSubmit={handleSubmit} className="flex w-full max-w-xl flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <label htmlFor="session-title" className="text-[13px] font-semibold text-rt-ink">
-          Focus / title
-        </label>
-        <input
-          id="session-title"
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="What is this session about?"
-          maxLength={120}
-          className="min-h-10 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-primary-deep"
-        />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <span className="text-[13px] font-semibold text-rt-ink">Questions (in order)</span>
-        <div className="flex flex-col gap-2">
-          {questions.map((question, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <span className="w-5 shrink-0 text-[12px] font-semibold text-rt-ink-faint">
-                {index + 1}.
-              </span>
-              <input
-                type="text"
-                value={question}
-                onChange={(e) => updateQuestion(index, e.target.value)}
-                placeholder={`Question ${index + 1}`}
-                maxLength={500}
-                className="min-h-10 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-primary-deep"
-              />
-              <button
-                type="button"
-                onClick={() => moveQuestion(index, -1)}
-                disabled={index === 0}
-                aria-label="Move question up"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                onClick={() => moveQuestion(index, 1)}
-                disabled={index === questions.length - 1}
-                aria-label="Move question down"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                onClick={() => removeQuestion(index)}
-                disabled={questions.length === 1}
-                aria-label="Remove question"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={addQuestion}
-          className="self-start"
-        >
-          + Add question
-        </Button>
-      </div>
-
-      {(validationError ?? error) && (
-        <p className="text-[13px] text-red-600">{validationError ?? error}</p>
-      )}
-
-      <Button type="submit" disabled={submitting} className="self-start">
-        {submitting ? 'Creating…' : 'Create session'}
-      </Button>
-    </form>
+    <SessionQuestionsForm
+      submitLabel="Create session"
+      submittingLabel="Creating…"
+      submitting={submitting}
+      error={error}
+      onSubmit={async (input) => {
+        const session = await create(input);
+        if (session) onCreated(session.id);
+      }}
+    />
   );
 }

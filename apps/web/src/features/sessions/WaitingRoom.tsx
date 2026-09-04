@@ -2,20 +2,26 @@ import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
 import { getDevUserId } from '../../lib/api';
 import type { SessionDetail } from './useSessionDetail';
+import { useStartSession } from './useStartSession';
 import { useWaitingRoom } from './useWaitingRoom';
 
 interface WaitingRoomProps {
   session: SessionDetail;
+  /** `SessionRouter`'s `reload` — called on the `sessionStarted` broadcast so
+   * every connected client (leader included) re-fetches and switches to the
+   * pinboard once `status` comes back `active` (F09). */
+  onStarted: () => void;
 }
 
 /**
  * F08's live lobby: connected participants over the socket, a question
- * preview, and — for the leader — where "Start session" will live once F09
- * owns the lobby -> active transition. Disabled here on purpose: opening this
- * screen is not this ticket's job to make functional.
+ * preview, and — for the leader — the F09 "Start session" action that flips
+ * `status` to `active` and, via `onStarted`, moves everyone here into the
+ * session view at once.
  */
-export function WaitingRoom({ session }: WaitingRoomProps) {
-  const { participants, loading, error, isLive } = useWaitingRoom(session.id);
+export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
+  const { participants, loading, error, isLive } = useWaitingRoom(session.id, onStarted);
+  const { start, starting, error: startError } = useStartSession(session.id);
   const isLeader = session.leaderId === getDevUserId();
 
   return (
@@ -78,9 +84,17 @@ export function WaitingRoom({ session }: WaitingRoomProps) {
         </div>
 
         {isLeader && (
-          <Button type="button" disabled title="Starting a session is F09's ticket" className="self-start">
-            Start session
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              onClick={() => void start()}
+              disabled={starting}
+              className="self-start"
+            >
+              {starting ? 'Starting…' : 'Start session'}
+            </Button>
+            {startError && <p className="text-[13px] text-red-600">{startError}</p>}
+          </div>
         )}
       </div>
     </main>
