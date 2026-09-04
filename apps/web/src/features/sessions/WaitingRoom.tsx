@@ -2,6 +2,7 @@ import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
+import { EndSessionControl } from './EndSessionControl';
 import { LeaveSessionControl } from './LeaveSessionControl';
 import { useStartSession } from './useStartSession';
 import { useWaitingRoom } from './useWaitingRoom';
@@ -95,6 +96,11 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
               {starting ? 'Starting…' : 'Start session'}
             </Button>
             {startError && <p className="text-[13px] text-red-600">{startError}</p>}
+            {/* F32 is offered here, not just on the board: a leader who opens a
+                session and changes their mind is locked into this lobby
+                otherwise — they cannot leave their own session, and the
+                dashboard routes them straight back here. */}
+            <EndSessionControl sessionId={session.id} className="text-rt-ink-muted" />
           </div>
         )}
 

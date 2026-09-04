@@ -13,7 +13,9 @@ import {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitSessionEnded,
   emitSessionStarted,
+  endSession,
   getSessionWithQuestions,
   joinSessionByCode,
   leaveSession,
@@ -188,6 +190,20 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       const leaderId = (req as DevAuthedRequest).devUserId as string;
       const session = await startSession({ sessionId: req.params.id, leaderId });
       emitSessionStarted(io, session);
+      res.json(session);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // F32: lobby/active -> ended. Leader-only, irreversible (the confirmation
+  // is the client's job), and broadcasts `sessionEnded` so nobody is left on a
+  // board that has stopped accepting writes.
+  sessionsRoutes.post<{ id: string }>('/:id/end', resolveDevUser, async (req, res, next) => {
+    try {
+      const leaderId = (req as DevAuthedRequest).devUserId as string;
+      const session = await endSession({ sessionId: req.params.id, leaderId });
+      emitSessionEnded(io, session);
       res.json(session);
     } catch (err) {
       next(err);

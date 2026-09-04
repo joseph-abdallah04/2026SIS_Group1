@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import type { BoardResponse } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { EndSessionControl } from '../sessions/EndSessionControl';
 import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
 import { ProposalCard } from './ProposalCard';
@@ -13,8 +14,18 @@ interface PinboardCanvasProps {
   isLive: boolean;
   /** Proposals that arrived on a live broadcast moments ago (F15). */
   newItemIds: ReadonlySet<string>;
-  /** Leaders cannot leave (F07); members get Leave in this header. */
+  /**
+   * Leaders cannot leave (F07), they end the session (F32) — this header
+   * offers whichever of the two applies.
+   */
   isLeader: boolean;
+  /**
+   * F24's agenda rail, rendered beside the board. A node rather than the
+   * question list itself: the agenda belongs to the sessions side of the app,
+   * and passing it in keeps this component about the board while still owning
+   * the header/board/footer split the rail has to sit inside.
+   */
+  agenda?: ReactNode;
 }
 
 function EmptyBoardPlate() {
@@ -125,7 +136,13 @@ function ZoomControl({
   );
 }
 
-export function PinboardCanvas({ board, isLive, newItemIds, isLeader }: PinboardCanvasProps) {
+export function PinboardCanvas({
+  board,
+  isLive,
+  newItemIds,
+  isLeader,
+  agenda,
+}: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const grid = ZOOM_GRID[zoom];
   const isEmpty = board.items.length === 0;
@@ -193,41 +210,48 @@ export function PinboardCanvas({ board, isLive, newItemIds, isLeader }: Pinboard
               {isLive ? 'live' : 'offline'}
             </span>
           </div>
-          {!isLeader && (
+          {isLeader ? (
+            <EndSessionControl sessionId={board.sessionId} className="text-white" />
+          ) : (
             <LeaveSessionControl sessionId={board.sessionId} className="text-white" />
           )}
         </div>
       </header>
 
-      <div className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-rt-surface">
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            backgroundImage: dotBackground,
-            backgroundSize: `${grid.dotSize} ${grid.dotSize}`,
-          }}
-        />
-        <div className="relative" style={{ padding: grid.padding }}>
-          {isEmpty ? (
-            <div className="flex min-h-[480px] items-center justify-center">
-              <EmptyBoardPlate />
-            </div>
-          ) : (
-            // Flow layout, in the server's order — item.x/item.y are persisted
-            // but deliberately not honoured yet. Free positioning arrives with
-            // F16 (drag to move); until then every participant sees the same
-            // reading order, which is what F14 promises.
-            <div className="flex flex-wrap items-start" style={{ gap: grid.gap }}>
-              {board.items.map((item) => (
-                <ProposalCard
-                  key={item.id}
-                  item={item}
-                  zoom={zoom}
-                  isNew={newItemIds.has(item.id)}
-                />
-              ))}
-            </div>
-          )}
+      {/* The agenda sits beside the board and above the footer, so the toolbar
+          and zoom control keep the full width they had. */}
+      <div className="flex min-h-0 flex-1">
+        {agenda}
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-rt-surface">
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              backgroundImage: dotBackground,
+              backgroundSize: `${grid.dotSize} ${grid.dotSize}`,
+            }}
+          />
+          <div className="relative" style={{ padding: grid.padding }}>
+            {isEmpty ? (
+              <div className="flex min-h-[480px] items-center justify-center">
+                <EmptyBoardPlate />
+              </div>
+            ) : (
+              // Flow layout, in the server's order — item.x/item.y are persisted
+              // but deliberately not honoured yet. Free positioning arrives with
+              // F16 (drag to move); until then every participant sees the same
+              // reading order, which is what F14 promises.
+              <div className="flex flex-wrap items-start" style={{ gap: grid.gap }}>
+                {board.items.map((item) => (
+                  <ProposalCard
+                    key={item.id}
+                    item={item}
+                    zoom={zoom}
+                    isNew={newItemIds.has(item.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

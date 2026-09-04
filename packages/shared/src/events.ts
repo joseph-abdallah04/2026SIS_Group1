@@ -85,6 +85,16 @@ export interface ServerToClientEvents {
    * itself; this payload only needs to say *that* it happened.
    */
   sessionStarted(payload: { sessionId: string; startedAt: string }): void;
+  /**
+   * F32: the leader ended the session. Same room broadcast as
+   * `sessionStarted`, and deliberately as thin — every client re-fetches and
+   * routes itself to the final screen off the new `status`, so this payload
+   * does not carry a copy of the session that could arrive stale.
+   *
+   * There is no client-to-server `sessionEnd`: ending is `POST /:id/end`, for
+   * the same reason starting is (docs/02 §5).
+   */
+  sessionEnded(payload: { sessionId: string; endedAt: string }): void;
 
   // === pinboard module ===
   /**

@@ -67,7 +67,9 @@ const {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitSessionEnded,
   emitSessionStarted,
+  endSession,
   generateSessionCode,
   joinSessionByCode,
   leaveSession,
@@ -495,6 +497,125 @@ describe('startSession (F09)', () => {
         endedAt: null,
       }),
     ).toThrow(/startedAt/);
+  });
+});
+
+describe('endSession (F32)', () => {
+  const activeSession = {
+    id: 's1',
+    code: 'K7NP-3WQZ',
+    title: 'Roadmap planning',
+    leaderId: 'leader-1',
+    // `as const` so the emit tests below can spread this into a real `Session`
+    // without `status` widening to `string`.
+    status: 'active' as const,
+  };
+
+  it('rejects a participant trying to end someone else\u2019s session', async () => {
+    sessionFindUnique.mockResolvedValueOnce(activeSession);
+    await expect(endSession({ sessionId: 's1', leaderId: 'u2' })).rejects.toMatchObject({
+      code: 'NOT_SESSION_LEADER',
+    });
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('records endedAt and releases the code, so the code stops being joinable', async () => {
+    sessionFindUnique.mockResolvedValueOnce(activeSession);
+    sessionUpdate.mockResolvedValueOnce({
+      ...activeSession,
+      status: 'ended',
+      code: null,
+      endedAt: new Date('2026-09-04T05:00:00.000Z'),
+    });
+
+    const session = await endSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(sessionUpdate).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: { status: 'ended', endedAt: expect.any(Date), code: null },
+    });
+    expect(session).toMatchObject({ status: 'ended', code: null });
+  });
+
+  // The leader is locked into a lobby exactly as much as a live session, so
+  // refusing here would strand whoever opens a session and changes their mind.
+  it('can end from lobby too, not just active', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...activeSession, status: 'lobby' });
+    sessionUpdate.mockResolvedValueOnce({ ...activeSession, status: 'ended', code: null });
+
+    await expect(endSession({ sessionId: 's1', leaderId: 'leader-1' })).resolves.toMatchObject({
+      status: 'ended',
+    });
+  });
+
+  it('refuses to end a draft — there is nothing to end, and F05 delete is the way out', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...activeSession, status: 'draft', code: null });
+    await expect(endSession({ sessionId: 's1', leaderId: 'leader-1' })).rejects.toMatchObject({
+      code: 'INVALID_TRANSITION',
+    });
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when already ended, so a double-click is not an error', async () => {
+    const endedSession = { ...activeSession, status: 'ended', code: null, endedAt: new Date() };
+    sessionFindUnique.mockResolvedValueOnce(endedSession);
+
+    const session = await endSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(session).toBe(endedSession);
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('raises SESSION_NOT_FOUND for an unknown session', async () => {
+    sessionFindUnique.mockResolvedValueOnce(null);
+    await expect(endSession({ sessionId: 'missing', leaderId: 'leader-1' })).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+    });
+  });
+
+  it('leaves member rows untouched — who was present at the end is what F31 summarises', async () => {
+    sessionFindUnique.mockResolvedValueOnce(activeSession);
+    sessionUpdate.mockResolvedValueOnce({ ...activeSession, status: 'ended', endedAt: new Date() });
+
+    await endSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(sessionMemberUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('emitSessionEnded broadcasts to the session room', () => {
+    const emit = vi.fn();
+    const to = vi.fn(() => ({ emit }));
+    const io = { to } as unknown as Parameters<typeof emitSessionEnded>[0];
+
+    emitSessionEnded(io, {
+      ...activeSession,
+      code: null,
+      status: 'ended',
+      createdAt: new Date(),
+      startedAt: new Date('2026-09-04T00:00:00.000Z'),
+      endedAt: new Date('2026-09-04T05:00:00.000Z'),
+    });
+
+    expect(to).toHaveBeenCalledWith('session:s1');
+    expect(emit).toHaveBeenCalledWith('sessionEnded', {
+      sessionId: 's1',
+      endedAt: '2026-09-04T05:00:00.000Z',
+    });
+  });
+
+  it('emitSessionEnded throws on a session with no endedAt instead of silently not broadcasting', () => {
+    const io = { to: vi.fn(() => ({ emit: vi.fn() })) } as unknown as Parameters<
+      typeof emitSessionEnded
+    >[0];
+
+    expect(() =>
+      emitSessionEnded(io, {
+        ...activeSession,
+        createdAt: new Date(),
+        startedAt: new Date(),
+        endedAt: null,
+      }),
+    ).toThrow(/endedAt/);
   });
 });
 

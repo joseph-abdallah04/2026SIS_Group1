@@ -356,6 +356,67 @@ export function emitSessionStarted(io: RealtimeServer, session: Session): void {
   });
 }
 
+export interface EndSessionArgs {
+  sessionId: string;
+  leaderId: string;
+}
+
+/**
+ * F32: the leader ends the session. Leader-only, records `endedAt`, and
+ * releases the join code back to NULL — an ended session is not joinable, and
+ * the unique index is only free to hand that code out again once it's gone
+ * (see the `code` column comment in schema.prisma).
+ *
+ * Allowed from `lobby` as well as `active`, though the ticket names only
+ * `active`: the leader is locked into a lobby exactly as much as a live
+ * session (the dashboard routes them back into it and `leaveSession` refuses
+ * them), so refusing here would strand whoever opens a session and then
+ * changes their mind — which is the dead end this ticket exists to remove.
+ *
+ * Already-`ended` is a no-op, same reasoning as `startSession`'s
+ * already-`active`: a double-click on a confirmed, irreversible action should
+ * not produce an error on the second click.
+ *
+ * Member rows are deliberately left as they are — `leftAt` stays NULL for
+ * whoever was still present, which is the truthful record of who was in the
+ * session when it ended (docs/02 §4), and what F31's summary will read.
+ */
+export async function endSession({ sessionId, leaderId }: EndSessionArgs): Promise<Session> {
+  const session = await prisma.session.findUnique({ where: { id: sessionId } });
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.leaderId !== leaderId) {
+    throw new ApiError(403, 'Only the session leader can end it', 'NOT_SESSION_LEADER');
+  }
+  if (session.status === 'ended') {
+    return session;
+  }
+  if (session.status !== 'lobby' && session.status !== 'active') {
+    throw new ApiError(409, `Cannot end a session that is ${session.status}`, 'INVALID_TRANSITION');
+  }
+
+  return prisma.session.update({
+    where: { id: sessionId },
+    data: { status: 'ended', endedAt: new Date(), code: null },
+  });
+}
+
+/**
+ * Broadcasts F32's `sessionEnded` to the room, so nobody is left sitting on a
+ * live board that no longer exists. Same shape and reasoning as
+ * `emitSessionStarted` — `io` is a parameter, and `routes.ts` is the caller.
+ */
+export function emitSessionEnded(io: RealtimeServer, session: Session): void {
+  if (!session.endedAt) {
+    throw new ApiError(500, 'Cannot announce a session that has no endedAt', 'NOT_ENDED');
+  }
+  io.to(sessionRoom(session.id)).emit('sessionEnded', {
+    sessionId: session.id,
+    endedAt: session.endedAt.toISOString(),
+  });
+}
+
 export interface LeaveSessionArgs {
   sessionId: string;
   userId: string;
@@ -624,6 +685,10 @@ export interface SessionRef {
 
 export interface QuestionRef {
   id: string;
+  // Widened for F32: a caller holding a question needs to reach its session to
+  // ask whether that session still accepts writes. Without it, pinboard could
+  // only see the question's own status, which an ended session doesn't change.
+  sessionId: string;
   text: string;
   position: number;
   status: Question['status'];
@@ -646,7 +711,7 @@ export async function getSession(sessionId: string): Promise<SessionRef | null> 
 export async function getQuestion(questionId: string): Promise<QuestionRef | null> {
   return prisma.question.findUnique({
     where: { id: questionId },
-    select: { id: true, text: true, position: true, status: true },
+    select: { id: true, sessionId: true, text: true, position: true, status: true },
   });
 }
 
@@ -665,7 +730,7 @@ export async function getActiveQuestion(sessionId: string): Promise<QuestionRef 
   const questions = await prisma.question.findMany({
     where: { sessionId },
     orderBy: { position: 'asc' },
-    select: { id: true, text: true, position: true, status: true },
+    select: { id: true, sessionId: true, text: true, position: true, status: true },
   });
 
   return questions.find((q) => q.status === 'discussion') ?? questions[0] ?? null;

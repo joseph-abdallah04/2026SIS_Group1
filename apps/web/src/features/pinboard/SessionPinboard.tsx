@@ -1,6 +1,8 @@
 import { useParams } from 'react-router-dom';
+import type { Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { AgendaPanel } from '../agenda/AgendaPanel';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { PinboardCanvas } from './PinboardCanvas';
@@ -16,8 +18,7 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
       <div
         className="relative min-h-0 flex-1 bg-rt-surface"
         style={{
-          backgroundImage:
-            'radial-gradient(rgba(140,164,172,0.42) 1.4px, transparent 1.4px)',
+          backgroundImage: 'radial-gradient(rgba(140,164,172,0.42) 1.4px, transparent 1.4px)',
           backgroundSize: '24px 24px',
         }}
       >
@@ -27,10 +28,18 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** `isLeader` decides whether the header offers "Leave session" (F07) — the
- * leader has no leave, they end the session instead. Required, not defaulted:
- * guessing here would silently drop a member's only way out. */
-export function SessionPinboard({ isLeader }: { isLeader: boolean }) {
+interface SessionPinboardProps {
+  /**
+   * Decides which of the two exits the header offers: "Leave session" for a
+   * member (F07), "End session" for the leader (F32). Required, not
+   * defaulted — guessing would silently drop someone's only way out.
+   */
+  isLeader: boolean;
+  /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
+  questions: Question[];
+}
+
+export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
@@ -57,15 +66,25 @@ export function SessionPinboard({ isLeader }: { isLeader: boolean }) {
     return (
       <BoardFrame>
         <div className="relative w-[400px] border border-rt-ink bg-rt-surface">
-          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-primary">+</span>
-          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-primary">+</span>
-          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-primary">+</span>
-          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-primary">+</span>
+          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
+          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
+          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
+          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-primary">
+            +
+          </span>
           <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
             Load failed
           </div>
           <div className="p-5 text-center">
-            <p className="text-[19px] font-semibold tracking-[-0.01em] text-rt-ink">Could not load board</p>
+            <p className="text-[19px] font-semibold tracking-[-0.01em] text-rt-ink">
+              Could not load board
+            </p>
             <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">{error}</p>
             <button
               type="button"
@@ -91,7 +110,13 @@ export function SessionPinboard({ isLeader }: { isLeader: boolean }) {
   return (
     <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
       <main className="h-screen">
-        <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} isLeader={isLeader} />
+        <PinboardCanvas
+          board={board}
+          isLive={isLive}
+          newItemIds={newItemIds}
+          isLeader={isLeader}
+          agenda={<AgendaPanel questions={questions} activeQuestionId={board.questionId} />}
+        />
       </main>
       <CreativeStudio />
     </CreativeToolsProvider>
