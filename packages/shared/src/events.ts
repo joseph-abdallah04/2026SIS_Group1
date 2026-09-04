@@ -43,6 +43,10 @@ export interface ClientToServerEvents {
   memberJoin(payload: { sessionId: string }, ack?: (res: { ok: boolean; error?: string }) => void): void;
 
   // === sessions module ===
+  // `sessionStart` has no client-to-server counterpart — starting is a REST
+  // call (`POST /:id/start`), not a socket event, so the leader's click goes
+  // through the same 403/idempotency checks REST already enforces. Only the
+  // resulting broadcast (`sessionStarted`, below) is a socket event.
 
   // === pinboard module ===
   /**
@@ -72,6 +76,15 @@ export interface ServerToClientEvents {
   sessionState(payload: SessionStatePayload): void;
 
   // === sessions module ===
+  /**
+   * F09: the leader started the session — broadcast to the whole
+   * `session:{id}` room (leader's own socket included, same pattern as
+   * `proposalCreated`) so every connected client transitions from the
+   * waiting room to the session view at the same moment, no refresh needed.
+   * `SessionRouter` re-fetches on receipt and switches on the new `status`
+   * itself; this payload only needs to say *that* it happened.
+   */
+  sessionStarted(payload: { sessionId: string; startedAt: string }): void;
 
   // === pinboard module ===
   /**

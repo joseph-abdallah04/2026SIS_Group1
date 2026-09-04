@@ -67,6 +67,10 @@ model Session {
   leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])
   status    SessionStatus @default(lobby)
   createdAt DateTime      @default(now())
+  // Set once, on lobby -> active (F09). Distinct from `createdAt` (when the
+  // draft was made) — the gap between the two is however long the leader
+  // spent in the waiting room.
+  startedAt DateTime?
   endedAt   DateTime?
 
   questions Question[]

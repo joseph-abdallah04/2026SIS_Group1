@@ -29,6 +29,12 @@ export const createSessionSchema = z.object({
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 
+// F05: editing a draft replaces title + the full question list in one call
+// (no partial-field PATCH semantics) — same shape as creating one, since a
+// draft's questions have no other state yet for a partial update to preserve.
+export const updateSessionSchema = createSessionSchema;
+export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
+
 // F06: `XXXX-XXXX` from an alphabet with no `0/1/I/L/O` — nothing that could
 // be confused for another character when read aloud or typed. Kept here
 // alongside the regex so the alphabet used to generate a code and the one

@@ -18,6 +18,8 @@ export interface Session {
   leaderId: string;
   status: SessionStatus;
   createdAt: Date;
+  // Set once, on lobby -> active (F09).
+  startedAt: Date | null;
   endedAt: Date | null;
 }
 
