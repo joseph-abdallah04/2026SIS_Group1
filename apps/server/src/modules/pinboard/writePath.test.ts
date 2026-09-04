@@ -289,6 +289,86 @@ describe('proposalCreate handler', () => {
     });
   });
 
+  // Container grouping is a graph, and a crafted payload can hand us a cycle or
+  // a child hanging off a node that cannot hold children. Neither may persist.
+  describe('container grouping', () => {
+    function grouping(nodes: Record<string, unknown>[]) {
+      return { type: 'diagram', artifactJson: { type: 'diagram', nodes, edges: [] }, x: 0, y: 0 };
+    }
+
+    const container = { id: 'c1', label: 'Platform', x: 24, y: 24, shape: 'container' };
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'discussion' });
+    });
+
+    it('accepts a node nested in a container', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([
+            container,
+            { id: 'n1', label: 'API', x: 40, y: 40, shape: 'box', parentId: 'c1' },
+          ]),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a child whose container does not exist', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([{ id: 'n1', label: 'API', x: 40, y: 40, shape: 'box', parentId: 'ghost' }]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a child parented to something that cannot hold children', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([
+            { id: 'n1', label: 'API', x: 24, y: 24, shape: 'box' },
+            { id: 'n2', label: 'Db', x: 200, y: 24, shape: 'cylinder', parentId: 'n1' },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a node parented to itself', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(grouping([{ ...container, parentId: 'c1' }]))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a nesting cycle of any length', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([
+            { id: 'a', label: 'A', x: 0, y: 0, shape: 'container', parentId: 'c' },
+            { id: 'b', label: 'B', x: 0, y: 0, shape: 'container', parentId: 'a' },
+            { id: 'c', label: 'C', x: 0, y: 0, shape: 'container', parentId: 'b' },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a shape outside the registry', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(grouping([{ id: 'n1', label: 'A', x: 0, y: 0, shape: 'hexagon' }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
   it('reports a closed board rather than failing silently', async () => {
     activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'voting' });
     question.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'voting' });

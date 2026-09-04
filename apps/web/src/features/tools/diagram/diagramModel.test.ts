@@ -11,9 +11,13 @@ import {
   DIAGRAM_NODE_WIDTH,
   DIAGRAM_GRID,
   addNode,
+  clampNodesInsideContainer,
   clearEdgeStyle,
   clearNodeSize,
   clearNodeStyle,
+  containerAtPoint,
+  deleteContainerWithContents,
+  draggedSelectionRoots,
   alignNodes,
   autoLayoutNodes,
   clientPointToDiagramPoint,
@@ -31,10 +35,12 @@ import {
   prepareDiagram,
   prepareNodeLabel,
   renameNode,
+  reparentNodes,
   resizeNode,
   snapNodePosition,
   styleEdge,
   styleNodes,
+  ungroupContainer,
 } from './diagramModel';
 
 function buildNodes(count: number): DiagramNode[] {
@@ -615,6 +621,223 @@ describe('style setters', () => {
       strokeColor: 'green',
       strokeWidthPreset: 'thin',
       fontSizePreset: 'large',
+    });
+  });
+});
+
+describe('semantic containers', () => {
+  // A 184x112 container at (100, 100) holding one box at (120, 120).
+  function grouped(): DiagramNode[] {
+    return [
+      { id: 'c1', label: 'Platform', x: 100, y: 100, shape: 'container' },
+      { id: 'n1', label: 'API', x: 120, y: 120, shape: 'box', parentId: 'c1' },
+      { id: 'n2', label: 'Outside', x: 600, y: 400, shape: 'box' },
+    ];
+  }
+
+  describe('containerAtPoint', () => {
+    it('finds the container a point falls inside', () => {
+      expect(containerAtPoint(grouped(), { x: 150, y: 150 })?.id).toBe('c1');
+      expect(containerAtPoint(grouped(), { x: 10, y: 10 })).toBeNull();
+    });
+
+    it('never offers a non-container as a drop target', () => {
+      const nodes: DiagramNode[] = [{ id: 'n1', label: 'A', x: 0, y: 0, shape: 'box' }];
+      expect(containerAtPoint(nodes, { x: 60, y: 28 })).toBeNull();
+    });
+
+    it('prefers the most deeply nested container', () => {
+      const nodes: DiagramNode[] = [
+        { id: 'outer', label: 'Outer', x: 0, y: 0, shape: 'container', width: 400, height: 300 },
+        {
+          id: 'inner',
+          label: 'Inner',
+          x: 40,
+          y: 40,
+          shape: 'container',
+          width: 200,
+          height: 150,
+          parentId: 'outer',
+        },
+      ];
+      expect(containerAtPoint(nodes, { x: 100, y: 100 })?.id).toBe('inner');
+      expect(containerAtPoint(nodes, { x: 350, y: 250 })?.id).toBe('outer');
+    });
+
+    it('excludes the nodes being dragged so nothing lands inside itself', () => {
+      const nodes = grouped();
+      expect(containerAtPoint(nodes, { x: 150, y: 150 }, ['c1'])).toBeNull();
+    });
+  });
+
+  describe('reparentNodes', () => {
+    it('assigns and clears a parent', () => {
+      const assigned = reparentNodes(grouped(), ['n2'], 'c1');
+      expect(assigned.find((node) => node.id === 'n2')?.parentId).toBe('c1');
+
+      const cleared = reparentNodes(assigned, ['n2'], null);
+      expect(cleared.find((node) => node.id === 'n2')).not.toHaveProperty('parentId');
+    });
+
+    it('refuses a parent that is not a container', () => {
+      const nodes = reparentNodes(grouped(), ['n2'], 'n1');
+      expect(nodes.find((node) => node.id === 'n2')).not.toHaveProperty('parentId');
+    });
+
+    it('refuses a parent that does not exist', () => {
+      const nodes = reparentNodes(grouped(), ['n2'], 'ghost');
+      expect(nodes.find((node) => node.id === 'n2')).not.toHaveProperty('parentId');
+    });
+
+    it('refuses to nest a container inside its own descendant', () => {
+      const nodes: DiagramNode[] = [
+        { id: 'outer', label: 'Outer', x: 0, y: 0, shape: 'container' },
+        { id: 'inner', label: 'Inner', x: 10, y: 10, shape: 'container', parentId: 'outer' },
+      ];
+
+      const attempted = reparentNodes(nodes, ['outer'], 'inner');
+
+      expect(attempted.find((node) => node.id === 'outer')).not.toHaveProperty('parentId');
+      expect(prepareDiagram(attempted, []).ok).toBe(true);
+    });
+
+    it('refuses to parent a node to itself', () => {
+      const nodes = reparentNodes(grouped(), ['c1'], 'c1');
+      expect(nodes.find((node) => node.id === 'c1')).not.toHaveProperty('parentId');
+    });
+
+    it('produces a grouping the write contract accepts', () => {
+      const grouped2 = reparentNodes(grouped(), ['n2'], 'c1');
+      const prepared = prepareDiagram(grouped2, []);
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) return;
+      expect(prepared.artifact.nodes.find((node) => node.id === 'n2')?.parentId).toBe('c1');
+    });
+  });
+
+  describe('draggedSelectionRoots', () => {
+    it('drops members that are already carried by another member', () => {
+      expect(draggedSelectionRoots(grouped(), ['c1', 'n1'])).toEqual(['c1']);
+      expect(draggedSelectionRoots(grouped(), ['n1'])).toEqual(['n1']);
+      expect(draggedSelectionRoots(grouped(), ['n1', 'n2']).sort()).toEqual(['n1', 'n2']);
+    });
+  });
+
+  describe('clampNodesInsideContainer', () => {
+    it('pulls a child back inside after the container shrinks', () => {
+      const nodes: DiagramNode[] = [
+        { id: 'c1', label: 'C', x: 100, y: 100, shape: 'container', width: 100, height: 80 },
+        { id: 'n1', label: 'N', x: 400, y: 400, shape: 'box', parentId: 'c1' },
+      ];
+
+      const [, child] = clampNodesInsideContainer(nodes, 'c1');
+
+      // The 120x56 box is wider than the 100-wide container, so it pins to the left.
+      expect(child).toMatchObject({ x: 100, y: 124 });
+    });
+
+    it('leaves a child that already fits exactly where it was', () => {
+      const nodes = grouped();
+      expect(clampNodesInsideContainer(nodes, 'c1')[1]).toBe(nodes[1]);
+    });
+
+    it('clamps nested descendants, not just direct children', () => {
+      const nodes: DiagramNode[] = [
+        { id: 'outer', label: 'O', x: 0, y: 0, shape: 'container', width: 200, height: 200 },
+        { id: 'inner', label: 'I', x: 10, y: 10, shape: 'container', parentId: 'outer' },
+        { id: 'leaf', label: 'L', x: 900, y: 500, shape: 'box', parentId: 'inner' },
+      ];
+
+      const clamped = clampNodesInsideContainer(nodes, 'outer');
+
+      expect(clamped.find((node) => node.id === 'leaf')?.x).toBeLessThanOrEqual(200);
+    });
+
+    it('ignores a target that is not a container', () => {
+      const nodes = grouped();
+      expect(clampNodesInsideContainer(nodes, 'n1')).toEqual(nodes);
+    });
+  });
+
+  describe('deleting a container', () => {
+    const edges = [{ from: 'n1', to: 'n2' }];
+
+    it('removes the whole subtree when contents go with it', () => {
+      const result = deleteContainerWithContents(grouped(), edges, 'c1');
+
+      expect(result.nodes.map((node) => node.id)).toEqual(['n2']);
+      // The arrow lost an endpoint and goes with it.
+      expect(result.edges).toEqual([]);
+    });
+
+    it('keeps the contents and lifts them out when ungrouped', () => {
+      const result = ungroupContainer(grouped(), edges, 'c1');
+
+      expect(result.nodes.map((node) => node.id).sort()).toEqual(['n1', 'n2']);
+      expect(result.nodes.find((node) => node.id === 'n1')).not.toHaveProperty('parentId');
+      // Both endpoints survived, so the arrow does too.
+      expect(result.edges).toEqual(edges);
+    });
+
+    it('lifts children to the grandparent when a nested container is ungrouped', () => {
+      const nodes: DiagramNode[] = [
+        { id: 'outer', label: 'O', x: 0, y: 0, shape: 'container' },
+        { id: 'inner', label: 'I', x: 10, y: 10, shape: 'container', parentId: 'outer' },
+        { id: 'leaf', label: 'L', x: 20, y: 20, shape: 'box', parentId: 'inner' },
+      ];
+
+      const result = ungroupContainer(nodes, [], 'inner');
+
+      expect(result.nodes.find((node) => node.id === 'leaf')?.parentId).toBe('outer');
+      expect(prepareDiagram(result.nodes, result.edges).ok).toBe(true);
+    });
+
+    it('never leaves a survivor pointing at a container that is gone', () => {
+      const result = deleteNodesWithEdges(grouped(), [], ['c1']);
+
+      expect(result.nodes.find((node) => node.id === 'n1')).not.toHaveProperty('parentId');
+      expect(prepareDiagram(result.nodes, result.edges).ok).toBe(true);
+    });
+  });
+
+  describe('copying a group', () => {
+    it('keeps the grouping when the container is copied too', () => {
+      const nodes = grouped();
+      const fragment = copyDiagramFragment(nodes, [], ['c1', 'n1']);
+
+      const pasted = pasteDiagramFragment(nodes, [], fragment, { x: 16, y: 16 });
+      expect(pasted.ok).toBe(true);
+      if (!pasted.ok) return;
+
+      const [containerCopy, childCopy] = pasted.addedIds;
+      expect(pasted.nodes.find((node) => node.id === childCopy)?.parentId).toBe(containerCopy);
+      expect(prepareDiagram(pasted.nodes, pasted.edges).ok).toBe(true);
+    });
+
+    it('drops a parent reference the copy left behind', () => {
+      const nodes = grouped();
+      const fragment = copyDiagramFragment(nodes, [], ['n1']);
+
+      const pasted = pasteDiagramFragment(nodes, [], fragment, { x: 16, y: 16 });
+      expect(pasted.ok).toBe(true);
+      if (!pasted.ok) return;
+
+      // The copy would otherwise still claim the original's container.
+      const copy = pasted.nodes.find((node) => node.id === pasted.addedIds[0]);
+      expect(copy).not.toHaveProperty('parentId');
+      expect(prepareDiagram(pasted.nodes, pasted.edges).ok).toBe(true);
+    });
+  });
+
+  describe('layout with groups', () => {
+    it('keeps every node on the sheet after Arrange, containers included', () => {
+      const arranged = autoLayoutNodes(grouped());
+      for (const node of arranged) {
+        expect(node.x).toBeGreaterThanOrEqual(0);
+        expect(node.y).toBeGreaterThanOrEqual(0);
+      }
+      // Arrange is positional only; it never changes who belongs to whom.
+      expect(arranged.find((node) => node.id === 'n1')?.parentId).toBe('c1');
     });
   });
 });

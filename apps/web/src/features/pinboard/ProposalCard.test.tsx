@@ -32,7 +32,8 @@ describe('diagram proposal card', () => {
       />,
     );
 
-    expect(container.querySelectorAll('g > rect')).toHaveLength(2);
+    // Box and container are stroked outlines; text is a bare label with no border.
+    expect(container.querySelectorAll('g > rect[stroke]')).toHaveLength(2);
     expect(container.querySelector('rect[stroke-dasharray="4 3"]')).not.toBeNull();
     const fittedText = [...container.querySelectorAll('text')].find(
       (element) => element.textContent === 'Architecture boundary',

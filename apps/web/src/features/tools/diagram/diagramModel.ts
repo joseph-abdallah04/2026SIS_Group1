@@ -6,10 +6,14 @@ import type {
   DiagramNodeSize,
 } from '@roundtable/shared';
 import {
+  DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_MAX_NODE_HEIGHT,
   DIAGRAM_MAX_NODE_WIDTH,
   DIAGRAM_MIN_NODE_HEIGHT,
   DIAGRAM_MIN_NODE_WIDTH,
+  diagramCanParent,
+  diagramDescendantIds,
+  diagramIsAncestor,
   diagramNodeSize,
   effectiveDiagramNodeSize,
 } from '@roundtable/shared';
@@ -17,7 +21,7 @@ import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
 
-export const DIAGRAM_NODE_SHAPES = ['box', 'container', 'text'] as const;
+export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
 
 // Palette drags carry the shape in a private media type so unrelated drops
 // (files, text from other apps) are ignored by the canvas.
@@ -25,6 +29,11 @@ export const DIAGRAM_SHAPE_MEDIA_TYPE = 'application/x-roundtable-diagram-shape'
 
 export const DIAGRAM_SHAPE_LABELS: Record<DiagramNodeShape, string> = {
   box: 'Box',
+  rectangle: 'Rectangle',
+  ellipse: 'Ellipse',
+  diamond: 'Decision',
+  triangle: 'Triangle',
+  cylinder: 'Database',
   container: 'Container',
   text: 'Text',
 };
@@ -425,6 +434,143 @@ export function distributeNodes(
   });
 }
 
+/**
+ * The container a point lands in, preferring the most deeply nested one so
+ * dropping into a container inside a container does the obvious thing.
+ * `excluded` keeps a node from being dropped into itself or its own subtree.
+ */
+export function containerAtPoint(
+  nodes: readonly DiagramNode[],
+  point: DiagramPoint,
+  excluded: readonly string[] = [],
+): DiagramNode | null {
+  const skip = new Set(excluded);
+  let best: DiagramNode | null = null;
+  let bestDepth = -1;
+
+  for (const node of nodes) {
+    if (skip.has(node.id) || !diagramCanParent(node.shape)) continue;
+    const bounds = nodeBounds(node);
+    const inside =
+      point.x >= bounds.x &&
+      point.x <= bounds.x + bounds.width &&
+      point.y >= bounds.y &&
+      point.y <= bounds.y + bounds.height;
+    if (!inside) continue;
+    const depth = diagramNodeDepthIn(nodes, node.id);
+    if (depth > bestDepth) {
+      best = node;
+      bestDepth = depth;
+    }
+  }
+  return best;
+}
+
+function diagramNodeDepthIn(nodes: readonly DiagramNode[], id: string): number {
+  const parents = new Map(nodes.map((node) => [node.id, node.parentId]));
+  const seen = new Set<string>();
+  let depth = 0;
+  let current = parents.get(id);
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    depth += 1;
+    current = parents.get(current);
+  }
+  return depth;
+}
+
+/**
+ * The members of a drag that are not already carried by another member, so a
+ * container and its children are reparented once, by the container.
+ */
+export function draggedSelectionRoots(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+): string[] {
+  const dragging = new Set(ids);
+  return ids.filter((id) => {
+    const node = nodes.find((candidate) => candidate.id === id);
+    return !node?.parentId || !dragging.has(node.parentId);
+  });
+}
+
+export function reparentNodes(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+  parentId: string | null,
+): DiagramNode[] {
+  const moving = new Set(ids);
+  return nodes.map((node) => {
+    if (!moving.has(node.id)) return node;
+    // Refuse any assignment that would make the graph cyclic or leaf-parented.
+    if (parentId !== null) {
+      const parent = nodes.find((candidate) => candidate.id === parentId);
+      if (!parent || !diagramCanParent(parent.shape)) return node;
+      if (diagramIsAncestor(nodes, node.id, parentId)) return node;
+    }
+    if ((node.parentId ?? null) === parentId) return node;
+    const next: DiagramNode = { ...node };
+    if (parentId === null) delete next.parentId;
+    else next.parentId = parentId;
+    return next;
+  });
+}
+
+/**
+ * Pull every descendant back inside the container's bounds, preserving relative
+ * layout where it fits. Used after a container is resized.
+ */
+export function clampNodesInsideContainer(
+  nodes: readonly DiagramNode[],
+  containerId: string,
+): DiagramNode[] {
+  const container = nodes.find((node) => node.id === containerId);
+  if (!container || !diagramCanParent(container.shape)) return [...nodes];
+  const bounds = nodeBounds(container);
+  const descendants = new Set(diagramDescendantIds(nodes, containerId));
+
+  return nodes.map((node) => {
+    if (!descendants.has(node.id)) return node;
+    const size = effectiveDiagramNodeSize(node);
+    const x = Math.min(
+      Math.max(node.x, bounds.x),
+      Math.max(bounds.x, bounds.x + bounds.width - size.width),
+    );
+    const y = Math.min(
+      Math.max(node.y, bounds.y),
+      Math.max(bounds.y, bounds.y + bounds.height - size.height),
+    );
+    if (x === node.x && y === node.y) return node;
+    return { ...node, ...placeNodePosition({ x, y }, size, false) };
+  });
+}
+
+/** Lifts direct children up to the container's own parent, then drops it. */
+export function ungroupContainer(
+  nodes: readonly DiagramNode[],
+  edges: readonly DiagramEdge[],
+  containerId: string,
+): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  const container = nodes.find((node) => node.id === containerId);
+  if (!container) return { nodes: [...nodes], edges: [...edges] };
+
+  const children = nodes.filter((node) => node.parentId === containerId).map((node) => node.id);
+  const lifted = reparentNodes(nodes, children, container.parentId ?? null);
+  return deleteNodesWithEdges(lifted, edges, [containerId]);
+}
+
+/** Removes the container together with everything nested inside it. */
+export function deleteContainerWithContents(
+  nodes: readonly DiagramNode[],
+  edges: readonly DiagramEdge[],
+  containerId: string,
+): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  return deleteNodesWithEdges(nodes, edges, [
+    containerId,
+    ...diagramDescendantIds(nodes, containerId),
+  ]);
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -582,10 +728,11 @@ export function pasteDiagramFragment(
 
   const nextNodes = [...nodes];
   const idMap = new Map<string, string>();
+  const copied: DiagramNode[] = [];
   for (const source of fragment.nodes) {
     const id = createNodeId(nextNodes);
     idMap.set(source.id, id);
-    nextNodes.push({
+    const copy: DiagramNode = {
       ...source,
       id,
       ...placeNodePosition(
@@ -593,7 +740,18 @@ export function pasteDiagramFragment(
         effectiveDiagramNodeSize(source),
         snap,
       ),
-    });
+    };
+    nextNodes.push(copy);
+    copied.push(copy);
+  }
+
+  // Grouping only survives a copy when the container came along; otherwise the
+  // copy would reference a node outside the fragment.
+  for (const copy of copied) {
+    if (!copy.parentId) continue;
+    const remapped = idMap.get(copy.parentId);
+    if (remapped) copy.parentId = remapped;
+    else delete copy.parentId;
   }
 
   const nextEdges = [...edges];
@@ -635,7 +793,16 @@ export function deleteNodesWithEdges(
 ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
   const removed = new Set(ids);
   return {
-    nodes: nodes.filter((node) => !removed.has(node.id)),
+    // A survivor whose container was deleted is lifted to the top level rather
+    // than left pointing at a node that no longer exists.
+    nodes: nodes
+      .filter((node) => !removed.has(node.id))
+      .map((node) => {
+        if (!node.parentId || !removed.has(node.parentId)) return node;
+        const next: DiagramNode = { ...node };
+        delete next.parentId;
+        return next;
+      }),
     edges: edges.filter((edge) => !removed.has(edge.from) && !removed.has(edge.to)),
   };
 }

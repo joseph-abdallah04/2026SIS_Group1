@@ -8,9 +8,12 @@ import {
   diagramNodeLabelLayout,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
+  diagramNodesInDrawOrder,
   effectiveDiagramNodeSize,
   type BoardItem,
 } from '@roundtable/shared';
+
+import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
 
 import {
   CARD_RADIUS,
@@ -233,25 +236,26 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                 </g>
               );
             })}
-            {diagramNodes.map((node) => {
+            {/* Containers are drawn before what they hold, so a group reads as
+                a backdrop rather than covering its own contents. */}
+            {diagramNodesInDrawOrder(diagramNodes).map((node) => {
               const shape = node.shape ?? 'box';
               const size = effectiveDiagramNodeSize(node);
               const label = diagramNodeLabelLayout(node);
 
               return (
                 <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                  {shape === 'text' && !node.fillColor ? null : (
-                    <rect
-                      width={size.width}
-                      height={size.height}
-                      rx={shape === 'container' ? 3 : 8}
-                      fill={diagramNodeFill(node)}
-                      // '#8CA4AC' and 1 are this preview's own pre-v2 border.
-                      stroke={shape === 'text' ? 'none' : diagramNodeStroke(node, '#8CA4AC')}
-                      strokeDasharray={shape === 'container' ? '4 3' : undefined}
-                      strokeWidth={diagramNodeStrokeWidth(node, 1)}
-                    />
-                  )}
+                  <DiagramShapeOutline
+                    shape={shape}
+                    size={size}
+                    fill={
+                      shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)
+                    }
+                    // '#8CA4AC', 1 and '4 3' are this preview's own pre-v2 border.
+                    stroke={diagramNodeStroke(node, '#8CA4AC')}
+                    strokeWidth={diagramNodeStrokeWidth(node, 1)}
+                    containerDashArray="4 3"
+                  />
                   <text
                     textAnchor="middle"
                     fill={DIAGRAM_LABEL_INK}

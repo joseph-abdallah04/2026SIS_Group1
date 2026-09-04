@@ -2,7 +2,11 @@ import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
-import { DIAGRAM_FILL_COLORS, DIAGRAM_STROKE_COLORS } from '@roundtable/shared';
+import {
+  DIAGRAM_FILL_COLORS,
+  DIAGRAM_NODE_SHAPE_KEYS,
+  DIAGRAM_STROKE_COLORS,
+} from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -1277,5 +1281,301 @@ describe('diagram resize and style', () => {
       .querySelector('text');
     expect(label?.querySelectorAll('tspan').length).toBeGreaterThan(1);
     expect(label?.getAttribute('textLength')).toBeNull();
+  });
+});
+
+describe('diagram shapes and container groups', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  /** Container at (24, 24) 184x112 as `n1`, box at (312, 24) as `n2`. */
+  async function containerAndBox() {
+    const opened = await openDiagram();
+    await opened.user.click(screen.getByRole('button', { name: 'Add container' }));
+    await opened.user.click(screen.getByRole('button', { name: 'Add box' }));
+    return opened;
+  }
+
+  function dragNode(
+    node: Element,
+    canvas: Element,
+    { pointerId, from, to }: { pointerId: number; from: [number, number]; to: [number, number] },
+  ) {
+    fireEvent.pointerDown(node, { button: 0, pointerId, clientX: from[0], clientY: from[1] });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: to[0], clientY: to[1] });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: to[0], clientY: to[1] });
+  }
+
+  it('offers every registered shape and proposes each one through the real contract', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user } = await openDiagram();
+
+    for (const shape of DIAGRAM_NODE_SHAPE_KEYS) {
+      const label = shape === 'diamond' ? 'decision' : shape === 'cylinder' ? 'database' : shape;
+      await user.click(screen.getByRole('button', { name: `Add ${label}` }));
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const input = send.mock.calls[0]?.[0];
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes.map((node) => node.shape)).toEqual([...DIAGRAM_NODE_SHAPE_KEYS]);
+  });
+
+  it('renders each primitive with its own outline', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add ellipse' }));
+    await user.click(screen.getByRole('button', { name: 'Add decision' }));
+    await user.click(screen.getByRole('button', { name: 'Add triangle' }));
+    await user.click(screen.getByRole('button', { name: 'Add database' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Ellipse: Ellipse' }).querySelector('ellipse'),
+    ).not.toBeNull();
+    // 128x88 diamond: apex, right vertex, base, left vertex.
+    expect(
+      screen
+        .getByRole('button', { name: 'Decision: Decision' })
+        .querySelector('path[d="M64,0 L128,44 L64,88 L0,44 Z"]'),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole('button', { name: 'Triangle: Triangle' })
+        .querySelector('path[d="M52,0 L104,88 L0,88 Z"]'),
+    ).not.toBeNull();
+    // The cylinder needs a second path for the front edge of its top rim.
+    expect(
+      screen.getByRole('button', { name: 'Database: Database' }).querySelectorAll('path'),
+    ).toHaveLength(2);
+  });
+
+  it('groups a node dropped into a container and shows the target while dragging', async () => {
+    render(<Harness propose={propose()} />);
+    const { canvas } = await containerAndBox();
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+
+    fireEvent.pointerDown(box, { button: 0, pointerId: 80, clientX: 320, clientY: 30 });
+    fireEvent.pointerMove(canvas, { pointerId: 80, clientX: 68, clientY: 56 });
+    expect(screen.getByTestId('container-drop-target')).toBeInTheDocument();
+    fireEvent.pointerUp(canvas, { pointerId: 80, clientX: 68, clientY: 56 });
+
+    expect(screen.queryByTestId('container-drop-target')).not.toBeInTheDocument();
+    expect(screen.getByText('Inside Container')).toBeInTheDocument();
+  });
+
+  it('ungroups a node dragged back out of its container', async () => {
+    render(<Harness propose={propose()} />);
+    const { canvas } = await containerAndBox();
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+
+    dragNode(box, canvas, { pointerId: 81, from: [320, 30], to: [68, 56] });
+    expect(screen.getByText('Inside Container')).toBeInTheDocument();
+
+    dragNode(box, canvas, { pointerId: 82, from: [100, 60], to: [700, 460] });
+
+    expect(screen.queryByText('Inside Container')).not.toBeInTheDocument();
+  });
+
+  it('proposes the grouping it was given', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await containerAndBox();
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+    dragNode(box, canvas, { pointerId: 83, from: [320, 30], to: [68, 56] });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const input = send.mock.calls[0]?.[0];
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const container = artifact.nodes.find((node) => node.shape === 'container');
+    expect(artifact.nodes.find((node) => node.shape === 'box')?.parentId).toBe(container?.id);
+  });
+
+  it('carries a container’s contents when the container is moved', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await containerAndBox();
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+    dragNode(box, canvas, { pointerId: 84, from: [320, 30], to: [68, 56] });
+    const groupedAt = box.getAttribute('transform');
+
+    const container = screen.getByRole('button', { name: 'Container: Container' });
+    dragNode(container, canvas, { pointerId: 85, from: [30, 30], to: [230, 230] });
+
+    expect(container).toHaveAttribute('transform', 'translate(224, 224)');
+    // The child moved by exactly the same 200x200 the container did.
+    const [, childX, childY] = /translate\((\d+), (\d+)\)/.exec(groupedAt!)!;
+    expect(box).toHaveAttribute(
+      'transform',
+      `translate(${Number(childX) + 200}, ${Number(childY) + 200})`,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(box).toHaveAttribute('transform', groupedAt!);
+  });
+
+  it('refuses to nest a container inside its own child', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    // Containers land at (24, 24) and (312, 24).
+    const [outer, inner] = screen.getAllByRole('button', { name: 'Container: Container' });
+
+    // Nest the second container inside the first...
+    dragNode(inner!, canvas, { pointerId: 86, from: [320, 30], to: [38, 36] });
+    expect(screen.getByText('Inside Container')).toBeInTheDocument();
+
+    // ...then drag the parent so it comes to rest over its own child.
+    dragNode(outer!, canvas, { pointerId: 87, from: [30, 30], to: [38, 38] });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const input = send.mock.calls[0]?.[0];
+    // A cycle would make the shared write contract reject the whole diagram.
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const [first, second] = artifact.nodes;
+    expect(first).not.toHaveProperty('parentId');
+    expect(second?.parentId).toBe(first?.id);
+  });
+
+  it('draws a container behind everything it holds', async () => {
+    render(<Harness propose={propose()} />);
+    const { canvas } = await containerAndBox();
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+    dragNode(box, canvas, { pointerId: 88, from: [320, 30], to: [68, 56] });
+
+    const drawn = [...canvas.querySelectorAll('g[role="button"]')].map((node) =>
+      node.getAttribute('aria-label'),
+    );
+    expect(drawn.indexOf('Container: Container')).toBeLessThan(drawn.indexOf('Box: Box'));
+  });
+
+  it('groups a palette shape dropped straight into a container', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Add container' }));
+
+    dropOnCanvas(canvas, {
+      clientX: 100,
+      clientY: 80,
+      types: [DIAGRAM_SHAPE_MEDIA_TYPE],
+      data: 'box',
+    });
+
+    expect(screen.getByText('Inside Container')).toBeInTheDocument();
+  });
+
+  it('pulls contents back inside when the container is made smaller', async () => {
+    render(<Harness propose={propose()} />);
+    const { canvas } = await containerAndBox();
+    const box = screen.getByRole('button', { name: 'Box: Box' });
+    dragNode(box, canvas, { pointerId: 89, from: [320, 30], to: [68, 56] });
+
+    // Select the container, then drag its bottom-right handle inwards.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Container: Container' }), {
+      button: 0,
+      pointerId: 90,
+      clientX: 30,
+      clientY: 30,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 90, clientX: 30, clientY: 30 });
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
+      button: 0,
+      pointerId: 91,
+      clientX: 213,
+      clientY: 141,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 91, clientX: 129, clientY: 101 });
+    fireEvent.pointerUp(canvas, { pointerId: 91, clientX: 129, clientY: 101 });
+
+    const [, x, y] = /translate\((\d+), (\d+)\)/.exec(box.getAttribute('transform')!)!;
+    // The child stays within the container's new 104x72 bounds at (24, 24).
+    expect(Number(x)).toBeGreaterThanOrEqual(24);
+    expect(Number(x)).toBeLessThanOrEqual(24 + 104);
+    expect(Number(y)).toBeGreaterThanOrEqual(24);
+    expect(Number(y)).toBeLessThanOrEqual(24 + 72);
+  });
+
+  describe('deleting a container', () => {
+    async function groupedThenDelete() {
+      const opened = await containerAndBox();
+      const box = screen.getByRole('button', { name: 'Box: Box' });
+      dragNode(box, opened.canvas, { pointerId: 92, from: [320, 30], to: [68, 56] });
+
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Container: Container' }), {
+        button: 0,
+        pointerId: 93,
+        clientX: 30,
+        clientY: 30,
+      });
+      fireEvent.pointerUp(opened.canvas, { pointerId: 93, clientX: 30, clientY: 30 });
+      await opened.user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+      return opened;
+    }
+
+    it('asks before destroying a container that holds something', async () => {
+      render(<Harness propose={propose()} />);
+      await groupedThenDelete();
+
+      expect(screen.getByRole('alert')).toHaveTextContent('This container holds 1 element');
+      // Nothing is removed until the question is answered.
+      expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+    });
+
+    it('keeps the contents and lifts them out when asked to', async () => {
+      render(<Harness propose={propose()} />);
+      await groupedThenDelete();
+
+      await userEvent.setup().click(screen.getByRole('button', { name: /Keep contents/ }));
+
+      expect(
+        screen.queryByRole('button', { name: 'Container: Container' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+      expect(screen.getByText('1/100 elements')).toBeInTheDocument();
+    });
+
+    it('removes the whole group when asked to, in one undo step', async () => {
+      render(<Harness propose={propose()} />);
+      const { user } = await groupedThenDelete();
+
+      await user.click(screen.getByRole('button', { name: /Delete contents/ }));
+      expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+      expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+    });
+
+    it('backs out of the question on Cancel without touching the diagram', async () => {
+      render(<Harness propose={propose()} />);
+      const { user } = await groupedThenDelete();
+
+      await user.click(screen.getByRole('button', { name: 'Cancel deleting the container' }));
+
+      expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+    });
+
+    it('deletes an empty container without asking', async () => {
+      render(<Harness propose={propose()} />);
+      const { user } = await openDiagram();
+      await user.click(screen.getByRole('button', { name: 'Add container' }));
+
+      await user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+
+      expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
   });
 });

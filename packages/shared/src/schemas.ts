@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   DIAGRAM_FILL_KEYS,
+  DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
   DIAGRAM_MAX_NODE_HEIGHT,
   DIAGRAM_MAX_NODE_WIDTH,
@@ -10,6 +11,7 @@ import {
   DIAGRAM_STROKE_KEYS,
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
+  diagramCanParent,
 } from './index.js';
 
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
@@ -59,7 +61,9 @@ export const diagramNodeSchema = z.object({
   x: z.number(),
   y: z.number(),
   // Optional so diagrams authored before shapes existed still parse as boxes.
-  shape: z.enum(['box', 'container', 'text']).optional(),
+  shape: z.enum(DIAGRAM_NODE_SHAPE_KEYS).optional(),
+  // v3 semantic grouping; the container rules are write-path invariants.
+  parentId: z.string().min(1).optional(),
   // v2, all optional: absent means the pre-v2 appearance.
   width: z.number().optional(),
   height: z.number().optional(),
@@ -86,6 +90,54 @@ export const diagramArtifactSchema = z.object({
 
 export const diagramWriteArtifactSchema = diagramArtifactSchema.superRefine(
   ({ nodes, edges }, context) => {
+    const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
+
+    nodes.forEach((node, index) => {
+      if (node.parentId === undefined) return;
+      if (node.parentId === node.id) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'A node cannot be its own parent',
+          path: ['nodes', index, 'parentId'],
+        });
+        return;
+      }
+      if (!shapeById.has(node.parentId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'parentId must reference an existing node',
+          path: ['nodes', index, 'parentId'],
+        });
+        return;
+      }
+      if (!diagramCanParent(shapeById.get(node.parentId))) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Only container nodes can hold children',
+          path: ['nodes', index, 'parentId'],
+        });
+      }
+    });
+
+    // Walk each parent chain; a repeat means the grouping graph has a cycle.
+    const parentById = new Map(nodes.map((node) => [node.id, node.parentId]));
+    nodes.forEach((node, index) => {
+      const seen = new Set<string>([node.id]);
+      let current = parentById.get(node.id);
+      while (current !== undefined && parentById.has(current)) {
+        if (seen.has(current)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Container nesting must not contain a cycle',
+            path: ['nodes', index, 'parentId'],
+          });
+          return;
+        }
+        seen.add(current);
+        current = parentById.get(current);
+      }
+    });
+
     const nodeIds = new Set<string>();
     nodes.forEach((node, index) => {
       const hasWidth = node.width !== undefined;

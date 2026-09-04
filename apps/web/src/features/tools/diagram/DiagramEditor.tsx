@@ -18,19 +18,25 @@ import {
   AlignVerticalDistributeCenter,
   Box,
   CheckCircle2,
+  Circle,
   ClipboardPaste,
   Container,
   Copy,
   CopyPlus,
+  Database,
+  Diamond,
   Grid3x3,
   Link2,
   LoaderCircle,
   Magnet,
   Maximize2,
   RotateCcw,
+  RectangleHorizontal,
   Send,
   Trash2,
+  Triangle,
   Type,
+  Ungroup,
   Undo2,
   Redo2,
   X,
@@ -64,10 +70,14 @@ import {
   diagramNodeSize,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
+  diagramCanParent,
+  diagramDescendantIds,
+  diagramNodesInDrawOrder,
   effectiveDiagramNodeSize,
 } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
+import { DiagramShapeOutline } from '../../../components/ui/DiagramShapeOutline';
 import { IconButton } from '../../../components/ui/IconButton';
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
@@ -84,15 +94,19 @@ import {
   addNode,
   alignNodes,
   autoLayoutNodes,
+  clampNodesInsideContainer,
   clearEdgeStyle,
   clearNodeSize,
   clearNodeStyle,
   clientPointToDiagramPoint,
+  containerAtPoint,
+  deleteContainerWithContents,
   copyDiagramFragment,
   deleteEdge,
   deleteNodesWithEdges,
   distributeNodes,
   edgeKey,
+  draggedSelectionRoots,
   moveNodesBy,
   nodeIdsInRect,
   normalizeRect,
@@ -102,9 +116,11 @@ import {
   prepareNodeLabel,
   renameEdge,
   renameNode,
+  reparentNodes,
   resizeNode,
   styleEdge,
   styleNodes,
+  ungroupContainer,
   type DiagramAlignMode,
   type DiagramDistributeAxis,
   type DiagramPoint,
@@ -167,11 +183,16 @@ interface NodePress {
   clientY: number;
 }
 
-const SHAPE_ICONS = {
+const SHAPE_ICONS: Record<DiagramNodeShape, typeof Box> = {
   box: Box,
+  rectangle: RectangleHorizontal,
+  ellipse: Circle,
+  diamond: Diamond,
+  triangle: Triangle,
+  cylinder: Database,
   container: Container,
   text: Type,
-} as const;
+};
 
 const DIAGRAM_VERTICAL_CHROME_REM = 14;
 
@@ -196,8 +217,15 @@ const LEGACY_NODE_STROKES: Record<DiagramNodeShape, string> = {
   box: '#4D6A74',
   container: '#8CA4AC',
   text: 'transparent',
+  // Shapes added with the expanded palette inherit the box border.
+  rectangle: '#4D6A74',
+  ellipse: '#4D6A74',
+  triangle: '#4D6A74',
+  diamond: '#4D6A74',
+  cylinder: '#4D6A74',
 };
 const LEGACY_NODE_STROKE_WIDTH = 1.5;
+const LEGACY_CONTAINER_DASH = '5 3';
 const LEGACY_EDGE_STROKE_WIDTH = 2;
 
 const SELECTION_ACCENT = '#E0A33C';
@@ -369,6 +397,8 @@ export function DiagramEditor() {
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [clipboard, setClipboard] = useState<PasteFragment | null>(null);
   const [marquee, setMarquee] = useState<MarqueeSession | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [pendingContainerDelete, setPendingContainerDelete] = useState<string | null>(null);
   const [panReady, setPanReady] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const canvasRef = useRef<SVGSVGElement>(null);
@@ -411,6 +441,10 @@ export function DiagramEditor() {
       : undefined;
   };
   const zoomPercent = Math.round(diagramViewZoom(view) * 100);
+  // Undo can take the container away while its delete question is still open.
+  const containerAwaitingDelete = nodes.some((node) => node.id === pendingContainerDelete)
+    ? pendingContainerDelete
+    : null;
   // The default marker keeps its id for the connection preview; every distinct
   // edge colour gets its own so an arrowhead always matches its line.
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
@@ -482,7 +516,7 @@ export function DiagramEditor() {
     setSelectedIds(id ? [id] : []);
   }
 
-  function addElement(shape: DiagramNodeShape, at?: DiagramPoint) {
+  function addElement(shape: DiagramNodeShape, at?: DiagramPoint, parentId: string | null = null) {
     clearError();
     const result = addNode(history.snapshotRef.current.nodes, shape, at, snapEnabled);
     if (!result.ok) {
@@ -490,7 +524,8 @@ export function DiagramEditor() {
       return;
     }
 
-    history.commit({ nodes: result.nodes, edges: history.snapshotRef.current.edges });
+    const nodes = parentId ? reparentNodes(result.nodes, [result.addedId], parentId) : result.nodes;
+    history.commit({ nodes, edges: history.snapshotRef.current.edges });
     selectOnly(result.addedId);
     setSelectedEdgeKey(null);
   }
@@ -536,8 +571,37 @@ export function DiagramEditor() {
     if (selectedIds.length === 0) return;
     clearError();
     const graph = history.snapshotRef.current;
+
+    // Deleting a container is ambiguous, so ask instead of guessing. Only a
+    // single container with contents needs the question.
+    if (selectedIds.length === 1) {
+      const target = graph.nodes.find((node) => node.id === selectedIds[0]);
+      if (
+        target &&
+        diagramCanParent(target.shape) &&
+        diagramDescendantIds(graph.nodes, target.id).length > 0
+      ) {
+        setPendingContainerDelete(target.id);
+        return;
+      }
+    }
+
     history.commit(deleteNodesWithEdges(graph.nodes, graph.edges, selectedIds));
     if (connectionSourceId && selectedIds.includes(connectionSourceId)) cancelConnection();
+    setSelectedIds([]);
+  }
+
+  function resolveContainerDelete(mode: 'contents' | 'ungroup') {
+    const containerId = pendingContainerDelete;
+    if (!containerId) return;
+    const graph = history.snapshotRef.current;
+    history.commit(
+      mode === 'contents'
+        ? deleteContainerWithContents(graph.nodes, graph.edges, containerId)
+        : ungroupContainer(graph.nodes, graph.edges, containerId),
+    );
+    if (connectionSourceId === containerId) cancelConnection();
+    setPendingContainerDelete(null);
     setSelectedIds([]);
   }
 
@@ -769,7 +833,17 @@ export function DiagramEditor() {
       return;
     }
 
-    const dragIds = selectedIds.includes(node.id) ? selectedIds : [node.id];
+    const selection = selectedIds.includes(node.id) ? selectedIds : [node.id];
+    // Moving a container moves everything nested inside it, so the group keeps
+    // its shape; the selection itself is unchanged.
+    const dragIds = [
+      ...new Set(
+        selection.flatMap((id) => [
+          id,
+          ...diagramDescendantIds(history.snapshotRef.current.nodes, id),
+        ]),
+      ),
+    ];
     dragRef.current = {
       pointerId: event.pointerId,
       anchorId: node.id,
@@ -779,9 +853,18 @@ export function DiagramEditor() {
       moved: false,
     };
     canvas.setPointerCapture(event.pointerId);
-    setSelectedIds(dragIds);
+    setSelectedIds(selection);
     setSelectedEdgeKey(null);
     clearError();
+  }
+
+  /** The container the dragged group would land in, if any. */
+  function dropContainerFor(drag: DragSession, nodes: readonly DiagramNode[]): DiagramNode | null {
+    const anchor = nodes.find((node) => node.id === drag.anchorId);
+    if (!anchor) return null;
+    const size = effectiveDiagramNodeSize(anchor);
+    const centre = { x: anchor.x + size.width / 2, y: anchor.y + size.height / 2 };
+    return containerAtPoint(nodes, centre, Object.keys(drag.origins));
   }
 
   function onResizePointerDown(
@@ -834,6 +917,13 @@ export function DiagramEditor() {
     const resize = resizeRef.current;
     if (!resize || resize.pointerId !== event.pointerId) return false;
     updateResize(event);
+
+    const graph = history.snapshotRef.current;
+    const clamped = clampNodesInsideContainer(graph.nodes, resize.nodeId);
+    if (clamped.some((node, index) => node !== graph.nodes[index])) {
+      history.preview({ nodes: clamped, edges: graph.edges });
+    }
+
     history.recordPreview(resize.previous);
     resizeRef.current = null;
     releaseCapture(event);
@@ -924,10 +1014,9 @@ export function DiagramEditor() {
       drag.moved = true;
     }
     const graph = history.snapshotRef.current;
-    history.preview({
-      nodes: moveNodesBy(graph.nodes, drag.origins, delta, drag.anchorId, snapEnabled),
-      edges: graph.edges,
-    });
+    const moved = moveNodesBy(graph.nodes, drag.origins, delta, drag.anchorId, snapEnabled);
+    history.preview({ nodes: moved, edges: graph.edges });
+    setDropTargetId(dropContainerFor(drag, moved)?.id ?? null);
   }
 
   function endPan(event: PointerEvent<SVGSVGElement>): boolean {
@@ -970,6 +1059,20 @@ export function DiagramEditor() {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     onCanvasPointerMove(event);
+
+    // Where the group came to rest decides its container, so grouping lands in
+    // the same history entry as the move.
+    if (drag.moved) {
+      const graph = history.snapshotRef.current;
+      const target = dropContainerFor(drag, graph.nodes);
+      const roots = draggedSelectionRoots(graph.nodes, Object.keys(drag.origins));
+      const reparented = reparentNodes(graph.nodes, roots, target?.id ?? null);
+      if (reparented.some((node, index) => node !== graph.nodes[index])) {
+        history.preview({ nodes: reparented, edges: graph.edges });
+      }
+    }
+
+    setDropTargetId(null);
     history.recordPreview(drag.previous);
     dragRef.current = null;
     releaseCapture(event);
@@ -999,6 +1102,7 @@ export function DiagramEditor() {
     if (drag?.pointerId === event.pointerId) {
       history.recordPreview(drag.previous);
       dragRef.current = null;
+      setDropTargetId(null);
     }
   }
 
@@ -1016,7 +1120,11 @@ export function DiagramEditor() {
     event.preventDefault();
     const point = surfacePoint(event);
     const size = diagramNodeSize(shape);
-    addElement(shape, { x: point.x - size.width / 2, y: point.y - size.height / 2 });
+    addElement(
+      shape,
+      { x: point.x - size.width / 2, y: point.y - size.height / 2 },
+      containerAtPoint(history.snapshotRef.current.nodes, point)?.id ?? null,
+    );
   }
 
   function nudgeSelection(offset: DiagramPoint) {
@@ -1078,6 +1186,13 @@ export function DiagramEditor() {
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.key === 'Escape' && pendingContainerDelete) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingContainerDelete(null);
+      return;
+    }
+
     if (event.key === 'Escape' && connectionMode) {
       event.preventDefault();
       event.stopPropagation();
@@ -1200,7 +1315,7 @@ export function DiagramEditor() {
           <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
             Elements
           </legend>
-          <div className="mt-2 grid grid-cols-3 gap-2 md:grid-cols-1">
+          <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
             {DIAGRAM_NODE_SHAPES.map((shape) => {
               const ShapeIcon = SHAPE_ICONS[shape];
               const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
@@ -1215,11 +1330,12 @@ export function DiagramEditor() {
                   }}
                   onClick={() => addElement(shape)}
                   disabled={disabled}
+                  aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
                   title={`Click to place a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}, or drag it onto the canvas`}
-                  className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 md:justify-start"
+                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <ShapeIcon aria-hidden="true" size={16} />
-                  Add {DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}
+                  {DIAGRAM_SHAPE_LABELS[shape]}
                 </button>
               );
             })}
@@ -1465,6 +1581,43 @@ export function DiagramEditor() {
           ) : null}
         </section>
 
+        {containerAwaitingDelete ? (
+          <section
+            className="mt-4 rounded-lg border border-rt-secondary bg-rt-secondary-wash p-3"
+            aria-label="Delete container"
+          >
+            <p role="alert" className="text-[12px] leading-relaxed text-rt-secondary-deep">
+              This container holds {diagramDescendantIds(nodes, containerAwaitingDelete).length}{' '}
+              {diagramDescendantIds(nodes, containerAwaitingDelete).length === 1
+                ? 'element'
+                : 'elements'}
+              . Delete them too, or keep them on the canvas?
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              <Button
+                variant="secondary"
+                className="min-h-8 px-2.5"
+                onClick={() => resolveContainerDelete('ungroup')}
+              >
+                <Ungroup aria-hidden="true" size={15} />
+                Keep contents
+              </Button>
+              <Button className="min-h-8 px-2.5" onClick={() => resolveContainerDelete('contents')}>
+                <Trash2 aria-hidden="true" size={15} />
+                Delete contents
+              </Button>
+              <Button
+                variant="quiet"
+                className="min-h-8 px-2.5"
+                aria-label="Cancel deleting the container"
+                onClick={() => setPendingContainerDelete(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
         {selectedNode ? (
           <section className="mt-4" aria-label="Selected element">
             <div className="flex items-center justify-between gap-2">
@@ -1513,6 +1666,30 @@ export function DiagramEditor() {
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {selectedNode.label.length}/{DIAGRAM_LABEL_LIMIT}
             </p>
+            {selectedNode.parentId ? (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-[11px] text-rt-ink-faint">
+                  Inside {selectedNodeById(nodes, selectedNode.parentId)?.label ?? 'a container'}
+                </span>
+                <Button
+                  variant="quiet"
+                  className="min-h-7 px-2 text-[11px]"
+                  disabled={isSubmitting}
+                  title="Move this element out of its container"
+                  onClick={() => {
+                    clearError();
+                    const graph = history.snapshotRef.current;
+                    history.commit({
+                      nodes: reparentNodes(graph.nodes, [selectedNode.id], null),
+                      edges: graph.edges,
+                    });
+                  }}
+                >
+                  <Ungroup aria-hidden="true" size={14} />
+                  Remove from container
+                </Button>
+              </div>
+            ) : null}
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-[11px] tabular-nums text-rt-ink-faint">
                 {Math.round(effectiveDiagramNodeSize(selectedNode).width)} ×{' '}
@@ -1846,7 +2023,7 @@ export function DiagramEditor() {
             />
           ) : null}
 
-          {nodes.map((node) => {
+          {diagramNodesInDrawOrder(nodes).map((node) => {
             const shape = displayShape(node);
             const size = effectiveDiagramNodeSize(node);
             const labelLayout = diagramNodeLabelLayout({
@@ -1903,6 +2080,19 @@ export function DiagramEditor() {
                     strokeDasharray="4 3"
                   />
                 ) : null}
+                {dropTargetId === node.id ? (
+                  <rect
+                    data-testid="container-drop-target"
+                    x={-3}
+                    y={-3}
+                    width={size.width + 6}
+                    height={size.height + 6}
+                    rx={5}
+                    fill="none"
+                    stroke="#4D6A74"
+                    strokeWidth={2.5}
+                  />
+                ) : null}
                 {isConnectionTarget ? (
                   <rect
                     x={-7}
@@ -1915,23 +2105,14 @@ export function DiagramEditor() {
                     strokeWidth={3}
                   />
                 ) : null}
-                {shape === 'text' ? (
-                  <rect
-                    width={size.width}
-                    height={size.height}
-                    fill={node.fillColor ? diagramNodeFill(node) : 'transparent'}
-                  />
-                ) : (
-                  <rect
-                    width={size.width}
-                    height={size.height}
-                    rx={shape === 'container' ? 3 : 8}
-                    fill={diagramNodeFill(node)}
-                    stroke={diagramNodeStroke(node, LEGACY_NODE_STROKES[shape])}
-                    strokeWidth={diagramNodeStrokeWidth(node, LEGACY_NODE_STROKE_WIDTH)}
-                    strokeDasharray={shape === 'container' ? '5 3' : undefined}
-                  />
-                )}
+                <DiagramShapeOutline
+                  shape={shape}
+                  size={size}
+                  fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
+                  stroke={diagramNodeStroke(node, LEGACY_NODE_STROKES[shape])}
+                  strokeWidth={diagramNodeStrokeWidth(node, LEGACY_NODE_STROKE_WIDTH)}
+                  containerDashArray={LEGACY_CONTAINER_DASH}
+                />
                 {isEditing ? (
                   <foreignObject
                     x={4}
