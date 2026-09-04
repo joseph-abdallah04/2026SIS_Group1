@@ -39,6 +39,8 @@ npm run db:seed --workspace @roundtable/server           # seed demo users + ses
 
 `.env.example` already points `DATABASE_URL` at the local container — copy it as-is, no editing needed for local dev.
 
+**If your `.env` predates September 2026, add `NODE_ENV=development` to it.** `NODE_ENV` now defaults to `production` when unset, because it is the switch that enables the dev-only identity stand-ins we use until login lands (docs/02 §7) — a missing env var must not hand out impersonation. Without it locally the server boots fine but refuses every request with a 401, and prints a warning saying so.
+
 **Port 5433, not 5432:** the container maps to host port `5433` (Postgres inside the container still listens on its normal 5432). If it used the standard 5432, it would silently conflict with any Postgres already installed via Homebrew/Postgres.app — on macOS a pre-existing native Postgres wins that conflict, and you'd get a confusing "access denied" instead of a port-in-use error. If you don't have another Postgres running locally, this makes no difference to you.
 
 Schema lives in `apps/server/prisma/schema.prisma`. Conventions: tables snake_case + plural via `@@map`; add your module's tables under its labeled comment. Module owners author migrations in their own PRs (see docs/05 §9).
