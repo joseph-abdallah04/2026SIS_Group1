@@ -42,6 +42,8 @@ jobs:
           output: 'trivy-results.sarif'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
+          # Without this, SARIF mode unsets --severity and exit-code:1 fails on MEDIUM too.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy results to GitHub Security tab
         if: always()

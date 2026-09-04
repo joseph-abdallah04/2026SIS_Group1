@@ -110,7 +110,10 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
           // anything left out would render as a placeholder until some other
           // request happened to fill it in.
           const { items, ...meta } = await getBoardForSession(sessionId);
-          const snapshot: SessionStatePayload = { ...meta, proposals: items };
+          // `viewer` tells the client who the server thinks it is, so the board
+          // can offer author-only controls (F16) against the same identity the
+          // write path will check, rather than a locally remembered guess.
+          const snapshot: SessionStatePayload = { ...meta, proposals: items, viewer: user };
           socket.emit('sessionState', snapshot);
           socket.to(sessionRoom(sessionId)).emit('memberJoined', { user });
 

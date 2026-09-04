@@ -193,6 +193,12 @@ export function compareBoardItems(a: BoardItem, b: BoardItem): number {
 export interface BoardResponse {
   sessionId: string;
   sessionTitle: string;
+  /**
+   * The session's leader. Clients compare it against their own id to decide
+   * whether to offer the leader's board-tidying affordances; the server checks
+   * the same thing again on every write.
+   */
+  leaderId: string;
   questionId: string | null;
   questionText: string | null;
   questionPosition: number | null;

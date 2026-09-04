@@ -119,6 +119,8 @@ model Proposal {
   author            User      @relation(fields: [authorId], references: [id])
   type              ProposalType
   artifactJson      Json
+  // Where this proposal sits on the board. Shared: everyone sees it in the
+  // same place, and a move by one person moves it for the room.
   x                 Float
   y                 Float
   extendsProposalId String?
