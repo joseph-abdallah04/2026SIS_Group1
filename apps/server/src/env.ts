@@ -16,7 +16,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
   CLIENT_ORIGIN: z.string().url().default('http://localhost:5173'),
-  JWT_SECRET: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
+  JWT_SECRET: z.preprocess(emptyToUndefined, z.string().min(32)),
   DATABASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   LIVEKIT_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   LIVEKIT_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
