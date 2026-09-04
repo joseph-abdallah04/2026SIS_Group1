@@ -97,7 +97,7 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 
 Notes:
 
-- `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[],edges:[]}`. Typed in `packages/shared`.
+- `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[{id,label,x,y,shape?}],edges:[{from,to,label?}]}`. Diagram `shape` is `box|container|text`; omitted means a legacy box. Typed in `packages/shared`.
 - Deleting a proposal that has reactions/votes/extends children: MVP = soft delete flag `deletedAt` on Proposal.
 
 ## 4. Realtime design (Socket.IO)

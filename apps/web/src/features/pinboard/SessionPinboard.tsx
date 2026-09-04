@@ -1,6 +1,8 @@
 import { useParams } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { CreativeStudio } from '../tools/CreativeStudio';
+import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
@@ -99,17 +101,20 @@ export function SessionPinboard() {
   }
 
   return (
-    <main className="relative h-screen">
-      <VoiceNotice
-        status={voice.status}
-        micStatus={voice.micStatus}
-        error={voice.error}
-        audioBlocked={voice.audioBlocked}
-        retry={voice.retry}
-        requestMicrophone={voice.requestMicrophone}
-        unlockAudio={voice.unlockAudio}
-      />
-      <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} propose={propose} />
-    </main>
+    <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
+      <main className="relative h-screen">
+        <VoiceNotice
+          status={voice.status}
+          micStatus={voice.micStatus}
+          error={voice.error}
+          audioBlocked={voice.audioBlocked}
+          retry={voice.retry}
+          requestMicrophone={voice.requestMicrophone}
+          unlockAudio={voice.unlockAudio}
+        />
+        <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} />
+      </main>
+      <CreativeStudio />
+    </CreativeToolsProvider>
   );
 }

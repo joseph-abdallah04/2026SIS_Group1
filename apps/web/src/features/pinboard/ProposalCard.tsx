@@ -1,4 +1,4 @@
-import type { BoardItem } from '@roundtable/shared';
+import { diagramEdgeGeometry, diagramNodeSize, type BoardItem } from '@roundtable/shared';
 
 import {
   CARD_RADIUS,
@@ -131,13 +131,14 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
   if (item.artifactJson.type !== 'diagram') return null;
   const compact = zoom <= 60;
   const { nodes, edges } = item.artifactJson;
-  const previewNodes = nodes.slice(0, 4);
+  const previewNodes = nodes;
   const nodeById = new Map(previewNodes.map((n) => [n.id, n]));
-  const svgWidth = Math.max(...previewNodes.map((n) => n.x), 0) + 100;
-  const svgHeight = Math.max(...previewNodes.map((n) => n.y), 0) + 56;
+  const svgWidth =
+    Math.max(...previewNodes.map((node) => node.x + diagramNodeSize(node.shape).width), 72) + 28;
+  const svgHeight =
+    Math.max(...previewNodes.map((node) => node.y + diagramNodeSize(node.shape).height), 32) + 24;
   const width = cardWidthPx('diagram', zoom);
-  // SVG ids are document-global: an unsuffixed "rt-arrow" would collide across
-  // every diagram card on the board and all of them would resolve to the first.
+  // Proposal-scoped marker ids prevent arrows in separate diagram cards from colliding.
   const arrowId = `rt-arrow-${item.id}`;
 
   return (
@@ -156,7 +157,7 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
         style={{ minHeight: compact ? 64 : 96 }}
       >
         {previewNodes.length === 0 ? (
-          <div className="m-2 flex h-[80px] items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
+          <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
         ) : (
           <svg
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
@@ -164,7 +165,15 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
             style={{ minHeight: compact ? 64 : 96 }}
           >
             <defs>
-              <marker id={arrowId} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <marker
+                id={arrowId}
+                markerWidth="8"
+                markerHeight="8"
+                refX="6"
+                refY="3"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
                 <path d="M0,0 L6,3 L0,6 Z" fill="#8CA4AC" />
               </marker>
             </defs>
@@ -172,40 +181,71 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
               const from = nodeById.get(edge.from);
               const to = nodeById.get(edge.to);
               if (!from || !to) return null;
+              const geometry = diagramEdgeGeometry(from, to);
               return (
-                <line
-                  key={`${edge.from}-${edge.to}`}
-                  x1={from.x + 72}
-                  y1={from.y + 16}
-                  x2={to.x}
-                  y2={to.y + 16}
-                  stroke="#8CA4AC"
-                  strokeWidth={1.5}
-                  markerEnd={`url(#${arrowId})`}
-                />
+                <g key={`${edge.from}-${edge.to}`}>
+                  <line
+                    x1={geometry.x1}
+                    y1={geometry.y1}
+                    x2={geometry.x2}
+                    y2={geometry.y2}
+                    stroke="#8CA4AC"
+                    strokeWidth={1.5}
+                    markerEnd={`url(#${arrowId})`}
+                  />
+                  {edge.label ? (
+                    <text
+                      x={geometry.labelX}
+                      y={geometry.labelY}
+                      textAnchor="middle"
+                      fill="#5A5F68"
+                      stroke="#F7F7F8"
+                      strokeWidth={3}
+                      paintOrder="stroke"
+                      style={{ fontSize: '9px', fontFamily: 'Inter, system-ui, sans-serif' }}
+                    >
+                      {edge.label}
+                    </text>
+                  ) : null}
+                </g>
               );
             })}
-            {previewNodes.map((node, index) => (
-              <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                <rect
-                  width="72"
-                  height="32"
-                  rx="8"
-                  fill={index === 0 ? '#EEF2F4' : '#FFFFFF'}
-                  stroke={index === 0 ? '#8CA4AC' : '#CFCFCF'}
-                  strokeWidth={1}
-                />
-                <text
-                  x="36"
-                  y="20"
-                  textAnchor="middle"
-                  fill="#080C15"
-                  style={{ fontSize: '11px', fontFamily: 'Inter, system-ui, sans-serif' }}
-                >
-                  {node.label}
-                </text>
-              </g>
-            ))}
+            {previewNodes.map((node, index) => {
+              const shape = node.shape ?? 'box';
+              const size = diagramNodeSize(node.shape);
+              const emphasised = shape === 'box' && index === 0;
+
+              return (
+                <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+                  {shape === 'text' ? null : (
+                    <rect
+                      width={size.width}
+                      height={size.height}
+                      rx={shape === 'container' ? 3 : 8}
+                      fill={shape === 'container' ? '#FAFAFA' : emphasised ? '#EEF2F4' : '#FFFFFF'}
+                      stroke={shape === 'container' || emphasised ? '#8CA4AC' : '#CFCFCF'}
+                      strokeDasharray={shape === 'container' ? '4 3' : undefined}
+                      strokeWidth={1}
+                    />
+                  )}
+                  <text
+                    x={size.width / 2}
+                    y={size.height / 2 + 4}
+                    textAnchor="middle"
+                    fill="#080C15"
+                    textLength={node.label.length > 10 ? size.width - 12 : undefined}
+                    lengthAdjust={node.label.length > 10 ? 'spacingAndGlyphs' : undefined}
+                    style={{
+                      fontSize: '11px',
+                      fontFamily: 'Inter, system-ui, sans-serif',
+                      fontWeight: shape === 'text' ? 600 : 400,
+                    }}
+                  >
+                    {node.label}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
         )}
       </div>

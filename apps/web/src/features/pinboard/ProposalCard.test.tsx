@@ -1,0 +1,87 @@
+import { render } from '@testing-library/react';
+import { diagramNodeSize, type BoardItem, type DiagramNode } from '@roundtable/shared';
+import { describe, expect, it } from 'vitest';
+
+import { ProposalCard } from './ProposalCard';
+
+function diagramItem(nodes: DiagramNode[]): BoardItem {
+  return {
+    id: 'diagram-1',
+    questionId: 'question-1',
+    authorId: 'user-1',
+    authorName: 'Alice',
+    type: 'diagram',
+    artifactJson: { type: 'diagram', nodes, edges: [] },
+    x: 0,
+    y: 0,
+    createdAt: '2026-09-03T00:00:00.000Z',
+    extendsProposalId: null,
+  };
+}
+
+describe('diagram proposal card', () => {
+  it('renders box, container, and text shapes distinctly', () => {
+    const { container } = render(
+      <ProposalCard
+        item={diagramItem([
+          { id: 'box', label: 'API', x: 0, y: 0, shape: 'box' },
+          { id: 'container', label: 'Platform', x: 100, y: 0, shape: 'container' },
+          { id: 'text', label: 'Architecture boundary', x: 200, y: 0, shape: 'text' },
+        ])}
+        zoom={100}
+      />,
+    );
+
+    expect(container.querySelectorAll('g > rect')).toHaveLength(2);
+    expect(container.querySelector('rect[stroke-dasharray="4 3"]')).not.toBeNull();
+    const fittedText = [...container.querySelectorAll('text')].find(
+      (element) => element.textContent === 'Architecture boundary',
+    );
+    expect(fittedText?.getAttribute('textLength')).toBe(String(diagramNodeSize('text').width - 12));
+  });
+
+  it('renders a legacy node without shape as a box', () => {
+    const { container } = render(
+      <ProposalCard item={diagramItem([{ id: 'legacy', label: 'Idea', x: 0, y: 0 }])} zoom={100} />,
+    );
+
+    expect(container.querySelector('g > rect[rx="8"]')).not.toBeNull();
+  });
+
+  it('renders a labeled arrow between variable-size shape boundaries', () => {
+    const item = diagramItem([
+      { id: 'client', label: 'Client', x: 24, y: 24, shape: 'box' },
+      { id: 'server', label: 'Server', x: 300, y: 24, shape: 'container' },
+    ]);
+    if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
+    item.artifactJson.edges = [{ from: 'client', to: 'server', label: 'calls' }];
+    const { container } = render(<ProposalCard item={item} zoom={100} />);
+
+    const line = container.querySelector('line[marker-end]');
+    expect(line?.getAttribute('x1')).toBe('144');
+    expect(line?.getAttribute('x2')).toBe('300');
+    expect(
+      [...container.querySelectorAll('text')].some((text) => text.textContent === 'calls'),
+    ).toBe(true);
+  });
+
+  it('renders the complete diagram rather than truncating after four nodes', () => {
+    const item = diagramItem(
+      Array.from({ length: 5 }, (_, index) => ({
+        id: `n${index + 1}`,
+        label: `Node ${index + 1}`,
+        x: index * 150,
+        y: 24,
+        shape: 'box' as const,
+      })),
+    );
+    if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
+    item.artifactJson.edges = [{ from: 'n4', to: 'n5' }];
+    const { container } = render(<ProposalCard item={item} zoom={100} />);
+
+    expect(
+      [...container.querySelectorAll('text')].some((text) => text.textContent === 'Node 5'),
+    ).toBe(true);
+    expect(container.querySelectorAll('line[marker-end]')).toHaveLength(1);
+  });
+});

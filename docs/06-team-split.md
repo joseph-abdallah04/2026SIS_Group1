@@ -318,7 +318,7 @@ Backend:  [NONE — validation only, in pinboard schema]
 // Diagram
 {
   type: "diagram",
-  nodes: Array<{ id, label, x, y }>,
+  nodes: Array<{ id, label, x, y, shape?: "box" | "container" | "text" }>,
   edges: Array<{ from, to, label? }>
 }
 ```
