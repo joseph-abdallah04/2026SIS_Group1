@@ -1,6 +1,8 @@
 import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents } from '@roundtable/shared/events';
 
+import { getCurrentUserId } from './currentUser';
+
 export type RoundTableSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 let socket: RoundTableSocket | null = null;
@@ -11,14 +13,11 @@ function handshakeAuth(): Record<string, string> {
   const token = localStorage.getItem('rt_token');
   if (token) auth.token = token;
 
-  // Dev-only escape hatch, matching the stand-in gateway on the server: with no
-  // login yet there is no JWT to identify anyone, so `rt_dev_user_id` lets two
-  // browser windows act as two different seeded members. Never sent from a
-  // production build, and the server ignores it there regardless.
-  if (import.meta.env.DEV) {
-    const devUserId = localStorage.getItem('rt_dev_user_id');
-    if (devUserId) auth.devUserId = devUserId;
-  }
+  // Matching the stand-in gateway on the server: with no login yet there is no
+  // JWT to identify anyone, so the current identity (see lib/currentUser.ts,
+  // empty in production) lets two browser windows act as two seeded members.
+  const userId = getCurrentUserId();
+  if (userId) auth.devUserId = userId;
 
   return auth;
 }

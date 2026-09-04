@@ -31,6 +31,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
+// Two routers share the `/api/sessions` prefix, so registration order
+// matters: sessions' `GET /:id` matches any single segment and would shadow a
+// one-segment route added to pinboard later. Pinboard's routes are all
+// `/:sessionId/<something>`, so nothing collides today — keep it that way, or
+// mount pinboard first.
 app.use('/api/sessions', createSessionsRoutes(io));
 app.use('/api/sessions', pinboardRoutes);
 
@@ -58,4 +63,3 @@ httpServer.on('error', (err) => {
 httpServer.listen(PORT, () => {
   console.log(`roundtable-server listening on :${PORT}`);
 });
-

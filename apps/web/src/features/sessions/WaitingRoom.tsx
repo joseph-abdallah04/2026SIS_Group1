@@ -1,6 +1,6 @@
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
-import { getDevUserId } from '../../lib/api';
+import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
 import { LeaveSessionControl } from './LeaveSessionControl';
 import { useStartSession } from './useStartSession';
@@ -23,7 +23,7 @@ interface WaitingRoomProps {
 export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
   const { participants, loading, error, isLive } = useWaitingRoom(session.id, onStarted);
   const { start, starting, error: startError } = useStartSession(session.id);
-  const isLeader = session.leaderId === getDevUserId();
+  const isLeader = session.leaderId === useCurrentUserId();
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">

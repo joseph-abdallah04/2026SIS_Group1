@@ -3,7 +3,12 @@
 // another module's tables directly).
 import { randomInt } from 'node:crypto';
 
-import { normalizeSessionCode, type Question, type Session, type SessionSummary } from '@roundtable/shared';
+import {
+  normalizeSessionCode,
+  type Question,
+  type Session,
+  type SessionSummary,
+} from '@roundtable/shared';
 import {
   SESSION_CODE_ALPHABET,
   type CreateSessionInput,
@@ -11,8 +16,17 @@ import {
 } from '@roundtable/shared/schemas';
 
 import { prisma } from '../../db.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
+
+/**
+ * `prisma` or a `$transaction` handle. Guards that decide whether a write is
+ * allowed take one of these so they can run *inside* the transaction that
+ * performs the write, closing the gap where the session changes state between
+ * the check and the write.
+ */
+type PrismaLike = Prisma.TransactionClient | typeof prisma;
 
 export interface CreateSessionArgs {
   leaderId: string;
@@ -38,11 +52,14 @@ export interface CreateSessionArgs {
 async function assertNotInAnotherLiveSession(
   userId: string,
   exceptSessionId?: string,
+  client: PrismaLike = prisma,
 ): Promise<void> {
-  const other = await prisma.session.findFirst({
+  const other = await client.session.findFirst({
     where: {
       status: { in: ['lobby', 'active'] },
-      members: { some: { userId } },
+      // `leftAt: null` is what makes leaving actually free you up — a past
+      // membership is history (docs/02 §4), not a session you are still in.
+      members: { some: { userId, leftAt: null } },
       ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
     },
     select: { title: true },
@@ -68,8 +85,9 @@ async function assertNotInAnotherLiveSession(
  * session, would both be half-finished states nothing else should ever see.
  */
 export async function createSession({ leaderId, input }: CreateSessionArgs): Promise<Session> {
-  await assertNotInAnotherLiveSession(leaderId);
   const row = await prisma.$transaction(async (tx) => {
+    await assertNotInAnotherLiveSession(leaderId, undefined, tx);
+
     const session = await tx.session.create({
       data: {
         title: input.title,
@@ -104,9 +122,17 @@ export interface MutateDraftArgs {
   leaderId: string;
 }
 
-/** Shared guard for F05's two mutations: only the leader, only while `draft`. */
-async function requireDraftOwnedBy({ sessionId, leaderId }: MutateDraftArgs): Promise<Session> {
-  const session = await prisma.session.findUnique({ where: { id: sessionId } });
+/**
+ * Shared guard for F05's two mutations: only the leader, only while `draft`.
+ * Callers pass their transaction handle so the "is it still a draft?" answer
+ * cannot go stale before the write — the leader could be opening the session
+ * for joining in another tab.
+ */
+async function requireDraftOwnedBy(
+  { sessionId, leaderId }: MutateDraftArgs,
+  client: PrismaLike = prisma,
+): Promise<Session> {
+  const session = await client.session.findUnique({ where: { id: sessionId } });
   if (!session) {
     throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
   }
@@ -141,9 +167,9 @@ export async function updateSessionDraft({
   leaderId,
   input,
 }: UpdateSessionDraftArgs): Promise<Session & { questions: Question[] }> {
-  await requireDraftOwnedBy({ sessionId, leaderId });
-
   return prisma.$transaction(async (tx) => {
+    await requireDraftOwnedBy({ sessionId, leaderId }, tx);
+
     const session = await tx.session.update({
       where: { id: sessionId },
       data: { title: input.title },
@@ -171,8 +197,10 @@ export async function updateSessionDraft({
  * member is the leader, so nothing else loses data.
  */
 export async function deleteSession({ sessionId, leaderId }: MutateDraftArgs): Promise<void> {
-  await requireDraftOwnedBy({ sessionId, leaderId });
-  await prisma.session.delete({ where: { id: sessionId } });
+  await prisma.$transaction(async (tx) => {
+    await requireDraftOwnedBy({ sessionId, leaderId }, tx);
+    await tx.session.delete({ where: { id: sessionId } });
+  });
 }
 
 /** Duck-typed rather than importing Prisma's error class: the `.code` is the
@@ -188,8 +216,9 @@ function isUniqueConstraintViolation(err: unknown): boolean {
 
 /** `XXXX-XXXX` from an alphabet with no `0/1/I/L/O` (packages/shared/src/schemas.ts). */
 export function generateSessionCode(): string {
-  const chars = Array.from({ length: 8 }, () =>
-    SESSION_CODE_ALPHABET[randomInt(SESSION_CODE_ALPHABET.length)],
+  const chars = Array.from(
+    { length: 8 },
+    () => SESSION_CODE_ALPHABET[randomInt(SESSION_CODE_ALPHABET.length)],
   ).join('');
   return `${chars.slice(0, 4)}-${chars.slice(4, 8)}`;
 }
@@ -222,13 +251,21 @@ export async function openSessionForJoining({
     throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
   }
   if (session.leaderId !== leaderId) {
-    throw new ApiError(403, 'Only the session leader can open it for joining', 'NOT_SESSION_LEADER');
+    throw new ApiError(
+      403,
+      'Only the session leader can open it for joining',
+      'NOT_SESSION_LEADER',
+    );
   }
   if (session.status === 'lobby') {
     return session;
   }
   if (session.status !== 'draft') {
-    throw new ApiError(409, `Cannot open a session that is ${session.status}`, 'INVALID_TRANSITION');
+    throw new ApiError(
+      409,
+      `Cannot open a session that is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
   }
 
   await assertNotInAnotherLiveSession(leaderId, sessionId);
@@ -240,14 +277,20 @@ export async function openSessionForJoining({
         data: { code: generateSessionCode(), status: 'lobby' },
       });
     } catch (err) {
-      if (!isUniqueConstraintViolation(err) || attempt === MAX_CODE_ATTEMPTS - 1) throw err;
+      if (!isUniqueConstraintViolation(err)) throw err;
       // Collision on the code itself — try again with a fresh one. At ~8.5e11
       // possible codes this is a correctness backstop, not a hot path.
     }
   }
-  // Unreachable — the loop above always returns or throws — but keeps the
-  // function's return type honest without a non-null assertion.
-  throw new ApiError(500, 'Could not allocate a session code', 'CODE_ALLOCATION_FAILED');
+
+  // Every attempt collided. Surfaced as our own error rather than the raw
+  // `P2002`, which would reach the client as an unexplained 500: nothing the
+  // caller did is wrong and retrying is the correct response.
+  throw new ApiError(
+    503,
+    'Could not allocate a session code — try again',
+    'CODE_ALLOCATION_FAILED',
+  );
 }
 
 export interface StartSessionArgs {
@@ -279,7 +322,11 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
     return session;
   }
   if (session.status !== 'lobby') {
-    throw new ApiError(409, `Cannot start a session that is ${session.status}`, 'INVALID_TRANSITION');
+    throw new ApiError(
+      409,
+      `Cannot start a session that is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
   }
 
   return prisma.session.update({
@@ -297,7 +344,12 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
  * server, and REST (`routes.ts`, which owns `io`) is the only caller.
  */
 export function emitSessionStarted(io: RealtimeServer, session: Session): void {
-  if (!session.startedAt) return; // startSession always sets it; guards the type, not a real case
+  if (!session.startedAt) {
+    // `startSession` always sets this, so reaching here means a caller
+    // broadcast a session it didn't start. Throwing beats returning: a silent
+    // no-op shows up as "nobody left the waiting room", with nothing to trace.
+    throw new ApiError(500, 'Cannot announce a session that has no startedAt', 'NOT_STARTED');
+  }
   io.to(sessionRoom(session.id)).emit('sessionStarted', {
     sessionId: session.id,
     startedAt: session.startedAt.toISOString(),
@@ -312,19 +364,26 @@ export interface LeaveSessionArgs {
 /**
  * F07's explicit "Leave session" action — distinct from a socket disconnect
  * (docs/02 §4: presence is in-memory and does not touch `SessionMember`).
- * Removes the persisted membership row so the session drops off this user's
- * dashboard and, if it's still lobby/active, out of `listSessionMembers`.
+ * Stamps `leftAt` rather than deleting the row: this table is history, and
+ * the summary and the vote denominator both count everyone who took part, so
+ * a delete would rewrite the past and orphan any votes they cast. Everything
+ * that means "who is in this session" filters on `leftAt: null` instead.
  *
- * The leader cannot leave this way: with no F32 (End session) yet, leaving
- * would strand the session with a leader-shaped hole nothing else accounts
- * for, so it is refused rather than allowed to corrupt state silently.
- * `deleteMany` (not `delete`) makes a repeat call — or a call from someone
- * who was never a member — a no-op instead of a thrown "not found".
+ * Only a live session can be left — leaving an `ended` one would edit history
+ * for no benefit, and a `draft` has no members but its leader.
+ *
+ * The leader cannot leave: with no F32 (End session) yet, leaving would
+ * strand the session with a leader-shaped hole nothing else accounts for, so
+ * it is refused rather than allowed to corrupt state silently.
+ *
+ * `updateMany` filtered on `leftAt: null` (not `update`) makes a repeat call —
+ * or a call from someone who was never a member — a no-op affecting zero rows,
+ * instead of a thrown "not found" or a second `leftAt` overwriting the first.
  */
 export async function leaveSession({ sessionId, userId }: LeaveSessionArgs): Promise<void> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { leaderId: true },
+    select: { leaderId: true, status: true },
   });
   if (!session) {
     throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
@@ -336,8 +395,18 @@ export async function leaveSession({ sessionId, userId }: LeaveSessionArgs): Pro
       'LEADER_CANNOT_LEAVE',
     );
   }
+  if (session.status !== 'lobby' && session.status !== 'active') {
+    throw new ApiError(
+      409,
+      `Cannot leave a session that is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
+  }
 
-  await prisma.sessionMember.deleteMany({ where: { sessionId, userId } });
+  await prisma.sessionMember.updateMany({
+    where: { sessionId, userId, leftAt: null },
+    data: { leftAt: new Date() },
+  });
 }
 
 export interface SessionPreview {
@@ -353,7 +422,13 @@ export async function resolveSessionByCode(rawCode: string): Promise<SessionPrev
   const code = normalizeSessionCode(rawCode);
   const session = await prisma.session.findUnique({
     where: { code },
-    select: { id: true, title: true, status: true, leaderId: true, _count: { select: { questions: true } } },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      leaderId: true,
+      _count: { select: { questions: true } },
+    },
   });
   if (!session) return null;
 
@@ -389,7 +464,10 @@ export interface JoinSessionArgs {
  * lobby/active session while still a member of another is refused — one live
  * session at a time; leave first (F07).
  */
-export async function joinSessionByCode({ rawCode, userId }: JoinSessionArgs): Promise<{ sessionId: string }> {
+export async function joinSessionByCode({
+  rawCode,
+  userId,
+}: JoinSessionArgs): Promise<{ sessionId: string }> {
   const session = await resolveSessionByCode(rawCode);
   if (!session) {
     throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
@@ -399,7 +477,10 @@ export async function joinSessionByCode({ rawCode, userId }: JoinSessionArgs): P
 
   await prisma.sessionMember.upsert({
     where: { sessionId_userId: { sessionId: session.id, userId } },
-    update: {},
+    // Clearing `leftAt` is the rejoin: someone who left and came back is in
+    // the session again, but keeps their original `joinedAt` — the history
+    // this table exists for is "took part from when", not "last arrived".
+    update: { leftAt: null },
     create: { sessionId: session.id, userId },
   });
 
@@ -412,10 +493,14 @@ export interface SessionMemberRow {
   joinedAt: Date;
 }
 
-/** Persisted membership history — the waiting room's initial render before live presence arrives. */
+/**
+ * The waiting room's initial render, before live presence arrives. Only
+ * current members (`leftAt: null`) — someone who left should not show up as
+ * waiting, even though their row survives as history.
+ */
 export async function listSessionMembers(sessionId: string): Promise<SessionMemberRow[]> {
   const rows = await prisma.sessionMember.findMany({
-    where: { sessionId },
+    where: { sessionId, leftAt: null },
     orderBy: { joinedAt: 'asc' },
     select: { userId: true, joinedAt: true, user: { select: { displayName: true } } },
   });
@@ -439,16 +524,41 @@ export interface SessionMemberIdentity {
  * gateway is the caller: a socket must not join a room for a session it has
  * no relationship to (docs/02 §8.2), so membership and identity are fetched
  * together rather than as two round trips.
+ *
+ * Requires `leftAt: null`: having once been in a session is not permission to
+ * sit in its room. Someone who left rejoins by code (F06), which clears it.
  */
 export async function getSessionMemberIdentity(
   sessionId: string,
   userId: string,
 ): Promise<SessionMemberIdentity | null> {
-  const membership = await prisma.sessionMember.findUnique({
-    where: { sessionId_userId: { sessionId, userId } },
+  const membership = await prisma.sessionMember.findFirst({
+    where: { sessionId, userId, leftAt: null },
     select: { user: { select: { id: true, displayName: true } } },
   });
   return membership?.user ?? null;
+}
+
+/**
+ * REST counterpart to the socket room check above: a session's title,
+ * questions, and member names are only for people in it. Session ids are not
+ * secrets — they sit in shareable URLs — so "knows the id" cannot be the
+ * authorisation for reading a session; the invite code is (F06), and using it
+ * produces the membership this asserts.
+ *
+ * Every legitimate caller already passes: the join flow is code -> `POST
+ * /join` -> membership -> `GET /:id`, and F04 makes the leader a member at
+ * creation. A user who has *left* still passes, deliberately, so an ended
+ * session they attended stays readable from their dashboard.
+ */
+export async function assertSessionMember(sessionId: string, userId: string): Promise<void> {
+  const membership = await prisma.sessionMember.findUnique({
+    where: { sessionId_userId: { sessionId, userId } },
+    select: { id: true },
+  });
+  if (!membership) {
+    throw new ApiError(403, 'You are not a member of this session', 'NOT_SESSION_MEMBER');
+  }
 }
 
 /**
@@ -456,22 +566,43 @@ export async function getSessionMemberIdentity(
  * the ones they've joined as a member. A leader is also a member (added in
  * `createSession`), so this is a single `OR`, not a union that could
  * duplicate a row.
+ *
+ * Sessions they *left* are included — that's the history half of F07's
+ * "hosted & invited" list. `isCurrentMember` is what separates the two, and
+ * the dashboard needs it: without it, a session someone walked out of still
+ * looks live to them and the one-live-session redirect would drag them back
+ * in on every page load.
  */
 export async function listSessionsForUser(userId: string): Promise<SessionSummary[]> {
   const rows = await prisma.session.findMany({
     where: { OR: [{ leaderId: userId }, { members: { some: { userId } } }] },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, code: true, title: true, status: true, createdAt: true, leaderId: true },
+    select: {
+      id: true,
+      code: true,
+      title: true,
+      status: true,
+      createdAt: true,
+      leaderId: true,
+      members: { where: { userId }, select: { leftAt: true } },
+    },
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    code: row.code,
-    title: row.title,
-    status: row.status,
-    createdAt: row.createdAt,
-    isLeader: row.leaderId === userId,
-  }));
+  return rows.map((row) => {
+    const membership = row.members[0];
+    return {
+      id: row.id,
+      code: row.code,
+      title: row.title,
+      status: row.status,
+      createdAt: row.createdAt,
+      isLeader: row.leaderId === userId,
+      // No row at all should be impossible (F04 adds the leader), but a
+      // leader is in their own session either way — don't let a stray
+      // pre-F04 row lock someone out of their session.
+      isCurrentMember: membership ? membership.leftAt === null : row.leaderId === userId,
+    };
+  });
 }
 
 /** A session with its ordered questions — the detail view behind `GET /:id`. */

@@ -36,7 +36,11 @@ export function LeaveSessionControl({ sessionId, className }: LeaveSessionContro
           >
             {leaving ? 'Leaving…' : 'Yes, leave'}
           </button>
-          <button type="button" onClick={() => setConfirming(false)} className="opacity-80 hover:underline">
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="opacity-80 hover:underline"
+          >
             Cancel
           </button>
         </span>

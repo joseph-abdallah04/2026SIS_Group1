@@ -11,27 +11,51 @@ const questionFindMany = vi.fn();
 const sessionMemberCreate = vi.fn();
 const sessionFindUnique = vi.fn();
 const sessionFindFirst = vi.fn();
+const sessionFindMany = vi.fn();
 const sessionUpdate = vi.fn();
 const sessionUpdateInTx = vi.fn();
 const sessionDelete = vi.fn();
 const sessionMemberUpsert = vi.fn();
-const sessionMemberDeleteMany = vi.fn();
+const sessionMemberUpdateMany = vi.fn();
+const sessionMemberFindUnique = vi.fn();
+
+// The transaction handle exposes the same stubs as the top-level client: the
+// guards now run *inside* the transaction that writes (so a draft cannot stop
+// being a draft between check and write), and a test asserting on
+// `sessionFindUnique` shouldn't have to care which of the two it went through.
+// `session.update` is the exception — kept separate so F05's in-transaction
+// update can't be confused with F06/F09's standalone one.
+const txClient = {
+  session: {
+    create: sessionCreate,
+    update: sessionUpdateInTx,
+    findUnique: sessionFindUnique,
+    findFirst: sessionFindFirst,
+    delete: sessionDelete,
+  },
+  question: {
+    createMany: questionCreateMany,
+    deleteMany: questionDeleteMany,
+    findMany: questionFindMany,
+  },
+  sessionMember: { create: sessionMemberCreate },
+};
 
 vi.mock('../../db.js', () => ({
   prisma: {
-    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) =>
-      cb({
-        session: { create: sessionCreate, update: sessionUpdateInTx },
-        question: {
-          createMany: questionCreateMany,
-          deleteMany: questionDeleteMany,
-          findMany: questionFindMany,
-        },
-        sessionMember: { create: sessionMemberCreate },
-      }),
-    ),
-    session: { findUnique: sessionFindUnique, findFirst: sessionFindFirst, update: sessionUpdate, delete: sessionDelete },
-    sessionMember: { upsert: sessionMemberUpsert, deleteMany: sessionMemberDeleteMany },
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(txClient)),
+    session: {
+      findUnique: sessionFindUnique,
+      findFirst: sessionFindFirst,
+      findMany: sessionFindMany,
+      update: sessionUpdate,
+      delete: sessionDelete,
+    },
+    sessionMember: {
+      upsert: sessionMemberUpsert,
+      updateMany: sessionMemberUpdateMany,
+      findUnique: sessionMemberFindUnique,
+    },
   },
 }));
 
@@ -40,12 +64,14 @@ vi.mock('../../realtime/types.js', () => ({
 }));
 
 const {
+  assertSessionMember,
   createSession,
   deleteSession,
   emitSessionStarted,
   generateSessionCode,
   joinSessionByCode,
   leaveSession,
+  listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
   startSession,
@@ -89,9 +115,7 @@ describe('createSession', () => {
       leaderId: 'u1',
       input: { title: 'X', questions: ['Third', 'Second', 'First'] },
     });
-    const texts = questionCreateMany.mock.calls[0]?.[0].data.map(
-      (q: { text: string }) => q.text,
-    );
+    const texts = questionCreateMany.mock.calls[0]?.[0].data.map((q: { text: string }) => q.text);
     expect(texts).toEqual(['Third', 'Second', 'First']);
   });
 
@@ -116,9 +140,7 @@ describe('createSessionSchema', () => {
   });
 
   it('rejects an empty title', () => {
-    expect(createSessionSchema.safeParse({ title: '', questions: ['Scope?'] }).success).toBe(
-      false,
-    );
+    expect(createSessionSchema.safeParse({ title: '', questions: ['Scope?'] }).success).toBe(false);
   });
 
   it('rejects a title that is only whitespace', () => {
@@ -224,12 +246,14 @@ describe('openSessionForJoining', () => {
     expect(session.status).toBe('lobby');
   });
 
-  it('gives up after repeated P2002 collisions rather than retrying forever', async () => {
+  it('gives up after repeated P2002 collisions with our own error, not a raw Prisma one', async () => {
     sessionFindUnique.mockResolvedValueOnce(draftSession);
     sessionUpdate.mockRejectedValue({ code: 'P2002' });
 
-    await expect(openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' })).rejects.toMatchObject({
-      code: 'P2002',
+    await expect(
+      openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' }),
+    ).rejects.toMatchObject({
+      code: 'CODE_ALLOCATION_FAILED',
     });
   });
 
@@ -364,9 +388,9 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
 
   it('deleteSession rejects a session that has left draft', async () => {
     sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'active' });
-    await expect(
-      deleteSession({ sessionId: 's1', leaderId: 'leader-1' }),
-    ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+    await expect(deleteSession({ sessionId: 's1', leaderId: 'leader-1' })).rejects.toMatchObject({
+      code: 'INVALID_TRANSITION',
+    });
     expect(sessionDelete).not.toHaveBeenCalled();
   });
 
@@ -388,7 +412,9 @@ describe('startSession (F09)', () => {
 
   it('rejects a caller who is not the leader', async () => {
     sessionFindUnique.mockResolvedValueOnce(lobbySession);
-    await expect(startSession({ sessionId: 's1', leaderId: 'not-the-leader' })).rejects.toMatchObject({
+    await expect(
+      startSession({ sessionId: 's1', leaderId: 'not-the-leader' }),
+    ).rejects.toMatchObject({
       code: 'NOT_SESSION_LEADER',
     });
     expect(sessionUpdate).not.toHaveBeenCalled();
@@ -451,29 +477,140 @@ describe('startSession (F09)', () => {
       startedAt: '2026-09-04T00:00:00.000Z',
     });
   });
+
+  it('emitSessionStarted throws on a session with no startedAt instead of silently not broadcasting', () => {
+    const io = { to: vi.fn(() => ({ emit: vi.fn() })) } as unknown as Parameters<
+      typeof emitSessionStarted
+    >[0];
+
+    expect(() =>
+      emitSessionStarted(io, {
+        id: 's1',
+        code: 'K7NP-3WQZ',
+        title: 'Roadmap planning',
+        leaderId: 'leader-1',
+        status: 'lobby',
+        createdAt: new Date(),
+        startedAt: null,
+        endedAt: null,
+      }),
+    ).toThrow(/startedAt/);
+  });
 });
 
 describe('leaveSession (F07)', () => {
+  const liveSession = { leaderId: 'leader-1', status: 'active' };
+
   it('refuses the leader — they must end the session instead', async () => {
-    sessionFindUnique.mockResolvedValueOnce({ leaderId: 'leader-1' });
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
     await expect(leaveSession({ sessionId: 's1', userId: 'leader-1' })).rejects.toMatchObject({
       code: 'LEADER_CANNOT_LEAVE',
     });
-    expect(sessionMemberDeleteMany).not.toHaveBeenCalled();
+    expect(sessionMemberUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('removes the membership row for a non-leader', async () => {
-    sessionFindUnique.mockResolvedValueOnce({ leaderId: 'leader-1' });
+  it('stamps leftAt rather than deleting the row — this table is history (docs/02 §4)', async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
     await leaveSession({ sessionId: 's1', userId: 'u2' });
-    expect(sessionMemberDeleteMany).toHaveBeenCalledWith({
-      where: { sessionId: 's1', userId: 'u2' },
+
+    const call = sessionMemberUpdateMany.mock.calls[0]?.[0];
+    expect(call.where).toEqual({ sessionId: 's1', userId: 'u2', leftAt: null });
+    expect(call.data.leftAt).toBeInstanceOf(Date);
+  });
+
+  it('is idempotent: the leftAt: null filter makes a second leave affect no rows', async () => {
+    sessionFindUnique.mockResolvedValue(liveSession);
+    await leaveSession({ sessionId: 's1', userId: 'u2' });
+    await leaveSession({ sessionId: 's1', userId: 'u2' });
+
+    for (const [args] of sessionMemberUpdateMany.mock.calls) {
+      expect(args.where).toMatchObject({ leftAt: null });
+    }
+  });
+
+  it('refuses leaving an ended session — that would edit history for no gain', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ leaderId: 'leader-1', status: 'ended' });
+    await expect(leaveSession({ sessionId: 's1', userId: 'u2' })).rejects.toMatchObject({
+      code: 'INVALID_TRANSITION',
     });
+    expect(sessionMemberUpdateMany).not.toHaveBeenCalled();
   });
 
   it('raises SESSION_NOT_FOUND for an unknown session', async () => {
     sessionFindUnique.mockResolvedValueOnce(null);
     await expect(leaveSession({ sessionId: 'missing', userId: 'u2' })).rejects.toMatchObject({
       code: 'SESSION_NOT_FOUND',
+    });
+  });
+});
+
+describe('leftAt semantics', () => {
+  it('the one-live-session guard ignores sessions the user has left', async () => {
+    await createSession({ leaderId: 'u1', input: { title: 'X', questions: ['Q'] } });
+    expect(sessionFindFirst.mock.calls[0]?.[0]).toMatchObject({
+      where: { members: { some: { userId: 'u1', leftAt: null } } },
+    });
+  });
+
+  it('rejoining clears leftAt but keeps the original joinedAt', async () => {
+    sessionFindUnique.mockResolvedValueOnce({
+      id: 's1',
+      title: 'Roadmap planning',
+      status: 'lobby',
+      leaderId: 'leader-1',
+      _count: { questions: 1 },
+    });
+
+    await joinSessionByCode({ rawCode: 'K7NP-3WQZ', userId: 'u2' });
+
+    const call = sessionMemberUpsert.mock.calls[0]?.[0];
+    expect(call.update).toEqual({ leftAt: null });
+    expect(call.create).not.toHaveProperty('joinedAt');
+  });
+
+  it('listSessionsForUser reports a left session as history, not as current', async () => {
+    sessionFindMany.mockResolvedValueOnce([
+      {
+        id: 'still-in',
+        code: 'K7NP-3WQZ',
+        title: 'Still in',
+        status: 'active',
+        createdAt: new Date(),
+        leaderId: 'someone',
+        members: [{ leftAt: null }],
+      },
+      {
+        id: 'walked-out',
+        code: 'M4T7-2QRX',
+        title: 'Walked out',
+        status: 'active',
+        createdAt: new Date(),
+        leaderId: 'someone',
+        members: [{ leftAt: new Date() }],
+      },
+    ]);
+
+    const sessions = await listSessionsForUser('u2');
+
+    // The dashboard redirect keys off this: `false` is what stops it hauling
+    // someone back into the session they just left.
+    expect(sessions.map((s) => s.isCurrentMember)).toEqual([true, false]);
+  });
+});
+
+describe('assertSessionMember', () => {
+  it('rejects a non-member — a session id is not authorisation to read a session', async () => {
+    sessionMemberFindUnique.mockResolvedValueOnce(null);
+    await expect(assertSessionMember('s1', 'stranger')).rejects.toMatchObject({
+      code: 'NOT_SESSION_MEMBER',
+    });
+  });
+
+  it('passes a member, including one who has since left, so their history stays readable', async () => {
+    sessionMemberFindUnique.mockResolvedValueOnce({ id: 'm1' });
+    await expect(assertSessionMember('s1', 'u2')).resolves.toBeUndefined();
+    expect(sessionMemberFindUnique.mock.calls[0]?.[0].where).toEqual({
+      sessionId_userId: { sessionId: 's1', userId: 'u2' },
     });
   });
 });

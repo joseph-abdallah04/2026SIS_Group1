@@ -37,11 +37,19 @@ function JoinByCodeForm() {
 }
 
 export function LoginPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Log in</h1></main>;
+  return (
+    <main className="flex h-screen items-center justify-center">
+      <h1 className="text-2xl font-bold">Log in</h1>
+    </main>
+  );
 }
 
 export function SignupPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Sign up</h1></main>;
+  return (
+    <main className="flex h-screen items-center justify-center">
+      <h1 className="text-2xl font-bold">Sign up</h1>
+    </main>
+  );
 }
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
@@ -87,7 +95,10 @@ function SessionCard({ session, isDraft, onChanged }: SessionCardProps) {
 
       {isDraft && (
         <div className="flex items-center gap-3 text-[12px]">
-          <Link to={`/sessions/${session.id}/edit`} className="font-semibold text-rt-primary-deep hover:underline">
+          <Link
+            to={`/sessions/${session.id}/edit`}
+            className="font-semibold text-rt-primary-deep hover:underline"
+          >
             Edit
           </Link>
           {confirming ? (
@@ -164,7 +175,12 @@ export function DashboardPage() {
   const { sessions, loading, error, reload } = useSessions();
   const navigate = useNavigate();
 
-  const liveSession = sessions?.find((s) => s.status === 'lobby' || s.status === 'active');
+  // `isCurrentMember` matters: a session they left still appears here as
+  // history, and without that check the redirect would haul them straight
+  // back into the session they just walked out of.
+  const liveSession = sessions?.find(
+    (s) => (s.status === 'lobby' || s.status === 'active') && s.isCurrentMember,
+  );
 
   useEffect(() => {
     if (liveSession) navigate(`/sessions/${liveSession.id}`, { replace: true });
@@ -195,9 +211,7 @@ export function DashboardPage() {
         {loading && <p className="text-[13px] text-rt-ink-muted">Loading sessions…</p>}
 
         {liveSession && (
-          <p className="text-[13px] text-rt-ink-muted">
-            Taking you back to your live session…
-          </p>
+          <p className="text-[13px] text-rt-ink-muted">Taking you back to your live session…</p>
         )}
 
         {error && (
@@ -222,7 +236,12 @@ export function DashboardPage() {
         {sessions && !liveSession && sessions.length > 0 && (
           <div className="flex flex-col gap-6">
             <SessionGroup title="Draft" sessions={draftSessions} isDraft onChanged={reload} />
-            <SessionGroup title="Ended" sessions={endedSessions} isDraft={false} onChanged={reload} />
+            <SessionGroup
+              title="Ended"
+              sessions={endedSessions}
+              isDraft={false}
+              onChanged={reload}
+            />
           </div>
         )}
       </div>
@@ -231,13 +250,25 @@ export function DashboardPage() {
 }
 
 export function SessionPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Session</h1></main>;
+  return (
+    <main className="flex h-screen items-center justify-center">
+      <h1 className="text-2xl font-bold">Session</h1>
+    </main>
+  );
 }
 
 export function SettingsPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Settings</h1></main>;
+  return (
+    <main className="flex h-screen items-center justify-center">
+      <h1 className="text-2xl font-bold">Settings</h1>
+    </main>
+  );
 }
 
 export function NotFoundPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">404</h1></main>;
+  return (
+    <main className="flex h-screen items-center justify-center">
+      <h1 className="text-2xl font-bold">404</h1>
+    </main>
+  );
 }

@@ -1,27 +1,28 @@
 import { useState } from 'react';
 
 import { Button } from '../../components/ui/Button';
+import { DEV_USER_ID_KEY } from '../../lib/currentUser';
 
 /**
- * Dev-only identity switcher. There is no login yet (docs/05 deferred item
- * 5), so every request acts as whichever id is stored in `rt_dev_user_id` —
- * the same key `lib/socket.ts` already reads for the realtime gateway's
- * stand-in auth. Paste a seeded user's id (e.g. from `db:seed`'s output, or
- * `SELECT id, email FROM users` against the local Postgres) to act as them.
+ * Dev-only identity switcher — the write side of `lib/currentUser.ts`. There
+ * is no login yet (docs/05 deferred item 5), so every REST request and socket
+ * handshake acts as whichever id is stored here. Paste a seeded user's id —
+ * from `db:seed`'s output, or `SELECT id, email FROM users` against the local
+ * Postgres — to act as them.
  *
  * Renders nothing in a production build.
  */
 export function DevUserSwitcher() {
-  const [devUserId, setDevUserId] = useState(() => localStorage.getItem('rt_dev_user_id') ?? '');
+  const [devUserId, setDevUserId] = useState(() => localStorage.getItem(DEV_USER_ID_KEY) ?? '');
   const [saved, setSaved] = useState(false);
 
   if (!import.meta.env.DEV) return null;
 
   function save() {
     if (devUserId.trim()) {
-      localStorage.setItem('rt_dev_user_id', devUserId.trim());
+      localStorage.setItem(DEV_USER_ID_KEY, devUserId.trim());
     } else {
-      localStorage.removeItem('rt_dev_user_id');
+      localStorage.removeItem(DEV_USER_ID_KEY);
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);

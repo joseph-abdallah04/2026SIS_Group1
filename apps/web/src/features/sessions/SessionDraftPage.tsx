@@ -3,7 +3,8 @@ import type { Session } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
-import { api, ApiClientError, getDevUserId } from '../../lib/api';
+import { api, ApiClientError } from '../../lib/api';
+import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
 
 interface CopyFieldProps {
@@ -56,7 +57,7 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isLeader = session.leaderId === getDevUserId();
+  const isLeader = session.leaderId === useCurrentUserId();
   const code = opened?.code ?? null;
   const joinLink = code ? `${window.location.origin}/join/${code}` : null;
 
@@ -107,7 +108,12 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
         {isLeader && !code && (
           <>
             {error && <p className="text-[13px] text-red-600">{error}</p>}
-            <Button type="button" onClick={() => void handleOpen()} disabled={opening} className="self-start">
+            <Button
+              type="button"
+              onClick={() => void handleOpen()}
+              disabled={opening}
+              className="self-start"
+            >
               {opening ? 'Opening…' : 'Open for joining'}
             </Button>
           </>

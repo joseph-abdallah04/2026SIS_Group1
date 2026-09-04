@@ -82,9 +82,10 @@ No cycles. If two modules seem to need each other, invert: raise an event or mov
 
 ```
 User          id, email, passwordHash, displayName, createdAt
-Session       id, code, title(focus), leaderId→User, status(lobby|active|ended), createdAt, endedAt
+Session       id, code?, title(focus), leaderId→User, status(draft|lobby|active|ended),
+              createdAt, startedAt?, endedAt?
 Question      id, sessionId→Session, text, position(int), status(pending|discussion|voting|answered|skipped)
-SessionMember id, sessionId→Session, userId→User, joinedAt        (unique sessionId+userId)
+SessionMember id, sessionId→Session, userId→User, joinedAt, leftAt?  (unique sessionId+userId)
 Proposal      id, questionId→Question, authorId→User, type(sticky|drawing|diagram),
               artifactJson(jsonb), x, y, extendsProposalId?→Proposal, createdAt
 Reaction      id, proposalId→Proposal, userId→User, emoji             (unique proposalId+userId+emoji)
@@ -97,6 +98,9 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 
 Notes:
 
+- `Session.status` runs `draft → lobby → active → ended`. A `draft` is the leader still writing the title and questions (F04/F05, editable and deletable only in this state); `lobby` means joinable (F06 mints the code); `active` is the live session (F09 sets `startedAt`).
+- `Session.code` is nullable and unique. It is claimed on `draft → lobby` and released on end, so NULL means "not joinable" — Postgres treats NULLs as distinct, so any number of drafts and ended sessions sit at NULL while the unique index still allows only one _live_ session per code.
+- `SessionMember.leftAt` is F07's "Leave session": a soft delete, because this table is history (see §4). NULL means currently in the session, so everything that asks "who is in here?" filters on `leftAt: null`. Rejoining by code clears it and keeps the original `joinedAt`.
 - `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[{id,label,x,y,shape?}],edges:[{from,to,label?}]}`. Diagram `shape` is `box|container|text`; omitted means a legacy box. Typed in `packages/shared`.
 - Deleting a proposal that has reactions/votes/extends children: MVP = soft delete flag `deletedAt` on Proposal.
 
@@ -114,7 +118,7 @@ The real efficiency risk is **event frequency**, not session lifetime — some i
 
 - **Persist immediately:** proposals, reactions, votes, phase transitions, memberships — anything that must survive a restart.
 - **Never persist:** who is currently connected, speaking indicators, typing state, in-progress drags/cursor positions. These live only in the socket room / LiveKit.
-- **`SessionMember` is history, not presence.** It records "joined at some point" — needed for the summary and the vote denominator. Live "who's online now" is a separate, in-memory concern (socket room membership). Don't conflate the two.
+- **`SessionMember` is history, not presence.** It records "joined at some point" — needed for the summary and the vote denominator. Live "who's online now" is a separate, in-memory concern (socket room membership). Don't conflate the two. This is also why leaving a session (F07) stamps `leftAt` instead of deleting the row: a delete would rewrite the past — shrinking the vote denominator after the fact and orphaning votes already cast.
 - **Throttle high-frequency events.** Dragging a proposal fires ~60 events/second. Broadcast every move over the socket immediately for smooth motion, but persist only on drag-end or throttled to ~1/second.
 - **Derive, don't store counters.** "Who hasn't voted yet" is a count of `Vote` rows, not a stored counter that can drift from reality.
 
@@ -122,38 +126,48 @@ If a hot-path socket handler's membership/phase check becomes a measured bottlen
 
 ### Event catalogue (shared types live in `packages/shared/src/events.ts`)
 
-| Direction | Event              | Payload                                          | Notes                                   |
-| --------- | ------------------ | ------------------------------------------------ | --------------------------------------- |
-| C→S       | `member:join`      | `{sessionId}`                                    | joins socket to room, triggers snapshot |
-| S→C       | `session:state`    | full snapshot                                    | on join/reconnect                       |
-| S→C       | `member:joined`    | `{user}`                                         | presence list update                    |
-| S→C       | `session:phase`    | `{questionId, phase}`                            | leader-driven transitions               |
-| S→C       | `session:skipped`  | `{questionId}`                                   | leader skipped                          |
-| C→S       | `proposal:create`  | `{type, artifactJson, x, y, extendsProposalId?}` | validated vs phase=discussion           |
-| S→C       | `proposal:created` | `{proposal}`                                     | broadcast                               |
-| C→S       | `proposal:update`  | `{id, artifactJson?, x?, y?}`                    | author-only, phase=discussion           |
-| S→C       | `proposal:updated` | `{proposal}`                                     | broadcast                               |
-| C→S       | `proposal:delete`  | `{id}`                                           | author-or-leader                        |
-| S→C       | `proposal:deleted` | `{id}`                                           | broadcast                               |
-| C→S       | `reaction:toggle`  | `{proposalId, emoji}`                            | any member, discussion phase            |
-| S→C       | `reaction:toggled` | `{proposalId, emoji, counts, byUser}`            | broadcast                               |
-| C→S       | `vote:cast`        | `{roundId, proposalId}`                          | one ballot per user                     |
-| S→C       | `vote:progress`    | `{roundId, votedCount, totalVoters}`             | no vote contents                        |
-| S→C       | `vote:result`      | `{questionId, winnerProposalId}`                 | when round closes                       |
+Event names are **camelCase** (`sessionState`, not `session:state`) — they are keys on a typed Socket.IO event map, and a colon buys nothing there. Rows marked _(built)_ exist today; the rest are the agreed shape for the module that will add them.
+
+| Direction | Event             | Payload                                          | Notes                                         |
+| --------- | ----------------- | ------------------------------------------------ | --------------------------------------------- |
+| C→S       | `memberJoin`      | `{sessionId}`                                    | _(built)_ joins socket to room, then snapshot |
+| S→C       | `sessionState`    | full snapshot                                    | _(built)_ on join/reconnect                   |
+| S→C       | `memberJoined`    | `{user}`                                         | _(built)_ presence, deduped per user          |
+| S→C       | `memberLeft`      | `{user}`                                         | _(built)_ only when a user's last socket goes |
+| S→C       | `sessionStarted`  | `{sessionId, startedAt}`                         | _(built)_ F09; see §5 on why start is REST    |
+| S→C       | `sessionPhase`    | `{questionId, phase}`                            | leader-driven transitions                     |
+| S→C       | `sessionSkipped`  | `{questionId}`                                   | leader skipped                                |
+| C→S       | `proposalCreate`  | `{type, artifactJson, x, y, extendsProposalId?}` | _(built)_ validated vs phase=discussion       |
+| S→C       | `proposalCreated` | `{proposal}`                                     | _(built)_ broadcast, author included          |
+| C→S       | `proposalUpdate`  | `{id, artifactJson?, x?, y?}`                    | author-only, phase=discussion                 |
+| S→C       | `proposalUpdated` | `{proposal}`                                     | broadcast                                     |
+| C→S       | `proposalDelete`  | `{id}`                                           | author-or-leader                              |
+| S→C       | `proposalDeleted` | `{proposalId, questionId}`                       | broadcast                                     |
+| C→S       | `reactionToggle`  | `{proposalId, emoji}`                            | any member, discussion phase                  |
+| S→C       | `reactionToggled` | `{proposalId, emoji, counts, byUser}`            | broadcast                                     |
+| C→S       | `voteCast`        | `{roundId, proposalId}`                          | one ballot per user                           |
+| S→C       | `voteProgress`    | `{roundId, votedCount, totalVoters}`             | no vote contents                              |
+| S→C       | `voteResult`      | `{questionId, winnerProposalId}`                 | when round closes                             |
 
 ## 5. REST API surface
 
 REST handles non-realtime concerns (all prefixed `/api`):
 
-| Area      | Endpoints                                                                                                                                                                              |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                             |
-| sessions  | `POST /api/sessions` (with questions), `GET /api/sessions/mine`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id`, `POST /api/sessions/:id/join {code}`                       |
-| summary   | `GET /api/sessions/:id/summary`                                                                                                                                                        |
-| voice     | `POST /api/sessions/:id/voice-token`                                                                                                                                                   |
-| assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config _without_ key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream) |
+| Area      | Endpoints                                                                                                                                                                                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                                                                                                                                                                           |
+| sessions  | `POST /api/sessions` (with questions), `GET /api/sessions`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id` (draft only), `GET /api/sessions/:id/members`, `POST /api/sessions/:id/open`, `POST /api/sessions/:id/start`, `POST /api/sessions/:id/leave`, `GET /api/sessions/code/:code`, `POST /api/sessions/join {code}` |
+| summary   | `GET /api/sessions/:id/summary`                                                                                                                                                                                                                                                                                                      |
+| voice     | `POST /api/sessions/:id/voice-token`                                                                                                                                                                                                                                                                                                 |
+| assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config _without_ key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream)                                                                                                                                               |
 
-Phase transitions, proposals, reactions, and votes go over WebSockets (see §4). Assistant chat streams over **SSE** because it's a request-scoped, one-directional response — no need for a socket room per private chat.
+Proposals, reactions, and votes go over WebSockets (see §4). Assistant chat streams over **SSE** because it's a request-scoped, one-directional response — no need for a socket room per private chat.
+
+**Lifecycle and phase changes are REST calls that broadcast their result** (`POST /:id/open`, `/:id/start`, and F25's question phases), not client-to-server socket events. The leader's click is a one-off, authorised, idempotent command — exactly what an HTTP request with a status code is for — and routing it through REST means one place enforces "is this the leader, is this transition legal" and returns a real error the button can render. The _fact_ is then broadcast to the room (`sessionStarted`) so every client moves together. Hence there is no `sessionStart` in the C→S map above.
+
+Two notes on the sessions surface. `GET /api/sessions` lists the caller's own sessions (led and joined), so `/mine` would be redundant. Joining is `GET /code/:code` (preview) then `POST /join {code}`, rather than `POST /:id/join {code}`, because a joiner has the code and not the id — resolving the code is the whole first step.
+
+Reads of a session (`GET /:id`, `GET /:id/members`) require membership. A session id travels in shareable URLs, so knowing one is not authorisation; the invite code is the capability, and redeeming it via `POST /join` is what creates the membership those reads check.
 
 ## 6. Monorepo layout
 
@@ -191,18 +205,18 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 - **Commits:** Conventional Commits (`feat(voting): …`) — enables readable changelogs.
 - **Testing:** Vitest unit tests per module (pure logic like state machine, tally rules); Playwright smoke test of happy path from Week 3 onward.
 - **Lint/format:** ESLint flat config + Prettier, enforced in CI.
-- **Env/config:** `.env.example` committed, real `.env` ignored. Server config loaded via one `env.ts` module using zod validation at boot.
+- **Env/config:** `.env.example` committed, real `.env` ignored. Server config loaded via one `env.ts` module using zod validation at boot. `NODE_ENV` **defaults to `production`** rather than `development`, because it is the single switch on every dev-only identity escape hatch (the `x-dev-user-id` header, the socket handshake's `devUserId`, open board reads) — a forgotten env var must fail closed, not hand out impersonation. Local development opts in with `NODE_ENV=development` in `.env`.
 
 ## 8. Key technical decisions & gotchas
 
 1. **Serving the SPA from the same Express process** avoids CORS entirely in production; in dev, Vite's proxy forwards `/api` and `/socket.io` to the server port.2. **Socket auth:** client passes JWT in the handshake (`auth.token`); server rejects unauthenticated/membership-less joins before adding to rooms.
-3. **Leader authority is enforced server-side** — hiding buttons in the UI is cosmetic only; every mutating event checks role + current phase.
-4. **Vote privacy:** individual ballots are never broadcast; only aggregate progress. Results computed server-side on close.
-5. **Drawings/diagrams are stored as JSON/SVG strings** — no file uploads in MVP, keeping infra minimal. Size-limit artifacts (~100KB) at validation time.
-6. **Reconnects:** Socket.IO reconnect + `session:state` resnapshot makes refreshes safe; LiveKit SDK auto-reconnects audio independently.
-7. **Render free tier sleeps** after ~15 min idle; first request pays a cold start (~30s). Acceptable for MVP demo; document it.
-8. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can _read_ shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
-9. **LLM provider abstraction:** the assistant talks to any OpenAI-compatible `/chat/completions` endpoint using the user's stored config. Tool-calling loop lives server-side in the `assistant` module; API keys are AES-encrypted at rest and never sent back to the client after save.
+2. **Leader authority is enforced server-side** — hiding buttons in the UI is cosmetic only; every mutating event checks role + current phase.
+3. **Vote privacy:** individual ballots are never broadcast; only aggregate progress. Results computed server-side on close.
+4. **Drawings/diagrams are stored as JSON/SVG strings** — no file uploads in MVP, keeping infra minimal. Size-limit artifacts (~100KB) at validation time.
+5. **Reconnects:** Socket.IO reconnect + `session:state` resnapshot makes refreshes safe; LiveKit SDK auto-reconnects audio independently.
+6. **Render free tier sleeps** after ~15 min idle; first request pays a cold start (~30s). Acceptable for MVP demo; document it.
+7. **AI Assistant isolation:** each user's chat is private — assistant events are emitted to the single requester's socket/HTTP connection only, never broadcast to the session room. The agent can _read_ shared session state but its outputs reach the pinboard only via an explicit user-driven propose (F37), reusing the normal proposal pipeline so ownership/validation stay consistent.
+8. **LLM provider abstraction:** the assistant talks to any OpenAI-compatible `/chat/completions` endpoint using the user's stored config. Tool-calling loop lives server-side in the `assistant` module; API keys are AES-encrypted at rest and never sent back to the client after save.
 
 ## 9. Deployment topology: single-process serving (decided)
 
