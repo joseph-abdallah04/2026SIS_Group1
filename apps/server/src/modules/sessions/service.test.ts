@@ -6,27 +6,50 @@ import { createSessionSchema, sessionCodeSchema } from '@roundtable/shared/schem
 // covered by the integration smoke test (docs/05 §10).
 const sessionCreate = vi.fn();
 const questionCreateMany = vi.fn();
+const questionDeleteMany = vi.fn();
+const questionFindMany = vi.fn();
 const sessionMemberCreate = vi.fn();
 const sessionFindUnique = vi.fn();
 const sessionUpdate = vi.fn();
+const sessionUpdateInTx = vi.fn();
+const sessionDelete = vi.fn();
 const sessionMemberUpsert = vi.fn();
+const sessionMemberDeleteMany = vi.fn();
 
 vi.mock('../../db.js', () => ({
   prisma: {
     $transaction: vi.fn(async (cb: (tx: unknown) => unknown) =>
       cb({
-        session: { create: sessionCreate },
-        question: { createMany: questionCreateMany },
+        session: { create: sessionCreate, update: sessionUpdateInTx },
+        question: {
+          createMany: questionCreateMany,
+          deleteMany: questionDeleteMany,
+          findMany: questionFindMany,
+        },
         sessionMember: { create: sessionMemberCreate },
       }),
     ),
-    session: { findUnique: sessionFindUnique, update: sessionUpdate },
-    sessionMember: { upsert: sessionMemberUpsert },
+    session: { findUnique: sessionFindUnique, update: sessionUpdate, delete: sessionDelete },
+    sessionMember: { upsert: sessionMemberUpsert, deleteMany: sessionMemberDeleteMany },
   },
 }));
 
-const { createSession, generateSessionCode, joinSessionByCode, openSessionForJoining, resolveSessionByCode } =
-  await import('./service.js');
+vi.mock('../../realtime/types.js', () => ({
+  sessionRoom: (id: string) => `session:${id}`,
+}));
+
+const {
+  createSession,
+  deleteSession,
+  emitSessionStarted,
+  generateSessionCode,
+  joinSessionByCode,
+  leaveSession,
+  openSessionForJoining,
+  resolveSessionByCode,
+  startSession,
+  updateSessionDraft,
+} = await import('./service.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -260,5 +283,185 @@ describe('resolveSessionByCode / joinSessionByCode', () => {
         create: { sessionId: 's1', userId: 'u2' },
       });
     }
+  });
+});
+
+describe('updateSessionDraft / deleteSession (F05)', () => {
+  const draftSession = {
+    id: 's1',
+    code: null,
+    title: 'Roadmap planning',
+    leaderId: 'leader-1',
+    status: 'draft',
+  };
+
+  it('rejects a caller who is not the leader', async () => {
+    sessionFindUnique.mockResolvedValueOnce(draftSession);
+    await expect(
+      updateSessionDraft({
+        sessionId: 's1',
+        leaderId: 'not-the-leader',
+        input: { title: 'New title', questions: ['Q1'] },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
+    expect(sessionUpdateInTx).not.toHaveBeenCalled();
+  });
+
+  it('rejects editing a session that has left draft', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'lobby' });
+    await expect(
+      updateSessionDraft({
+        sessionId: 's1',
+        leaderId: 'leader-1',
+        input: { title: 'New title', questions: ['Q1'] },
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+    expect(sessionUpdateInTx).not.toHaveBeenCalled();
+  });
+
+  it('replaces title and the full question list, reassigning position from array order', async () => {
+    sessionFindUnique.mockResolvedValueOnce(draftSession);
+    sessionUpdateInTx.mockResolvedValueOnce({ ...draftSession, title: 'New title' });
+    questionFindMany.mockResolvedValueOnce([
+      { id: 'q1', sessionId: 's1', text: 'First', position: 0 },
+      { id: 'q2', sessionId: 's1', text: 'Second', position: 1 },
+    ]);
+
+    const result = await updateSessionDraft({
+      sessionId: 's1',
+      leaderId: 'leader-1',
+      input: { title: 'New title', questions: ['First', 'Second'] },
+    });
+
+    expect(questionDeleteMany).toHaveBeenCalledWith({ where: { sessionId: 's1' } });
+    expect(questionCreateMany.mock.calls[0]?.[0].data).toEqual([
+      { sessionId: 's1', text: 'First', position: 0 },
+      { sessionId: 's1', text: 'Second', position: 1 },
+    ]);
+    expect(result.title).toBe('New title');
+    expect(result.questions).toHaveLength(2);
+  });
+
+  it('deleteSession rejects a non-leader and never deletes', async () => {
+    sessionFindUnique.mockResolvedValueOnce(draftSession);
+    await expect(
+      deleteSession({ sessionId: 's1', leaderId: 'not-the-leader' }),
+    ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
+    expect(sessionDelete).not.toHaveBeenCalled();
+  });
+
+  it('deleteSession rejects a session that has left draft', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'active' });
+    await expect(
+      deleteSession({ sessionId: 's1', leaderId: 'leader-1' }),
+    ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+    expect(sessionDelete).not.toHaveBeenCalled();
+  });
+
+  it('deleteSession deletes the row once the leader/draft guard passes', async () => {
+    sessionFindUnique.mockResolvedValueOnce(draftSession);
+    await deleteSession({ sessionId: 's1', leaderId: 'leader-1' });
+    expect(sessionDelete).toHaveBeenCalledWith({ where: { id: 's1' } });
+  });
+});
+
+describe('startSession (F09)', () => {
+  const lobbySession = {
+    id: 's1',
+    code: 'K7NP-3WQZ',
+    title: 'Roadmap planning',
+    leaderId: 'leader-1',
+    status: 'lobby',
+  };
+
+  it('rejects a caller who is not the leader', async () => {
+    sessionFindUnique.mockResolvedValueOnce(lobbySession);
+    await expect(startSession({ sessionId: 's1', leaderId: 'not-the-leader' })).rejects.toMatchObject({
+      code: 'NOT_SESSION_LEADER',
+    });
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects starting a session that is not lobby', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...lobbySession, status: 'draft' });
+    await expect(startSession({ sessionId: 's1', leaderId: 'leader-1' })).rejects.toMatchObject({
+      code: 'INVALID_TRANSITION',
+    });
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('flips status to active and records startedAt', async () => {
+    sessionFindUnique.mockResolvedValueOnce(lobbySession);
+    sessionUpdate.mockResolvedValueOnce({
+      ...lobbySession,
+      status: 'active',
+      startedAt: new Date('2026-09-04T00:00:00.000Z'),
+    });
+
+    const session = await startSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(sessionUpdate).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: { status: 'active', startedAt: expect.any(Date) },
+    });
+    expect(session.status).toBe('active');
+  });
+
+  it('is a no-op that returns the existing session when already active', async () => {
+    const activeSession = { ...lobbySession, status: 'active', startedAt: new Date() };
+    sessionFindUnique.mockResolvedValueOnce(activeSession);
+
+    const session = await startSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(session).toBe(activeSession);
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('emitSessionStarted broadcasts sessionStarted to the session room, including the leader', async () => {
+    const emit = vi.fn();
+    const to = vi.fn(() => ({ emit }));
+    const io = { to } as unknown as Parameters<typeof emitSessionStarted>[0];
+
+    emitSessionStarted(io, {
+      id: 's1',
+      code: 'K7NP-3WQZ',
+      title: 'Roadmap planning',
+      leaderId: 'leader-1',
+      status: 'active',
+      createdAt: new Date(),
+      startedAt: new Date('2026-09-04T00:00:00.000Z'),
+      endedAt: null,
+    });
+
+    expect(to).toHaveBeenCalledWith('session:s1');
+    expect(emit).toHaveBeenCalledWith('sessionStarted', {
+      sessionId: 's1',
+      startedAt: '2026-09-04T00:00:00.000Z',
+    });
+  });
+});
+
+describe('leaveSession (F07)', () => {
+  it('refuses the leader — they must end the session instead', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ leaderId: 'leader-1' });
+    await expect(leaveSession({ sessionId: 's1', userId: 'leader-1' })).rejects.toMatchObject({
+      code: 'LEADER_CANNOT_LEAVE',
+    });
+    expect(sessionMemberDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('removes the membership row for a non-leader', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ leaderId: 'leader-1' });
+    await leaveSession({ sessionId: 's1', userId: 'u2' });
+    expect(sessionMemberDeleteMany).toHaveBeenCalledWith({
+      where: { sessionId: 's1', userId: 'u2' },
+    });
+  });
+
+  it('raises SESSION_NOT_FOUND for an unknown session', async () => {
+    sessionFindUnique.mockResolvedValueOnce(null);
+    await expect(leaveSession({ sessionId: 'missing', userId: 'u2' })).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+    });
   });
 });

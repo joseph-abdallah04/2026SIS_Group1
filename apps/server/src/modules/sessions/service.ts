@@ -4,10 +4,15 @@
 import { randomInt } from 'node:crypto';
 
 import { normalizeSessionCode, type Question, type Session, type SessionSummary } from '@roundtable/shared';
-import { SESSION_CODE_ALPHABET, type CreateSessionInput } from '@roundtable/shared/schemas';
+import {
+  SESSION_CODE_ALPHABET,
+  type CreateSessionInput,
+  type UpdateSessionInput,
+} from '@roundtable/shared/schemas';
 
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
+import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
 
 export interface CreateSessionArgs {
   leaderId: string;
@@ -55,6 +60,82 @@ export async function createSession({ leaderId, input }: CreateSessionArgs): Pro
   });
 
   return row;
+}
+
+export interface MutateDraftArgs {
+  sessionId: string;
+  leaderId: string;
+}
+
+/** Shared guard for F05's two mutations: only the leader, only while `draft`. */
+async function requireDraftOwnedBy({ sessionId, leaderId }: MutateDraftArgs): Promise<Session> {
+  const session = await prisma.session.findUnique({ where: { id: sessionId } });
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.leaderId !== leaderId) {
+    throw new ApiError(403, 'Only the session leader can do that', 'NOT_SESSION_LEADER');
+  }
+  if (session.status !== 'draft') {
+    throw new ApiError(
+      409,
+      `Cannot edit or delete a session that is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
+  }
+  return session;
+}
+
+export interface UpdateSessionDraftArgs extends MutateDraftArgs {
+  /** Already validated by the caller against `updateSessionSchema`. */
+  input: UpdateSessionInput;
+}
+
+/**
+ * F05: replace a draft's title and question list wholesale. There is no
+ * per-question edit endpoint — the client always resubmits its full,
+ * reordered list (mirrors `createSession`'s "array order is `position`"),
+ * so this deletes and recreates the question rows rather than diffing them.
+ * Safe to do: a draft has no proposals/votes pointing at its questions yet
+ * (nothing is joinable before `lobby`), so there is nothing else to migrate.
+ */
+export async function updateSessionDraft({
+  sessionId,
+  leaderId,
+  input,
+}: UpdateSessionDraftArgs): Promise<Session & { questions: Question[] }> {
+  await requireDraftOwnedBy({ sessionId, leaderId });
+
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.update({
+      where: { id: sessionId },
+      data: { title: input.title },
+    });
+
+    await tx.question.deleteMany({ where: { sessionId } });
+    await tx.question.createMany({
+      data: input.questions.map((text, position) => ({ sessionId, text, position })),
+    });
+
+    const questions = await tx.question.findMany({
+      where: { sessionId },
+      orderBy: { position: 'asc' },
+    });
+
+    return { ...session, questions };
+  });
+}
+
+/**
+ * F05: delete a draft outright. Leader-only, draft-only — the same guard as
+ * `updateSessionDraft`, because both ask "can this session still be
+ * reshaped?" and the answer is identical. `Question`/`SessionMember` rows
+ * cascade via the FK (`onDelete: Cascade` in schema.prisma); a draft's only
+ * member is the leader, so nothing else loses data.
+ */
+export async function deleteSession({ sessionId, leaderId }: MutateDraftArgs): Promise<void> {
+  await requireDraftOwnedBy({ sessionId, leaderId });
+  await prisma.session.delete({ where: { id: sessionId } });
 }
 
 /** Duck-typed rather than importing Prisma's error class: the `.code` is the
@@ -128,6 +209,96 @@ export async function openSessionForJoining({
   // Unreachable — the loop above always returns or throws — but keeps the
   // function's return type honest without a non-null assertion.
   throw new ApiError(500, 'Could not allocate a session code', 'CODE_ALLOCATION_FAILED');
+}
+
+export interface StartSessionArgs {
+  sessionId: string;
+  leaderId: string;
+}
+
+/**
+ * The `lobby -> active` transition (F09): leader-only, records `startedAt`,
+ * and — unlike `openSessionForJoining` — has no retry loop, because nothing
+ * here is contested. The realtime fan-out that moves every waiting client
+ * into the session view at once is the caller's job (`emitSessionStarted`,
+ * below): this function only performs and returns the state change so
+ * routes.ts can broadcast it with the `io` instance routes have and this
+ * module's pure service functions deliberately don't.
+ *
+ * Already-`active` is a no-op, same reasoning as `openSessionForJoining`'s
+ * already-`lobby` case: a double-click on "Start session" should not error.
+ */
+export async function startSession({ sessionId, leaderId }: StartSessionArgs): Promise<Session> {
+  const session = await prisma.session.findUnique({ where: { id: sessionId } });
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.leaderId !== leaderId) {
+    throw new ApiError(403, 'Only the session leader can start it', 'NOT_SESSION_LEADER');
+  }
+  if (session.status === 'active') {
+    return session;
+  }
+  if (session.status !== 'lobby') {
+    throw new ApiError(409, `Cannot start a session that is ${session.status}`, 'INVALID_TRANSITION');
+  }
+
+  return prisma.session.update({
+    where: { id: sessionId },
+    data: { status: 'active', startedAt: new Date() },
+  });
+}
+
+/**
+ * Broadcasts F09's `sessionStarted` to everyone in the room, leader's own
+ * socket included (same "author sees the broadcast too" rule as
+ * `emitProposalCreated` in the pinboard module). Takes `io` as a parameter
+ * rather than importing a shared singleton — the same pattern pinboard's
+ * socket.ts uses — so this module stays testable without a real Socket.IO
+ * server, and REST (`routes.ts`, which owns `io`) is the only caller.
+ */
+export function emitSessionStarted(io: RealtimeServer, session: Session): void {
+  if (!session.startedAt) return; // startSession always sets it; guards the type, not a real case
+  io.to(sessionRoom(session.id)).emit('sessionStarted', {
+    sessionId: session.id,
+    startedAt: session.startedAt.toISOString(),
+  });
+}
+
+export interface LeaveSessionArgs {
+  sessionId: string;
+  userId: string;
+}
+
+/**
+ * F07's explicit "Leave session" action — distinct from a socket disconnect
+ * (docs/02 §4: presence is in-memory and does not touch `SessionMember`).
+ * Removes the persisted membership row so the session drops off this user's
+ * dashboard and, if it's still lobby/active, out of `listSessionMembers`.
+ *
+ * The leader cannot leave this way: with no F32 (End session) yet, leaving
+ * would strand the session with a leader-shaped hole nothing else accounts
+ * for, so it is refused rather than allowed to corrupt state silently.
+ * `deleteMany` (not `delete`) makes a repeat call — or a call from someone
+ * who was never a member — a no-op instead of a thrown "not found".
+ */
+export async function leaveSession({ sessionId, userId }: LeaveSessionArgs): Promise<void> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { leaderId: true },
+  });
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.leaderId === userId) {
+    throw new ApiError(
+      409,
+      'The leader cannot leave — end the session instead',
+      'LEADER_CANNOT_LEAVE',
+    );
+  }
+
+  await prisma.sessionMember.deleteMany({ where: { sessionId, userId } });
 }
 
 export interface SessionPreview {

@@ -9,7 +9,7 @@ import { Server as SocketServer } from 'socket.io';
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
-import { sessionsRoutes } from './modules/sessions/index.js';
+import { createSessionsRoutes } from './modules/sessions/index.js';
 import { registerRealtimeGateway } from './realtime/gateway.js';
 import type { RealtimeServer } from './realtime/types.js';
 
@@ -20,11 +20,18 @@ const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json({ limit: '256kb' }));
 
+// `io` is created before the routes that need it (rather than after, as
+// there is no socket-only reason to delay it) — F09's `POST /:id/start`
+// broadcasts on this exact instance once it succeeds, so `sessionsRoutes`
+// is a factory that takes it, not a module-level `Router`.
+const httpServer = http.createServer(app);
+const io: RealtimeServer = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
-app.use('/api/sessions', sessionsRoutes);
+app.use('/api/sessions', createSessionsRoutes(io));
 app.use('/api/sessions', pinboardRoutes);
 
 app.use(errorHandler);
@@ -38,9 +45,6 @@ if (fs.existsSync(webDist)) {
     res.sendFile(path.join(webDist, 'index.html'));
   });
 }
-
-const httpServer = http.createServer(app);
-const io: RealtimeServer = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
 
 registerRealtimeGateway(io);
 
