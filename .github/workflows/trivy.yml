@@ -28,6 +28,12 @@ jobs:
           output: 'trivy-results.sarif'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
+          # Without this, trivy-action's entrypoint.sh unsets `severity` when
+          # format is sarif ("Building SARIF report with all severities"),
+          # silently discarding the CRITICAL,HIGH filter above. `exit-code`
+          # then fires on any fixable finding down to LOW/MEDIUM, which is
+          # not the policy this workflow documents (aquasecurity/trivy-action#309).
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy results to GitHub Security tab
         if: always()
