@@ -167,6 +167,13 @@ export interface JoinSessionArgs {
  * a no-op rather than a duplicate row or a thrown error — the ticket's "joining
  * twice doesn't create duplicate participant entries" is this upsert, not a
  * pre-check.
+ *
+ * Deliberately does not check `status`: a code stays valid through `active`
+ * (it is only released on `ended` — see the `code` column comment on
+ * `Session`), so this doubles as the late-join path. `SessionRouter` sends a
+ * newly-joined member straight into `SessionPinboard` if the session already
+ * started, and into `WaitingRoom` if it hasn't — the join itself doesn't need
+ * to know which.
  */
 export async function joinSessionByCode({ rawCode, userId }: JoinSessionArgs): Promise<{ sessionId: string }> {
   const session = await resolveSessionByCode(rawCode);
