@@ -858,41 +858,6 @@ export function deleteEdge(
   return edges.filter((edge) => edge.from !== target.from || edge.to !== target.to);
 }
 
-export function autoLayoutNodes(nodes: readonly DiagramNode[]): DiagramNode[] {
-  if (nodes.length === 0) return [];
-
-  const largestWidth = Math.max(...nodes.map((node) => effectiveDiagramNodeSize(node).width));
-  const largestHeight = Math.max(...nodes.map((node) => effectiveDiagramNodeSize(node).height));
-  const columns = Math.min(
-    Math.ceil(Math.sqrt(nodes.length)),
-    Math.max(1, Math.floor(DIAGRAM_CANVAS_WIDTH / (largestWidth + NODE_GAP))),
-  );
-  const rows = Math.ceil(nodes.length / columns);
-  const horizontalGap = Math.max(
-    DIAGRAM_GRID,
-    (DIAGRAM_CANVAS_WIDTH - columns * largestWidth) / (columns + 1),
-  );
-  const verticalGap = Math.max(
-    DIAGRAM_GRID,
-    (DIAGRAM_CANVAS_HEIGHT - rows * largestHeight) / (rows + 1),
-  );
-
-  return nodes.map((node, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    return {
-      ...node,
-      ...snapPositionForSize(
-        {
-          x: horizontalGap + column * (largestWidth + horizontalGap),
-          y: verticalGap + row * (largestHeight + verticalGap),
-        },
-        effectiveDiagramNodeSize(node),
-      ),
-    };
-  });
-}
-
 export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): DiagramNode[] {
   if (nodes.length === 0) return [];
   const minX = Math.min(...nodes.map((node) => node.x));

@@ -503,42 +503,138 @@ export function diagramEdgeToPointGeometry(
   };
 }
 
-export function diagramEdgeGeometry(
-  from: Pick<DiagramNode, 'x' | 'y' | 'shape' | 'width' | 'height'>,
-  to: Pick<DiagramNode, 'x' | 'y' | 'shape' | 'width' | 'height'>,
-): DiagramEdgeGeometry {
+export interface DiagramEdgeRoute extends DiagramEdgeGeometry {
+  /** Path data for the arrow: a line when straight, a quadratic when bent. */
+  path: string;
+  /** Signed sideways offset of the control point; 0 when the arrow is straight. */
+  bend: number;
+}
+
+// A bent arrow bows out by this fraction of the centre-to-centre distance,
+// capped so a long reciprocal pair does not swing across the sheet.
+export const DIAGRAM_RECIPROCAL_BEND_RATIO = 0.16;
+export const DIAGRAM_MAX_BEND = 44;
+
+type DiagramNodeGeometry = Pick<DiagramNode, 'x' | 'y' | 'shape' | 'width' | 'height'>;
+
+function nodeCentre(node: DiagramNodeGeometry, size: DiagramNodeSize) {
+  return { x: node.x + size.width / 2, y: node.y + size.height / 2 };
+}
+
+/**
+ * One arrow's geometry. `bend` of 0 gives the straight route the diagram has
+ * always drawn; a non-zero bend bows the arrow to one side so a reciprocal pair
+ * stays two readable paths instead of one line drawn over itself.
+ *
+ * Both endpoints are anchored towards the control point, so a bent arrow still
+ * leaves and arrives perpendicular to the outline it touches.
+ */
+export function diagramEdgeRoute(
+  from: DiagramNodeGeometry,
+  to: DiagramNodeGeometry,
+  bend = 0,
+): DiagramEdgeRoute {
   const fromSize = effectiveDiagramNodeSize(from);
   const toSize = effectiveDiagramNodeSize(to);
-  const fromCenter = { x: from.x + fromSize.width / 2, y: from.y + fromSize.height / 2 };
-  const toCenter = { x: to.x + toSize.width / 2, y: to.y + toSize.height / 2 };
-  const delta = { x: toCenter.x - fromCenter.x, y: toCenter.y - fromCenter.y };
+  const fromCentre = nodeCentre(from, fromSize);
+  const toCentre = nodeCentre(to, toSize);
+  const delta = { x: toCentre.x - fromCentre.x, y: toCentre.y - fromCentre.y };
 
   if (delta.x === 0 && delta.y === 0) {
+    const x1 = from.x + fromSize.width;
+    const y1 = fromCentre.y;
     return {
-      x1: from.x + fromSize.width,
-      y1: fromCenter.y,
+      x1,
+      y1,
       x2: to.x,
-      y2: toCenter.y,
-      labelX: fromCenter.x,
-      labelY: fromCenter.y - 8,
+      y2: toCentre.y,
+      labelX: fromCentre.x,
+      labelY: fromCentre.y - 8,
+      path: `M${x1},${y1} L${to.x},${toCentre.y}`,
+      bend: 0,
     };
   }
 
-  const fromScale = diagramBoundaryScale(from.shape, fromSize, delta);
-  const toScale = diagramBoundaryScale(to.shape, toSize, delta);
-  const x1 = fromCenter.x + delta.x * fromScale;
-  const y1 = fromCenter.y + delta.y * fromScale;
-  const x2 = toCenter.x - delta.x * toScale;
-  const y2 = toCenter.y - delta.y * toScale;
+  const distance = Math.hypot(delta.x, delta.y);
+  const offset = bend * Math.min(DIAGRAM_MAX_BEND, distance * DIAGRAM_RECIPROCAL_BEND_RATIO);
+  const control = {
+    x: (fromCentre.x + toCentre.x) / 2 - (delta.y / distance) * offset,
+    y: (fromCentre.y + toCentre.y) / 2 + (delta.x / distance) * offset,
+  };
+
+  // Each anchor is found along the direction that endpoint actually leaves in.
+  // Taking the destination's boundary along `+delta` would be wrong for any
+  // shape that is not centrally symmetric, such as the triangle.
+  const fromDirection = { x: control.x - fromCentre.x, y: control.y - fromCentre.y };
+  const toDirection = { x: control.x - toCentre.x, y: control.y - toCentre.y };
+  const fromScale = diagramBoundaryScale(from.shape, fromSize, fromDirection);
+  const toScale = diagramBoundaryScale(to.shape, toSize, toDirection);
+
+  const x1 = fromCentre.x + fromDirection.x * fromScale;
+  const y1 = fromCentre.y + fromDirection.y * fromScale;
+  const x2 = toCentre.x + toDirection.x * toScale;
+  const y2 = toCentre.y + toDirection.y * toScale;
+
+  if (offset === 0) {
+    return {
+      x1,
+      y1,
+      x2,
+      y2,
+      labelX: (x1 + x2) / 2,
+      labelY: (y1 + y2) / 2 - 8,
+      path: `M${x1},${y1} L${x2},${y2}`,
+      bend: 0,
+    };
+  }
 
   return {
     x1,
     y1,
     x2,
     y2,
-    labelX: (x1 + x2) / 2,
-    labelY: (y1 + y2) / 2 - 8,
+    // Midpoint of the quadratic, so the label rides the curve it belongs to.
+    labelX: 0.25 * x1 + 0.5 * control.x + 0.25 * x2,
+    labelY: 0.25 * y1 + 0.5 * control.y + 0.25 * y2 - 8,
+    path: `M${x1},${y1} Q${control.x},${control.y} ${x2},${y2}`,
+    bend: offset,
   };
+}
+
+export function diagramEdgeGeometry(
+  from: DiagramNodeGeometry,
+  to: DiagramNodeGeometry,
+): DiagramEdgeGeometry {
+  return diagramEdgeRoute(from, to, 0);
+}
+
+/**
+ * Routes for a whole diagram, index-aligned with `edges`. An entry is null when
+ * an endpoint is missing, which legacy artifacts are allowed to contain.
+ *
+ * A pair of arrows that point at each other is bowed apart in opposite
+ * directions; which way each one goes is decided by endpoint id, so the result
+ * does not depend on the order the edges happen to sit in the array.
+ */
+export function diagramEdgeRoutes(
+  nodes: readonly DiagramNode[],
+  edges: readonly DiagramEdge[],
+): (DiagramEdgeRoute | null)[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const directed = new Set(edges.map((edge) => `${edge.from}\u0000${edge.to}`));
+
+  return edges.map((edge) => {
+    const from = byId.get(edge.from);
+    const to = byId.get(edge.to);
+    if (!from || !to) return null;
+
+    const reciprocal = directed.has(`${edge.to}\u0000${edge.from}`);
+    // Both halves of a pair bend by the same amount: the control point is offset
+    // perpendicular to each arrow's own direction, and those directions are
+    // opposite, so the two curves separate on their own. Choosing a sign per
+    // endpoint here would cancel that out and stack them on the same side.
+    return diagramEdgeRoute(from, to, reciprocal ? 1 : 0);
+  });
 }
 
 export interface DiagramNode {

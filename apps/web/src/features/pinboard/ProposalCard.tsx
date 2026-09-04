@@ -1,7 +1,7 @@
 import {
   DIAGRAM_LABEL_INK,
   diagramEdgeDash,
-  diagramEdgeGeometry,
+  diagramEdgeRoutes,
   diagramEdgeStroke,
   diagramEdgeStrokeWidth,
   diagramNodeFill,
@@ -159,6 +159,9 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
   // the line it terminates.
   const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
   const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
+  // Same shared routing the editor uses, so a bowed reciprocal pair reads the
+  // same way on the board as it did while it was being drawn.
+  const edgeRoutes = diagramEdgeRoutes(diagramNodes, edges);
 
   return (
     <article
@@ -199,21 +202,19 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                 </marker>
               ))}
             </defs>
-            {edges.map((edge) => {
+            {edges.map((edge, index) => {
               const from = nodeById.get(edge.from);
               const to = nodeById.get(edge.to);
-              if (!from || !to) return null;
-              const geometry = diagramEdgeGeometry(from, to);
+              const route = edgeRoutes[index];
+              if (!from || !to || !route) return null;
               const stroke = diagramEdgeStroke(edge);
               // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
               const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
               return (
                 <g key={`${edge.from}-${edge.to}`}>
-                  <line
-                    x1={geometry.x1}
-                    y1={geometry.y1}
-                    x2={geometry.x2}
-                    y2={geometry.y2}
+                  <path
+                    d={route.path}
+                    fill="none"
                     stroke={stroke}
                     strokeWidth={strokeWidth}
                     markerEnd={`url(#${arrowId(stroke)})`}
@@ -221,8 +222,8 @@ function DiagramCard({ item, zoom, isOwnedByViewer = false }: ProposalCardProps)
                   />
                   {edge.label ? (
                     <text
-                      x={geometry.labelX}
-                      y={geometry.labelY}
+                      x={route.labelX}
+                      y={route.labelY}
                       textAnchor="middle"
                       fill="#5A5F68"
                       stroke="#F7F7F8"

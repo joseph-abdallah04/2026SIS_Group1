@@ -16,6 +16,8 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   AlignVerticalDistributeCenter,
+  ArrowDown,
+  ArrowRight,
   Box,
   CheckCircle2,
   Circle,
@@ -62,6 +64,7 @@ import {
   DIAGRAM_STROKE_WIDTH_PRESETS,
   diagramEdgeDash,
   diagramEdgeGeometry,
+  diagramEdgeRoutes,
   diagramEdgeStroke,
   diagramEdgeStrokeWidth,
   diagramEdgeToPointGeometry,
@@ -93,7 +96,6 @@ import {
   addEdge,
   addNode,
   alignNodes,
-  autoLayoutNodes,
   clampNodesInsideContainer,
   clearEdgeStyle,
   clearNodeSize,
@@ -140,6 +142,7 @@ import {
   zoomDiagramView,
   type DiagramView,
 } from './diagramView';
+import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
 
 interface DragSession {
@@ -254,6 +257,15 @@ const STROKE_STYLE_LABELS: Record<DiagramStrokeStyle, string> = {
   dashed: 'Dashed',
   dotted: 'Dotted',
 };
+
+const LAYOUT_DIRECTIONS: {
+  direction: DiagramLayoutDirection;
+  label: string;
+  Icon: typeof ArrowDown;
+}[] = [
+  { direction: 'TB', label: 'Arrange top to bottom', Icon: ArrowDown },
+  { direction: 'LR', label: 'Arrange left to right', Icon: ArrowRight },
+];
 
 const ALIGN_ACTIONS: { mode: DiagramAlignMode; label: string; Icon: typeof AlignStartVertical }[] =
   [
@@ -399,6 +411,7 @@ export function DiagramEditor() {
   const [marquee, setMarquee] = useState<MarqueeSession | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [pendingContainerDelete, setPendingContainerDelete] = useState<string | null>(null);
+  const [layoutDirection, setLayoutDirection] = useState<DiagramLayoutDirection>('TB');
   const [panReady, setPanReady] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const canvasRef = useRef<SVGSVGElement>(null);
@@ -448,6 +461,9 @@ export function DiagramEditor() {
   // The default marker keeps its id for the connection preview; every distinct
   // edge colour gets its own so an arrowhead always matches its line.
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
+  // Routing is derived from the edge set, never stored: a reciprocal pair bows
+  // apart so both directions stay readable.
+  const edgeRoutes = diagramEdgeRoutes(nodes, edges);
   const edgeArrowId = (color: string) => `diagram-editor-arrow-${color.replace('#', '')}`;
   const marqueeRect: DiagramRect | null = marquee
     ? normalizeRect(marquee.origin, marquee.current)
@@ -1350,16 +1366,39 @@ export function DiagramEditor() {
             variant="quiet"
             className="min-h-8 px-2.5"
             disabled={nodes.length < 2 || isSubmitting}
-            title="Lay every element out on a tidy grid"
+            title="Lay the diagram out along its arrows"
             onClick={() => {
               clearError();
               const graph = history.snapshotRef.current;
-              history.commit({ nodes: autoLayoutNodes(graph.nodes), edges: graph.edges });
+              history.commit({
+                nodes: layoutDiagram(graph.nodes, graph.edges, layoutDirection),
+                edges: graph.edges,
+              });
             }}
           >
             <AlignHorizontalDistributeCenter aria-hidden="true" size={15} />
             Arrange
           </Button>
+        </div>
+
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="text-[11px] text-rt-ink-faint">Flow</span>
+          {LAYOUT_DIRECTIONS.map(({ direction, label, Icon }) => (
+            <IconButton
+              key={direction}
+              label={label}
+              className={`h-8 w-8 ${
+                layoutDirection === direction
+                  ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
+                  : ''
+              }`}
+              aria-pressed={layoutDirection === direction}
+              disabled={isSubmitting}
+              onClick={() => setLayoutDirection(direction)}
+            >
+              <Icon aria-hidden="true" size={15} />
+            </IconButton>
+          ))}
         </div>
 
         <div className="mt-3 flex items-center gap-1.5">
@@ -1943,11 +1982,11 @@ export function DiagramEditor() {
             />
           ) : null}
 
-          {edges.map((edge) => {
+          {edges.map((edge, index) => {
             const from = nodes.find((node) => node.id === edge.from);
             const to = nodes.find((node) => node.id === edge.to);
-            if (!from || !to) return null;
-            const geometry = diagramEdgeGeometry(from, to);
+            const route = edgeRoutes[index];
+            if (!from || !to || !route) return null;
             const selected = selectedEdgeKey === edgeKey(edge);
             const strokeWidth = diagramEdgeStrokeWidth(edge, LEGACY_EDGE_STROKE_WIDTH);
             const stroke = diagramEdgeStroke(edge);
@@ -1969,19 +2008,12 @@ export function DiagramEditor() {
                   setSelectedEdgeKey(edgeKey(edge));
                 }}
               >
-                <line
-                  x1={geometry.x1}
-                  y1={geometry.y1}
-                  x2={geometry.x2}
-                  y2={geometry.y2}
-                  stroke="transparent"
-                  strokeWidth={18}
-                />
-                <line
-                  x1={geometry.x1}
-                  y1={geometry.y1}
-                  x2={geometry.x2}
-                  y2={geometry.y2}
+                {/* The hit target follows the same path, so a bowed arrow is
+                    grabbable where it is actually drawn. */}
+                <path d={route.path} fill="none" stroke="transparent" strokeWidth={18} />
+                <path
+                  d={route.path}
+                  fill="none"
                   stroke={selected ? SELECTION_ACCENT : stroke}
                   strokeWidth={selected ? Math.max(3, strokeWidth + 1) : strokeWidth}
                   markerEnd={`url(#${selected ? 'diagram-editor-arrow-selected' : edgeArrowId(stroke)})`}
@@ -1990,8 +2022,8 @@ export function DiagramEditor() {
                 />
                 {edge.label ? (
                   <text
-                    x={geometry.labelX}
-                    y={geometry.labelY}
+                    x={route.labelX}
+                    y={route.labelY}
                     textAnchor="middle"
                     fill="#5A5F68"
                     stroke="#FFFFFF"

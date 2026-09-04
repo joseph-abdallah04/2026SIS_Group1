@@ -61,12 +61,36 @@ describe('diagram proposal card', () => {
     item.artifactJson.edges = [{ from: 'client', to: 'server', label: 'calls' }];
     const { container } = render(<ProposalCard item={item} zoom={100} />);
 
-    const line = container.querySelector('line[marker-end]');
-    expect(line?.getAttribute('x1')).toBe('144');
-    expect(line?.getAttribute('x2')).toBe('300');
+    // Arrows are paths now, so a bowed reciprocal pair can share the same code
+    // as a straight one; the boundary anchors are unchanged.
+    const arrow = container.querySelector('path[marker-end]');
+    expect(arrow?.getAttribute('d')).toMatch(/^M144,/);
+    expect(arrow?.getAttribute('d')).toContain(' L300,');
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'calls'),
     ).toBe(true);
+  });
+
+  it('bows a reciprocal pair apart on the board card too', () => {
+    const item = diagramItem([
+      { id: 'a', label: 'A', x: 24, y: 24, shape: 'box' },
+      { id: 'b', label: 'B', x: 400, y: 24, shape: 'box' },
+    ]);
+    if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
+    item.artifactJson.edges = [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'a' },
+    ];
+    const { container } = render(<ProposalCard item={item} zoom={100} />);
+
+    // The card shares the editor's routing, so both directions stay readable
+    // instead of one arrow hiding under the other.
+    const paths = [...container.querySelectorAll('path[marker-end]')].map((path) =>
+      path.getAttribute('d'),
+    );
+    expect(paths).toHaveLength(2);
+    expect(paths.every((path) => path?.includes('Q'))).toBe(true);
+    expect(paths[0]).not.toBe(paths[1]);
   });
 
   it('renders the complete diagram rather than truncating after four nodes', () => {
@@ -86,6 +110,6 @@ describe('diagram proposal card', () => {
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'Node 5'),
     ).toBe(true);
-    expect(container.querySelectorAll('line[marker-end]')).toHaveLength(1);
+    expect(container.querySelectorAll('path[marker-end]')).toHaveLength(1);
   });
 });

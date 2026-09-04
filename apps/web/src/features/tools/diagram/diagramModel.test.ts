@@ -19,7 +19,6 @@ import {
   deleteContainerWithContents,
   draggedSelectionRoots,
   alignNodes,
-  autoLayoutNodes,
   clientPointToDiagramPoint,
   copyDiagramFragment,
   createNodeId,
@@ -181,28 +180,6 @@ describe('diagram node model', () => {
         'n2',
       ).edges,
     ).toEqual([{ from: 'n1', to: 'n3' }]);
-  });
-
-  it('auto-layout preserves node identity while arranging every node on canvas', () => {
-    const nodes = buildNodes(9).map((node, index) => ({
-      ...node,
-      shape: index % 2 === 0 ? ('container' as const) : ('text' as const),
-    }));
-    const arranged = autoLayoutNodes(nodes);
-
-    expect(arranged.map(({ id, label, shape }) => ({ id, label, shape }))).toEqual(
-      nodes.map(({ id, label, shape }) => ({ id, label, shape })),
-    );
-    expect(new Set(arranged.map((node) => `${node.x},${node.y}`)).size).toBe(nodes.length);
-    expect(
-      arranged.every(
-        (node) =>
-          node.x >= 0 &&
-          node.y >= 0 &&
-          node.x + DIAGRAM_NODE_WIDTH <= DIAGRAM_CANVAS_WIDTH &&
-          node.y + DIAGRAM_NODE_HEIGHT <= DIAGRAM_CANVAS_HEIGHT,
-      ),
-    ).toBe(true);
   });
 });
 
@@ -826,18 +803,6 @@ describe('semantic containers', () => {
       const copy = pasted.nodes.find((node) => node.id === pasted.addedIds[0]);
       expect(copy).not.toHaveProperty('parentId');
       expect(prepareDiagram(pasted.nodes, pasted.edges).ok).toBe(true);
-    });
-  });
-
-  describe('layout with groups', () => {
-    it('keeps every node on the sheet after Arrange, containers included', () => {
-      const arranged = autoLayoutNodes(grouped());
-      for (const node of arranged) {
-        expect(node.x).toBeGreaterThanOrEqual(0);
-        expect(node.y).toBeGreaterThanOrEqual(0);
-      }
-      // Arrange is positional only; it never changes who belongs to whom.
-      expect(arranged.find((node) => node.id === 'n1')?.parentId).toBe('c1');
     });
   });
 });

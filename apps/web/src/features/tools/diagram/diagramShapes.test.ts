@@ -11,6 +11,8 @@ import {
   diagramNodeLabelLayout,
   diagramNodeSize,
   diagramNodesInDrawOrder,
+  diagramEdgeRoute,
+  diagramEdgeRoutes,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 import { describe, expect, it } from 'vitest';
@@ -282,5 +284,140 @@ describe('grouping write contract', () => {
       artifact([node('n1', { shape: 'hexagon' as never })]),
     );
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('edge routing', () => {
+  const left = node('a', { shape: 'box', x: 0, y: 0 });
+  const right = node('b', { shape: 'box', x: 400, y: 0 });
+
+  it('draws a lone arrow as a straight line, exactly as before', () => {
+    const route = diagramEdgeRoute(left, right);
+
+    expect(route.bend).toBe(0);
+    expect(route).toMatchObject({ x1: 120, y1: 28, x2: 400, y2: 28 });
+    expect(route.path).toBe('M120,28 L400,28');
+    // The label still rides the middle of the run.
+    expect(route.labelX).toBe(260);
+  });
+
+  it('bows a reciprocal pair apart in opposite directions', () => {
+    const routes = diagramEdgeRoutes(
+      [left, right],
+      [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    );
+
+    const [forward, back] = routes;
+    expect(forward?.bend).not.toBe(0);
+    expect(back?.bend).not.toBe(0);
+    expect(forward?.path).toContain('Q');
+    expect(back?.path).toContain('Q');
+
+    // Both boxes sit level at y = 28, so the two curves have to land on
+    // opposite sides of that line instead of being drawn over each other.
+    const straightY = 28;
+    expect(Math.sign(forward!.labelY + 8 - straightY)).toBe(
+      -Math.sign(back!.labelY + 8 - straightY),
+    );
+  });
+
+  it('routes an arrow the same way whatever order the edges sit in', () => {
+    const forwardFirst = diagramEdgeRoutes(
+      [left, right],
+      [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    );
+    const backFirst = diagramEdgeRoutes(
+      [left, right],
+      [
+        { from: 'b', to: 'a' },
+        { from: 'a', to: 'b' },
+      ],
+    );
+
+    expect(backFirst[1]!.path).toBe(forwardFirst[0]!.path);
+    expect(backFirst[0]!.path).toBe(forwardFirst[1]!.path);
+  });
+
+  it('leaves a single-direction arrow straight even next to a bowed pair', () => {
+    const third = node('c', { shape: 'box', x: 200, y: 300 });
+    const routes = diagramEdgeRoutes(
+      [left, right, third],
+      [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+        { from: 'a', to: 'c' },
+      ],
+    );
+
+    expect(routes[2]?.bend).toBe(0);
+    expect(routes[2]?.path).toContain(' L');
+  });
+
+  it('caps the bend so a long reciprocal pair does not swing across the sheet', () => {
+    const far = node('b', { shape: 'box', x: 900, y: 0 });
+    const routes = diagramEdgeRoutes(
+      [left, far],
+      [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    );
+
+    expect(Math.abs(routes[0]!.bend)).toBeLessThanOrEqual(44);
+  });
+
+  it('keeps a bowed arrow anchored on the outlines it connects', () => {
+    const routes = diagramEdgeRoutes(
+      [left, right],
+      [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    );
+    const forward = routes[0]!;
+
+    // Still on the source box's outline: 0..120 wide, 0..56 tall.
+    expect(forward.x1).toBeGreaterThanOrEqual(0);
+    expect(forward.x1).toBeLessThanOrEqual(120);
+    expect(forward.y1).toBeGreaterThanOrEqual(0);
+    expect(forward.y1).toBeLessThanOrEqual(56);
+    // ...and on the destination box's outline: 400..520 wide.
+    expect(forward.x2).toBeGreaterThanOrEqual(400);
+    expect(forward.x2).toBeLessThanOrEqual(520);
+  });
+
+  it('skips an arrow whose endpoint no longer exists', () => {
+    expect(diagramEdgeRoutes([left], [{ from: 'a', to: 'ghost' }])).toEqual([null]);
+  });
+
+  it('handles two nodes stacked on the same centre without dividing by zero', () => {
+    const route = diagramEdgeRoute(left, node('b', { shape: 'box', x: 0, y: 0 }));
+    expect(Number.isFinite(route.x1)).toBe(true);
+    expect(Number.isFinite(route.y1)).toBe(true);
+    expect(route.path).toContain('M');
+  });
+
+  it('anchors on the destination outline even when the shape is not symmetric', () => {
+    // A triangle approached diagonally: its upper-left slope is much closer to
+    // the centre than its base is, so taking the boundary in the wrong
+    // direction would put the arrowhead outside the shape entirely.
+    const source = node('s', { shape: 'box', x: 0, y: 0 });
+    const triangle = node('t', { shape: 'triangle', x: 200, y: 200 });
+
+    const route = diagramEdgeRoute(source, triangle);
+
+    const centre = { x: 200 + 52, y: 200 + 44 };
+    const distance = Math.hypot(route.x2 - centre.x, route.y2 - centre.y);
+    // The base is 44 from the centre; the approached slope is nearer than that.
+    expect(distance).toBeLessThan(44);
+    // And the anchor sits between the source and the triangle's centre.
+    expect(route.x2).toBeLessThan(centre.x);
+    expect(route.y2).toBeLessThan(centre.y);
   });
 });

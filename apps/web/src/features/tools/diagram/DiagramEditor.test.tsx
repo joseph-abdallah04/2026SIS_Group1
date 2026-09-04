@@ -1212,7 +1212,7 @@ describe('diagram resize and style', () => {
     await user.click(screen.getByRole('button', { name: 'Arrow style dotted' }));
 
     // Selected arrows draw in the selection accent; the dash still scales.
-    const line = arrow.querySelector('line[stroke-dasharray]');
+    const line = arrow.querySelector('path[stroke-dasharray]');
     expect(line).toHaveAttribute('stroke-dasharray', '0.01 8.75');
     expect(line).toHaveAttribute('stroke-linecap', 'round');
   });
@@ -1577,5 +1577,176 @@ describe('diagram shapes and container groups', () => {
       expect(screen.getByText('0/100 elements')).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('diagram routing and graph-aware arrange', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  function chainFixture(edges: { from: string; to: string }[]): BoardItem {
+    return {
+      id: 'routing-parent',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        // Deliberately scattered so Arrange has something to improve.
+        nodes: [
+          { id: 'n1', label: 'Client', x: 600, y: 400, shape: 'box' },
+          { id: 'n2', label: 'Api', x: 40, y: 300, shape: 'box' },
+          { id: 'n3', label: 'Store', x: 700, y: 40, shape: 'box' },
+        ],
+        edges,
+      },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-04T00:00:00.000Z',
+      extendsProposalId: null,
+    };
+  }
+
+  async function openFixture(edges: { from: string; to: string }[]) {
+    const user = userEvent.setup();
+    const send = propose();
+    render(
+      <Harness propose={send}>
+        <ExtendButton proposal={chainFixture(edges)} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    return { user, send };
+  }
+
+  function positionOf(name: string): { x: number; y: number } {
+    const transform = screen.getByRole('button', { name }).getAttribute('transform')!;
+    const [, x, y] = /translate\((-?\d+), (-?\d+)\)/.exec(transform)!;
+    return { x: Number(x), y: Number(y) };
+  }
+
+  it('arranges a chain along its arrows instead of on a bare grid', async () => {
+    const { user } = await openFixture([
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n3' },
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+
+    // Top to bottom is the default flow.
+    expect(positionOf('Box: Client').y).toBeLessThan(positionOf('Box: Api').y);
+    expect(positionOf('Box: Api').y).toBeLessThan(positionOf('Box: Store').y);
+    // A single chain lines up on one column.
+    expect(positionOf('Box: Client').x).toBe(positionOf('Box: Api').x);
+  });
+
+  it('switches the flow axis when left to right is chosen', async () => {
+    const { user } = await openFixture([
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n3' },
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Arrange left to right' }));
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+
+    expect(positionOf('Box: Client').x).toBeLessThan(positionOf('Box: Api').x);
+    expect(positionOf('Box: Api').x).toBeLessThan(positionOf('Box: Store').x);
+    expect(positionOf('Box: Client').y).toBe(positionOf('Box: Api').y);
+  });
+
+  it('marks the chosen flow direction as pressed', async () => {
+    const { user } = await openFixture([{ from: 'n1', to: 'n2' }]);
+
+    expect(screen.getByRole('button', { name: 'Arrange top to bottom' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Arrange left to right' }));
+
+    expect(screen.getByRole('button', { name: 'Arrange left to right' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Arrange top to bottom' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('undoes a whole arrange in one step', async () => {
+    const { user } = await openFixture([{ from: 'n1', to: 'n2' }]);
+    const before = positionOf('Box: Client');
+
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    expect(positionOf('Box: Client')).not.toEqual(before);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+
+    expect(positionOf('Box: Client')).toEqual(before);
+  });
+
+  it('bows a reciprocal pair into two separate curves', async () => {
+    await openFixture([
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n1' },
+    ]);
+
+    const forward = screen.getByRole('button', { name: 'Arrow from Client to Api' });
+    const back = screen.getByRole('button', { name: 'Arrow from Api to Client' });
+
+    const forwardPath = forward.querySelector('path[marker-end]')!.getAttribute('d')!;
+    const backPath = back.querySelector('path[marker-end]')!.getAttribute('d')!;
+    expect(forwardPath).toContain('Q');
+    expect(backPath).toContain('Q');
+    expect(forwardPath).not.toBe(backPath);
+  });
+
+  it('leaves a lone arrow straight', async () => {
+    await openFixture([{ from: 'n1', to: 'n2' }]);
+
+    const path = screen
+      .getByRole('button', { name: 'Arrow from Client to Api' })
+      .querySelector('path[marker-end]')!
+      .getAttribute('d')!;
+
+    expect(path).toContain(' L');
+    expect(path).not.toContain('Q');
+  });
+
+  it('gives a bowed arrow a hit target that follows the same curve', async () => {
+    await openFixture([
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n1' },
+    ]);
+
+    const arrow = screen.getByRole('button', { name: 'Arrow from Client to Api' });
+    const [target, drawn] = arrow.querySelectorAll('path');
+    expect(target?.getAttribute('d')).toBe(drawn?.getAttribute('d'));
+    expect(target).toHaveAttribute('stroke', 'transparent');
+  });
+
+  it('proposes positions only: arrange never rewrites the arrows', async () => {
+    const { user, send } = await openFixture([
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n3' },
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const input = send.mock.calls[0]?.[0];
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.edges).toEqual([
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n3' },
+    ]);
+    expect(artifact.nodes.map((entry) => entry.id)).toEqual(['n1', 'n2', 'n3']);
   });
 });
