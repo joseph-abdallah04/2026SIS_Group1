@@ -16,6 +16,7 @@
   --color-rt-ink-muted: #5a5f68;
   --color-rt-ink-faint: #8a8f97;
   --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Lora', Georgia, serif;
 }
 
 body {

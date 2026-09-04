@@ -1,9 +1,11 @@
 // Shared domain types — concrete, no `any`. See docs/02-architecture.md §3.
+// `createdAt` is a fixed-width UTC ISO-8601 string (same convention as
+// `BoardItem`) — this is the wire shape sent to clients, not the DB row.
 export interface User {
   id: string;
   email: string;
   displayName: string;
-  createdAt: Date;
+  createdAt: string;
 }
 
 export type SessionStatus = 'lobby' | 'active' | 'ended';
@@ -19,6 +21,12 @@ export interface Session {
 }
 
 // === auth module ===
+
+/** Response shape for endpoints that hand back an authenticated session (F02 login). */
+export interface AuthResult {
+  token: string;
+  user: User;
+}
 
 // === sessions module ===
 
