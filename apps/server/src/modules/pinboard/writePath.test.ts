@@ -184,7 +184,7 @@ describe('proposalCreate handler', () => {
   });
 
   it('rejects a diagram whose arrow references a missing node', async () => {
-    activeQuestion.mockResolvedValue({ id: 'q1', text: 'Q', position: 0, status: 'discussion' });
+    activeQuestion.mockResolvedValue(questionRef('discussion'));
     const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
     expect(
       await propose({

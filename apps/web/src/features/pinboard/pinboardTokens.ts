@@ -25,12 +25,6 @@ export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21
 /** Soft accent for the leader mark in a card's footer. */
 export const OWNED_INK = '#7A6A4C';
 
-/** Diagram preview blocks, in the same greys the old node boxes used. */
-export const NODE_BORDER = '1px solid #CFCFCF';
-export const NODE_PLACEHOLDER_BORDER = '1px dashed #CFCFCF';
-export const NODE_ROOT_BORDER = '1px solid #8CA4AC';
-export const NODE_ROOT_FILL = '#EEF2F4';
-
 /** Plate behind a drawing's artwork. */
 export const THUMB_BACKGROUND = '#F7F7F8';
 

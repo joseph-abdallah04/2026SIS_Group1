@@ -58,7 +58,7 @@ function EmptyBoardPlate() {
           Nothing proposed yet
         </h2>
         <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">
-          Anything anyone proposes appears here for the whole room, in the same order for everyone.
+          Anything anyone proposes appears here for the whole room — same board, same positions.
         </p>
 
         <div className="mt-[18px] border-t border-rt-tertiary">

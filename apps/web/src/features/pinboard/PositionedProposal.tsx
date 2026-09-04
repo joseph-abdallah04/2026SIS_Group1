@@ -46,10 +46,9 @@ interface PositionedProposalProps {
 /**
  * Inline text editor for a sticky you authored.
  *
- * Deliberately the only editor here: F16 covers "edit content (text for
- * stickies)", while drawings and diagrams are edited in the tools owner's
- * editors (F19–F21), which do not exist yet. A half-editor for those would be
- * worse than none.
+ * Stickies edit here; drawings and diagrams reopen in the Creative Tools
+ * studio (F19–F21) — that wire-up is a follow-up, so those cards can only be
+ * moved or deleted for now.
  */
 function StickyTextEditor({
   artifact,
@@ -59,7 +58,7 @@ function StickyTextEditor({
 }: {
   artifact: StickyArtifact;
   width: number;
-  onSave: (text: string) => void;
+  onSave: (text: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [text, setText] = useState(artifact.text);
@@ -79,7 +78,14 @@ function StickyTextEditor({
   const submit = () => {
     if (!submittable) return;
     setSaving(true);
-    onSave(trimmed);
+    void onSave(trimmed)
+      .then(() => {
+        // Parent closes the editor on success.
+      })
+      .catch(() => {
+        // Keep the editor open with the typed text so a rejected save is not lost.
+        setSaving(false);
+      });
   };
 
   return (
@@ -218,8 +224,7 @@ export function PositionedProposal({
   onDelete,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
-  // Editing is the author's alone; a sticky is the only kind with an editor
-  // until the tools owner's F19–F21 land.
+  // Stickies edit inline; drawings/diagrams wait for studio reopen (F20/F21).
   const canEditText = isOwn && item.artifactJson.type === 'sticky';
   const draggable = canMove && !editing;
 
@@ -260,8 +265,9 @@ export function PositionedProposal({
           artifact={item.artifactJson}
           width={CARD_WIDTH.sticky}
           onCancel={() => setEditing(false)}
-          onSave={(text) => {
-            void onEditText(item, text).finally(() => setEditing(false));
+          onSave={async (text) => {
+            await onEditText(item, text);
+            setEditing(false);
           }}
         />
       ) : (
