@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import type { QuestionStatus } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import type { SessionDetail } from './useSessionDetail';
@@ -17,6 +18,20 @@ function formatEndedAt(endedAt: Date | null): string | null {
 }
 
 /**
+ * Past tense, and read from the end of the session: a question the leader
+ * never opened and one they were mid-discussion on are both "not covered"
+ * once the session is over, so both read as "Not reached" rather than
+ * exposing `pending` vs `discussion`.
+ */
+const ENDED_QUESTION_LABELS: Record<QuestionStatus, string> = {
+  pending: 'Not reached',
+  discussion: 'Not reached',
+  voting: 'Not reached',
+  answered: 'Answered',
+  skipped: 'Skipped',
+};
+
+/**
  * F32's final screen: where every participant lands when the leader ends the
  * session, and what an ended session shows if someone opens its URL later.
  *
@@ -27,6 +42,7 @@ function formatEndedAt(endedAt: Date | null): string | null {
 export function SessionEndedPage({ session }: { session: SessionDetail }) {
   const { members, loading, error } = useSessionMembers(session.id);
   const endedAt = formatEndedAt(session.endedAt);
+  const covered = session.questions.filter((question) => question.status === 'answered').length;
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
@@ -43,7 +59,35 @@ export function SessionEndedPage({ session }: { session: SessionDetail }) {
             {session.questions.length === 1
               ? '1 question'
               : `${session.questions.length} questions`}
+            {/* Worth saying now that F25 makes the statuses mean something:
+                the interesting part of a finished agenda is how much of it the
+                session actually got through. */}
+            {covered > 0 && ` · ${covered} covered`}
           </p>
+        </div>
+
+        <div>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">
+            Agenda
+          </span>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {session.questions.map((question, index) => (
+              <li
+                key={question.id}
+                className="flex items-baseline justify-between gap-3 rounded-lg border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
+              >
+                <span className="text-rt-ink">
+                  <span className="mr-2 text-[11px] font-semibold text-rt-ink-faint">
+                    {index + 1}
+                  </span>
+                  {question.text}
+                </span>
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">
+                  {ENDED_QUESTION_LABELS[question.status]}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
 
         <div>

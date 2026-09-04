@@ -3,7 +3,7 @@
 // Client: `io<ServerToClientEvents, ClientToServerEvents>(...)`
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
-import type { BoardItem, BoardResponse, SessionStatus } from './index.js';
+import type { BoardItem, BoardResponse, QuestionStatus, SessionStatus } from './index.js';
 import type { ProposalCreateInput } from './schemas.js';
 
 export interface SessionUserPayload {
@@ -95,6 +95,18 @@ export interface ServerToClientEvents {
    * the same reason starting is (docs/02 §5).
    */
   sessionEnded(payload: { sessionId: string; endedAt: string }): void;
+  /**
+   * F25/F26: the leader moved a question through the agenda. One event covers
+   * every transition, skipping included — a skip is `status: 'skipped'`, not a
+   * separate `sessionSkipped`, because both are the same state change and two
+   * events for it would mean two chances to disagree about the agenda.
+   *
+   * Thin like its siblings: it names the question that changed and its new
+   * status, and clients react by patching that one row and re-reading the
+   * board (the active question, and therefore which proposals belong on
+   * screen, may have moved with it).
+   */
+  sessionPhase(payload: { sessionId: string; questionId: string; status: QuestionStatus }): void;
 
   // === pinboard module ===
   /**

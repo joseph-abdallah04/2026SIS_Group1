@@ -3,6 +3,7 @@ import type { Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { AgendaPanel } from '../agenda/AgendaPanel';
+import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { PinboardCanvas } from './PinboardCanvas';
@@ -115,8 +116,16 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
           isLive={isLive}
           newItemIds={newItemIds}
           isLeader={isLeader}
-          agenda={<AgendaPanel questions={questions} activeQuestionId={board.questionId} />}
+          agenda={
+            <AgendaPanel
+              sessionId={sessionId}
+              questions={questions}
+              activeQuestionId={board.questionId}
+              isLeader={isLeader}
+            />
+          }
         />
+        <SessionJoinNotices />
       </main>
       <CreativeStudio />
     </CreativeToolsProvider>

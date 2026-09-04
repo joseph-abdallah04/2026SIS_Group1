@@ -6,6 +6,7 @@ import { randomInt } from 'node:crypto';
 import {
   normalizeSessionCode,
   type Question,
+  type QuestionStatus,
   type Session,
   type SessionSummary,
 } from '@roundtable/shared';
@@ -329,9 +330,158 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
     );
   }
 
-  return prisma.session.update({
-    where: { id: sessionId },
-    data: { status: 'active', startedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const started = await tx.session.update({
+      where: { id: sessionId },
+      data: { status: 'active', startedAt: new Date() },
+    });
+
+    // Starting the session opens the first question, in the same transaction:
+    // a session that is `active` but whose every question is still `pending`
+    // is a live board that refuses proposals (see pinboard's
+    // `createProposal`), which reads as broken rather than as "waiting for the
+    // leader". F25 owns every transition after this one; this is only the
+    // first, and it is implied by the leader pressing Start.
+    const first = await tx.question.findFirst({
+      where: { sessionId, status: 'pending' },
+      orderBy: { position: 'asc' },
+      select: { id: true },
+    });
+    if (first) {
+      await tx.question.update({ where: { id: first.id }, data: { status: 'discussion' } });
+    }
+
+    return started;
+  });
+}
+
+/**
+ * Which statuses may follow which (F25). Leaving a state out of a list is the
+ * rule, not an omission:
+ *
+ * - nothing returns to `pending`, so "un-start" a question is not expressible;
+ * - `discussion -> answered` is absent because answering is what closes a
+ *   vote (F30) — a leader who wants to move on without voting skips instead,
+ *   which records *that* rather than inventing an answer nobody chose;
+ * - `answered` and `skipped` are terminal, so the agenda only moves forward
+ *   and a question cannot be reopened after the board has moved past it.
+ */
+const PHASE_TRANSITIONS: Record<QuestionStatus, readonly QuestionStatus[]> = {
+  pending: ['discussion', 'skipped'],
+  discussion: ['voting', 'skipped'],
+  voting: ['answered', 'skipped'],
+  answered: [],
+  skipped: [],
+};
+
+export interface SetQuestionPhaseArgs {
+  sessionId: string;
+  questionId: string;
+  leaderId: string;
+  status: QuestionStatus;
+}
+
+/**
+ * F25 (and F26, which is the `skipped` target): the leader moves one question
+ * through the agenda.
+ *
+ * Runs in a transaction because the "only one question is open at a time"
+ * invariant is read-then-write: two rapid clicks could otherwise each see no
+ * open question and both open one, leaving the board with two live questions
+ * and no way to say which is current.
+ *
+ * Only while the session is `active`. Phases in a lobby would mean discussion
+ * before anyone has arrived, and in an ended session they would edit a
+ * finished record.
+ */
+export async function setQuestionPhase({
+  sessionId,
+  questionId,
+  leaderId,
+  status,
+}: SetQuestionPhaseArgs): Promise<QuestionRef> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: { leaderId: true, status: true },
+    });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.leaderId !== leaderId) {
+      throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+    }
+    if (session.status !== 'active') {
+      throw new ApiError(
+        409,
+        `Cannot change the agenda of a session that is ${session.status}`,
+        'INVALID_TRANSITION',
+      );
+    }
+
+    const question = await tx.question.findUnique({
+      where: { id: questionId },
+      select: QUESTION_REF_SELECT,
+    });
+    // The `sessionId` check is what stops a leader from driving another
+    // session's agenda through their own session's endpoint.
+    if (!question || question.sessionId !== sessionId) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+
+    // Before the transition table, so a double-clicked button is a no-op
+    // rather than an INVALID_PHASE_TRANSITION the leader has to make sense of.
+    if (question.status === status) {
+      return question;
+    }
+
+    if (!PHASE_TRANSITIONS[question.status].includes(status)) {
+      throw new ApiError(
+        409,
+        `A question that is ${question.status} cannot become ${status}`,
+        'INVALID_PHASE_TRANSITION',
+      );
+    }
+
+    if (status === 'discussion' || status === 'voting') {
+      const open = await tx.question.findFirst({
+        where: {
+          sessionId,
+          id: { not: questionId },
+          status: { in: ['discussion', 'voting'] },
+        },
+        select: { position: true },
+      });
+      if (open) {
+        throw new ApiError(
+          409,
+          `Question ${open.position + 1} is still open — answer or skip it first`,
+          'QUESTION_ALREADY_OPEN',
+        );
+      }
+    }
+
+    return tx.question.update({
+      where: { id: questionId },
+      data: { status },
+      select: QUESTION_REF_SELECT,
+    });
+  });
+}
+
+/**
+ * Broadcasts F25's `sessionPhase`. Same shape and reasoning as
+ * `emitSessionStarted`: `io` is a parameter and `routes.ts` is the caller.
+ */
+export function emitQuestionPhase(
+  io: RealtimeServer,
+  sessionId: string,
+  question: QuestionRef,
+): void {
+  io.to(sessionRoom(sessionId)).emit('sessionPhase', {
+    sessionId,
+    questionId: question.id,
+    status: question.status,
   });
 }
 
@@ -694,6 +844,15 @@ export interface QuestionRef {
   status: Question['status'];
 }
 
+/** Every read that returns a `QuestionRef` selects exactly these columns. */
+const QUESTION_REF_SELECT = {
+  id: true,
+  sessionId: true,
+  text: true,
+  position: true,
+  status: true,
+} as const;
+
 /**
  * Minimal session lookup — the contract Pinboard's temporary adapter already
  * defined and depends on (docs/02 §2: a module reaches another only through
@@ -711,27 +870,39 @@ export async function getSession(sessionId: string): Promise<SessionRef | null> 
 export async function getQuestion(questionId: string): Promise<QuestionRef | null> {
   return prisma.question.findUnique({
     where: { id: questionId },
-    select: { id: true, sessionId: true, text: true, position: true, status: true },
+    select: QUESTION_REF_SELECT,
   });
 }
 
 /**
  * The question the board is currently showing.
  *
- * STAND-IN BEHAVIOUR, carried over from Pinboard's adapter unchanged — "first
- * question in `discussion`, else the first by position". The real answer is
- * an explicit active-question pointer driven by the leader's phase controls
- * (F25); nothing sets `discussion` yet; so today this always falls back to
- * "first by position" in practice. Replacing the heuristic is F25's job, not
- * this ticket's — Pinboard (and anyone else calling this) does not need to
- * change when that happens.
+ * Derived from the phases F25 writes rather than stored as a pointer, so
+ * "which question is current" has exactly one source of truth and cannot
+ * disagree with the statuses the agenda panel renders:
+ *
+ * 1. the open question — `discussion` or `voting`, and `setQuestionPhase`
+ *    guarantees there is at most one;
+ * 2. failing that, the next `pending` one, so the board shows what is coming
+ *    up between the leader answering one question and opening the next
+ *    (proposals stay closed until it is actually in `discussion`);
+ * 3. `null` once every question is answered or skipped — the agenda is done
+ *    and the leader's remaining move is to end the session (F32).
+ *
+ * This replaces the heuristic Pinboard's adapter carried while F25 did not
+ * exist ("first in discussion, else first by position"), which could not tell
+ * a finished agenda from one that had not started.
  */
 export async function getActiveQuestion(sessionId: string): Promise<QuestionRef | null> {
   const questions = await prisma.question.findMany({
     where: { sessionId },
     orderBy: { position: 'asc' },
-    select: { id: true, sessionId: true, text: true, position: true, status: true },
+    select: QUESTION_REF_SELECT,
   });
 
-  return questions.find((q) => q.status === 'discussion') ?? questions[0] ?? null;
+  return (
+    questions.find((q) => q.status === 'discussion' || q.status === 'voting') ??
+    questions.find((q) => q.status === 'pending') ??
+    null
+  );
 }

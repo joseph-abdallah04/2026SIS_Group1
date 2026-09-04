@@ -6,6 +6,7 @@ export {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitQuestionPhase,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
@@ -21,6 +22,7 @@ export {
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setQuestionPhase,
   startSession,
   updateSessionDraft,
 } from './service.js';

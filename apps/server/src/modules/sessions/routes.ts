@@ -2,6 +2,7 @@ import { Router, type Request, type RequestHandler } from 'express';
 import {
   createSessionSchema,
   joinSessionSchema,
+  setQuestionPhaseSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
 
@@ -13,6 +14,7 @@ import {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitQuestionPhase,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
@@ -23,6 +25,7 @@ import {
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setQuestionPhase,
   startSession,
   updateSessionDraft,
 } from './service.js';
@@ -191,6 +194,36 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       const session = await startSession({ sessionId: req.params.id, leaderId });
       emitSessionStarted(io, session);
       res.json(session);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // F25/F26: the leader drives the agenda — one question at a time through
+  // discussion -> voting -> answered, or straight to skipped. REST for the
+  // same reason start and end are (docs/02 §5): one place decides whether the
+  // transition is legal and returns an error the button can show, and the
+  // resulting fact is broadcast so every agenda panel and board follows.
+  sessionsRoutes.post<{ id: string }>('/:id/phase', resolveDevUser, async (req, res, next) => {
+    try {
+      const parsed = setQuestionPhaseSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ApiError(
+          400,
+          parsed.error.issues[0]?.message ?? 'Invalid phase change',
+          'VALIDATION_ERROR',
+        );
+      }
+
+      const leaderId = (req as DevAuthedRequest).devUserId as string;
+      const question = await setQuestionPhase({
+        sessionId: req.params.id,
+        questionId: parsed.data.questionId,
+        leaderId,
+        status: parsed.data.status,
+      });
+      emitQuestionPhase(io, req.params.id, question);
+      res.json(question);
     } catch (err) {
       next(err);
     }

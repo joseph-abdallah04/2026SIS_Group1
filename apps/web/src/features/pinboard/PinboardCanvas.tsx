@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from 'react';
-import type { BoardResponse } from '@roundtable/shared';
+import type { BoardResponse, QuestionStatus } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { EndSessionControl } from '../sessions/EndSessionControl';
@@ -27,6 +27,16 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
 }
+
+const PHASE_LABELS: Record<QuestionStatus, string> = {
+  // "Up next" rather than "Pending": the board is showing the question the
+  // leader has not opened yet, and it stays closed to proposals until they do.
+  pending: 'Up next',
+  discussion: 'Discussing',
+  voting: 'Voting',
+  answered: 'Answered',
+  skipped: 'Skipped',
+};
 
 function EmptyBoardPlate() {
   return (
@@ -170,10 +180,15 @@ export function PinboardCanvas({
 
   const dotBackground = `radial-gradient(rgba(140,164,172,${grid.dotOpacity}) ${grid.dotRadius}, transparent ${grid.dotRadius})`;
 
+  // Human wording, not the raw enum: "Q2 · pending" reads as a bug, and the
+  // difference between the phases is the difference between the board taking
+  // proposals and not (F25).
   const phaseLabel =
     board.questionPosition != null && board.questionStatus
-      ? `Q${board.questionPosition + 1} · ${board.questionStatus}`
-      : 'Discussion';
+      ? `Q${board.questionPosition + 1} · ${PHASE_LABELS[board.questionStatus]}`
+      : // No active question at all: every question has been answered or
+        // skipped, so the agenda is done and the leader's move is to end it.
+        'Agenda complete';
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">

@@ -18,6 +18,10 @@ const sessionDelete = vi.fn();
 const sessionMemberUpsert = vi.fn();
 const sessionMemberUpdateMany = vi.fn();
 const sessionMemberFindUnique = vi.fn();
+const questionFindUnique = vi.fn();
+const questionFindFirst = vi.fn();
+const questionUpdate = vi.fn();
+const questionFindManyTopLevel = vi.fn();
 
 // The transaction handle exposes the same stubs as the top-level client: the
 // guards now run *inside* the transaction that writes (so a draft cannot stop
@@ -37,6 +41,9 @@ const txClient = {
     createMany: questionCreateMany,
     deleteMany: questionDeleteMany,
     findMany: questionFindMany,
+    findUnique: questionFindUnique,
+    findFirst: questionFindFirst,
+    update: questionUpdate,
   },
   sessionMember: { create: sessionMemberCreate },
 };
@@ -56,6 +63,7 @@ vi.mock('../../db.js', () => ({
       updateMany: sessionMemberUpdateMany,
       findUnique: sessionMemberFindUnique,
     },
+    question: { findMany: questionFindManyTopLevel },
   },
 }));
 
@@ -67,10 +75,13 @@ const {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitQuestionPhase,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
   generateSessionCode,
+  getActiveQuestion,
+  setQuestionPhase,
   joinSessionByCode,
   leaveSession,
   listSessionsForUser,
@@ -412,6 +423,17 @@ describe('startSession (F09)', () => {
     status: 'lobby',
   };
 
+  // The write moved inside a transaction when F25 made starting also open the
+  // first question, so these assert on `sessionUpdateInTx`, not `sessionUpdate`.
+  beforeEach(() => {
+    questionFindFirst.mockResolvedValue(null);
+    sessionUpdateInTx.mockResolvedValue({
+      ...lobbySession,
+      status: 'active',
+      startedAt: new Date('2026-09-04T00:00:00.000Z'),
+    });
+  });
+
   it('rejects a caller who is not the leader', async () => {
     sessionFindUnique.mockResolvedValueOnce(lobbySession);
     await expect(
@@ -419,7 +441,7 @@ describe('startSession (F09)', () => {
     ).rejects.toMatchObject({
       code: 'NOT_SESSION_LEADER',
     });
-    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionUpdateInTx).not.toHaveBeenCalled();
   });
 
   it('rejects starting a session that is not lobby', async () => {
@@ -427,24 +449,49 @@ describe('startSession (F09)', () => {
     await expect(startSession({ sessionId: 's1', leaderId: 'leader-1' })).rejects.toMatchObject({
       code: 'INVALID_TRANSITION',
     });
-    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionUpdateInTx).not.toHaveBeenCalled();
   });
 
   it('flips status to active and records startedAt', async () => {
     sessionFindUnique.mockResolvedValueOnce(lobbySession);
-    sessionUpdate.mockResolvedValueOnce({
-      ...lobbySession,
-      status: 'active',
-      startedAt: new Date('2026-09-04T00:00:00.000Z'),
-    });
 
     const session = await startSession({ sessionId: 's1', leaderId: 'leader-1' });
 
-    expect(sessionUpdate).toHaveBeenCalledWith({
+    expect(sessionUpdateInTx).toHaveBeenCalledWith({
       where: { id: 's1' },
       data: { status: 'active', startedAt: expect.any(Date) },
     });
     expect(session.status).toBe('active');
+  });
+
+  // F25: without this the board is live but closed to proposals, which reads
+  // as broken rather than as "waiting for the leader".
+  it('opens the first pending question into discussion', async () => {
+    sessionFindUnique.mockResolvedValueOnce(lobbySession);
+    questionFindFirst.mockResolvedValueOnce({ id: 'q1' });
+
+    await startSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(questionFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { sessionId: 's1', status: 'pending' },
+        orderBy: { position: 'asc' },
+      }),
+    );
+    expect(questionUpdate).toHaveBeenCalledWith({
+      where: { id: 'q1' },
+      data: { status: 'discussion' },
+    });
+  });
+
+  it('still starts a session whose questions are somehow all non-pending', async () => {
+    sessionFindUnique.mockResolvedValueOnce(lobbySession);
+    questionFindFirst.mockResolvedValueOnce(null);
+
+    const session = await startSession({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(session.status).toBe('active');
+    expect(questionUpdate).not.toHaveBeenCalled();
   });
 
   it('is a no-op that returns the existing session when already active', async () => {
@@ -454,7 +501,10 @@ describe('startSession (F09)', () => {
     const session = await startSession({ sessionId: 's1', leaderId: 'leader-1' });
 
     expect(session).toBe(activeSession);
-    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionUpdateInTx).not.toHaveBeenCalled();
+    // Re-starting must not re-open question 1 either: by the time a leader
+    // double-clicks, the agenda may have moved on to question 3.
+    expect(questionUpdate).not.toHaveBeenCalled();
   });
 
   it('emitSessionStarted broadcasts sessionStarted to the session room, including the leader', async () => {
@@ -733,5 +783,196 @@ describe('assertSessionMember', () => {
     expect(sessionMemberFindUnique.mock.calls[0]?.[0].where).toEqual({
       sessionId_userId: { sessionId: 's1', userId: 'u2' },
     });
+  });
+});
+
+describe('setQuestionPhase (F25/F26)', () => {
+  const activeSession = { leaderId: 'leader-1', status: 'active' as const };
+
+  function question(overrides: Partial<QuestionRow> = {}): QuestionRow {
+    return { id: 'q1', sessionId: 's1', text: 'What ships first?', position: 0, status: 'pending', ...overrides };
+  }
+
+  interface QuestionRow {
+    id: string;
+    sessionId: string;
+    text: string;
+    position: number;
+    status: 'pending' | 'discussion' | 'voting' | 'answered' | 'skipped';
+  }
+
+  function advance(status: QuestionRow['status'], leaderId = 'leader-1') {
+    return setQuestionPhase({ sessionId: 's1', questionId: 'q1', leaderId, status });
+  }
+
+  beforeEach(() => {
+    sessionFindUnique.mockResolvedValue(activeSession);
+    questionFindFirst.mockResolvedValue(null);
+    questionUpdate.mockImplementation(({ data }: { data: { status: string } }) =>
+      Promise.resolve(question({ status: data.status as QuestionRow['status'] })),
+    );
+  });
+
+  it('rejects a caller who is not the leader — the agenda is the leader’s control', async () => {
+    questionFindUnique.mockResolvedValue(question());
+    await expect(advance('discussion', 'someone-else')).rejects.toMatchObject({
+      code: 'NOT_SESSION_LEADER',
+    });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'lobby', 'ended'] as const)(
+    'refuses to move the agenda while the session is %s',
+    async (status) => {
+      sessionFindUnique.mockResolvedValue({ ...activeSession, status });
+      questionFindUnique.mockResolvedValue(question());
+      await expect(advance('discussion')).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+      expect(questionUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a question that belongs to another session', async () => {
+    questionFindUnique.mockResolvedValue(question({ sessionId: 'other-session' }));
+    await expect(advance('discussion')).rejects.toMatchObject({ code: 'QUESTION_NOT_FOUND' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pending', 'discussion'],
+    ['pending', 'skipped'],
+    ['discussion', 'voting'],
+    ['discussion', 'skipped'],
+    ['voting', 'answered'],
+    ['voting', 'skipped'],
+  ] as const)('allows %s -> %s', async (from, to) => {
+    questionFindUnique.mockResolvedValue(question({ status: from }));
+    await expect(advance(to)).resolves.toMatchObject({ status: to });
+    expect(questionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'q1' }, data: { status: to } }),
+    );
+  });
+
+  it.each([
+    // Answering is how a vote closes (F30); a leader moving on without one
+    // skips, which records that nobody chose rather than inventing a choice.
+    ['pending', 'voting'],
+    ['pending', 'answered'],
+    ['discussion', 'answered'],
+    // Terminal states stay terminal — the agenda only moves forward.
+    ['answered', 'discussion'],
+    ['answered', 'voting'],
+    ['skipped', 'discussion'],
+  ] as const)('refuses %s -> %s', async (from, to) => {
+    questionFindUnique.mockResolvedValue(question({ status: from }));
+    await expect(advance(to)).rejects.toMatchObject({ code: 'INVALID_PHASE_TRANSITION' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('treats setting the status a question already has as a no-op, so a double-click is not an error', async () => {
+    const current = question({ status: 'discussion' });
+    questionFindUnique.mockResolvedValue(current);
+    await expect(advance('discussion')).resolves.toBe(current);
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  // The invariant `getActiveQuestion` relies on: with two questions open,
+  // "which question is the board showing" would have no answer.
+  it('refuses to open a second question while another is still open', async () => {
+    questionFindUnique.mockResolvedValue(question({ id: 'q2', position: 1 }));
+    questionFindFirst.mockResolvedValue({ position: 0 });
+
+    await expect(
+      setQuestionPhase({
+        sessionId: 's1',
+        questionId: 'q2',
+        leaderId: 'leader-1',
+        status: 'discussion',
+      }),
+    ).rejects.toMatchObject({ code: 'QUESTION_ALREADY_OPEN' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('names the offending question by its 1-based agenda position, not its id', async () => {
+    questionFindUnique.mockResolvedValue(question({ id: 'q3', position: 2 }));
+    questionFindFirst.mockResolvedValue({ position: 1 });
+
+    await expect(
+      setQuestionPhase({
+        sessionId: 's1',
+        questionId: 'q3',
+        leaderId: 'leader-1',
+        status: 'discussion',
+      }),
+    ).rejects.toThrow(/Question 2 is still open/);
+  });
+
+  it('does not apply the single-open check to the question already open (discussion -> voting)', async () => {
+    questionFindUnique.mockResolvedValue(question({ status: 'discussion' }));
+    await expect(advance('voting')).resolves.toMatchObject({ status: 'voting' });
+    // Excluding itself is the whole point — a `where` without `id: { not: … }`
+    // would find this very question and refuse its own transition.
+    expect(questionFindFirst.mock.calls[0]?.[0].where).toMatchObject({
+      id: { not: 'q1' },
+      status: { in: ['discussion', 'voting'] },
+    });
+  });
+
+  it('does not run the single-open check when closing or skipping a question', async () => {
+    questionFindUnique.mockResolvedValue(question({ status: 'voting' }));
+    await advance('answered');
+    expect(questionFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('emitQuestionPhase broadcasts the new status to the session room', () => {
+    const emit = vi.fn();
+    const to = vi.fn(() => ({ emit }));
+    const io = { to } as unknown as Parameters<typeof emitQuestionPhase>[0];
+
+    emitQuestionPhase(io, 's1', question({ status: 'voting' }));
+
+    expect(to).toHaveBeenCalledWith('session:s1');
+    expect(emit).toHaveBeenCalledWith('sessionPhase', {
+      sessionId: 's1',
+      questionId: 'q1',
+      status: 'voting',
+    });
+  });
+});
+
+describe('getActiveQuestion', () => {
+  const rows = [
+    { id: 'q1', sessionId: 's1', text: 'One', position: 0, status: 'answered' },
+    { id: 'q2', sessionId: 's1', text: 'Two', position: 1, status: 'voting' },
+    { id: 'q3', sessionId: 's1', text: 'Three', position: 2, status: 'pending' },
+  ];
+
+  it('prefers the open question over an earlier finished one or a later pending one', async () => {
+    questionFindManyTopLevel.mockResolvedValueOnce(rows);
+    await expect(getActiveQuestion('s1')).resolves.toMatchObject({ id: 'q2' });
+  });
+
+  it('shows the next pending question between one closing and the leader opening the next', async () => {
+    questionFindManyTopLevel.mockResolvedValueOnce([
+      { ...rows[0] },
+      { ...rows[1], status: 'answered' },
+      { ...rows[2] },
+    ]);
+    await expect(getActiveQuestion('s1')).resolves.toMatchObject({ id: 'q3' });
+  });
+
+  it('returns null once the agenda is finished, rather than the last question again', async () => {
+    questionFindManyTopLevel.mockResolvedValueOnce([
+      { ...rows[0] },
+      { ...rows[1], status: 'skipped' },
+      { ...rows[2], status: 'answered' },
+    ]);
+    // The old heuristic returned `questions[0]` here, so a finished session
+    // looked identical to one parked on question 1.
+    await expect(getActiveQuestion('s1')).resolves.toBeNull();
+  });
+
+  it('returns null for a session with no questions', async () => {
+    questionFindManyTopLevel.mockResolvedValueOnce([]);
+    await expect(getActiveQuestion('s1')).resolves.toBeNull();
   });
 });

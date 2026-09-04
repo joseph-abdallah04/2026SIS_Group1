@@ -165,6 +165,7 @@ member:joined              → { user: User }
 - [x] Depends on `User` type from auth (shared)
 
 - [!] `Question.status` values (`pending`, `discussion`, `voting`, `answered`, `skipped`) must be centrally defined as `QuestionStatus` in `packages/shared` (see docs/02 §3) — supersedes any earlier `SessionPhase`/`phase` wording in this doc
+- [!] As built (F25/F26), the sketch above collapsed: `phase:advance` and `question:skip` became one REST call, `POST /api/sessions/:id/phase {questionId, status}` (docs/02 §5 — lifecycle commands are REST that broadcast), and `session:phase`/`session:skipped` became the single `sessionPhase` event, since a skip is the same state change as any other. Event names are camelCase per docs/02 §4.
 - Other modules consume status events; don't drive them
 
 ### Notes

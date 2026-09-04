@@ -55,6 +55,18 @@ export const joinSessionSchema = z.object({
 
 export type JoinSessionInput = z.infer<typeof joinSessionSchema>;
 
+// F25/F26: the leader moving one question through the agenda. `pending` is
+// absent on purpose — it is the state a question is *created* in and nothing
+// may return to it, so "un-start a discussion" is not expressible. The rest of
+// the machine (which status may follow which) is enforced server-side in
+// `setQuestionPhase`; this only bounds the shape.
+export const setQuestionPhaseSchema = z.object({
+  questionId: z.string().min(1),
+  status: z.enum(['discussion', 'voting', 'answered', 'skipped']),
+});
+
+export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
+
 // === pinboard module ===
 
 const stickyColorSchema = z.enum(['yellow', 'pink', 'blue', 'green']);
