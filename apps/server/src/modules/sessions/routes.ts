@@ -87,6 +87,12 @@ sessionsRoutes.get('/', resolveDevUser, async (req, res, next) => {
   }
 });
 
+// Registered ahead of `/code/:code` and `/:id/open` below on purpose — this is
+// safe, not a routing bug: Express's `/:id` only matches a single path
+// segment (no `/`), so a two-segment request like `GET /code/K7NP-3WQZ` can
+// never reach this handler no matter the registration order. Only a
+// one-segment path with `id` literally equal to `'code'` would, and that has
+// nothing to do with the code lookup below.
 sessionsRoutes.get<{ id: string }>('/:id', resolveDevUser, async (req, res, next) => {
   try {
     const session = await getSessionWithQuestions(req.params.id);
