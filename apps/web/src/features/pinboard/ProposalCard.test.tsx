@@ -28,7 +28,6 @@ describe('diagram proposal card', () => {
           { id: 'container', label: 'Platform', x: 100, y: 0, shape: 'container' },
           { id: 'text', label: 'Architecture boundary', x: 200, y: 0, shape: 'text' },
         ])}
-        zoom={100}
       />,
     );
 
@@ -46,7 +45,7 @@ describe('diagram proposal card', () => {
 
   it('renders a legacy node without shape as a box', () => {
     const { container } = render(
-      <ProposalCard item={diagramItem([{ id: 'legacy', label: 'Idea', x: 0, y: 0 }])} zoom={100} />,
+      <ProposalCard item={diagramItem([{ id: 'legacy', label: 'Idea', x: 0, y: 0 }])} />,
     );
 
     expect(container.querySelector('g > rect[rx="8"]')).not.toBeNull();
@@ -59,7 +58,7 @@ describe('diagram proposal card', () => {
     ]);
     if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
     item.artifactJson.edges = [{ from: 'client', to: 'server', label: 'calls' }];
-    const { container } = render(<ProposalCard item={item} zoom={100} />);
+    const { container } = render(<ProposalCard item={item} />);
 
     // Arrows are paths now, so a bowed reciprocal pair can share the same code
     // as a straight one; the boundary anchors are unchanged.
@@ -105,7 +104,7 @@ describe('diagram proposal card', () => {
     );
     if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
     item.artifactJson.edges = [{ from: 'n4', to: 'n5' }];
-    const { container } = render(<ProposalCard item={item} zoom={100} />);
+    const { container } = render(<ProposalCard item={item} />);
 
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'Node 5'),

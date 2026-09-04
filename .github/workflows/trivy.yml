@@ -19,8 +19,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Trivy pulls its vulnerability DB anonymously from mirror.gcr.io on
+      # every run; that registry rate-limits anonymous pulls, which is a
+      # known cause of trivy-action jobs failing fast (~10s, before any real
+      # scan happens) with no actual findings. Caching the DB across runs
+      # avoids re-pulling it every time.
+      - name: Restore Trivy DB cache
+        uses: actions/cache@v4
+        with:
+          path: .trivy-cache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_CACHE_DIR: .trivy-cache
         with:
           scan-type: 'fs'
           ignore-unfixed: true
@@ -28,6 +42,8 @@ jobs:
           output: 'trivy-results.sarif'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
+          # Without this, SARIF mode unsets --severity and exit-code:1 fails on MEDIUM too.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy results to GitHub Security tab
         if: always()

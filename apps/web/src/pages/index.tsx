@@ -1,14 +1,36 @@
+import { useNavigate } from 'react-router-dom';
+
+import { Button } from '../components/ui/Button';
+import { logout } from '../features/auth/api';
+import { clearToken } from '../lib/auth';
+
 // Placeholder pages — smoke-test targets (docs/05 §10). Owners replace with real UI.
-export function LoginPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Log in</h1></main>;
-}
+export { LoginPage } from '../features/auth/LoginPage';
+export { SignupPage } from '../features/auth/SignupPage';
 
-export function SignupPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Sign up</h1></main>;
-}
-
+// Real layout is the Session Lifecycle owner's ticket (F07) — the "Log out"
+// button is a temporary graft so F02's logout flow has somewhere to be
+// triggered from; it goes away when this placeholder is replaced wholesale.
 export function DashboardPage() {
-  return <main className="flex h-screen items-center justify-center"><h1 className="text-2xl font-bold">Dashboard</h1></main>;
+  const navigate = useNavigate();
+
+  async function onLogout() {
+    try {
+      await logout();
+    } finally {
+      clearToken();
+      navigate('/login', { replace: true });
+    }
+  }
+
+  return (
+    <main className="flex h-screen flex-col items-center justify-center gap-4">
+      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <Button variant="secondary" onClick={onLogout}>
+        Log out
+      </Button>
+    </main>
+  );
 }
 
 export function SessionPage() {
