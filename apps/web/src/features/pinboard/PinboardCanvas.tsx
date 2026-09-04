@@ -134,7 +134,7 @@ function ZoomControl({
         onClick={onZoomOut}
         disabled={!canZoomOut}
         title={canZoomOut ? 'Zoom out' : 'The whole board is already in view'}
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
       >
         −
       </button>
@@ -146,14 +146,14 @@ function ZoomControl({
         onClick={onZoomIn}
         disabled={!canZoomIn}
         title="Zoom in"
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
       >
         +
       </button>
       <button
         type="button"
         onClick={onFit}
-        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
       >
         Fit
       </button>

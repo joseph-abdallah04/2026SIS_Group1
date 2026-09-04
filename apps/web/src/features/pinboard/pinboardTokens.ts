@@ -78,4 +78,4 @@ export const DESK_MARGIN = 64;
 /** The dotted grid, in board units, so it magnifies with everything else. */
 export const DOT_SPACING = 22;
 export const DOT_RADIUS = 1.5;
-export const DOT_COLOR = 'rgba(140,164,172,0.38)';
+export const DOT_COLOR = 'rgba(32, 30, 29, 0.16)';
