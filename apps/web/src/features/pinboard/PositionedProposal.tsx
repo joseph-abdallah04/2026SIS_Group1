@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
+import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
 import { CARD_INK, CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
 
@@ -146,7 +148,42 @@ function StickyTextEditor({
   );
 }
 
-/** Edit / delete controls, shown only on a card the viewer authored. */
+/**
+ * A card control: icon only, because the card is 210px wide and two text pills
+ * across its top edge crowd the note itself. The label is not dropped, only
+ * moved — it stays as the accessible name and the tooltip, so what the button
+ * does is still discoverable by hover, by keyboard and by screen reader.
+ */
+function CardControl({
+  label,
+  onClick,
+  destructive = false,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  /** Warms the hover colour, so removal does not look like every other action. */
+  destructive?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={`inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
+        destructive
+          ? 'hover:border-rt-secondary hover:bg-rt-secondary-wash hover:text-rt-secondary-deep'
+          : 'hover:bg-rt-primary-tint hover:text-rt-ink'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Edit / delete controls, shown on a card the viewer may change. */
 function OwnerControls({
   canEditText,
   canDelete,
@@ -161,47 +198,35 @@ function OwnerControls({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  // Two-step rather than a confirm dialog: a proposal others may have reacted
-  // to or extended should not vanish on one stray click, but a modal is heavier
-  // than this decision deserves. Disarms itself so it cannot sit primed.
-  const [armed, setArmed] = useState(false);
-
-  useEffect(() => {
-    if (!armed) return;
-    const timer = setTimeout(() => setArmed(false), 3000);
-    return () => clearTimeout(timer);
-  }, [armed]);
-
+  // Pulled out by the same amount on both axes, so the last control — the bin —
+  // sits centred on the card's top-right corner rather than tucked inside it.
   return (
-    <div className="absolute -top-2.5 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       {canEditText ? (
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-full border border-rt-tertiary bg-white px-2.5 py-[3px] text-[10.5px] font-medium text-rt-ink-muted shadow-sm hover:text-rt-ink focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-primary"
-        >
-          Edit
-        </button>
+        <CardControl label="Edit proposal" onClick={onEdit}>
+          <Pencil aria-hidden="true" size={12} strokeWidth={2} />
+        </CardControl>
       ) : null}
       {canDelete ? (
-        <button
-          type="button"
-          onClick={() => (armed ? onDelete() : setArmed(true))}
+        <CardControl
           // Removing someone else's idea deserves naming what is happening.
-          title={isOwn ? 'Remove your proposal' : 'Remove as session leader'}
-          aria-label={armed ? 'Confirm delete' : isOwn ? 'Delete proposal' : 'Remove as leader'}
-          className={`rounded-full border px-2.5 py-[3px] text-[10.5px] font-medium shadow-sm focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-primary ${
-            armed
-              ? 'border-rt-secondary bg-rt-secondary-wash text-rt-secondary-deep'
-              : 'border-rt-tertiary bg-white text-rt-ink-muted hover:text-rt-ink'
-          }`}
+          label={isOwn ? 'Delete proposal' : 'Remove as session leader'}
+          onClick={onDelete}
+          destructive
         >
-          {armed ? 'Remove?' : isOwn ? 'Delete' : 'Remove'}
-        </button>
+          <Trash2 aria-hidden="true" size={12} strokeWidth={2} />
+        </CardControl>
       ) : null}
     </div>
   );
 }
+
+/** What the confirmation calls the thing being removed. */
+const PROPOSAL_KIND: Record<BoardItem['type'], string> = {
+  sticky: 'sticky note',
+  drawing: 'drawing',
+  diagram: 'diagram',
+};
 
 /**
  * One card placed on the board (F16).
@@ -224,9 +249,27 @@ export function PositionedProposal({
   onDelete,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
+  // Removal is destructive and cannot be undone, so it always passes through a
+  // confirmation (F17) — for the author and the moderating leader alike.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
   // Stickies edit inline; drawings/diagrams wait for studio reopen (F20/F21).
   const canEditText = isOwn && item.artifactJson.type === 'sticky';
   const draggable = canMove && !editing;
+
+  const confirmRemove = () => {
+    setRemoving(true);
+    void onDelete(item)
+      .then(() => {
+        // The card leaves on the server's broadcast, taking this dialog with it.
+      })
+      .catch(() => {
+        // Refused or offline: close the dialog and leave the card alone. The
+        // canvas surfaces the reason, so the prompt does not repeat it.
+        setRemoving(false);
+        setConfirmingRemove(false);
+      });
+  };
 
   return (
     <div
@@ -284,11 +327,21 @@ export function PositionedProposal({
               canDelete={canDelete}
               isOwn={isOwn}
               onEdit={() => setEditing(true)}
-              onDelete={() => void onDelete(item)}
+              onDelete={() => setConfirmingRemove(true)}
             />
           ) : null}
         </>
       )}
+
+      {confirmingRemove ? (
+        <ConfirmRemoveDialog
+          kind={PROPOSAL_KIND[item.type]}
+          isOwn={isOwn}
+          pending={removing}
+          onCancel={() => setConfirmingRemove(false)}
+          onConfirm={confirmRemove}
+        />
+      ) : null}
     </div>
   );
 }
