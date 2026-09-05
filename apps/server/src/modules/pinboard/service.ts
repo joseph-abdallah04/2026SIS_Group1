@@ -26,7 +26,7 @@ type ProposalRow = Prisma.ProposalGetPayload<{
 
 export function toBoardItem(row: ProposalRow): BoardItem {
   const parsed = artifactJsonSchema.safeParse(row.artifactJson);
-  if (!parsed.success) {
+  if (!parsed.success || parsed.data.type !== row.type) {
     throw new ApiError(500, 'Invalid artifact data stored for proposal', 'INVALID_ARTIFACT');
   }
 
