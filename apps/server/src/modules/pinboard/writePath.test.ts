@@ -144,13 +144,14 @@ describe('proposalCreate handler', () => {
         handlers.set(event, fn);
       },
     };
-    return {
-      socket,
-      propose: (payload: unknown) =>
-        new Promise<{ ok: boolean; code?: string }>((resolve) => {
-          handlers.get('proposalCreate')?.(payload, resolve);
-        }),
-    };
+    const intent =
+      (event: string) =>
+      (payload: unknown): Promise<{ ok: boolean; code?: string }> =>
+        new Promise((resolve) => {
+          handlers.get(event)?.(payload, resolve);
+        });
+
+    return { socket, propose: intent('proposalCreate'), edit: intent('proposalUpdate') };
   }
 
   const io = { to: () => ({ emit: vi.fn() }) };
@@ -199,6 +200,249 @@ describe('proposalCreate handler', () => {
       }),
     ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  // Diagram contract v2 adds optional size and style fields. The editor bounds
+  // them, but a crafted socket payload bypasses the editor entirely, so the
+  // shared write schema has to stop these before anything is persisted.
+  describe('diagram style contract v2', () => {
+    function diagram(node: Record<string, unknown>) {
+      return {
+        type: 'diagram',
+        artifactJson: {
+          type: 'diagram',
+          nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box', ...node }],
+          edges: [],
+        },
+        x: 0,
+        y: 0,
+      };
+    }
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('accepts a legitimately sized and styled diagram', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          diagram({
+            width: 200,
+            height: 90,
+            fillColor: 'blue',
+            strokeColor: 'slate',
+            strokeWidthPreset: 'thick',
+            fontSizePreset: 'large',
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a node carrying only one of width and height', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(diagram({ width: 200 }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a node sized outside the bounds', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(diagram({ width: 5_000, height: 5_000 }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(await propose(diagram({ width: 1, height: 1 }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a raw colour smuggled in place of a palette key', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(diagram({ fillColor: 'url(#evil)' }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(await propose(diagram({ strokeColor: '#ff0000' }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an arrow style outside the closed set', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose({
+          type: 'diagram',
+          artifactJson: {
+            type: 'diagram',
+            nodes: [
+              { id: 'n1', label: 'A', x: 0, y: 0 },
+              { id: 'n2', label: 'B', x: 240, y: 0 },
+            ],
+            edges: [{ from: 'n1', to: 'n2', strokeStyle: 'wavy' }],
+          },
+          x: 0,
+          y: 0,
+        }),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  // Container grouping is a graph, and a crafted payload can hand us a cycle or
+  // a child hanging off a node that cannot hold children. Neither may persist.
+  describe('container grouping', () => {
+    function grouping(nodes: Record<string, unknown>[]) {
+      return { type: 'diagram', artifactJson: { type: 'diagram', nodes, edges: [] }, x: 0, y: 0 };
+    }
+
+    const container = { id: 'c1', label: 'Platform', x: 24, y: 24, shape: 'container' };
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('accepts a node nested in a container', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([
+            container,
+            { id: 'n1', label: 'API', x: 40, y: 40, shape: 'box', parentId: 'c1' },
+          ]),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a child whose container does not exist', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([{ id: 'n1', label: 'API', x: 40, y: 40, shape: 'box', parentId: 'ghost' }]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a child parented to something that cannot hold children', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([
+            { id: 'n1', label: 'API', x: 24, y: 24, shape: 'box' },
+            { id: 'n2', label: 'Db', x: 200, y: 24, shape: 'cylinder', parentId: 'n1' },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a node parented to itself', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(grouping([{ ...container, parentId: 'c1' }]))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a nesting cycle of any length', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          grouping([
+            { id: 'a', label: 'A', x: 0, y: 0, shape: 'container', parentId: 'c' },
+            { id: 'b', label: 'B', x: 0, y: 0, shape: 'container', parentId: 'a' },
+            { id: 'c', label: 'C', x: 0, y: 0, shape: 'container', parentId: 'b' },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a shape outside the registry', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(grouping([{ id: 'n1', label: 'A', x: 0, y: 0, shape: 'hexagon' }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  // F16 added a second way to write an artifact. The diagram contract has to
+  // hold on edits exactly as it does on creation: the editor is not the only
+  // thing that can emit one of these.
+  describe('diagram contract on edits', () => {
+    function edit(nodes: Record<string, unknown>[], edges: Record<string, unknown>[] = []) {
+      return { id: 'p1', artifactJson: { type: 'diagram', nodes, edges } };
+    }
+
+    const container = { id: 'c1', label: 'Platform', x: 24, y: 24, shape: 'container' };
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('rejects an edit whose arrow points at a node that is not there', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(edit([{ id: 'n1', label: 'A', x: 0, y: 0 }], [{ from: 'n1', to: 'ghost' }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit that duplicates a node id', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(
+          edit([
+            { id: 'n1', label: 'A', x: 0, y: 0 },
+            { id: 'n1', label: 'B', x: 200, y: 0 },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit that sizes a node outside the bounds', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(edit([{ id: 'n1', label: 'A', x: 0, y: 0, width: 5_000, height: 5_000 }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit that introduces a container cycle', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(
+          edit([
+            { id: 'a', label: 'A', x: 0, y: 0, shape: 'container', parentId: 'b' },
+            { id: 'b', label: 'B', x: 0, y: 0, shape: 'container', parentId: 'a' },
+          ]),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('rejects an edit carrying a colour outside the closed palette', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await send(edit([{ id: 'n1', label: 'A', x: 0, y: 0, fillColor: 'url(#evil)' }])),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+    });
+
+    it('still accepts a legitimate edit', async () => {
+      const { edit: send } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const result = await send(
+        edit([container, { id: 'n1', label: 'API', x: 40, y: 40, shape: 'box', parentId: 'c1' }]),
+      );
+      // Ownership and row lookup are F16's concern; the contract check is ours,
+      // so anything other than INVALID_PROPOSAL means the artifact passed.
+      expect(result.code).not.toBe('INVALID_PROPOSAL');
+    });
   });
 
   it('reports a closed board rather than failing silently', async () => {
