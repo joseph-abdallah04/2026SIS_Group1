@@ -4,7 +4,7 @@ import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { api } from '../../lib/api';
-import { getSocket } from '../../lib/socket';
+import { getSocket, joinSessionRoom, scheduleLeaveSessionRoom } from '../../lib/socket';
 
 /** How long a card that arrived while you were watching stays highlighted (F15). */
 const HIGHLIGHT_MS = 2400;
@@ -180,7 +180,7 @@ export function usePinboard(sessionId: string) {
     let cancelled = false;
 
     const join = () => {
-      socket.emit('memberJoin', { sessionId }, (res) => {
+      joinSessionRoom(sessionId, (res) => {
         if (cancelled) return;
         setIsLive(res.ok);
         if (!res.ok) {
@@ -229,6 +229,7 @@ export function usePinboard(sessionId: string) {
 
     return () => {
       cancelled = true;
+      scheduleLeaveSessionRoom(sessionId);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('sessionState', onSessionState);

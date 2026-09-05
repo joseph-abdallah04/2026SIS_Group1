@@ -110,6 +110,16 @@ function memberJoinAck(socket: FakeSocket, sessionId: string) {
   });
 }
 
+function memberLeaveAck(socket: FakeSocket, sessionId: string) {
+  return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    const handler = socket.listeners.get('memberLeave') as (
+      payload: { sessionId: string },
+      ack: (res: { ok: boolean; error?: string }) => void,
+    ) => void;
+    handler({ sessionId }, resolve);
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   verifyToken.mockImplementation((token: string) =>
@@ -248,5 +258,50 @@ describe('presence dedup', () => {
     const left = broadcasts.find((b) => b.event === 'memberLeft');
     expect(left).toBeDefined();
     expect((left?.payload as { user: { id: string } }).user.id).toBe('u1');
+  });
+});
+
+describe('memberLeave', () => {
+  it('emits memberLeft when the last socket for a user leaves the room', async () => {
+    const { io, connect, broadcasts } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    const socket = connect('u1');
+    await memberJoinAck(socket, 's1');
+
+    broadcasts.length = 0;
+    expect(await memberLeaveAck(socket, 's1')).toMatchObject({ ok: true });
+    expect(socket.data.sessionId).toBeNull();
+
+    const left = broadcasts.find((b) => b.event === 'memberLeft');
+    expect(left).toBeDefined();
+    expect((left?.payload as { user: { id: string } }).user.id).toBe('u1');
+  });
+
+  it('does not emit memberLeft when a second tab is still in the room', async () => {
+    const { io, connect, broadcasts } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    const tab1 = connect('u1');
+    await memberJoinAck(tab1, 's1');
+    const tab2 = connect('u1');
+    await memberJoinAck(tab2, 's1');
+
+    broadcasts.length = 0;
+    expect(await memberLeaveAck(tab1, 's1')).toMatchObject({ ok: true });
+    expect(broadcasts.some((b) => b.event === 'memberLeft')).toBe(false);
+  });
+
+  it('is a no-op when this socket is not in that session', async () => {
+    const { io, connect, broadcasts } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    const socket = connect('u1');
+    await memberJoinAck(socket, 's1');
+
+    broadcasts.length = 0;
+    expect(await memberLeaveAck(socket, 'other')).toMatchObject({ ok: true });
+    expect(socket.data.sessionId).toBe('s1');
+    expect(broadcasts.some((b) => b.event === 'memberLeft')).toBe(false);
   });
 });

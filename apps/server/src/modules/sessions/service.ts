@@ -295,6 +295,11 @@ export interface OpenSessionArgs {
  *
  * Already-`lobby` is treated as success, not a conflict: a double-click on
  * "Open for joining" should be a no-op, not an error toast.
+ *
+ * The write itself is `updateMany` filtered on `status: 'draft'`, not
+ * `update` by id. Two in-flight opens would otherwise both pass the draft
+ * check and the second would overwrite the first minted code — anyone who
+ * copied the first one would be holding a code that no longer resolves.
  */
 export async function openSessionForJoining({
   sessionId,
@@ -326,11 +331,33 @@ export async function openSessionForJoining({
 
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     try {
-      return await prisma.session.update({
-        where: { id: sessionId },
+      const claimed = await prisma.session.updateMany({
+        where: { id: sessionId, status: 'draft' },
         data: { code: generateSessionCode(), status: 'lobby' },
       });
+      if (claimed.count === 1) {
+        const opened = await prisma.session.findUnique({ where: { id: sessionId } });
+        if (!opened) {
+          throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+        }
+        return opened;
+      }
+      // Lost the race: another request already left draft. If they landed
+      // in lobby, that is the idempotent success path — return *their* code.
+      const current = await prisma.session.findUnique({ where: { id: sessionId } });
+      if (!current) {
+        throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+      }
+      if (current.status === 'lobby') {
+        return current;
+      }
+      throw new ApiError(
+        409,
+        `Cannot open a session that is ${current.status}`,
+        'INVALID_TRANSITION',
+      );
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       if (!isUniqueConstraintViolation(err)) throw err;
       // Collision on the code itself — try again with a fresh one. At ~8.5e11
       // possible codes this is a correctness backstop, not a hot path.

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SessionStatePayload, SessionUserPayload } from '@roundtable/shared/events';
 
 import { api } from '../../lib/api';
-import { getSocket } from '../../lib/socket';
+import { getSocket, joinSessionRoom, scheduleLeaveSessionRoom } from '../../lib/socket';
 
 interface SessionMemberRow {
   userId: string;
@@ -18,7 +18,11 @@ interface SessionMemberRow {
  * membership history is persisted), and `memberJoined`/`memberLeft` keep it
  * live from there. Follows the reconnect pattern in
  * `features/pinboard/usePinboard.ts`: every `connect` re-emits `memberJoin`,
- * because a reconnected socket belongs to no rooms yet.
+ * because a reconnected socket belongs to no rooms yet. Cleanup asks the
+ * server to leave the room (`scheduleLeaveSessionRoom`): a client cannot
+ * `socket.leave()` a server room, and the singleton stays connected on the
+ * dashboard. The leave is deferred one tick so lobby → pinboard (and Strict
+ * Mode remounts) can rejoin the same session without a presence flicker.
  *
  * `onStarted` (F09) fires on the `sessionStarted` broadcast — the caller
  * (`SessionRouter`, via `WaitingRoom`) re-fetches the session on receipt,
@@ -63,7 +67,7 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
     let cancelled = false;
 
     const join = () => {
-      socket.emit('memberJoin', { sessionId }, (res) => {
+      joinSessionRoom(sessionId, (res) => {
         if (cancelled) return;
         setIsLive(res.ok);
         if (!res.ok) {
@@ -107,6 +111,7 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
 
     return () => {
       cancelled = true;
+      scheduleLeaveSessionRoom(sessionId);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('sessionState', onSessionState);

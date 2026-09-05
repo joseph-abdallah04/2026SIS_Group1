@@ -13,6 +13,7 @@ const sessionFindUnique = vi.fn();
 const sessionFindFirst = vi.fn();
 const sessionFindMany = vi.fn();
 const sessionUpdate = vi.fn();
+const sessionUpdateMany = vi.fn();
 const sessionUpdateInTx = vi.fn();
 const sessionDelete = vi.fn();
 const sessionMemberUpsert = vi.fn();
@@ -63,6 +64,7 @@ vi.mock('../../db.js', () => ({
       findFirst: sessionFindFirst,
       findMany: sessionFindMany,
       update: sessionUpdate,
+      updateMany: sessionUpdateMany,
       delete: sessionDelete,
     },
     sessionMember: {
@@ -235,7 +237,7 @@ describe('openSessionForJoining', () => {
     await expect(
       openSessionForJoining({ sessionId: 's1', leaderId: 'not-the-leader' }),
     ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
-    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionUpdateMany).not.toHaveBeenCalled();
   });
 
   it('rejects a session that is not draft or lobby', async () => {
@@ -243,35 +245,42 @@ describe('openSessionForJoining', () => {
     await expect(
       openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' }),
     ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
-    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('mints exactly one code and flips status to lobby', async () => {
-    sessionFindUnique.mockResolvedValueOnce(draftSession);
-    sessionUpdate.mockResolvedValueOnce({ ...draftSession, code: 'K7NP-3WQZ', status: 'lobby' });
+  it('mints exactly one code and flips status to lobby, claiming only while still draft', async () => {
+    const opened = { ...draftSession, code: 'K7NP-3WQZ', status: 'lobby' };
+    sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(opened);
+    sessionUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     const session = await openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' });
 
-    expect(sessionUpdate).toHaveBeenCalledTimes(1);
+    expect(sessionUpdateMany).toHaveBeenCalledTimes(1);
+    expect(sessionUpdateMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { id: 's1', status: 'draft' },
+      data: { status: 'lobby' },
+    });
+    expect(sessionUpdate).not.toHaveBeenCalled();
     expect(session.status).toBe('lobby');
     expect(sessionCodeSchema.safeParse(session.code).success).toBe(true);
   });
 
   it('retries on a P2002 collision and succeeds on the next attempt', async () => {
-    sessionFindUnique.mockResolvedValueOnce(draftSession);
-    sessionUpdate
+    const opened = { ...draftSession, code: 'M4T7-2QRX', status: 'lobby' };
+    sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(opened);
+    sessionUpdateMany
       .mockRejectedValueOnce({ code: 'P2002' })
-      .mockResolvedValueOnce({ ...draftSession, code: 'M4T7-2QRX', status: 'lobby' });
+      .mockResolvedValueOnce({ count: 1 });
 
     const session = await openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' });
 
-    expect(sessionUpdate).toHaveBeenCalledTimes(2);
+    expect(sessionUpdateMany).toHaveBeenCalledTimes(2);
     expect(session.status).toBe('lobby');
   });
 
   it('gives up after repeated P2002 collisions with our own error, not a raw Prisma one', async () => {
     sessionFindUnique.mockResolvedValueOnce(draftSession);
-    sessionUpdate.mockRejectedValue({ code: 'P2002' });
+    sessionUpdateMany.mockRejectedValue({ code: 'P2002' });
 
     await expect(
       openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' }),
@@ -287,7 +296,18 @@ describe('openSessionForJoining', () => {
     const session = await openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' });
 
     expect(session).toBe(lobbySession);
-    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns the winner\'s code when a concurrent open already left draft — does not mint a second one', async () => {
+    const lobbySession = { ...draftSession, code: 'K7NP-3WQZ', status: 'lobby' };
+    sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(lobbySession);
+    sessionUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    const session = await openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' });
+
+    expect(session).toBe(lobbySession);
+    expect(sessionUpdateMany).toHaveBeenCalledTimes(1);
   });
 });
 
