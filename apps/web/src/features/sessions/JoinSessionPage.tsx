@@ -57,7 +57,7 @@ export function JoinSessionPage() {
     setError(null);
     try {
       const { sessionId } = await api.post<{ sessionId: string }>('/api/sessions/join', { code });
-      navigate(`/sessions/${sessionId}`);
+      navigate(`/sessions/${sessionId}`, { replace: true });
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : 'Failed to join that session');
       setJoining(false);

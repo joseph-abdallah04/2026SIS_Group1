@@ -191,6 +191,19 @@ describe('presence dedup', () => {
     expect(snapshot.participants[0]?.id).toBe('u1');
   });
 
+  it('does not re-broadcast memberJoined when the same socket joins again', async () => {
+    const { io, connect, broadcasts } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    const socket = connect('u1');
+    await memberJoinAck(socket, 's1');
+    broadcasts.length = 0;
+
+    await memberJoinAck(socket, 's1');
+
+    expect(broadcasts.some((b) => b.event === 'memberJoined')).toBe(false);
+  });
+
   it('does not re-broadcast memberJoined for a second socket already present', async () => {
     const { io, connect, broadcasts } = createFakeIo();
     registerRealtimeGateway(io as never);

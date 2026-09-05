@@ -13,7 +13,7 @@ export function CreateSessionPage() {
         <span className="text-[13px] font-semibold tracking-[-0.01em]">New session</span>
       </header>
       <div className="flex flex-1 justify-center px-6 py-10">
-        <CreateSessionForm onCreated={() => navigate('/dashboard')} />
+        <CreateSessionForm onCreated={(id) => navigate(`/sessions/${id}`, { replace: true })} />
       </div>
     </main>
   );

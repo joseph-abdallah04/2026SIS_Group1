@@ -67,6 +67,14 @@ export const setQuestionPhaseSchema = z.object({
 
 export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
 
+// Leader pointing the board at a question without changing its status — so
+// an answered question's pinboard can be shown again without reopening it.
+export const focusQuestionSchema = z.object({
+  questionId: z.string().min(1),
+});
+
+export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
+
 // === pinboard module ===
 
 const stickyColorSchema = z.enum(['yellow', 'pink', 'blue', 'green']);

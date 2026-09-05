@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import type { Question, QuestionStatus } from '@roundtable/shared';
 
-import {
-  useSetQuestionPhase,
-  type QuestionPhaseTarget,
-} from '../sessions/useSetQuestionPhase';
+import { useFocusQuestion } from '../sessions/useFocusQuestion';
+import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
 
 interface AgendaPanelProps {
   sessionId: string;
@@ -44,7 +42,6 @@ function statusLabel(status: QuestionStatus): string | null {
       return 'Answered';
     case 'skipped':
       return 'Skipped';
-    // `pending` says nothing: the numbered row already reads as "not yet".
     default:
       return null;
   }
@@ -52,11 +49,11 @@ function statusLabel(status: QuestionStatus): string | null {
 
 /**
  * F24: the ordered question list beside the board, with F25/F26's leader
- * controls on the current question.
+ * controls. The leader can click a finished question to put that question's
+ * pinboard back on screen without reopening it.
  *
  * Collapse state is local to each participant — the leader collapsing their
- * rail is not an instruction to everyone else, and the panel is a lens on
- * session state rather than part of it.
+ * rail is not an instruction to everyone else.
  */
 export function AgendaPanel({
   sessionId,
@@ -66,11 +63,21 @@ export function AgendaPanel({
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [confirmingSkip, setConfirmingSkip] = useState<string | null>(null);
-  const { setPhase, busyQuestionId, error } = useSetQuestionPhase(sessionId);
+  const {
+    setPhase,
+    busyQuestionId: phaseBusyId,
+    error: phaseError,
+  } = useSetQuestionPhase(sessionId);
+  const { focus, error: focusError } = useFocusQuestion(sessionId);
 
   const activeIndex = questions.findIndex((question) => question.id === activeQuestionId);
   const position = activeIndex >= 0 ? `${activeIndex + 1}/${questions.length}` : null;
   const allDone = questions.length > 0 && questions.every((q) => isComplete(q.status));
+  const openQuestion = questions.find(
+    (question) => question.status === 'discussion' || question.status === 'voting',
+  );
+  const firstPending = questions.find((question) => question.status === 'pending');
+  const error = phaseError ?? focusError;
 
   if (collapsed) {
     return (
@@ -118,45 +125,72 @@ export function AgendaPanel({
       ) : (
         <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
           {questions.map((question, index) => {
-            const isCurrent = question.id === activeQuestionId;
-            const complete = isComplete(question.status);
+            const isFocused = question.id === activeQuestionId;
             const label = statusLabel(question.status);
             const next = NEXT_PHASE[question.status];
-            // Controls only on the current question: the invariant is that one
-            // question is open at a time, so offering "Start discussion" on
-            // question 4 would just produce a QUESTION_ALREADY_OPEN error.
-            const showControls = isLeader && isCurrent && next !== undefined;
-            const busy = busyQuestionId === question.id;
+            // Phase controls stay on the question that is actually open, even
+            // while the board is looking back at an earlier one. Pending gets
+            // "Start discussion" only when nothing is open, on the next one.
+            const showControls =
+              isLeader &&
+              next !== undefined &&
+              (openQuestion
+                ? question.id === openQuestion.id
+                : firstPending !== undefined && question.id === firstPending.id);
+            const busy = phaseBusyId === question.id;
 
             return (
               <li
                 key={question.id}
-                aria-current={isCurrent ? 'step' : undefined}
+                aria-current={isFocused ? 'step' : undefined}
                 className={`rounded-md border px-2.5 py-2 ${
-                  isCurrent
+                  isFocused
                     ? 'border-rt-primary bg-white shadow-sm'
                     : 'border-transparent bg-transparent'
                 }`}
               >
                 <div className="flex items-baseline gap-2">
                   <span
-                    className={`text-[11px] font-semibold ${
-                      isCurrent ? 'text-rt-primary-deep' : 'text-rt-ink-faint'
+                    className={`w-4 shrink-0 text-center text-[11px] font-semibold ${
+                      question.status === 'answered'
+                        ? 'text-rt-primary-deep'
+                        : isFocused
+                          ? 'text-rt-primary-deep'
+                          : 'text-rt-ink-faint'
                     }`}
+                    aria-hidden
                   >
-                    {complete ? '✓' : index + 1}
+                    {question.status === 'answered' ? '✓' : index + 1}
                   </span>
-                  <p
-                    className={`text-[12.5px] leading-snug ${
-                      complete
-                        ? 'text-rt-ink-faint line-through'
-                        : isCurrent
-                          ? 'font-medium text-rt-ink'
-                          : 'text-rt-ink-muted'
-                    }`}
-                  >
-                    {question.text}
-                  </p>
+                  {isLeader ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isFocused) void focus(question.id);
+                      }}
+                      className={`text-left text-[12.5px] leading-snug hover:underline ${
+                        question.status === 'skipped'
+                          ? 'text-rt-ink-faint line-through'
+                          : isFocused
+                            ? 'font-medium text-rt-ink'
+                            : 'text-rt-ink-muted'
+                      }`}
+                    >
+                      {question.text}
+                    </button>
+                  ) : (
+                    <p
+                      className={`text-[12.5px] leading-snug ${
+                        question.status === 'skipped'
+                          ? 'text-rt-ink-faint line-through'
+                          : isFocused
+                            ? 'font-medium text-rt-ink'
+                            : 'text-rt-ink-muted'
+                      }`}
+                    >
+                      {question.text}
+                    </p>
+                  )}
                 </div>
 
                 {label && (
@@ -176,8 +210,6 @@ export function AgendaPanel({
                       {busy ? 'Working…' : next.label}
                     </button>
 
-                    {/* Skipping is terminal — nothing reopens a skipped
-                        question — so it asks first, like ending a session. */}
                     {confirmingSkip === question.id ? (
                       <span className="flex items-center gap-2 text-[11px]">
                         <span className="text-rt-ink-muted">Skip it?</span>

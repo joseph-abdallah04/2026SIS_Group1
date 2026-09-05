@@ -131,6 +131,12 @@ export interface ServerToClientEvents {
    * screen, may have moved with it).
    */
   sessionPhase(payload: { sessionId: string; questionId: string; status: QuestionStatus }): void;
+  /**
+   * The leader pointed the board at a different question without changing
+   * that question's status (looking back at an answered pinboard). Clients
+   * re-read the board the same way they do for `sessionPhase`.
+   */
+  sessionFocus(payload: { sessionId: string; questionId: string }): void;
 
   // === pinboard module ===
   /**

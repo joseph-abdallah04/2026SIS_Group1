@@ -14,6 +14,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('./api', () => ({ signup: vi.fn() }));
+vi.mock('../../lib/socket', () => ({ disconnectSocket: vi.fn(), getSocket: vi.fn() }));
 
 function renderPage() {
   return render(

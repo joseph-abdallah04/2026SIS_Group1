@@ -1,23 +1,25 @@
 import { useState } from 'react';
 
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useEndSession } from './useEndSession';
 
 interface EndSessionControlProps {
   sessionId: string;
-  /** Extra classes — the pinboard header is a coloured bar, the waiting room is not. */
+  /** Extra classes on the trigger wrapper. */
   className?: string;
 }
+
+const TRIGGER =
+  'rounded-full bg-red-600 px-3 py-[5px] text-[12px] font-semibold text-white shadow-sm hover:bg-red-700';
 
 /**
  * F32: the leader's way out, and the counterpart to a member's
  * `LeaveSessionControl` — the leader cannot leave their own session
  * (LEADER_CANNOT_LEAVE), they end it for everyone.
  *
- * Two clicks, not one: ending is irreversible (the board stops accepting
- * proposals and the join code is released), so the confirm step is part of the
- * feature rather than a nicety. Nothing navigates on success — the server's
- * `sessionEnded` broadcast moves this client to the final screen along with
- * everybody else's.
+ * Two clicks, not one: ending is irreversible. Nothing navigates on success —
+ * the server's `sessionEnded` broadcast moves this client to the final screen
+ * along with everybody else's.
  */
 export function EndSessionControl({ sessionId, className }: EndSessionControlProps) {
   const [confirming, setConfirming] = useState(false);
@@ -25,37 +27,21 @@ export function EndSessionControl({ sessionId, className }: EndSessionControlPro
 
   return (
     <div className={className}>
-      {confirming ? (
-        <span className="flex flex-wrap items-center gap-2 text-[12px]">
-          <span className="opacity-80">End for everyone? This cannot be undone.</span>
-          <button
-            type="button"
-            onClick={() => void end()}
-            disabled={ending}
-            className="font-semibold hover:underline"
-          >
-            {ending ? 'Ending…' : 'Yes, end session'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            className="opacity-80 hover:underline"
-          >
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="text-[12px] font-semibold hover:underline"
+      <button type="button" onClick={() => setConfirming(true)} className={TRIGGER}>
+        End session
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title="End this session for everyone?"
+          confirmLabel="End session"
+          confirmingLabel="Ending…"
+          busy={ending}
+          onConfirm={() => void end()}
+          onCancel={() => setConfirming(false)}
         >
-          End session
-        </button>
+          This cannot be undone. The board becomes read-only and the join code is released.
+        </ConfirmDialog>
       )}
-      {/* Own background rather than inherited colour, for the same reason as
-          `LeaveSessionControl`: this renders on the pinboard's dark header and
-          on the waiting room's white page. */}
       {error && (
         <p className="mt-1 rounded bg-white px-2 py-1 text-[12px] text-red-600 shadow-sm">
           {error}

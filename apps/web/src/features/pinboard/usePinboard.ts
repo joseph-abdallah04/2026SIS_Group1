@@ -213,6 +213,9 @@ export function usePinboard(sessionId: string) {
     const onPhase = ({ sessionId: id }: { sessionId: string }) => {
       if (id === sessionId) reload();
     };
+    const onFocus = ({ sessionId: id }: { sessionId: string }) => {
+      if (id === sessionId) reload();
+    };
 
     if (socket.connected) onConnect();
     socket.on('connect', onConnect);
@@ -222,6 +225,7 @@ export function usePinboard(sessionId: string) {
     socket.on('proposalUpdated', onUpdated);
     socket.on('proposalDeleted', onDeleted);
     socket.on('sessionPhase', onPhase);
+    socket.on('sessionFocus', onFocus);
 
     return () => {
       cancelled = true;
@@ -232,6 +236,7 @@ export function usePinboard(sessionId: string) {
       socket.off('proposalUpdated', onUpdated);
       socket.off('proposalDeleted', onDeleted);
       socket.off('sessionPhase', onPhase);
+      socket.off('sessionFocus', onFocus);
     };
   }, [sessionId, applySnapshot, highlight, reload, removeItem, upsertItem]);
 

@@ -71,6 +71,18 @@ describe('AgendaPanel (F24)', () => {
     expect(screen.getByText('Question 2').closest('li')).toHaveAttribute('aria-current', 'step');
   });
 
+  it('ticks an answered question and strikes through a skipped one', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'skipped')],
+      activeQuestionId: null,
+    });
+
+    expect(screen.getByText('Question 1')).not.toHaveClass('line-through');
+    expect(screen.getByText('Question 2')).toHaveClass('line-through');
+    expect(screen.getByText('Answered')).toBeInTheDocument();
+    expect(screen.getByText('Skipped')).toBeInTheDocument();
+  });
+
   it('collapses to a rail that still says where the session is up to', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
@@ -139,6 +151,27 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
   it('offers no controls on a finished question', () => {
     renderPanel({ questions: [question(0, 'answered')], activeQuestionId: 'q1' });
     expect(screen.queryByRole('button', { name: 'Skip question' })).not.toBeInTheDocument();
+  });
+
+  it('keeps phase controls on the open question while the board looks back', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+
+    expect(screen.getByRole('button', { name: 'Open voting' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start discussion' })).not.toBeInTheDocument();
+  });
+
+  it('asks the server to focus a finished question when the leader clicks it', async () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'discussion')],
+      activeQuestionId: 'q2',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Question 1' }));
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/focus', { questionId: 'q1' });
   });
 
   it('asks before skipping, because a skipped question cannot be reopened', async () => {

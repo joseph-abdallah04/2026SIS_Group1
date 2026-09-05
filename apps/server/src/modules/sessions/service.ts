@@ -331,11 +331,6 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
   }
 
   return prisma.$transaction(async (tx) => {
-    const started = await tx.session.update({
-      where: { id: sessionId },
-      data: { status: 'active', startedAt: new Date() },
-    });
-
     // Starting the session opens the first question, in the same transaction:
     // a session that is `active` but whose every question is still `pending`
     // is a live board that refuses proposals (see pinboard's
@@ -351,7 +346,14 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
       await tx.question.update({ where: { id: first.id }, data: { status: 'discussion' } });
     }
 
-    return started;
+    return tx.session.update({
+      where: { id: sessionId },
+      data: {
+        status: 'active',
+        startedAt: new Date(),
+        currentQuestionId: first?.id ?? null,
+      },
+    });
   });
 }
 
@@ -461,12 +463,93 @@ export async function setQuestionPhase({
       }
     }
 
-    return tx.question.update({
+    const updated = await tx.question.update({
       where: { id: questionId },
       data: { status },
       select: QUESTION_REF_SELECT,
     });
+
+    // The board follows the question that just changed, except when closing
+    // one: then it advances to the next pending question so the room is not
+    // left staring at a finished card. The leader can still look back via
+    // `focusQuestion` without touching statuses.
+    if (status === 'discussion' || status === 'voting') {
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { currentQuestionId: questionId },
+      });
+    } else if (status === 'answered' || status === 'skipped') {
+      const next = await tx.question.findFirst({
+        where: { sessionId, status: 'pending' },
+        orderBy: { position: 'asc' },
+        select: { id: true },
+      });
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { currentQuestionId: next?.id ?? questionId },
+      });
+    }
+
+    return updated;
   });
+}
+
+export interface FocusQuestionArgs {
+  sessionId: string;
+  questionId: string;
+  leaderId: string;
+}
+
+/**
+ * Point the board at a question without changing its status. An answered
+ * question's proposals are still there; focusing it is how the room looks
+ * back at them. Does not reopen the question — proposing still requires
+ * `discussion`.
+ */
+export async function focusQuestion({
+  sessionId,
+  questionId,
+  leaderId,
+}: FocusQuestionArgs): Promise<QuestionRef> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { leaderId: true, status: true, currentQuestionId: true },
+  });
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.leaderId !== leaderId) {
+    throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+  }
+  if (session.status !== 'active') {
+    throw new ApiError(
+      409,
+      `Cannot change the agenda of a session that is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
+  }
+
+  const question = await prisma.question.findUnique({
+    where: { id: questionId },
+    select: QUESTION_REF_SELECT,
+  });
+  if (!question || question.sessionId !== sessionId) {
+    throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+  }
+
+  if (session.currentQuestionId === questionId) {
+    return question;
+  }
+
+  await prisma.session.update({
+    where: { id: sessionId },
+    data: { currentQuestionId: questionId },
+  });
+  return question;
+}
+
+export function emitQuestionFocus(io: RealtimeServer, sessionId: string, questionId: string): void {
+  io.to(sessionRoom(sessionId)).emit('sessionFocus', { sessionId, questionId });
 }
 
 /**
@@ -684,6 +767,14 @@ export async function joinSessionByCode({
     throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
   }
 
+  if (session.status !== 'lobby' && session.status !== 'active') {
+    throw new ApiError(
+      409,
+      session.status === 'ended' ? 'This session has ended' : 'This session is not joinable yet',
+      'SESSION_NOT_JOINABLE',
+    );
+  }
+
   await assertNotInAnotherLiveSession(userId, session.id);
 
   await prisma.sessionMember.upsert({
@@ -883,23 +974,30 @@ export async function getQuestion(questionId: string): Promise<QuestionRef | nul
 /**
  * The question the board is currently showing.
  *
- * Derived from the phases F25 writes rather than stored as a pointer, so
- * "which question is current" has exactly one source of truth and cannot
- * disagree with the statuses the agenda panel renders:
+ * Prefers `Session.currentQuestionId` when it is set, so the leader can look
+ * back at an answered question's pinboard without reopening it. Statuses stay
+ * the source of truth for what is *legal* (proposing still requires
+ * `discussion`); the pointer is only which board is on screen.
  *
- * 1. the open question — `discussion` or `voting`, and `setQuestionPhase`
- *    guarantees there is at most one;
- * 2. failing that, the next `pending` one, so the board shows what is coming
- *    up between the leader answering one question and opening the next
- *    (proposals stay closed until it is actually in `discussion`);
- * 3. `null` once every question is answered or skipped — the agenda is done
- *    and the leader's remaining move is to end the session (F32).
+ * When the pointer is empty, fall back to the phase-derived default:
  *
- * This replaces the heuristic Pinboard's adapter carried while F25 did not
- * exist ("first in discussion, else first by position"), which could not tell
- * a finished agenda from one that had not started.
+ * 1. the open question — `discussion` or `voting`;
+ * 2. failing that, the next `pending` one;
+ * 3. `null` once every question is answered or skipped.
  */
 export async function getActiveQuestion(sessionId: string): Promise<QuestionRef | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { currentQuestionId: true },
+  });
+  if (session?.currentQuestionId) {
+    const focused = await prisma.question.findUnique({
+      where: { id: session.currentQuestionId },
+      select: QUESTION_REF_SELECT,
+    });
+    if (focused && focused.sessionId === sessionId) return focused;
+  }
+
   const questions = await prisma.question.findMany({
     where: { sessionId },
     orderBy: { position: 'asc' },

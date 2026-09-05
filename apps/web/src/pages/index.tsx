@@ -8,6 +8,7 @@ import { logout } from '../features/auth/api';
 import { useDeleteSession } from '../features/sessions/useDeleteSession';
 import { useSessions } from '../features/sessions/useSessions';
 import { clearToken } from '../lib/auth';
+import { disconnectSocket } from '../lib/socket';
 
 // F01/F02 own these two screens; the dashboard below re-exports them so
 // `App.tsx` keeps importing every page from one barrel.
@@ -185,6 +186,7 @@ export function DashboardPage() {
     try {
       await logout();
     } finally {
+      disconnectSocket();
       clearToken();
       navigate('/login', { replace: true });
     }

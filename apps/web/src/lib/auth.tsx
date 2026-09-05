@@ -1,6 +1,21 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 const TOKEN_KEY = 'rt_token';
+
+/**
+ * Where to send someone after login. Only same-origin paths — a `next` of
+ * `//evil.example` or `https://…` would otherwise be an open redirect.
+ */
+export function safeReturnPath(next: string | null | undefined): string {
+  if (!next) return '/dashboard';
+  if (!next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\')) {
+    return '/dashboard';
+  }
+  if (next.includes('://')) return '/dashboard';
+  const path = next.split('?')[0] ?? next;
+  if (path === '/login' || path === '/signup') return '/dashboard';
+  return next;
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -64,9 +79,9 @@ export function getUserId(): string | null {
 /** Clears the token and sends the browser to /login (unless already there). */
 export function redirectToLogin(): void {
   clearToken();
-  if (window.location.pathname !== '/login') {
-    window.location.assign('/login');
-  }
+  if (window.location.pathname === '/login') return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
 }
 
 /**
@@ -81,10 +96,12 @@ export function redirectToLogin(): void {
  * for `lib/api.ts`, which reacts to a 401 outside any component's render.
  */
 export function RequireAuth() {
+  const location = useLocation();
   const token = getToken();
   if (!token || isTokenExpired(token)) {
     clearToken();
-    return <Navigate to="/login" replace />;
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
   return <Outlet />;
 }

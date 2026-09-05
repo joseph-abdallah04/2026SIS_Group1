@@ -114,14 +114,14 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
           }
 
           // Checked *before* this socket joins, so it reflects only other
-          // sockets — the question is "was this user already present",  not
-          // "is this socket in the room yet".
-          const alreadyPresent = await userHasAnotherSocketInRoom(
-            io,
-            sessionId,
-            user.id,
-            socket.id,
-          );
+          // sockets — the question is "was this user already present", not
+          // "is this socket in the room yet". Rejoining the *same* socket
+          // (React Strict Mode remounts `memberJoin` without leaving the
+          // room) must also count as already present, or the room gets a
+          // second `memberJoined` for someone who never left.
+          const alreadyPresent =
+            socket.data.sessionId === sessionId ||
+            (await userHasAnotherSocketInRoom(io, sessionId, user.id, socket.id));
 
           socket.data.user = user;
           socket.data.sessionId = sessionId;

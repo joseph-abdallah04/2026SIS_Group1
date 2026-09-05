@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { disconnectSocket } from '../../lib/socket';
 import { useLeaveSession } from './useLeaveSession';
 
 interface LeaveSessionControlProps {
   sessionId: string;
-  /** Extra classes — pinboard header is on a coloured bar, waiting room is not. */
+  /** Extra classes on the trigger wrapper. */
   className?: string;
 }
+
+const TRIGGER =
+  'rounded-full bg-red-600 px-3 py-[5px] text-[12px] font-semibold text-white shadow-sm hover:bg-red-700';
 
 /**
  * F07: explicit leave, on the waiting room and pinboard — not the dashboard.
@@ -20,42 +25,29 @@ export function LeaveSessionControl({ sessionId, className }: LeaveSessionContro
   const { leave, leaving, error } = useLeaveSession();
 
   async function handleLeave() {
-    if (await leave(sessionId)) navigate('/dashboard');
+    if (!(await leave(sessionId))) return;
+    disconnectSocket();
+    navigate('/dashboard', { replace: true });
   }
 
   return (
     <div className={className}>
-      {confirming ? (
-        <span className="flex flex-wrap items-center gap-2 text-[12px]">
-          <span className="opacity-80">Leave this session?</span>
-          <button
-            type="button"
-            onClick={() => void handleLeave()}
-            disabled={leaving}
-            className="font-semibold hover:underline"
-          >
-            {leaving ? 'Leaving…' : 'Yes, leave'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            className="opacity-80 hover:underline"
-          >
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="text-[12px] font-semibold hover:underline"
+      <button type="button" onClick={() => setConfirming(true)} className={TRIGGER}>
+        Leave session
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title="Leave this session?"
+          confirmLabel="Leave session"
+          confirmingLabel="Leaving…"
+          busy={leaving}
+          onConfirm={() => void handleLeave()}
+          onCancel={() => setConfirming(false)}
         >
-          Leave session
-        </button>
+          You will drop off the live list. You can rejoin later with the code or link if the session
+          is still open.
+        </ConfirmDialog>
       )}
-      {/* Own background rather than inherited colour: this renders both on the
-          pinboard's dark header and on the waiting room's white page, and a
-          bare red would be unreadable on one of the two. */}
       {error && (
         <p className="mt-1 rounded bg-white px-2 py-1 text-[12px] text-red-600 shadow-sm">
           {error}

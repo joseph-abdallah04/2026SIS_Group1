@@ -63,7 +63,7 @@ vi.mock('../../db.js', () => ({
       updateMany: sessionMemberUpdateMany,
       findUnique: sessionMemberFindUnique,
     },
-    question: { findMany: questionFindManyTopLevel },
+    question: { findMany: questionFindManyTopLevel, findUnique: questionFindUnique },
   },
 }));
 
@@ -75,10 +75,12 @@ const {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
+  focusQuestion,
   generateSessionCode,
   getActiveQuestion,
   setQuestionPhase,
@@ -459,7 +461,7 @@ describe('startSession (F09)', () => {
 
     expect(sessionUpdateInTx).toHaveBeenCalledWith({
       where: { id: 's1' },
-      data: { status: 'active', startedAt: expect.any(Date) },
+      data: { status: 'active', startedAt: expect.any(Date), currentQuestionId: null },
     });
     expect(session.status).toBe('active');
   });
@@ -481,6 +483,10 @@ describe('startSession (F09)', () => {
     expect(questionUpdate).toHaveBeenCalledWith({
       where: { id: 'q1' },
       data: { status: 'discussion' },
+    });
+    expect(sessionUpdateInTx).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: { status: 'active', startedAt: expect.any(Date), currentQuestionId: 'q1' },
     });
   });
 
@@ -917,10 +923,14 @@ describe('setQuestionPhase (F25/F26)', () => {
     });
   });
 
-  it('does not run the single-open check when closing or skipping a question', async () => {
+  it('looks for the next pending question when closing, not for another open one', async () => {
     questionFindUnique.mockResolvedValue(question({ status: 'voting' }));
     await advance('answered');
-    expect(questionFindFirst).not.toHaveBeenCalled();
+    expect(questionFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { sessionId: 's1', status: 'pending' },
+      }),
+    );
   });
 
   it('emitQuestionPhase broadcasts the new status to the session room', () => {
@@ -945,6 +955,17 @@ describe('getActiveQuestion', () => {
     { id: 'q2', sessionId: 's1', text: 'Two', position: 1, status: 'voting' },
     { id: 'q3', sessionId: 's1', text: 'Three', position: 2, status: 'pending' },
   ];
+
+  beforeEach(() => {
+    sessionFindUnique.mockResolvedValue({ currentQuestionId: null });
+  });
+
+  it('returns the focused question even when it is already answered', async () => {
+    sessionFindUnique.mockResolvedValue({ currentQuestionId: 'q1' });
+    questionFindUnique.mockResolvedValue(rows[0]);
+    await expect(getActiveQuestion('s1')).resolves.toMatchObject({ id: 'q1' });
+    expect(questionFindManyTopLevel).not.toHaveBeenCalled();
+  });
 
   it('prefers the open question over an earlier finished one or a later pending one', async () => {
     questionFindManyTopLevel.mockResolvedValueOnce(rows);
@@ -974,5 +995,56 @@ describe('getActiveQuestion', () => {
   it('returns null for a session with no questions', async () => {
     questionFindManyTopLevel.mockResolvedValueOnce([]);
     await expect(getActiveQuestion('s1')).resolves.toBeNull();
+  });
+});
+
+describe('focusQuestion', () => {
+  const active = { leaderId: 'leader-1', status: 'active' as const, currentQuestionId: 'q1' };
+  const q2 = {
+    id: 'q2',
+    sessionId: 's1',
+    text: 'Two',
+    position: 1,
+    status: 'answered' as const,
+  };
+
+  it('points the board at another question without changing its status', async () => {
+    sessionFindUnique.mockResolvedValue(active);
+    questionFindUnique.mockResolvedValue(q2);
+    sessionUpdate.mockResolvedValue({});
+
+    await expect(
+      focusQuestion({ sessionId: 's1', questionId: 'q2', leaderId: 'leader-1' }),
+    ).resolves.toMatchObject({ id: 'q2', status: 'answered' });
+
+    expect(sessionUpdate).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: { currentQuestionId: 'q2' },
+    });
+  });
+
+  it('is a no-op when that question is already focused', async () => {
+    sessionFindUnique.mockResolvedValue({ ...active, currentQuestionId: 'q2' });
+    questionFindUnique.mockResolvedValue(q2);
+    await focusQuestion({ sessionId: 's1', questionId: 'q2', leaderId: 'leader-1' });
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a caller who is not the leader', async () => {
+    sessionFindUnique.mockResolvedValue(active);
+    await expect(
+      focusQuestion({ sessionId: 's1', questionId: 'q2', leaderId: 'other' }),
+    ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
+  });
+
+  it('emitQuestionFocus broadcasts sessionFocus to the session room', () => {
+    const emit = vi.fn();
+    const to = vi.fn(() => ({ emit }));
+    const io = { to } as unknown as Parameters<typeof emitQuestionFocus>[0];
+
+    emitQuestionFocus(io, 's1', 'q2');
+
+    expect(to).toHaveBeenCalledWith('session:s1');
+    expect(emit).toHaveBeenCalledWith('sessionFocus', { sessionId: 's1', questionId: 'q2' });
   });
 });

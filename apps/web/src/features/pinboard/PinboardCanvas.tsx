@@ -522,9 +522,9 @@ export function PinboardCanvas({
             </span>
           </div>
           {isLeader ? (
-            <EndSessionControl sessionId={board.sessionId} className="text-white" />
+            <EndSessionControl sessionId={board.sessionId} />
           ) : (
-            <LeaveSessionControl sessionId={board.sessionId} className="text-white" />
+            <LeaveSessionControl sessionId={board.sessionId} />
           )}
         </div>
       </header>

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createSessionSchema,
+  focusQuestionSchema,
   joinSessionSchema,
   setQuestionPhaseSchema,
   updateSessionSchema,
@@ -8,15 +9,18 @@ import {
 
 import { requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
-import type { RealtimeServer } from '../../realtime/types.js';
+import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
 import {
   assertSessionMember,
   createSession,
   deleteSession,
+  emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
+  focusQuestion,
+  getSessionMemberIdentity,
   getSessionWithQuestions,
   joinSessionByCode,
   leaveSession,
@@ -197,6 +201,33 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
+  // Point the board at a question without changing its status, so the room
+  // can look back at an answered pinboard. Same leader-only REST + broadcast
+  // pattern as phase changes.
+  sessionsRoutes.post<{ id: string }>('/:id/focus', requireAuth, async (req, res, next) => {
+    try {
+      const parsed = focusQuestionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ApiError(
+          400,
+          parsed.error.issues[0]?.message ?? 'Invalid focus',
+          'VALIDATION_ERROR',
+        );
+      }
+
+      const leaderId = req.userId!;
+      const question = await focusQuestion({
+        sessionId: req.params.id,
+        questionId: parsed.data.questionId,
+        leaderId,
+      });
+      emitQuestionFocus(io, req.params.id, question.id);
+      res.json(question);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // F32: lobby/active -> ended. Leader-only, irreversible (the confirmation
   // is the client's job), and broadcasts `sessionEnded` so nobody is left on a
   // board that has stopped accepting writes.
@@ -217,7 +248,29 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
   sessionsRoutes.post<{ id: string }>('/:id/leave', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;
+      // Identity before the leave stamps `leftAt` — afterwards they are no
+      // longer a current member and `getSessionMemberIdentity` would miss them.
+      const identity = await getSessionMemberIdentity(req.params.id, userId);
       await leaveSession({ sessionId: req.params.id, userId });
+
+      // Presence is socket-room state. Leaving via REST used to leave their
+      // socket in the room until the tab closed, so "Here now" kept showing
+      // them. Pull every socket for this user out of the room and announce
+      // the leave immediately. Clearing `sessionId` on those sockets is what
+      // stops the gateway's `disconnect` handler from emitting `memberLeft`
+      // a second time when the client then drops the socket.
+      if (identity) {
+        const room = sessionRoom(req.params.id);
+        const sockets = await io.in(room).fetchSockets();
+        for (const socket of sockets) {
+          if (socket.data.user?.id === userId) {
+            socket.data.sessionId = null;
+            await socket.leave(room);
+          }
+        }
+        io.to(room).emit('memberLeft', { user: identity });
+      }
+
       res.status(204).end();
     } catch (err) {
       next(err);

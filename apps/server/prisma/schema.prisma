@@ -72,6 +72,11 @@ model Session {
   // spent in the waiting room.
   startedAt DateTime?
   endedAt   DateTime?
+  // The question the board is showing. Distinct from each question's own
+  // status: the leader can look back at an answered question's pinboard
+  // without reopening it (proposals stay closed). Set when the session
+  // starts, then by phase changes and by an explicit focus.
+  currentQuestionId String?
 
   questions Question[]
   members   SessionMember[]

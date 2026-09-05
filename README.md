@@ -96,21 +96,26 @@ Both seeded accounts share the password **`roundtable`**:
 
 Re-run the seed if you seeded before September 2026 — earlier runs stored a
 placeholder hash that no password matches, so those accounts can't log in.
+The seeded `DEMO-0001` session is **ended**, so login lands on the dashboard
+instead of a leftover live board. Create a new session from there to exercise
+the waiting room and pinboard.
 
 ### Watching proposals appear live (two windows)
 
 Two windows have to be two *people*, and identity now comes from the token, so
 one browser profile can only be one user at a time. Use a normal window and a
 private/incognito one (or two profiles): log in as Alice in the first and Bob in
-the second, then open the same `/sessions/<id>` in both.
+the second.
+
+Share the waiting-room **code** or **link** into Bob's window — the link is
+`http://localhost:5173/join/<code>` locally, which only works if it opens in
+Bob's browser, not Alice's. Opening it in the same profile is still Alice.
 
 Propose from one window and the card appears in both, highlighted briefly. A
 socket may only join a session its user is a member of — Bob has to join by
-code first (or be the seeded member he already is), otherwise the join is
-refused and the board shows `offline`.
+code or link first, otherwise the join is refused and the board shows `offline`.
 
-The handshake is read once, when the socket is created, so logging in or out
-needs a page refresh before the new identity is used.
+Logging in or out drops the socket so the next page uses the new identity.
 
 ## Build & Deploy
 

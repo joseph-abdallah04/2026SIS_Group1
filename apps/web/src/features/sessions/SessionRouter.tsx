@@ -4,6 +4,7 @@ import { SessionPinboard } from '../pinboard/SessionPinboard';
 import { useCurrentUserId } from '../../lib/currentUser';
 import { SessionDraftPage } from './SessionDraftPage';
 import { SessionEndedPage } from './SessionEndedPage';
+import { LiveSessionExitGuard } from './LiveSessionExitGuard';
 import { useSessionDetail } from './useSessionDetail';
 import { useSessionEndedListener } from './useSessionEndedListener';
 import { useSessionPhaseListener } from './useSessionPhaseListener';
@@ -59,20 +60,31 @@ export function SessionRouter() {
     );
   }
 
+  const isLeader = session.leaderId === currentUserId;
+  const exitGuard =
+    session.status === 'lobby' || session.status === 'active' ? (
+      <LiveSessionExitGuard sessionId={sessionId} enabled isLeader={isLeader} onEnded={reload} />
+    ) : null;
+
   switch (session.status) {
     case 'draft':
       return <SessionDraftPage session={session} onOpened={reload} />;
     case 'lobby':
-      return <WaitingRoom session={session} onStarted={reload} />;
+      return (
+        <>
+          {exitGuard}
+          <WaitingRoom session={session} onStarted={reload} />
+        </>
+      );
     case 'active':
       // `questions` is passed down rather than re-fetched by the board: this
       // component already holds the agenda (F24 renders it), and two fetches
       // of the same list could disagree.
       return (
-        <SessionPinboard
-          isLeader={session.leaderId === currentUserId}
-          questions={session.questions}
-        />
+        <>
+          {exitGuard}
+          <SessionPinboard isLeader={isLeader} questions={session.questions} />
+        </>
       );
     case 'ended':
       return <SessionEndedPage session={session} />;

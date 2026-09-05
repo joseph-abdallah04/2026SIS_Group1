@@ -120,7 +120,11 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   }
 
   return (
-    <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
+    <CreativeToolsProvider
+      isLive={isLive && board.questionStatus === 'discussion'}
+      proposals={board.items}
+      propose={propose}
+    >
       {/* `overflow-hidden` so nothing on the board can produce a page-level
           scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
       <main className="h-dvh overflow-hidden">
