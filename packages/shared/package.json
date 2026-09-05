@@ -6,16 +6,19 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
+      "development": "./src/index.ts",
       "node": "./dist/index.js",
       "default": "./src/index.ts"
     },
     "./events": {
       "types": "./src/events.ts",
+      "development": "./src/events.ts",
       "node": "./dist/events.js",
       "default": "./src/events.ts"
     },
     "./schemas": {
       "types": "./src/schemas.ts",
+      "development": "./src/schemas.ts",
       "node": "./dist/schemas.js",
       "default": "./src/schemas.ts"
     },
