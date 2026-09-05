@@ -4,13 +4,25 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./events": "./src/events.ts",
-    "./schemas": "./src/schemas.ts",
+    ".": {
+      "types": "./src/index.ts",
+      "node": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./events": {
+      "types": "./src/events.ts",
+      "node": "./dist/events.js",
+      "default": "./src/events.ts"
+    },
+    "./schemas": {
+      "types": "./src/schemas.ts",
+      "node": "./dist/schemas.js",
+      "default": "./src/schemas.ts"
+    },
     "./assets/roundtable-logo.svg": "./src/assets/roundtable-logo.svg"
   },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "echo \"No tests yet\""
