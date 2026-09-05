@@ -1,5 +1,9 @@
-import { diagramEdgeGeometry, type DiagramNode } from '@roundtable/shared';
-import { diagramArtifactSchema } from '@roundtable/shared/schemas';
+import {
+  diagramEdgeGeometry,
+  diagramEdgeToPointGeometry,
+  type DiagramNode,
+} from '@roundtable/shared';
+import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 import { describe, expect, it } from 'vitest';
 
 import { DIAGRAM_EDGE_LIMIT } from '../artifactLimits';
@@ -119,14 +123,14 @@ describe('diagram edge validation at submission', () => {
 
   it('rejects invalid edge references in the shared server schema', () => {
     expect(
-      diagramArtifactSchema.safeParse({
+      diagramWriteArtifactSchema.safeParse({
         type: 'diagram',
         nodes,
         edges: [{ from: 'n1', to: 'missing' }],
       }).success,
     ).toBe(false);
     expect(
-      diagramArtifactSchema.safeParse({
+      diagramWriteArtifactSchema.safeParse({
         type: 'diagram',
         nodes,
         edges: [
@@ -165,7 +169,7 @@ describe('diagram edge validation at submission', () => {
 
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
-    expect(diagramArtifactSchema.safeParse(prepared.artifact).success).toBe(true);
+    expect(diagramWriteArtifactSchema.safeParse(prepared.artifact).success).toBe(true);
     expect(prepared.artifact.nodes[0]).toMatchObject({
       label: 'Client',
       x: DIAGRAM_PREVIEW_PADDING,
@@ -189,5 +193,11 @@ describe('straight edge geometry', () => {
     );
 
     expect(geometry).toMatchObject({ x1: 72, y1: 16, x2: 172, y2: 16 });
+  });
+
+  it('starts a live preview at the source boundary and ends at the pointer', () => {
+    expect(
+      diagramEdgeToPointGeometry({ x: 20, y: 40, shape: 'box' }, { x: 300, y: 68 }),
+    ).toMatchObject({ x1: 140, y1: 68, x2: 300, y2: 68 });
   });
 });

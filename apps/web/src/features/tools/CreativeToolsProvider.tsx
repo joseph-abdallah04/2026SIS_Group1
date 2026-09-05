@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput } from '@roundtable/shared/schemas';
@@ -24,6 +24,21 @@ export function CreativeToolsProvider({
   const [extensionSource, setExtensionSource] = useState<BoardItem | null>(null);
   const activeTool = parseToolKind(searchParams.get('tool'));
   const submission = useProposalSubmission({ extensionSource, isLive, proposals, propose });
+  const closeGuardRef = useRef<(() => boolean) | null>(null);
+
+  const setCloseGuard = useCallback((guard: (() => boolean) | null) => {
+    closeGuardRef.current = guard;
+  }, []);
+
+  useEffect(() => {
+    if (!activeTool) return;
+
+    const onPopState = () => {
+      if (closeGuardRef.current && !closeGuardRef.current()) window.history.forward();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [activeTool]);
 
   function setToolParam(tool: ToolKind, replace: boolean) {
     const nextParams = new URLSearchParams(searchParams);
@@ -44,6 +59,7 @@ export function CreativeToolsProvider({
   }
 
   function closeTool() {
+    if (closeGuardRef.current && !closeGuardRef.current()) return;
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('tool');
     setSearchParams(nextParams, { replace: true });
@@ -62,6 +78,7 @@ export function CreativeToolsProvider({
         openTool,
         openEditorForExtend,
         closeTool,
+        setCloseGuard,
         resetSubmission: submission.reset,
         submitArtifact: submission.submitArtifact,
       }}
