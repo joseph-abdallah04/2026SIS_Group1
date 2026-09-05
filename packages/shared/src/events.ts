@@ -55,6 +55,18 @@ export interface ClientToServerEvents {
     payload: { sessionId: string },
     ack?: (res: { ok: boolean; error?: string }) => void,
   ): void;
+  /**
+   * Leave a session room without dropping the TCP connection. The waiting
+   * room and pinboard emit this on unmount so navigating to the dashboard
+   * drops you from "Here now"; a page refresh still uses `disconnect`.
+   *
+   * No-op (and still `ok`) if this socket is not currently in that room —
+   * a Strict Mode remount may join again before the deferred leave fires.
+   */
+  memberLeave(
+    payload: { sessionId: string },
+    ack?: (res: { ok: boolean; error?: string }) => void,
+  ): void;
 
   // === sessions module ===
 

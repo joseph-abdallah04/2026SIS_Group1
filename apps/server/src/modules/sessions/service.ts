@@ -94,6 +94,11 @@ export interface OpenSessionArgs {
  *
  * Already-`lobby` is treated as success, not a conflict: a double-click on
  * "Open for joining" should be a no-op, not an error toast.
+ *
+ * The write itself is `updateMany` filtered on `status: 'draft'`, not
+ * `update` by id. Two in-flight opens would otherwise both pass the draft
+ * check and the second would overwrite the first minted code — anyone who
+ * copied the first one would be holding a code that no longer resolves.
  */
 export async function openSessionForJoining({
   sessionId,
@@ -115,18 +120,36 @@ export async function openSessionForJoining({
 
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     try {
-      return await prisma.session.update({
-        where: { id: sessionId },
+      const claimed = await prisma.session.updateMany({
+        where: { id: sessionId, status: 'draft' },
         data: { code: generateSessionCode(), status: 'lobby' },
       });
+      if (claimed.count === 1) {
+        const opened = await prisma.session.findUnique({ where: { id: sessionId } });
+        if (!opened) {
+          throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+        }
+        return opened;
+      }
+      const current = await prisma.session.findUnique({ where: { id: sessionId } });
+      if (!current) {
+        throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+      }
+      if (current.status === 'lobby') {
+        return current;
+      }
+      throw new ApiError(
+        409,
+        `Cannot open a session that is ${current.status}`,
+        'INVALID_TRANSITION',
+      );
     } catch (err) {
-      if (!isUniqueConstraintViolation(err) || attempt === MAX_CODE_ATTEMPTS - 1) throw err;
+      if (err instanceof ApiError) throw err;
+      if (!isUniqueConstraintViolation(err)) throw err;
       // Collision on the code itself — try again with a fresh one. At ~8.5e11
       // possible codes this is a correctness backstop, not a hot path.
     }
   }
-  // Unreachable — the loop above always returns or throws — but keeps the
-  // function's return type honest without a non-null assertion.
   throw new ApiError(500, 'Could not allocate a session code', 'CODE_ALLOCATION_FAILED');
 }
 
@@ -233,6 +256,27 @@ export async function getSessionMemberIdentity(
     select: { user: { select: { id: true, displayName: true } } },
   });
   return membership?.user ?? null;
+}
+
+/**
+ * REST counterpart to the socket room check above: a session's title,
+ * questions, and member names are only for people in it. Session ids are not
+ * secrets — they sit in shareable URLs — so "knows the id" cannot be the
+ * authorisation for reading a session; the invite code is (F06), and using it
+ * produces the membership this asserts.
+ *
+ * Every legitimate caller already passes: the join flow is code -> `POST
+ * /join` -> membership -> `GET /:id`, and F04 makes the leader a member at
+ * creation.
+ */
+export async function assertSessionMember(sessionId: string, userId: string): Promise<void> {
+  const membership = await prisma.sessionMember.findUnique({
+    where: { sessionId_userId: { sessionId, userId } },
+    select: { id: true },
+  });
+  if (!membership) {
+    throw new ApiError(403, 'You are not a member of this session', 'NOT_SESSION_MEMBER');
+  }
 }
 
 /**

@@ -75,6 +75,19 @@ async function userHasAnotherSocketInRoom(
   return sockets.some((s) => s.id !== excludeSocketId && s.data.user?.id === userId);
 }
 
+/** Presence is per-user, not per-socket: a second tab closing is not a leave. */
+async function emitMemberLeftIfLast(
+  io: RealtimeServer,
+  socket: RealtimeSocket,
+  sessionId: string,
+  user: SocketUser,
+): Promise<void> {
+  const stillThere = await userHasAnotherSocketInRoom(io, sessionId, user.id, socket.id);
+  if (!stillThere) {
+    socket.to(sessionRoom(sessionId)).emit('memberLeft', { user });
+  }
+}
+
 export function registerRealtimeGateway(io: RealtimeServer): void {
   io.on('connection', (socket) => {
     socket.data.user = null;
@@ -107,21 +120,18 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
           const previous = socket.data.sessionId;
           if (previous && previous !== sessionId) {
             await socket.leave(sessionRoom(previous));
-            const stillThere = await userHasAnotherSocketInRoom(io, previous, user.id, socket.id);
-            if (!stillThere) {
-              socket.to(sessionRoom(previous)).emit('memberLeft', { user });
-            }
+            await emitMemberLeftIfLast(io, socket, previous, user);
           }
 
           // Checked *before* this socket joins, so it reflects only other
-          // sockets — the question is "was this user already present",  not
-          // "is this socket in the room yet".
-          const alreadyPresent = await userHasAnotherSocketInRoom(
-            io,
-            sessionId,
-            user.id,
-            socket.id,
-          );
+          // sockets — the question is "was this user already present", not
+          // "is this socket in the room yet". Rejoining the *same* socket
+          // (React Strict Mode remounts `memberJoin` without leaving the
+          // room) must also count as already present, or the room gets a
+          // second `memberJoined` for someone who never left.
+          const alreadyPresent =
+            socket.data.sessionId === sessionId ||
+            (await userHasAnotherSocketInRoom(io, sessionId, user.id, socket.id));
 
           socket.data.user = user;
           socket.data.sessionId = sessionId;
@@ -160,6 +170,38 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
       })();
     });
 
+    // Clients cannot `socket.leave()` a server room themselves; the waiting
+    // room and pinboard emit this on unmount so a trip to the dashboard
+    // drops the user from "Here now" without tearing down the singleton.
+    socket.on('memberLeave', ({ sessionId }, ack) => {
+      void (async () => {
+        try {
+          if (typeof sessionId !== 'string' || sessionId.length === 0) {
+            ack?.({ ok: false, error: 'sessionId is required' });
+            return;
+          }
+          // A leave for a room this socket is not in is a no-op — the
+          // deferred client leave can fire after a remount already joined
+          // a different session, or after REST leave already kicked us.
+          if (socket.data.sessionId !== sessionId) {
+            ack?.({ ok: true });
+            return;
+          }
+
+          const user = socket.data.user;
+          await socket.leave(sessionRoom(sessionId));
+          socket.data.sessionId = null;
+          if (user) {
+            await emitMemberLeftIfLast(io, socket, sessionId, user);
+          }
+          ack?.({ ok: true });
+        } catch (err) {
+          console.error('[realtime] memberLeave failed:', err);
+          ack?.({ ok: false, error: 'Failed to leave session' });
+        }
+      })();
+    });
+
     registerPinboardSocketHandlers(io, socket);
 
     socket.on('disconnect', () => {
@@ -169,10 +211,7 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
       void (async () => {
         // By the time `disconnect` fires the socket has already left every
         // room, so this reflects only sockets other than the one closing.
-        const stillThere = await userHasAnotherSocketInRoom(io, sessionId, user.id, socket.id);
-        if (!stillThere) {
-          socket.to(sessionRoom(sessionId)).emit('memberLeft', { user });
-        }
+        await emitMemberLeftIfLast(io, socket, sessionId, user);
       })();
     });
   });

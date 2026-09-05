@@ -3,6 +3,7 @@
 // from a file inside.
 export { sessionsRoutes } from './routes.js';
 export {
+  assertSessionMember,
   createSession,
   generateSessionCode,
   getActiveQuestion,

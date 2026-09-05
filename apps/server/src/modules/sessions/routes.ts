@@ -4,6 +4,7 @@ import { createSessionSchema, joinSessionSchema } from '@roundtable/shared/schem
 import { requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
 import {
+  assertSessionMember,
   createSession,
   getSessionWithQuestions,
   joinSessionByCode,
@@ -63,10 +64,15 @@ sessionsRoutes.get('/', requireAuth, async (req, res, next) => {
 // nothing to do with the code lookup below.
 sessionsRoutes.get<{ id: string }>('/:id', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.userId!;
     const session = await getSessionWithQuestions(req.params.id);
     if (!session) {
       throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
     }
+    // Members only: the questions are the agenda, and a session id is a
+    // shareable URL fragment rather than a secret. Checked after the 404 so
+    // a real member of a deleted session still gets "not found".
+    await assertSessionMember(session.id, userId);
     res.json(session);
   } catch (err) {
     next(err);
@@ -121,8 +127,11 @@ sessionsRoutes.post('/join', requireAuth, async (req, res, next) => {
 });
 
 // The waiting room's initial render, before live presence events arrive.
+// Members only — this is a list of other people's display names.
 sessionsRoutes.get<{ id: string }>('/:id/members', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.userId!;
+    await assertSessionMember(req.params.id, userId);
     const members = await listSessionMembers(req.params.id);
     res.json(members);
   } catch (err) {
