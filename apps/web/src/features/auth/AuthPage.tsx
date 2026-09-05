@@ -9,7 +9,7 @@ import { disconnectSocket } from '../../lib/socket';
 import { login, signup } from './api';
 
 const INPUT_CLASSES =
-  'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:outline-none';
+  'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none';
 
 const LABEL_CLASSES =
   'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
@@ -19,13 +19,13 @@ const LABEL_CLASSES =
  * `rounded-lg` for every other button in the app, and a `className` override
  * can't reliably win that fight (Tailwind resolves conflicting utilities like
  * `rounded-lg`/`rounded-full` by generation order, not DOM order). Uses the
- * existing gold `rt-secondary` token as the warm accent — no new colors.
+ * mustard `rt-secondary` token as the CTA — same gold as the rest of the app.
  */
 function SubmitButton({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="submit"
-      className="mt-2 w-full rounded-full bg-rt-secondary px-4 py-3 text-sm font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+      className="mt-2 w-full rounded-full bg-rt-secondary px-4 py-3 text-sm font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
       {...props}
     >
       {children}

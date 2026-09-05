@@ -110,7 +110,7 @@ function EmptyBoardPlate() {
             </p>
           </div>
           <div className="flex items-center gap-3 py-2.5">
-            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-primary-tint" />
+            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-cool-tint" />
             <p className="text-[12.5px] font-medium text-rt-ink">
               Diagram
               <span className="font-normal text-rt-ink-faint"> — soft border, box preview</span>
@@ -126,7 +126,7 @@ function EmptyBoardPlate() {
         <button
           type="button"
           disabled
-          className="rounded-full bg-rt-primary px-[18px] py-[9px] text-[12px] font-semibold text-white opacity-90"
+          className="rounded-full bg-rt-secondary px-[18px] py-[9px] text-[12px] font-semibold text-rt-ink opacity-90"
           title="Coming in F22"
         >
           Propose the first idea
@@ -159,7 +159,7 @@ function ZoomControl({
         onClick={onZoomOut}
         disabled={!canZoomOut}
         title={canZoomOut ? 'Zoom out' : 'The whole board is already in view'}
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
       >
         −
       </button>
@@ -171,14 +171,14 @@ function ZoomControl({
         onClick={onZoomIn}
         disabled={!canZoomIn}
         title="Zoom in"
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
       >
         +
       </button>
       <button
         type="button"
         onClick={onFit}
-        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
+        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary"
       >
         Fit
       </button>
@@ -488,10 +488,10 @@ export function PinboardCanvas({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-3 border-b border-rt-primary-tint bg-rt-primary px-6 py-3 text-white">
+      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-6 py-3 text-rt-ink">
         <RoundTableLogo />
-        <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-white/25 bg-white px-3.5 py-1.5 shadow-sm">
-          <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-primary-deep uppercase">
+        <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
+          <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
             {phaseLabel}
           </span>
           {board.questionText ? (
@@ -503,11 +503,11 @@ export function PinboardCanvas({
           )}
         </div>
         <div className="ml-auto flex items-center gap-2.5">
-          <span className="rounded-full border border-rt-primary-tint bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-primary-deep shadow-sm">
+          <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
           </span>
           <div
-            className="flex items-center gap-[7px] rounded-full border border-rt-primary-tint bg-white px-2.5 py-1 shadow-sm"
+            className="flex items-center gap-[7px] rounded-full border border-rt-secondary/25 bg-white px-2.5 py-1 shadow-sm"
             title={
               isLive
                 ? 'Connected: new proposals appear here as they are made'
@@ -515,9 +515,9 @@ export function PinboardCanvas({
             }
           >
             <div
-              className={`h-[7px] w-[7px] rounded-full ${isLive ? 'bg-rt-primary' : 'bg-rt-tertiary'}`}
+              className={`h-[7px] w-[7px] rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
             />
-            <span className="text-[10.5px] font-medium text-rt-primary-deep">
+            <span className="text-[10.5px] font-medium text-rt-secondary-deep">
               {isLive ? 'live' : 'offline'}
             </span>
           </div>

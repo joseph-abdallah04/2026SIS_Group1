@@ -18,6 +18,8 @@ const sessionDelete = vi.fn();
 const sessionMemberUpsert = vi.fn();
 const sessionMemberUpdateMany = vi.fn();
 const sessionMemberFindUnique = vi.fn();
+const sessionMemberUpdate = vi.fn();
+const sessionMemberCount = vi.fn();
 const questionFindUnique = vi.fn();
 const questionFindFirst = vi.fn();
 const questionUpdate = vi.fn();
@@ -45,7 +47,12 @@ const txClient = {
     findFirst: questionFindFirst,
     update: questionUpdate,
   },
-  sessionMember: { create: sessionMemberCreate },
+  sessionMember: {
+    create: sessionMemberCreate,
+    findUnique: sessionMemberFindUnique,
+    update: sessionMemberUpdate,
+    count: sessionMemberCount,
+  },
 };
 
 vi.mock('../../db.js', () => ({
@@ -62,6 +69,7 @@ vi.mock('../../db.js', () => ({
       upsert: sessionMemberUpsert,
       updateMany: sessionMemberUpdateMany,
       findUnique: sessionMemberFindUnique,
+      update: sessionMemberUpdate,
     },
     question: { findMany: questionFindManyTopLevel, findUnique: questionFindUnique },
   },
@@ -393,26 +401,72 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
     expect(result.questions).toHaveLength(2);
   });
 
-  it('deleteSession rejects a non-leader and never deletes', async () => {
+  it('deleteSession rejects a non-leader and never deletes a draft', async () => {
     sessionFindUnique.mockResolvedValueOnce(draftSession);
     await expect(
-      deleteSession({ sessionId: 's1', leaderId: 'not-the-leader' }),
+      deleteSession({ sessionId: 's1', userId: 'not-the-leader' }),
     ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
     expect(sessionDelete).not.toHaveBeenCalled();
   });
 
-  it('deleteSession rejects a session that has left draft', async () => {
-    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'active' });
-    await expect(deleteSession({ sessionId: 's1', leaderId: 'leader-1' })).rejects.toMatchObject({
-      code: 'INVALID_TRANSITION',
-    });
-    expect(sessionDelete).not.toHaveBeenCalled();
+  it.each(['lobby', 'active'] as const)(
+    'deleteSession rejects a live %s session — end it first, do not wipe the room',
+    async (status) => {
+      sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status });
+      await expect(deleteSession({ sessionId: 's1', userId: 'leader-1' })).rejects.toMatchObject({
+        code: 'INVALID_TRANSITION',
+      });
+      expect(sessionDelete).not.toHaveBeenCalled();
+    },
+  );
+
+  it('deleteSession deletes a draft once the leader guard passes', async () => {
+    sessionFindUnique.mockResolvedValueOnce(draftSession);
+    await deleteSession({ sessionId: 's1', userId: 'leader-1' });
+    expect(sessionDelete).toHaveBeenCalledWith({ where: { id: 's1' } });
   });
 
-  it('deleteSession deletes the row once the leader/draft guard passes', async () => {
-    sessionFindUnique.mockResolvedValueOnce(draftSession);
-    await deleteSession({ sessionId: 's1', leaderId: 'leader-1' });
+  it('deleteSession hides an ended session for that member and does not destroy the row', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'ended' });
+    sessionMemberFindUnique.mockResolvedValueOnce({ id: 'm1' });
+    sessionMemberCount.mockResolvedValueOnce(1);
+    await deleteSession({ sessionId: 's1', userId: 'u2' });
+    expect(sessionDelete).not.toHaveBeenCalled();
+    expect(sessionMemberUpdate).toHaveBeenCalledWith({
+      where: { sessionId_userId: { sessionId: 's1', userId: 'u2' } },
+      data: { hiddenAt: expect.any(Date) },
+    });
+  });
+
+  it('deleteSession lets the leader hide an ended session without wiping it for others', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'ended' });
+    sessionMemberFindUnique.mockResolvedValueOnce({ id: 'm-leader' });
+    sessionMemberCount.mockResolvedValueOnce(2);
+    await deleteSession({ sessionId: 's1', userId: 'leader-1' });
+    expect(sessionDelete).not.toHaveBeenCalled();
+    expect(sessionMemberUpdate).toHaveBeenCalledWith({
+      where: { sessionId_userId: { sessionId: 's1', userId: 'leader-1' } },
+      data: { hiddenAt: expect.any(Date) },
+    });
+  });
+
+  it('deleteSession destroys an ended session once the last member has hidden it', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'ended' });
+    sessionMemberFindUnique.mockResolvedValueOnce({ id: 'm-last' });
+    sessionMemberCount.mockResolvedValueOnce(0);
+    await deleteSession({ sessionId: 's1', userId: 'u2' });
+    expect(sessionMemberUpdate).toHaveBeenCalled();
     expect(sessionDelete).toHaveBeenCalledWith({ where: { id: 's1' } });
+  });
+
+  it('deleteSession rejects hiding an ended session the caller never joined', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'ended' });
+    sessionMemberFindUnique.mockResolvedValueOnce(null);
+    await expect(deleteSession({ sessionId: 's1', userId: 'stranger' })).rejects.toMatchObject({
+      code: 'NOT_SESSION_MEMBER',
+    });
+    expect(sessionMemberUpdate).not.toHaveBeenCalled();
+    expect(sessionDelete).not.toHaveBeenCalled();
   });
 });
 
@@ -773,6 +827,16 @@ describe('leftAt semantics', () => {
     // someone back into the session they just left.
     expect(sessions.map((s) => s.isCurrentMember)).toEqual([true, false]);
   });
+
+  it('listSessionsForUser omits sessions the caller has hidden from their dashboard', async () => {
+    sessionFindMany.mockResolvedValueOnce([]);
+    await listSessionsForUser('u2');
+    expect(sessionFindMany.mock.calls[0]?.[0].where.AND).toEqual(
+      expect.arrayContaining([
+        { NOT: { members: { some: { userId: 'u2', hiddenAt: { not: null } } } } },
+      ]),
+    );
+  });
 });
 
 describe('assertSessionMember', () => {
@@ -796,7 +860,14 @@ describe('setQuestionPhase (F25/F26)', () => {
   const activeSession = { leaderId: 'leader-1', status: 'active' as const };
 
   function question(overrides: Partial<QuestionRow> = {}): QuestionRow {
-    return { id: 'q1', sessionId: 's1', text: 'What ships first?', position: 0, status: 'pending', ...overrides };
+    return {
+      id: 'q1',
+      sessionId: 's1',
+      text: 'What ships first?',
+      position: 0,
+      status: 'pending',
+      ...overrides,
+    };
   }
 
   interface QuestionRow {

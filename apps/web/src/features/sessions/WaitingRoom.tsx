@@ -29,7 +29,7 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Waiting room</span>
         <div className="ml-auto">

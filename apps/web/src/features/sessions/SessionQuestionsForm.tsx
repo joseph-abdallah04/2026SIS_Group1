@@ -11,7 +11,7 @@ interface SessionQuestionsFormProps {
   submitting: boolean;
   error: string | null;
   onSubmit: (input: CreateSessionInput) => void | Promise<void>;
-  /** Rendered after the submit button — F05's Delete action, or nothing for create. */
+  /** Rendered after the submit button — F05's Delete, or create-page Cancel. */
   extraActions?: React.ReactNode;
 }
 
@@ -39,6 +39,8 @@ export function SessionQuestionsForm({
     initialQuestions.length > 0 ? initialQuestions : [''],
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  const ready = title.trim().length > 0 && questions.some((question) => question.trim().length > 0);
 
   function updateQuestion(index: number, text: string) {
     setQuestions((prev) => prev.map((q, i) => (i === index ? text : q)));
@@ -68,10 +70,12 @@ export function SessionQuestionsForm({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    // Incomplete forms never submit — the button is disabled, and this
+    // catches Enter-in-a-field. No zod toast: those messages are what
+    // this gate exists to avoid.
+    if (!ready || submitting) return;
     setValidationError(null);
 
-    // Client-side check mirrors the server's zod schema so a bad submission
-    // never round-trips just to be told what a glance here already shows.
     const parsed = createSessionSchema.safeParse({
       title,
       questions: questions.map((q) => q.trim()).filter((q) => q.length > 0),
@@ -97,7 +101,7 @@ export function SessionQuestionsForm({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="What is this session about?"
           maxLength={120}
-          className="min-h-10 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-primary-deep"
+          className="min-h-10 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
         />
       </div>
 
@@ -115,7 +119,7 @@ export function SessionQuestionsForm({
                 onChange={(e) => updateQuestion(index, e.target.value)}
                 placeholder={`Question ${index + 1}`}
                 maxLength={500}
-                className="min-h-10 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-primary-deep"
+                className="min-h-10 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
               />
               <button
                 type="button"
@@ -157,7 +161,7 @@ export function SessionQuestionsForm({
       )}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={submitting} className="self-start">
+        <Button type="submit" disabled={submitting || !ready} className="self-start">
           {submitting ? submittingLabel : submitLabel}
         </Button>
         {extraActions}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
 import { api, ApiClientError } from '../../lib/api';
+import { UNKNOWN_JOIN_BODY, UNKNOWN_JOIN_TITLE } from './joinCopy';
 
 interface SessionPreview {
   id: string;
@@ -13,22 +14,30 @@ interface SessionPreview {
   questionCount: number;
 }
 
+function isUnknownJoinCode(err: unknown): boolean {
+  if (!(err instanceof ApiClientError)) return false;
+  return err.status === 404 || err.code === 'INVALID_CODE' || err.code === 'SESSION_NOT_JOINABLE';
+}
+
 /**
- * `/join/:code` — resolves the code to a preview before committing to
- * anything (so a mistyped code fails with a clear message rather than a
- * silent join), then joins and hands off to `SessionRouter`, which lands the
- * new member in the waiting room once it sees they're now a member.
+ * `/join/:code` — sits behind `RequireAuth`, so a pasted link still goes
+ * through login (or signup) first, valid code or not. Resolves the code to a
+ * preview before committing, then joins and hands off to `SessionRouter`.
  */
 export function JoinSessionPage() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
 
   const [preview, setPreview] = useState<SessionPreview | null>(null);
+  const [unknownCode, setUnknownCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
-    if (!code) return;
+    if (!code) {
+      setUnknownCode(true);
+      return;
+    }
     let cancelled = false;
     const codeParam = code;
 
@@ -39,9 +48,12 @@ export function JoinSessionPage() {
         );
         if (!cancelled) setPreview(data);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof ApiClientError ? err.message : 'Failed to look up that code');
+        if (cancelled) return;
+        if (isUnknownJoinCode(err)) {
+          setUnknownCode(true);
+          return;
         }
+        setError(err instanceof ApiClientError ? err.message : 'Failed to look up that code');
       }
     }
 
@@ -59,6 +71,11 @@ export function JoinSessionPage() {
       const { sessionId } = await api.post<{ sessionId: string }>('/api/sessions/join', { code });
       navigate(`/sessions/${sessionId}`, { replace: true });
     } catch (err) {
+      if (isUnknownJoinCode(err)) {
+        setUnknownCode(true);
+        setJoining(false);
+        return;
+      }
       setError(err instanceof ApiClientError ? err.message : 'Failed to join that session');
       setJoining(false);
     }
@@ -66,21 +83,44 @@ export function JoinSessionPage() {
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Join session</span>
       </header>
 
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-6 py-10">
-        {!preview && !error && <p className="text-[13px] text-rt-ink-muted">Looking up {code}…</p>}
+        {!preview && !unknownCode && !error && (
+          <p className="text-[13px] text-rt-ink-muted">Looking up {code}…</p>
+        )}
 
-        {error && (
-          <div className="w-full rounded-lg border border-rt-tertiary bg-rt-surface-alt p-4 text-center">
-            <p className="text-[13px] text-red-600">{error}</p>
+        {unknownCode && (
+          <div className="flex w-full flex-col gap-4 rounded-lg border border-rt-tertiary bg-rt-surface p-5 text-center shadow-sm">
+            <div>
+              <h1 className="text-[16px] font-semibold tracking-[-0.01em]">{UNKNOWN_JOIN_TITLE}</h1>
+              <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">
+                {UNKNOWN_JOIN_BODY}
+              </p>
+            </div>
+            <Link to="/dashboard">
+              <Button type="button" className="w-full">
+                Go to dashboard
+              </Button>
+            </Link>
           </div>
         )}
 
-        {preview && (
+        {error && !unknownCode && (
+          <div className="flex w-full flex-col gap-4 rounded-lg border border-rt-tertiary bg-rt-surface p-5 text-center shadow-sm">
+            <p className="text-[13px] leading-relaxed text-rt-ink-muted">{error}</p>
+            <Link to="/dashboard">
+              <Button type="button" className="w-full">
+                Go to dashboard
+              </Button>
+            </Link>
+          </div>
+        )}
+
+        {preview && !unknownCode && (
           <div className="flex w-full flex-col gap-4 rounded-lg border border-rt-tertiary bg-rt-surface-alt p-5 text-center">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">

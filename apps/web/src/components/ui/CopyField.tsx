@@ -52,7 +52,7 @@ export function CopyField({ label, value }: CopyFieldProps) {
           value={value}
           aria-label={label}
           onFocus={(e) => e.currentTarget.select()}
-          className="min-h-10 min-w-0 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface-alt px-3 py-2 font-mono text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-primary-deep"
+          className="min-h-10 min-w-0 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface-alt px-3 py-2 font-mono text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
         />
         <Button type="button" variant="secondary" onClick={() => void copy()}>
           {copied ? 'Copied' : 'Copy'}

@@ -116,6 +116,11 @@ model SessionMember {
   // orphan any Vote rows they left behind). NULL means "currently in the
   // session"; rejoining by code clears it and keeps the original `joinedAt`.
   leftAt    DateTime?
+  // Dashboard-only hide for an ended session. Distinct from `leftAt` (which
+  // is "I walked out of a live room"). NULL means it still appears on this
+  // user's dashboard. Once every member has hidden it, the session row is
+  // deleted — that is the GC path, not one person wiping it for the rest.
+  hiddenAt  DateTime?
 
   // History of who joined this session — not live presence (that's socket-room
   // state, kept in memory; see docs/02 §4 "What gets persisted vs kept in memory").

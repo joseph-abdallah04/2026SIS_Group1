@@ -124,12 +124,10 @@ export interface MutateDraftArgs {
 }
 
 /**
- * Shared guard for F05's two mutations: only the leader, only while `draft`.
- * Callers pass their transaction handle so the "is it still a draft?" answer
- * cannot go stale before the write — the leader could be opening the session
- * for joining in another tab.
+ * Leader-only guard for F05's edit. Callers pass their transaction handle so
+ * the ownership answer cannot go stale before the write.
  */
-async function requireDraftOwnedBy(
+async function requireOwnedBy(
   { sessionId, leaderId }: MutateDraftArgs,
   client: PrismaLike = prisma,
 ): Promise<Session> {
@@ -140,10 +138,23 @@ async function requireDraftOwnedBy(
   if (session.leaderId !== leaderId) {
     throw new ApiError(403, 'Only the session leader can do that', 'NOT_SESSION_LEADER');
   }
+  return session;
+}
+
+/**
+ * F05 edit: only the leader, only while `draft`. The "is it still a draft?"
+ * check lives in the same transaction as the write — the leader could be
+ * opening the session for joining in another tab.
+ */
+async function requireDraftOwnedBy(
+  args: MutateDraftArgs,
+  client: PrismaLike = prisma,
+): Promise<Session> {
+  const session = await requireOwnedBy(args, client);
   if (session.status !== 'draft') {
     throw new ApiError(
       409,
-      `Cannot edit or delete a session that is ${session.status}`,
+      `Cannot edit a session that is ${session.status}`,
       'INVALID_TRANSITION',
     );
   }
@@ -190,17 +201,59 @@ export async function updateSessionDraft({
   });
 }
 
+export interface DeleteSessionArgs {
+  sessionId: string;
+  userId: string;
+}
+
 /**
- * F05: delete a draft outright. Leader-only, draft-only — the same guard as
- * `updateSessionDraft`, because both ask "can this session still be
- * reshaped?" and the answer is identical. `Question`/`SessionMember` rows
- * cascade via the FK (`onDelete: Cascade` in schema.prisma); a draft's only
- * member is the leader, so nothing else loses data.
+ * Dashboard delete. Two different operations, one endpoint, because the ⋯
+ * menu is the same control:
+ *
+ * - `draft` (F05): the leader destroys the row. Nobody else has it.
+ * - `ended`: hide it on *this* user's dashboard (`hiddenAt`). If that was
+ *   the last member still showing it, the session row goes too — that is
+ *   how ended sessions leave the database, without one person wiping it
+ *   for everyone else.
+ *
+ * Live sessions (`lobby`/`active`) are refused — end them first. Hiding is
+ * member-only; a stranger with a session id cannot tidy someone else's list.
  */
-export async function deleteSession({ sessionId, leaderId }: MutateDraftArgs): Promise<void> {
+export async function deleteSession({ sessionId, userId }: DeleteSessionArgs): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    await requireDraftOwnedBy({ sessionId, leaderId }, tx);
-    await tx.session.delete({ where: { id: sessionId } });
+    const session = await tx.session.findUnique({ where: { id: sessionId } });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.status === 'lobby' || session.status === 'active') {
+      throw new ApiError(409, 'Cannot delete a live session — end it first', 'INVALID_TRANSITION');
+    }
+
+    if (session.status === 'draft') {
+      if (session.leaderId !== userId) {
+        throw new ApiError(403, 'Only the session leader can do that', 'NOT_SESSION_LEADER');
+      }
+      await tx.session.delete({ where: { id: sessionId } });
+      return;
+    }
+
+    const membership = await tx.sessionMember.findUnique({
+      where: { sessionId_userId: { sessionId, userId } },
+    });
+    if (!membership) {
+      throw new ApiError(403, 'Not a member of this session', 'NOT_SESSION_MEMBER');
+    }
+    await tx.sessionMember.update({
+      where: { sessionId_userId: { sessionId, userId } },
+      data: { hiddenAt: new Date() },
+    });
+
+    const stillOnSomeDashboard = await tx.sessionMember.count({
+      where: { sessionId, hiddenAt: null },
+    });
+    if (stillOnSomeDashboard === 0) {
+      await tx.session.delete({ where: { id: sessionId } });
+    }
   });
 }
 
@@ -874,10 +927,18 @@ export async function assertSessionMember(sessionId: string, userId: string): Pr
  * the dashboard needs it: without it, a session someone walked out of still
  * looks live to them and the one-live-session redirect would drag them back
  * in on every page load.
+ *
+ * Sessions they have *hidden* (`hiddenAt`) are not — that is a per-user
+ * dashboard tidy-up, not a rewrite of who took part.
  */
 export async function listSessionsForUser(userId: string): Promise<SessionSummary[]> {
   const rows = await prisma.session.findMany({
-    where: { OR: [{ leaderId: userId }, { members: { some: { userId } } }] },
+    where: {
+      AND: [
+        { OR: [{ leaderId: userId }, { members: { some: { userId } } }] },
+        { NOT: { members: { some: { userId, hiddenAt: { not: null } } } } },
+      ],
+    },
     orderBy: { createdAt: 'desc' },
     select: {
       id: true,

@@ -40,12 +40,12 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Session setup</span>
         <Link
           to="/dashboard"
-          className="ml-auto text-[12px] font-semibold text-white/80 hover:text-white hover:underline"
+          className="ml-auto text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
         >
           Dashboard
         </Link>

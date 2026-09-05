@@ -145,7 +145,7 @@ export function AgendaPanel({
                 aria-current={isFocused ? 'step' : undefined}
                 className={`rounded-md border px-2.5 py-2 ${
                   isFocused
-                    ? 'border-rt-primary bg-white shadow-sm'
+                    ? 'border-rt-secondary bg-white shadow-sm'
                     : 'border-transparent bg-transparent'
                 }`}
               >
@@ -205,7 +205,7 @@ export function AgendaPanel({
                       type="button"
                       onClick={() => void setPhase(question.id, next.status)}
                       disabled={busy}
-                      className="self-start rounded-full bg-rt-primary px-3 py-[5px] text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+                      className="self-start rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
                     >
                       {busy ? 'Working…' : next.label}
                     </button>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
-import { Button } from '../../components/ui/Button';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { SessionQuestionsForm } from './SessionQuestionsForm';
 import { useDeleteSession } from './useDeleteSession';
 import { useSessionDetail } from './useSessionDetail';
@@ -30,7 +30,7 @@ export function EditSessionPage() {
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Edit session</span>
       </header>
@@ -58,35 +58,30 @@ export function EditSessionPage() {
               if (updated) navigate('/dashboard');
             }}
             extraActions={
-              confirmingDelete ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[13px] text-rt-ink-muted">Delete this draft?</span>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void handleDelete()}
-                    disabled={deleting}
-                  >
-                    {deleting ? 'Deleting…' : 'Yes, delete'}
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={() => setConfirmingDelete(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmingDelete(true)}
-                  className="text-[13px] font-semibold text-red-600 hover:underline"
-                >
-                  Delete draft
-                </button>
-              )
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                className="text-[13px] font-semibold text-red-600 hover:underline"
+              >
+                Delete draft
+              </button>
             }
           />
         )}
 
-        {deleteError && <p className="mt-2 text-[13px] text-red-600">{deleteError}</p>}
+        {confirmingDelete && (
+          <ConfirmDialog
+            title="Delete this draft?"
+            confirmLabel="Delete"
+            confirmingLabel="Deleting…"
+            busy={deleting}
+            onConfirm={() => void handleDelete()}
+            onCancel={() => setConfirmingDelete(false)}
+          >
+            This cannot be undone. The draft will be removed from your dashboard.
+            {deleteError && <p className="mt-2 text-red-600">{deleteError}</p>}
+          </ConfirmDialog>
+        )}
       </div>
     </main>
   );

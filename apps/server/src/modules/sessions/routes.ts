@@ -134,12 +134,13 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F05: delete a draft. The frontend's confirm dialog is what makes this
-  // safe to expose with no further confirmation step server-side.
+  // Draft: leader destroys the row (F05). Ended: any member hides it on
+  // their own dashboard. The confirm dialog is the extra step, not the
+  // server. Live sessions must be ended first.
   sessionsRoutes.delete<{ id: string }>('/:id', requireAuth, async (req, res, next) => {
     try {
-      const leaderId = req.userId!;
-      await deleteSession({ sessionId: req.params.id, leaderId });
+      const userId = req.userId!;
+      await deleteSession({ sessionId: req.params.id, userId });
       res.status(204).end();
     } catch (err) {
       next(err);

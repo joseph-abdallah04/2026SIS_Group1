@@ -362,7 +362,7 @@ export function DiagramEditor() {
                   type="button"
                   onClick={() => addElement(shape)}
                   disabled={nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting}
-                  className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 md:justify-start"
+                  className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-secondary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 md:justify-start"
                 >
                   <ShapeIcon aria-hidden="true" size={16} />
                   Add {DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}
@@ -512,7 +512,7 @@ export function DiagramEditor() {
           aria-label="Diagram canvas"
           tabIndex={0}
           viewBox={`0 0 ${DIAGRAM_CANVAS_WIDTH} ${DIAGRAM_CANVAS_HEIGHT}`}
-          className="w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none"
+          className="w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
           style={{
             maxWidth: `min(1200px, calc((100dvh - ${DIAGRAM_VERTICAL_CHROME_REM}rem) * ${DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT}))`,
             aspectRatio: `${DIAGRAM_CANVAS_WIDTH} / ${DIAGRAM_CANVAS_HEIGHT}`,

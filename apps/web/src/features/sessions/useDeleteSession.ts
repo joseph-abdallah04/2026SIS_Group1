@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 
 import { api, ApiClientError } from '../../lib/api';
 
-/** F05: DELETE a draft. The confirmation step lives in the calling component. */
+/** DELETE a draft (destroy) or an ended session (hide on this user's dashboard). */
 export function useDeleteSession() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);

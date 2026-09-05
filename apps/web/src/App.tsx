@@ -37,6 +37,8 @@ export default function App() {
           <Route path="/sessions/new" element={<CreateSessionPage />} />
           <Route path="/sessions/:id/edit" element={<EditSessionPage />} />
           <Route path="/sessions/:id" element={<SessionRouter />} />
+          {/* Auth first, even for a dead code — JoinSessionPage is the miss
+              screen, not a way around login. */}
           <Route path="/join/:code" element={<JoinSessionPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

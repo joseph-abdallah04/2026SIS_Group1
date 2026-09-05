@@ -129,14 +129,14 @@ function StickyTextEditor({
           type="button"
           onClick={submit}
           disabled={!submittable}
-          className="rounded-full bg-rt-primary px-3 py-[5px] text-[11px] font-semibold text-white disabled:opacity-45 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+          className="rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink disabled:opacity-45 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-full px-2.5 py-[5px] text-[11px] font-medium text-rt-ink-muted hover:bg-white/60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+          className="rounded-full px-2.5 py-[5px] text-[11px] font-medium text-rt-ink-muted hover:bg-white/60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
         >
           Cancel
         </button>
@@ -178,7 +178,7 @@ function OwnerControls({
         <button
           type="button"
           onClick={onEdit}
-          className="rounded-full border border-rt-tertiary bg-white px-2.5 py-[3px] text-[10.5px] font-medium text-rt-ink-muted shadow-sm hover:text-rt-ink focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-primary"
+          className="rounded-full border border-rt-tertiary bg-white px-2.5 py-[3px] text-[10.5px] font-medium text-rt-ink-muted shadow-sm hover:text-rt-ink focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-secondary"
         >
           Edit
         </button>
@@ -190,7 +190,7 @@ function OwnerControls({
           // Removing someone else's idea deserves naming what is happening.
           title={isOwn ? 'Remove your proposal' : 'Remove as session leader'}
           aria-label={armed ? 'Confirm delete' : isOwn ? 'Delete proposal' : 'Remove as leader'}
-          className={`rounded-full border px-2.5 py-[3px] text-[10.5px] font-medium shadow-sm focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-primary ${
+          className={`rounded-full border px-2.5 py-[3px] text-[10.5px] font-medium shadow-sm focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-secondary ${
             armed
               ? 'border-rt-secondary bg-rt-secondary-wash text-rt-secondary-deep'
               : 'border-rt-tertiary bg-white text-rt-ink-muted hover:text-rt-ink'
