@@ -96,7 +96,7 @@ Persisting presence into `SessionMember` would also not fix clustering. It would
 
 ---
 
-## What to do later (when this is a real product)
+## What to do later
 
 Do not do this for the coursework unless you have measured a real ceiling.
 
