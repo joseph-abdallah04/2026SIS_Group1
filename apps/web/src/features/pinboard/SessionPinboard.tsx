@@ -1,6 +1,9 @@
 import { useParams } from 'react-router-dom';
+import type { Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { AgendaPanel } from '../agenda/AgendaPanel';
+import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { PinboardCanvas } from './PinboardCanvas';
@@ -9,14 +12,14 @@ import { usePinboard } from './usePinboard';
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Loading session…</span>
       </header>
       <div
         className="relative min-h-0 flex-1 bg-rt-surface"
         style={{
-          backgroundImage: 'radial-gradient(rgba(140,164,172,0.42) 1.4px, transparent 1.4px)',
+          backgroundImage: 'radial-gradient(rgba(224,163,60,0.35) 1.4px, transparent 1.4px)',
           backgroundSize: '24px 24px',
         }}
       >
@@ -26,7 +29,18 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SessionPinboard() {
+interface SessionPinboardProps {
+  /**
+   * Decides which of the two exits the header offers: "Leave session" for a
+   * member (F07), "End session" for the leader (F32). Required, not
+   * defaulted — guessing would silently drop someone's only way out.
+   */
+  isLeader: boolean;
+  /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
+  questions: Question[];
+}
+
+export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const {
@@ -64,16 +78,16 @@ export function SessionPinboard() {
     return (
       <BoardFrame>
         <div className="relative w-[400px] border border-rt-ink bg-rt-surface">
-          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-secondary">
             +
           </span>
-          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-secondary">
             +
           </span>
-          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-secondary">
             +
           </span>
-          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-secondary">
             +
           </span>
           <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
@@ -87,7 +101,7 @@ export function SessionPinboard() {
             <button
               type="button"
               onClick={() => void reload()}
-              className="mt-5 bg-rt-primary px-[18px] py-[9px] text-[12px] font-semibold text-white hover:opacity-90 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+              className="mt-5 rounded-full bg-rt-secondary px-[18px] py-[9px] text-[12px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
             >
               Retry
             </button>
@@ -106,7 +120,11 @@ export function SessionPinboard() {
   }
 
   return (
-    <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
+    <CreativeToolsProvider
+      isLive={isLive && board.questionStatus === 'discussion'}
+      proposals={board.items}
+      propose={propose}
+    >
       {/* `overflow-hidden` so nothing on the board can produce a page-level
           scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
       <main className="h-dvh overflow-hidden">
@@ -114,10 +132,20 @@ export function SessionPinboard() {
           board={board}
           isLive={isLive}
           newItemIds={newItemIds}
+          isLeader={isLeader}
           viewerId={viewerId}
           editProposal={editProposal}
           deleteProposal={deleteProposal}
+          agenda={
+            <AgendaPanel
+              sessionId={sessionId}
+              questions={questions}
+              activeQuestionId={board.questionId}
+              isLeader={isLeader}
+            />
+          }
         />
+        <SessionJoinNotices />
       </main>
       <CreativeStudio />
     </CreativeToolsProvider>

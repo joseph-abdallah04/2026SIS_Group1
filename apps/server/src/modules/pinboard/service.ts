@@ -84,6 +84,21 @@ export async function createProposal({
   if (!question) {
     throw new ApiError(404, 'Question not found', 'QUESTION_NOT_FOUND');
   }
+  // The session gate, checked before the question's own: an ended session
+  // (F32) leaves its questions' statuses untouched, so a question left in
+  // `discussion` would otherwise keep accepting proposals after the leader
+  // wrapped up. `active` is also the only status where a board is on screen —
+  // a `lobby` session is still in the waiting room.
+  const session = await getSession(question.sessionId);
+  if (!session || session.status !== 'active') {
+    throw new ApiError(
+      409,
+      session?.status === 'ended'
+        ? 'This session has ended — the board is read-only'
+        : 'This session is not live',
+      'SESSION_NOT_ACTIVE',
+    );
+  }
   // Proposals belong to the ideation phase. Once a question moves to voting or
   // is answered the board is the thing being voted on, so it must stop moving.
   if (question.status !== 'discussion') {

@@ -1,8 +1,13 @@
 import { useParams } from 'react-router-dom';
 
 import { SessionPinboard } from '../pinboard/SessionPinboard';
+import { useCurrentUserId } from '../../lib/currentUser';
 import { SessionDraftPage } from './SessionDraftPage';
+import { SessionEndedPage } from './SessionEndedPage';
+import { LiveSessionExitGuard } from './LiveSessionExitGuard';
 import { useSessionDetail } from './useSessionDetail';
+import { useSessionEndedListener } from './useSessionEndedListener';
+import { useSessionPhaseListener } from './useSessionPhaseListener';
 import { WaitingRoom } from './WaitingRoom';
 
 /**
@@ -15,7 +20,14 @@ import { WaitingRoom } from './WaitingRoom';
 export function SessionRouter() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { session, loading, error, reload } = useSessionDetail(sessionId);
+  const { session, loading, error, reload, applyQuestionPhase } = useSessionDetail(sessionId);
+  const currentUserId = useCurrentUserId();
+  // F32: one listener for both live views, since the waiting room and the
+  // pinboard can each be the thing the leader ends from.
+  useSessionEndedListener(sessionId, reload);
+  // F25: patch the agenda in place instead of re-fetching, so advancing a
+  // question doesn't blank the live view (see `applyQuestionPhase`).
+  useSessionPhaseListener(sessionId, applyQuestionPhase);
 
   if (!sessionId) {
     return (
@@ -48,18 +60,33 @@ export function SessionRouter() {
     );
   }
 
+  const isLeader = session.leaderId === currentUserId;
+  const exitGuard =
+    session.status === 'lobby' || session.status === 'active' ? (
+      <LiveSessionExitGuard sessionId={sessionId} enabled isLeader={isLeader} onEnded={reload} />
+    ) : null;
+
   switch (session.status) {
     case 'draft':
       return <SessionDraftPage session={session} onOpened={reload} />;
     case 'lobby':
-      return <WaitingRoom session={session} />;
-    case 'active':
-      return <SessionPinboard />;
-    case 'ended':
       return (
-        <main className="flex h-screen items-center justify-center bg-rt-surface">
-          <p className="text-[13px] text-rt-ink-muted">This session has ended.</p>
-        </main>
+        <>
+          {exitGuard}
+          <WaitingRoom session={session} onStarted={reload} />
+        </>
       );
+    case 'active':
+      // `questions` is passed down rather than re-fetched by the board: this
+      // component already holds the agenda (F24 renders it), and two fetches
+      // of the same list could disagree.
+      return (
+        <>
+          {exitGuard}
+          <SessionPinboard isLeader={isLeader} questions={session.questions} />
+        </>
+      );
+    case 'ended':
+      return <SessionEndedPage session={session} />;
   }
 }

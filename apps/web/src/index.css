@@ -1,13 +1,24 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-rt-primary: #8ca4ac;
-  --color-rt-primary-deep: #4d6a74;
-  --color-rt-primary-tint: #eef2f4;
+  /*
+   * Brand from the login page. Pale blue is a third colour, used sparingly —
+   * `rt-tertiary` stays the neutral border grey so every `border-rt-tertiary`
+   * does not suddenly go blue.
+   *   primary   #F1C881  light gold (chrome)
+   *   secondary #E0A33C  mustard (CTAs, the login button)
+   *   cool      #8CA4AC  pale blue (live dots, tool ink)
+   */
+  --color-rt-primary: #f1c881;
+  --color-rt-primary-deep: #7a6a4c;
+  --color-rt-primary-tint: #fdf4e5;
   --color-rt-secondary: #e0a33c;
   --color-rt-secondary-tint: #f1c881;
   --color-rt-secondary-wash: #fdf4e5;
   --color-rt-secondary-deep: #7a6a4c;
+  --color-rt-cool: #8ca4ac;
+  --color-rt-cool-deep: #4d6a74;
+  --color-rt-cool-tint: #eef2f4;
   --color-rt-tertiary: #cfcfcf;
   --color-rt-surface: #ffffff;
   --color-rt-surface-alt: #f7f7f8;

@@ -15,10 +15,11 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('./api', () => ({ login: vi.fn() }));
+vi.mock('../../lib/socket', () => ({ disconnectSocket: vi.fn(), getSocket: vi.fn() }));
 
-function renderPage() {
+function renderPage(path = '/login') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <LoginPage />
     </MemoryRouter>,
   );
@@ -55,7 +56,12 @@ describe('LoginPage', () => {
   it('stores the token and navigates to /dashboard on success', async () => {
     vi.mocked(authApi.login).mockResolvedValue({
       token: 'test-token',
-      user: { id: 'u1', email: 'alice@example.com', displayName: 'Alice', createdAt: '2026-01-01T00:00:00.000Z' },
+      user: {
+        id: 'u1',
+        email: 'alice@example.com',
+        displayName: 'Alice',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
     });
     const user = userEvent.setup();
     renderPage();
@@ -64,9 +70,29 @@ describe('LoginPage', () => {
     await user.type(screen.getByLabelText(/password/i), 'password123');
     await user.click(screen.getByRole('button', { name: /log in/i }));
 
-    await waitFor(() =>
-      expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true }),
-    );
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true }));
     expect(localStorage.getItem('rt_token')).toBe('test-token');
+  });
+
+  it('returns to the join link after login when next is a same-origin path', async () => {
+    vi.mocked(authApi.login).mockResolvedValue({
+      token: 'test-token',
+      user: {
+        id: 'u1',
+        email: 'bob@example.com',
+        displayName: 'Bob',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    const user = userEvent.setup();
+    renderPage('/login?next=/join/K7NP-3WQZ');
+
+    await user.type(screen.getByLabelText(/email/i), 'bob@example.com');
+    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.click(screen.getByRole('button', { name: /log in/i }));
+
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith('/join/K7NP-3WQZ', { replace: true }),
+    );
   });
 });

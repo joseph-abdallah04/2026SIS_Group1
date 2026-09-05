@@ -67,7 +67,16 @@ model Session {
   leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])
   status    SessionStatus @default(lobby)
   createdAt DateTime      @default(now())
+  // Set once, on lobby -> active (F09). Distinct from `createdAt` (when the
+  // draft was made) — the gap between the two is however long the leader
+  // spent in the waiting room.
+  startedAt DateTime?
   endedAt   DateTime?
+  // The question the board is showing. Distinct from each question's own
+  // status: the leader can look back at an answered question's pinboard
+  // without reopening it (proposals stay closed). Set when the session
+  // starts, then by phase changes and by an explicit focus.
+  currentQuestionId String?
 
   questions Question[]
   members   SessionMember[]
@@ -101,6 +110,17 @@ model SessionMember {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   joinedAt  DateTime @default(now())
+  // Set by F07's explicit "Leave session". A soft delete, because docs/02 §4
+  // makes this table history — the summary and the vote denominator both count
+  // everyone who took part, so deleting the row would rewrite the past (and
+  // orphan any Vote rows they left behind). NULL means "currently in the
+  // session"; rejoining by code clears it and keeps the original `joinedAt`.
+  leftAt    DateTime?
+  // Dashboard-only hide for an ended session. Distinct from `leftAt` (which
+  // is "I walked out of a live room"). NULL means it still appears on this
+  // user's dashboard. Once every member has hidden it, the session row is
+  // deleted — that is the GC path, not one person wiping it for the rest.
+  hiddenAt  DateTime?
 
   // History of who joined this session — not live presence (that's socket-room
   // state, kept in memory; see docs/02 §4 "What gets persisted vs kept in memory").

@@ -17,7 +17,7 @@ vi.mock('./sessionsAdapter.js', () => ({
 }));
 
 const { prisma } = await import('../../db.js');
-const { getActiveQuestion, getQuestion } = await import('./sessionsAdapter.js');
+const { getActiveQuestion, getQuestion, getSession } = await import('./sessionsAdapter.js');
 const { createProposal } = await import('./service.js');
 const { registerPinboardSocketHandlers } = await import('./socket.js');
 
@@ -25,6 +25,7 @@ const create = vi.mocked(prisma.proposal.create);
 const findFirst = vi.mocked(prisma.proposal.findFirst);
 const question = vi.mocked(getQuestion);
 const activeQuestion = vi.mocked(getActiveQuestion);
+const session = vi.mocked(getSession);
 
 const STICKY = {
   type: 'sticky',
@@ -57,6 +58,7 @@ function createdRow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   question.mockResolvedValue(questionRef('discussion'));
+  session.mockResolvedValue({ id: 's1', title: 'Session', status: 'active', leaderId: 'leader-1' });
   create.mockResolvedValue(createdRow() as never);
 });
 
@@ -98,6 +100,33 @@ describe('createProposal', () => {
       createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
     ).resolves.toBeDefined();
   });
+
+  // F32: ending a session leaves its questions' statuses alone, so without the
+  // session gate a question still in `discussion` would keep taking proposals
+  // after the leader wrapped up.
+  it('refuses to write once the session has ended, even with the question still in discussion', async () => {
+    session.mockResolvedValue({
+      id: 's1',
+      title: 'Session',
+      status: 'ended',
+      leaderId: 'leader-1',
+    });
+    await expect(
+      createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
+    ).rejects.toThrow(/has ended/);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'lobby'] as const)(
+    'refuses to write while the session is %s',
+    async (status) => {
+      session.mockResolvedValue({ id: 's1', title: 'Session', status, leaderId: 'leader-1' });
+      await expect(
+        createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
+      ).rejects.toThrow(/not live/);
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
 
   describe('extends', () => {
     const extending = { ...STICKY, extendsProposalId: 'parent-1' };

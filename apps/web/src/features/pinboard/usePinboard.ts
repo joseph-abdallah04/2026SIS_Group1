@@ -145,15 +145,22 @@ export function usePinboard(sessionId: string) {
   useEffect(() => {
     let cancelled = false;
 
-    // First paint, and the only path that works with no socket at all. It never
-    // replaces a board that is already on screen: the socket's join snapshot is
-    // always at least as fresh, and a live event can only reach this client
-    // after that snapshot, so overwriting with an older read could silently
-    // drop a proposal that arrived while this request was in flight.
+    // First paint, and the only path that works with no socket at all. The
+    // *first* read never replaces a board that is already on screen: the
+    // socket's join snapshot is always at least as fresh, and a live event can
+    // only reach this client after that snapshot, so overwriting with an older
+    // read could silently drop a proposal that arrived while this request was
+    // in flight.
+    //
+    // A later read (`reloadToken > 0`) is the opposite case — something asked
+    // for the board again precisely because the one on screen is stale. F25 is
+    // why that matters: when the leader advances the agenda the active question
+    // changes, so the board must swap to a different question's proposals
+    // entirely, and keeping `prev` would leave the previous question's cards up.
     async function load() {
       try {
         const data = await api.get<BoardResponse>(`/api/sessions/${sessionId}/proposals`);
-        if (!cancelled) setBoard((prev) => prev ?? data);
+        if (!cancelled) setBoard((prev) => (reloadToken === 0 ? (prev ?? data) : data));
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load board');
@@ -199,6 +206,16 @@ export function usePinboard(sessionId: string) {
     const onUpdated = ({ proposal }: { proposal: BoardItem }) => upsertItem(proposal);
     const onDeleted = ({ proposalId, questionId }: { proposalId: string; questionId: string }) =>
       removeItem(proposalId, questionId);
+    // F25: the leader moved the agenda. Which question is active — and so
+    // which proposals belong on this board, and whether it accepts writes at
+    // all — is the server's to decide, so this re-reads rather than trying to
+    // reproduce that rule from the one status in the payload.
+    const onPhase = ({ sessionId: id }: { sessionId: string }) => {
+      if (id === sessionId) reload();
+    };
+    const onFocus = ({ sessionId: id }: { sessionId: string }) => {
+      if (id === sessionId) reload();
+    };
 
     if (socket.connected) onConnect();
     socket.on('connect', onConnect);
@@ -207,6 +224,8 @@ export function usePinboard(sessionId: string) {
     socket.on('proposalCreated', onCreated);
     socket.on('proposalUpdated', onUpdated);
     socket.on('proposalDeleted', onDeleted);
+    socket.on('sessionPhase', onPhase);
+    socket.on('sessionFocus', onFocus);
 
     return () => {
       cancelled = true;
@@ -217,8 +236,10 @@ export function usePinboard(sessionId: string) {
       socket.off('proposalCreated', onCreated);
       socket.off('proposalUpdated', onUpdated);
       socket.off('proposalDeleted', onDeleted);
+      socket.off('sessionPhase', onPhase);
+      socket.off('sessionFocus', onFocus);
     };
-  }, [sessionId, applySnapshot, highlight, removeItem, upsertItem]);
+  }, [sessionId, applySnapshot, highlight, reload, removeItem, upsertItem]);
 
   /** Propose a new item onto the board (F15). */
   const propose = useCallback(

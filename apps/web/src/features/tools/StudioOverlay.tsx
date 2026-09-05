@@ -33,12 +33,12 @@ export function StudioOverlay({ children, isLive, onClose, title }: StudioOverla
       }}
     >
       <div className="flex h-full min-h-0 flex-col">
-        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-primary-deep bg-rt-primary px-4 text-white sm:px-6">
-          <IconButton label="Back to pinboard" tone="inverse" onClick={onClose}>
+        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-4 text-rt-ink sm:px-6">
+          <IconButton label="Back to pinboard" onClick={onClose}>
             <ArrowLeft aria-hidden="true" size={19} strokeWidth={1.8} />
           </IconButton>
           <div className="min-w-0">
-            <p className="text-[9px] font-semibold tracking-[0.14em] text-white/75 uppercase">
+            <p className="text-[9px] font-semibold tracking-[0.14em] text-rt-ink/60 uppercase">
               Creative studio
             </p>
             <h1 id="creative-studio-title" className="truncate text-[17px] font-semibold">
@@ -48,8 +48,8 @@ export function StudioOverlay({ children, isLive, onClose, title }: StudioOverla
           <div
             className={`ml-auto flex h-8 items-center gap-2 rounded-full border px-3 text-[11px] font-semibold ${
               isLive
-                ? 'border-white/35 bg-white/15 text-white'
-                : 'border-rt-secondary-tint bg-rt-secondary-wash text-rt-secondary-deep'
+                ? 'border-rt-cool/50 bg-white/70 text-rt-ink'
+                : 'border-rt-cool bg-rt-cool-tint text-rt-cool-deep'
             }`}
             role="status"
           >

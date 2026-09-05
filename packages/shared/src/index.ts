@@ -20,6 +20,8 @@ export interface Session {
   leaderId: string;
   status: SessionStatus;
   createdAt: Date;
+  // Set once, on lobby -> active (F09).
+  startedAt: Date | null;
   endedAt: Date | null;
 }
 
@@ -31,6 +33,12 @@ export interface SessionSummary {
   status: SessionStatus;
   createdAt: Date;
   isLeader: boolean;
+  /**
+   * Still in the session, as opposed to having taken part and left (F07).
+   * `SessionMember` rows survive a leave so history stays intact (docs/02
+   * §4), so "is this session mine right now?" needs its own flag.
+   */
+  isCurrentMember: boolean;
 }
 
 // === auth module ===

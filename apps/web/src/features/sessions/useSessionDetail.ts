@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Question, Session } from '@roundtable/shared';
+import type { Question, QuestionStatus, Session } from '@roundtable/shared';
 
 import { api } from '../../lib/api';
 
@@ -16,6 +16,26 @@ export function useSessionDetail(sessionId: string) {
     setError(null);
     setSession(null);
     setReloadToken((n) => n + 1);
+  }, []);
+
+  /**
+   * Patch one question's status in place (F25) — deliberately not a `reload`.
+   * `reload` blanks the session while it refetches, which on a phase change
+   * would drop the whole live view behind "Loading session…" every time the
+   * leader advanced the agenda. The `sessionPhase` broadcast carries the new
+   * status, so the refetch has nothing to add.
+   */
+  const applyQuestionPhase = useCallback((questionId: string, status: QuestionStatus) => {
+    setSession((prev) =>
+      prev
+        ? {
+            ...prev,
+            questions: prev.questions.map((question) =>
+              question.id === questionId ? { ...question, status } : question,
+            ),
+          }
+        : prev,
+    );
   }, []);
 
   useEffect(() => {
@@ -37,5 +57,5 @@ export function useSessionDetail(sessionId: string) {
     };
   }, [sessionId, reloadToken]);
 
-  return { session, loading, error, reload };
+  return { session, loading, error, reload, applyQuestionPhase };
 }

@@ -51,38 +51,39 @@ async function main() {
 
   const session = await prisma.session.upsert({
     where: { code: 'DEMO-0001' },
-    // `active`, not `lobby`: it seeds a question already in `discussion` with
-    // proposals on it, which is what a live session looks like. `/sessions/:id`
-    // routes by status (F08), so `lobby` here would land on the waiting room
-    // instead of the pinboard this seed exists to exercise. Set on `update`
-    // too, so a re-seed of an existing local database picks up this change —
-    // an `update: {}` would silently leave an already-seeded row at `lobby`.
-    update: { status: 'active' },
+    // `ended`, not `active`: an active seeded session is a live membership
+    // for both demo accounts, so login's dashboard lock-in dumps whoever
+    // signs in straight onto that board instead of the dashboard. Keep the
+    // code so this upsert still finds the row; ended sessions are history,
+    // not something you are *in*.
+    update: { status: 'ended', endedAt: new Date() },
     create: {
       code: 'DEMO-0001',
       title: 'Demo session (seeded)',
       leaderId: alice.id,
-      status: 'active',
+      status: 'ended',
+      endedAt: new Date(),
     },
   });
 
   // Fixed ids so re-running the seed stays idempotent (upsert needs a unique key).
-  // `update: {}` on purpose: question status is session-owned state, and a
-  // re-seed must not reset a question the sessions phase machine has moved on.
+  // Statuses are reset on update so a leftover live agenda (answered questions
+  // still sitting on an `active` row from an older seed) cannot survive a
+  // re-seed and lock someone into an empty "Agenda complete" board.
   const question1 = await prisma.question.upsert({
     where: { id: 'seed-question-1' },
-    update: {},
+    update: { status: 'answered' },
     create: {
       id: 'seed-question-1',
       sessionId: session.id,
       text: 'What are our core features for the MVP?',
       position: 0,
-      status: 'discussion',
+      status: 'answered',
     },
   });
   await prisma.question.upsert({
     where: { id: 'seed-question-2' },
-    update: {},
+    update: { status: 'pending' },
     create: {
       id: 'seed-question-2',
       sessionId: session.id,
@@ -150,9 +151,9 @@ async function main() {
   });
 
   console.log(
-    'Seeded: alice@example.com, bob@example.com, session DEMO-0001 (2 questions, 2 members, 3 proposals)',
+    'Seeded: alice@example.com, bob@example.com, ended session DEMO-0001 (history — login lands on the dashboard)',
   );
-  console.log(`Open: /sessions/${session.id}`);
+  console.log(`History: /sessions/${session.id}`);
   console.log(
     `Log in at /login as alice@example.com (leader) or bob@example.com — password: ${DEMO_PASSWORD}`,
   );

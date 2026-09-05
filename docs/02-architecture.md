@@ -82,9 +82,10 @@ No cycles. If two modules seem to need each other, invert: raise an event or mov
 
 ```
 User          id, email, passwordHash, displayName, createdAt
-Session       id, code, title(focus), leaderId→User, status(lobby|active|ended), createdAt, endedAt
+Session       id, code?, title(focus), leaderId→User, status(draft|lobby|active|ended),
+              createdAt, startedAt?, endedAt?
 Question      id, sessionId→Session, text, position(int), status(pending|discussion|voting|answered|skipped)
-SessionMember id, sessionId→Session, userId→User, joinedAt        (unique sessionId+userId)
+SessionMember id, sessionId→Session, userId→User, joinedAt, leftAt?  (unique sessionId+userId)
 Proposal      id, questionId→Question, authorId→User, type(sticky|drawing|diagram),
               artifactJson(jsonb), x, y, extendsProposalId?→Proposal, createdAt
 Reaction      id, proposalId→Proposal, userId→User, emoji             (unique proposalId+userId+emoji)
@@ -97,6 +98,9 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 
 Notes:
 
+- `Session.status` runs `draft → lobby → active → ended`. A `draft` is the leader still writing the title and questions (F04/F05, editable and deletable only in this state); `lobby` means joinable (F06 mints the code); `active` is the live session (F09 sets `startedAt`).
+- `Session.code` is nullable and unique. It is claimed on `draft → lobby` and released on end, so NULL means "not joinable" — Postgres treats NULLs as distinct, so any number of drafts and ended sessions sit at NULL while the unique index still allows only one _live_ session per code.
+- `SessionMember.leftAt` is F07's "Leave session": a soft delete, because this table is history (see §4). NULL means currently in the session, so everything that asks "who is in here?" filters on `leftAt: null`. Rejoining by code clears it and keeps the original `joinedAt`.
 - `artifactJson` shape depends on proposal type — sticky `{text,color}`, drawing `{svg}`, diagram `{nodes:[{id,label,x,y,shape?,…}],edges:[{from,to,label?,…}]}`. Diagram `shape` comes from a closed registry — `box|rectangle|ellipse|diamond|triangle|cylinder|container|text`; omitted means a legacy box. Each shape owns its default size, outline and edge-anchor rule in `packages/shared`; arbitrary SVG, icon names or uploads are never accepted. Typed in `packages/shared`.
 - Diagram styling (contract v2) is additive and entirely optional: nodes may carry a bounded `width`+`height` pair (both or neither) plus closed-enum `fillColor`, `strokeColor`, `strokeWidthPreset` and `fontSizePreset`; edges may carry `strokeColor`, `strokeWidthPreset` and `strokeStyle`. Omitting a field means the pre-v2 appearance, so diagrams authored before v2 render unchanged. The palettes, size bounds and resolvers live in `packages/shared` and are shared by the editor and the board card — no raw CSS colours, arbitrary sizes or style objects are representable. Reading and writing are deliberately asymmetric. `artifactJsonSchema` (read) tolerates values it does not recognise — a palette key, shape or size written by a different build is dropped so the node loads with its default appearance instead of taking the whole board down, the same rule that already applies to legacy dangling edges. `artifactWriteJsonSchema` + `diagramWriteArtifactSchema` (write) reject anything outside the contract, and both write intents — `proposalCreate` and `proposalUpdate` (F16) — parse with the strict union rather than the tolerant one. Parsing through the tolerant one would strip a crafted value before the write invariants ever ran, and an edit is a write like any other.
 - Diagram **arrow routing is derived, never stored**. A pair of arrows pointing at each other is bowed apart into two quadratic curves so both stay readable; every other arrow is a straight line with the anchors it always had. The routing helper lives in `packages/shared` and is used by the editor and the board card, so an arrow looks the same in both. Nothing about a curve reaches `artifactJson` — re-deriving it from the edge set keeps the artifact independent of how any client happens to draw it.
@@ -117,7 +121,7 @@ The real efficiency risk is **event frequency**, not session lifetime — some i
 
 - **Persist immediately:** proposals, reactions, votes, phase transitions, memberships — anything that must survive a restart.
 - **Never persist:** who is currently connected, speaking indicators, typing state, in-progress drags/cursor positions. These live only in the socket room / LiveKit.
-- **`SessionMember` is history, not presence.** It records "joined at some point" — needed for the summary and the vote denominator. Live "who's online now" is a separate, in-memory concern (socket room membership). Don't conflate the two.
+- **`SessionMember` is history, not presence.** It records "joined at some point" — needed for the summary and the vote denominator. Live "who's online now" is a separate, in-memory concern (socket room membership). Don't conflate the two. This is also why leaving a session (F07) stamps `leftAt` instead of deleting the row: a delete would rewrite the past — shrinking the vote denominator after the fact and orphaning votes already cast.
 - **Throttle high-frequency events.** Dragging a proposal fires ~60 events/second. Broadcast every move over the socket immediately for smooth motion, but persist only on drag-end or throttled to ~1/second.
 - **Derive, don't store counters.** "Who hasn't voted yet" is a count of `Vote` rows, not a stored counter that can drift from reality.
 
@@ -125,38 +129,58 @@ If a hot-path socket handler's membership/phase check becomes a measured bottlen
 
 ### Event catalogue (shared types live in `packages/shared/src/events.ts`)
 
-| Direction | Event              | Payload                                          | Notes                                   |
-| --------- | ------------------ | ------------------------------------------------ | --------------------------------------- |
-| C→S       | `member:join`      | `{sessionId}`                                    | joins socket to room, triggers snapshot |
-| S→C       | `session:state`    | full snapshot                                    | on join/reconnect                       |
-| S→C       | `member:joined`    | `{user}`                                         | presence list update                    |
-| S→C       | `session:phase`    | `{questionId, phase}`                            | leader-driven transitions               |
-| S→C       | `session:skipped`  | `{questionId}`                                   | leader skipped                          |
-| C→S       | `proposal:create`  | `{type, artifactJson, x, y, extendsProposalId?}` | validated vs phase=discussion           |
-| S→C       | `proposal:created` | `{proposal}`                                     | broadcast                               |
-| C→S       | `proposal:update`  | `{id, artifactJson?, x?, y?}`                    | author-only, phase=discussion           |
-| S→C       | `proposal:updated` | `{proposal}`                                     | broadcast                               |
-| C→S       | `proposal:delete`  | `{id}`                                           | author-or-leader                        |
-| S→C       | `proposal:deleted` | `{id}`                                           | broadcast                               |
-| C→S       | `reaction:toggle`  | `{proposalId, emoji}`                            | any member, discussion phase            |
-| S→C       | `reaction:toggled` | `{proposalId, emoji, counts, byUser}`            | broadcast                               |
-| C→S       | `vote:cast`        | `{roundId, proposalId}`                          | one ballot per user                     |
-| S→C       | `vote:progress`    | `{roundId, votedCount, totalVoters}`             | no vote contents                        |
-| S→C       | `vote:result`      | `{questionId, winnerProposalId}`                 | when round closes                       |
+Event names are **camelCase** (`sessionState`, not `session:state`) — they are keys on a typed Socket.IO event map, and a colon buys nothing there. Rows marked _(built)_ exist today; the rest are the agreed shape for the module that will add them.
+
+| Direction | Event             | Payload                                          | Notes                                         |
+| --------- | ----------------- | ------------------------------------------------ | --------------------------------------------- |
+| C→S       | `memberJoin`      | `{sessionId}`                                    | _(built)_ joins socket to room, then snapshot |
+| S→C       | `sessionState`    | full snapshot                                    | _(built)_ on join/reconnect                   |
+| S→C       | `memberJoined`    | `{user}`                                         | _(built)_ presence, deduped per user          |
+| S→C       | `memberLeft`      | `{user}`                                         | _(built)_ only when a user's last socket goes |
+| S→C       | `sessionStarted`  | `{sessionId, startedAt}`                         | _(built)_ F09; see §5 on why start is REST    |
+| S→C       | `sessionEnded`    | `{sessionId, endedAt}`                           | _(built)_ F32; everyone routes to the wrap-up |
+| S→C       | `sessionPhase`    | `{sessionId, questionId, status}`                | _(built)_ F25/F26; skipping included         |
+| C→S       | `proposalCreate`  | `{type, artifactJson, x, y, extendsProposalId?}` | _(built)_ validated vs phase=discussion       |
+| S→C       | `proposalCreated` | `{proposal}`                                     | _(built)_ broadcast, author included          |
+| C→S       | `proposalUpdate`  | `{id, artifactJson?, x?, y?}`                    | author-only, phase=discussion                 |
+| S→C       | `proposalUpdated` | `{proposal}`                                     | broadcast                                     |
+| C→S       | `proposalDelete`  | `{id}`                                           | author-or-leader                              |
+| S→C       | `proposalDeleted` | `{proposalId, questionId}`                       | broadcast                                     |
+| C→S       | `reactionToggle`  | `{proposalId, emoji}`                            | any member, discussion phase                  |
+| S→C       | `reactionToggled` | `{proposalId, emoji, counts, byUser}`            | broadcast                                     |
+| C→S       | `voteCast`        | `{roundId, proposalId}`                          | one ballot per user                           |
+| S→C       | `voteProgress`    | `{roundId, votedCount, totalVoters}`             | no vote contents                              |
+| S→C       | `voteResult`      | `{questionId, winnerProposalId}`                 | when round closes                             |
 
 ## 5. REST API surface
 
 REST handles non-realtime concerns (all prefixed `/api`):
 
-| Area      | Endpoints                                                                                                                                                                              |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                             |
-| sessions  | `POST /api/sessions` (with questions), `GET /api/sessions/mine`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id`, `POST /api/sessions/:id/join {code}`                       |
-| summary   | `GET /api/sessions/:id/summary`                                                                                                                                                        |
-| voice     | `POST /api/sessions/:id/voice-token`                                                                                                                                                   |
-| assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config _without_ key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream) |
+| Area      | Endpoints                                                                                                                                                                                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                                                                                                                                                                           |
+| sessions  | `POST /api/sessions` (with questions), `GET /api/sessions`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id` (draft only), `GET /api/sessions/:id/members`, `POST /api/sessions/:id/open`, `POST /api/sessions/:id/start`, `POST /api/sessions/:id/phase {questionId, status}`, `POST /api/sessions/:id/end`, `POST /api/sessions/:id/leave`, `GET /api/sessions/code/:code`, `POST /api/sessions/join {code}` |
+| summary   | `GET /api/sessions/:id/summary`                                                                                                                                                                                                                                                                                                      |
+| voice     | `POST /api/sessions/:id/voice-token`                                                                                                                                                                                                                                                                                                 |
+| assistant | `PUT /api/me/llm-config {baseUrl, apiKey, model}` (write-only; GET returns config _without_ key), `POST /api/me/llm-config/test`, `POST /api/sessions/:id/assistant/chat` (SSE stream)                                                                                                                                               |
 
-Phase transitions, proposals, reactions, and votes go over WebSockets (see §4). Assistant chat streams over **SSE** because it's a request-scoped, one-directional response — no need for a socket room per private chat.
+Proposals, reactions, and votes go over WebSockets (see §4). Assistant chat streams over **SSE** because it's a request-scoped, one-directional response — no need for a socket room per private chat.
+
+**Lifecycle and phase changes are REST calls that broadcast their result** (`POST /:id/open`, `/:id/start`, `/:id/end`, and F25's question phases), not client-to-server socket events. The leader's click is a one-off, authorised, idempotent command — exactly what an HTTP request with a status code is for — and routing it through REST means one place enforces "is this the leader, is this transition legal" and returns a real error the button can render. The _fact_ is then broadcast to the room (`sessionStarted`) so every client moves together. Hence there is no `sessionStart` in the C→S map above.
+
+Two notes on the sessions surface. `GET /api/sessions` lists the caller's own sessions (led and joined), so `/mine` would be redundant. Joining is `GET /code/:code` (preview) then `POST /join {code}`, rather than `POST /:id/join {code}`, because a joiner has the code and not the id — resolving the code is the whole first step.
+
+Ending a session (F32) releases its code back to NULL, so the code stops resolving the moment the session is over — which is also what lets that code be handed out again later. It is allowed from `lobby` as well as `active`: the leader cannot leave their own session, so without that a leader who opens a session and changes their mind would have no way out. An ended session is read-only, enforced where writes happen rather than only in the UI — `createProposal` refuses anything whose session is not `active` (SESSION_NOT_ACTIVE), because ending does not change the individual questions' statuses.
+
+The agenda (F25/F26) is one endpoint, `POST /:id/phase {questionId, status}`, and one broadcast, `sessionPhase`. Three rules make "which question is the session on" answerable:
+
+- **A question only moves forward**: `pending → discussion → voting → answered`, with `skipped` reachable from any of the first three. Nothing returns to `pending` and the last two are terminal, so `skipped` is a decision on the record rather than a temporary state. `discussion → answered` is deliberately absent — answering is what closes a vote (F30), so a leader moving on without one skips instead of declaring an answer nobody chose.
+- **At most one question is open** (`discussion` or `voting`) per session, checked inside the transaction that writes. This is the invariant that lets the *active question be derived rather than stored*: `getActiveQuestion` returns the open one, else the next `pending` one (the board shows what's coming up but stays closed to proposals), else `null` once the agenda is done. A stored `activeQuestionId` pointer would be a second source of truth that could disagree with the statuses the agenda panel renders.
+- **Only while the session is `active`**, so phases cannot run in a lobby before anyone has arrived, or edit a finished session's record.
+
+Starting a session opens its first question in the same transaction, because an `active` session whose every question is still `pending` is a live board that refuses proposals — that reads as broken rather than as "waiting for the leader".
+
+Reads of a session (`GET /:id`, `GET /:id/members`) require membership. A session id travels in shareable URLs, so knowing one is not authorisation; the invite code is the capability, and redeeming it via `POST /join` is what creates the membership those reads check.
 
 ## 6. Monorepo layout
 
@@ -194,7 +218,7 @@ Phase transitions, proposals, reactions, and votes go over WebSockets (see §4).
 - **Commits:** Conventional Commits (`feat(voting): …`) — enables readable changelogs.
 - **Testing:** Vitest unit tests per module (pure logic like state machine, tally rules); Playwright smoke test of happy path from Week 3 onward.
 - **Lint/format:** ESLint flat config + Prettier, enforced in CI.
-- **Env/config:** `.env.example` committed, real `.env` ignored. Server config loaded via one `env.ts` module using zod validation at boot.
+- **Env/config:** `.env.example` committed, real `.env` ignored. Server config loaded via one `env.ts` module using zod validation at boot. `NODE_ENV` **defaults to `production`** rather than `development`, so that a forgotten env var costs convenience rather than safety. Nothing about identity depends on it any more — REST routes go through `requireAuth` and the socket handshake verifies its token in every environment — but the strict default stays, so the next environment-gated shortcut anyone adds inherits it. Local development opts in with `NODE_ENV=development` in `.env`. `JWT_SECRET` is required (min 32 chars) and the server refuses to boot without it.
 
 ## 8. Key technical decisions & gotchas
 

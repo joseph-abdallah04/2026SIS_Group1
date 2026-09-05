@@ -43,6 +43,12 @@ export const createSessionSchema = z.object({
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 
+// F05: editing a draft replaces title + the full question list in one call
+// (no partial-field PATCH semantics) — same shape as creating one, since a
+// draft's questions have no other state yet for a partial update to preserve.
+export const updateSessionSchema = createSessionSchema;
+export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
+
 // F06: `XXXX-XXXX` from an alphabet with no `0/1/I/L/O` — nothing that could
 // be confused for another character when read aloud or typed. Kept here
 // alongside the regex so the alphabet used to generate a code and the one
@@ -62,6 +68,26 @@ export const joinSessionSchema = z.object({
 });
 
 export type JoinSessionInput = z.infer<typeof joinSessionSchema>;
+
+// F25/F26: the leader moving one question through the agenda. `pending` is
+// absent on purpose — it is the state a question is *created* in and nothing
+// may return to it, so "un-start a discussion" is not expressible. The rest of
+// the machine (which status may follow which) is enforced server-side in
+// `setQuestionPhase`; this only bounds the shape.
+export const setQuestionPhaseSchema = z.object({
+  questionId: z.string().min(1),
+  status: z.enum(['discussion', 'voting', 'answered', 'skipped']),
+});
+
+export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
+
+// Leader pointing the board at a question without changing its status — so
+// an answered question's pinboard can be shown again without reopening it.
+export const focusQuestionSchema = z.object({
+  questionId: z.string().min(1),
+});
+
+export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
 
 // === pinboard module ===
 

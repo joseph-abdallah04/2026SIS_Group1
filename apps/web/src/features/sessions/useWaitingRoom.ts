@@ -23,8 +23,13 @@ interface SessionMemberRow {
  * `socket.leave()` a server room, and the singleton stays connected on the
  * dashboard. The leave is deferred one tick so lobby → pinboard (and Strict
  * Mode remounts) can rejoin the same session without a presence flicker.
+ *
+ * `onStarted` (F09) fires on the `sessionStarted` broadcast — the caller
+ * (`SessionRouter`, via `WaitingRoom`) re-fetches the session on receipt,
+ * which flips `status` to `active` and switches every connected client to
+ * the pinboard at the same moment, without a poll or a manual refresh.
  */
-export function useWaitingRoom(sessionId: string) {
+export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
   const [participants, setParticipants] = useState<SessionUserPayload[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
@@ -91,12 +96,18 @@ export function useWaitingRoom(sessionId: string) {
       setParticipants((prev) => (prev ? prev.filter((p) => p.id !== user.id) : prev));
     };
 
+    const onStartedEvent = (payload: { sessionId: string; startedAt: string }) => {
+      if (cancelled || payload.sessionId !== sessionId) return;
+      onStarted?.();
+    };
+
     if (socket.connected) onConnect();
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('sessionState', onSessionState);
     socket.on('memberJoined', onJoined);
     socket.on('memberLeft', onLeft);
+    socket.on('sessionStarted', onStartedEvent);
 
     return () => {
       cancelled = true;
@@ -106,8 +117,9 @@ export function useWaitingRoom(sessionId: string) {
       socket.off('sessionState', onSessionState);
       socket.off('memberJoined', onJoined);
       socket.off('memberLeft', onLeft);
+      socket.off('sessionStarted', onStartedEvent);
     };
-  }, [sessionId]);
+  }, [sessionId, onStarted]);
 
   return { participants, loading, error, isLive };
 }
