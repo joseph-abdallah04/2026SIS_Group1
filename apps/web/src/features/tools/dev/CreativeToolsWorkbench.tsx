@@ -60,7 +60,7 @@ export function CreativeToolsWorkbench() {
           {proposals.length ? (
             <div className="flex flex-wrap items-start gap-5">
               {proposals.map((proposal) => (
-                <ProposalCard key={proposal.id} item={proposal} zoom={100} isNew />
+                <ProposalCard key={proposal.id} item={proposal} isNew />
               ))}
             </div>
           ) : (

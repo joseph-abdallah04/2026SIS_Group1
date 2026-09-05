@@ -30,7 +30,18 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
 export function SessionPinboard() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
+  const {
+    board,
+    loading,
+    error,
+    reload,
+    propose,
+    editProposal,
+    deleteProposal,
+    isLive,
+    newItemIds,
+    viewerId,
+  } = usePinboard(sessionId);
   // Entering the session view joins the room; leaving it (or ending the
   // session) unmounts this and disconnects — F11's connect/disconnect points.
   // Called before any early return so the room is not torn down and rebuilt
@@ -102,7 +113,11 @@ export function SessionPinboard() {
 
   return (
     <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
-      <main className="relative h-screen">
+      {/* `relative` so VoiceNotice's `absolute` banner positions against this
+          frame; `overflow-hidden` so nothing on the board can produce a
+          page-level scrollbar; `h-dvh` so mobile browser chrome does not cut
+          it off. */}
+      <main className="relative h-dvh overflow-hidden">
         <VoiceNotice
           status={voice.status}
           micStatus={voice.micStatus}
@@ -112,7 +127,14 @@ export function SessionPinboard() {
           requestMicrophone={voice.requestMicrophone}
           unlockAudio={voice.unlockAudio}
         />
-        <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} />
+        <PinboardCanvas
+          board={board}
+          isLive={isLive}
+          newItemIds={newItemIds}
+          viewerId={viewerId}
+          editProposal={editProposal}
+          deleteProposal={deleteProposal}
+        />
       </main>
       <CreativeStudio />
     </CreativeToolsProvider>

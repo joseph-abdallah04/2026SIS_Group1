@@ -16,6 +16,7 @@
   --color-rt-ink-muted: #5a5f68;
   --color-rt-ink-faint: #8a8f97;
   --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Lora', Georgia, serif;
 }
 
 body {
@@ -24,9 +25,8 @@ body {
 }
 
 /*
- * F15 — a proposal that landed while you were watching. Deliberately quiet:
- * it should catch the eye once, not compete with the board. `usePinboard`
- * drops the flag after the glow has finished.
+ * F15 — a proposal that landed while you were watching. Soft fade/slide only;
+ * no coloured outline (that felt too loud on the board).
  */
 @keyframes rt-proposal-arrive {
   from {
@@ -39,24 +39,12 @@ body {
   }
 }
 
-@keyframes rt-proposal-glow {
-  0%,
-  55% {
-    box-shadow: 0 0 0 3px var(--color-rt-secondary-tint);
-  }
-  to {
-    box-shadow: 0 0 0 3px transparent;
-  }
-}
-
 .rt-proposal-arrive {
-  animation:
-    rt-proposal-arrive 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    rt-proposal-glow 2400ms ease-out;
+  animation: rt-proposal-arrive 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .rt-proposal-arrive {
-    animation: rt-proposal-glow 2400ms ease-out;
+    animation: none;
   }
 }
