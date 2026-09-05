@@ -75,46 +75,40 @@ npm run dev
 - Web app: http://localhost:5173
 - Server: http://localhost:3001 (`GET /api/health` to verify)
 
-### Opening a session board before auth exists
+### Logging in
 
-`/sessions/:id` sits behind the auth guard, which looks for a token in
-`localStorage`. Signup/login are the Auth owner's tickets and aren't built yet,
-so until they land, fake the token once in the browser console:
+Auth is real (F01/F02): every page except `/login` and `/signup` needs a valid
+token, and the server derives who you are from it on every request and socket
+handshake. Either sign up through the UI, or seed the two demo accounts:
 
-```js
-localStorage.setItem('rt_token', 'dev');
+```bash
+npm run db:seed --workspace @roundtable/server
 ```
 
-Then run `npm run db:seed --workspace @roundtable/server` and open the
-`/sessions/<id>` URL it prints. The board API (`GET /api/sessions/:id/proposals`)
-is likewise unauthenticated in development only — in production it stays behind
-`requireAuth`, which rejects everything until the real middleware lands.
+Both seeded accounts share the password **`roundtable`**:
+
+| Email               | Who               |
+| ------------------- | ----------------- |
+| `alice@example.com` | Demo leader       |
+| `bob@example.com`   | Demo participant  |
+
+Re-run the seed if you seeded before September 2026 — earlier runs stored a
+placeholder hash that no password matches, so those accounts can't log in.
 
 ### Watching proposals appear live (two windows)
 
-Sockets identify a user from a verified JWT, which doesn't exist yet either, so
-in development the handshake carries `rt_dev_user_id` instead. Without it a
-socket joins as the session's leader, which is fine for one window — but two
-windows would then be the same person. To act as someone else, set it to a
-seeded member's id:
+Two windows have to be two *people*, and identity now comes from the token, so
+one browser profile can only be one user at a time. Use a normal window and a
+private/incognito one (or two profiles): log in as Alice in the first and Bob in
+the second, then open the same `/sessions/<id>` in both.
 
-```js
-// Bob's id — read it off any of his seeded cards, or query the users table
-localStorage.setItem('rt_dev_user_id', '<user id>');
-```
+Propose from one window and the card appears in both, highlighted briefly. A
+socket may only join a session its user is a member of — Bob has to join by
+code first (or be the seeded member he already is), otherwise the join is
+refused and the board shows `offline`.
 
-The id must belong to a member of that session or the join is refused; it is
-never sent from a production build. Reconnect the socket after changing it —
-the handshake is read once, so a page refresh is the simplest way.
-
-Open the same `/sessions/<id>` in two windows and propose from one: the card
-appears in both, highlighted briefly. Until F19 ships the sticky note tool, the
-dev-only **`dev: propose sticky`** button in the board footer stands in for it.
-
-**None of this works in production yet.** With no JWT verification, the gateway
-refuses every socket: joins fail, the board shows `offline`, and proposing
-returns `NOT_IN_SESSION` — the same closed-by-default posture as `requireAuth`.
-Realtime starts working on Render once auth and the sessions gateway land.
+The handshake is read once, when the socket is created, so logging in or out
+needs a page refresh before the new identity is used.
 
 ## Build & Deploy
 

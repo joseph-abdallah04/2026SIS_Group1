@@ -35,7 +35,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     if (body?.code && AUTH_FAILURE_CODES.has(body.code)) {
       redirectToLogin();
     }
-    throw new ApiClientError(res.status, body?.error ?? `Request failed (${res.status})`, body?.code);
+    throw new ApiClientError(
+      res.status,
+      body?.error ?? `Request failed (${res.status})`,
+      body?.code,
+    );
   }
   return body as T;
 }

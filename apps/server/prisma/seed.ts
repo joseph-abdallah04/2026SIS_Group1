@@ -2,6 +2,7 @@
 // Usage (from apps/server): npx tsx prisma/seed.ts
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 
@@ -11,34 +12,57 @@ dotenv.config({ path: path.resolve(here, '../../.env') });
 
 const prisma = new PrismaClient();
 
+/**
+ * The password both demo accounts share. Real bcrypt hashes, not a placeholder
+ * string: now that login is real (F01/F02), a seeded user who cannot log in is
+ * a seeded user nobody can act as — and testing a session needs two people in
+ * two browser windows.
+ *
+ * Rounds are bcrypt's own default rather than a copy of the auth service's
+ * constant; a hash records the cost it was made with, so `bcrypt.compare`
+ * verifies these regardless of what the service later uses.
+ */
+const DEMO_PASSWORD = 'roundtable';
+
 async function main() {
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+
+  // `passwordHash` is set on `update` too, so re-seeding a database that was
+  // seeded before login existed replaces the unusable placeholder hash — an
+  // `update: {}` would leave those accounts permanently unable to log in.
   const alice = await prisma.user.upsert({
     where: { email: 'alice@example.com' },
-    update: {},
+    update: { passwordHash },
     create: {
       email: 'alice@example.com',
-      passwordHash: 'seed-only-not-a-real-hash',
+      passwordHash,
       displayName: 'Alice (demo leader)',
     },
   });
   const bob = await prisma.user.upsert({
     where: { email: 'bob@example.com' },
-    update: {},
+    update: { passwordHash },
     create: {
       email: 'bob@example.com',
-      passwordHash: 'seed-only-not-a-real-hash',
+      passwordHash,
       displayName: 'Bob (demo participant)',
     },
   });
 
   const session = await prisma.session.upsert({
     where: { code: 'DEMO-0001' },
-    update: {},
+    // `active`, not `lobby`: it seeds a question already in `discussion` with
+    // proposals on it, which is what a live session looks like. `/sessions/:id`
+    // routes by status (F08), so `lobby` here would land on the waiting room
+    // instead of the pinboard this seed exists to exercise. Set on `update`
+    // too, so a re-seed of an existing local database picks up this change —
+    // an `update: {}` would silently leave an already-seeded row at `lobby`.
+    update: { status: 'active' },
     create: {
       code: 'DEMO-0001',
       title: 'Demo session (seeded)',
       leaderId: alice.id,
-      status: 'lobby',
+      status: 'active',
     },
   });
 
@@ -129,6 +153,10 @@ async function main() {
     'Seeded: alice@example.com, bob@example.com, session DEMO-0001 (2 questions, 2 members, 3 proposals)',
   );
   console.log(`Open: /sessions/${session.id}`);
+  console.log(
+    `Log in at /login as alice@example.com (leader) or bob@example.com — password: ${DEMO_PASSWORD}`,
+  );
+  console.log(`  alice: ${alice.id}\n  bob:   ${bob.id}`);
 }
 
 main()

@@ -3,7 +3,7 @@
 // Client: `io<ServerToClientEvents, ClientToServerEvents>(...)`
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
-import type { BoardItem, BoardResponse } from './index.js';
+import type { BoardItem, BoardResponse, SessionStatus } from './index.js';
 import type { ProposalCreateInput, ProposalDeleteInput, ProposalUpdateInput } from './schemas.js';
 
 export interface SessionUserPayload {
@@ -24,15 +24,24 @@ export interface WriteAck {
  * resyncs from this alone, so anything missing here is something the header
  * would render as a placeholder until a REST call happened to fill it in.
  *
- * Sessions-owned fields (phase, presence, vote progress) get added here as
- * those modules land.
+ * F08 adds the first sessions-owned fields: `status`/`leaderId` (so the
+ * waiting room and pinboard don't need a separate REST call just to know
+ * whose session this is) and `participants` — who is *connected right now*,
+ * derived from socket rooms, not `session_members` (docs/02 §4: presence is
+ * in-memory, membership history is persisted). Vote progress etc. get added
+ * here as those modules land.
  */
 export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
+  status: SessionStatus;
+  leaderId: string;
+  participants: SessionUserPayload[];
   /**
    * Who the server believes this socket is. The client renders author-only
    * affordances from this rather than from a locally remembered id, so what the
    * UI offers and what the server will accept come from one source (F16).
+   * Together with `leaderId` above, one snapshot answers both "is this mine"
+   * and "am I the leader" without a REST call.
    *
    * Not part of `BoardResponse`: the REST read has no identity attached, and a
    * client that only ever managed a REST load cannot write anyway.
@@ -43,6 +52,18 @@ export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
 export interface ClientToServerEvents {
   /** Join a session room; server validates membership then acks with ok/error. */
   memberJoin(
+    payload: { sessionId: string },
+    ack?: (res: { ok: boolean; error?: string }) => void,
+  ): void;
+  /**
+   * Leave a session room without dropping the TCP connection. The waiting
+   * room and pinboard emit this on unmount so navigating to the dashboard
+   * drops you from "Here now"; a page refresh still uses `disconnect`.
+   *
+   * No-op (and still `ok`) if this socket is not currently in that room —
+   * a Strict Mode remount may join again before the deferred leave fires.
+   */
+  memberLeave(
     payload: { sessionId: string },
     ack?: (res: { ok: boolean; error?: string }) => void,
   ): void;

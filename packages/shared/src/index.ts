@@ -8,16 +8,29 @@ export interface User {
   createdAt: string;
 }
 
-export type SessionStatus = 'lobby' | 'active' | 'ended';
+// draft: leader is still setting the session up (F04). lobby: joinable, has a
+// code (F06). active: started (F09). ended: over, code released.
+export type SessionStatus = 'draft' | 'lobby' | 'active' | 'ended';
 
 export interface Session {
   id: string;
-  code: string;
+  // null while draft or ended — only lobby/active sessions hold a code.
+  code: string | null;
   title: string;
   leaderId: string;
   status: SessionStatus;
   createdAt: Date;
   endedAt: Date | null;
+}
+
+/** Row shape for the dashboard's session list (F04/F07). */
+export interface SessionSummary {
+  id: string;
+  code: string | null;
+  title: string;
+  status: SessionStatus;
+  createdAt: Date;
+  isLeader: boolean;
 }
 
 // === auth module ===
@@ -49,6 +62,18 @@ export interface SessionMember {
   sessionId: string;
   userId: string;
   joinedAt: Date;
+}
+
+/**
+ * Uppercases, drops anything outside the code alphabet (spaces, stray
+ * punctuation, a typed-in hyphen), then re-inserts the hyphen after the 4th
+ * character. "k7np3wqz", "K7NP 3WQZ" and "K7NP-3WQZ" all normalise to the
+ * same string, so the client and server can compare/lookup identically
+ * before either validates it against `sessionCodeSchema` (./schemas.ts).
+ */
+export function normalizeSessionCode(raw: string): string {
+  const cleaned = raw.toUpperCase().replace(/[^23456789A-HJ-NP-Z]/g, '');
+  return cleaned.length <= 4 ? cleaned : `${cleaned.slice(0, 4)}-${cleaned.slice(4, 8)}`;
 }
 
 // === pinboard module ===
