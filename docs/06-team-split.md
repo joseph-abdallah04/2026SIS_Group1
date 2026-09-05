@@ -461,7 +461,7 @@ Frontend: apps/web/src/features/voice/
 ### API surface
 
 ```
-POST   /api/sessions/:id/voice-token     → { token: string, url: string }
+POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, expiresInSeconds }
 ```
 
 ### Frontend interactions
@@ -483,7 +483,9 @@ POST   /api/sessions/:id/voice-token     → { token: string, url: string }
 ### Notes
 
 - Room name: `session-{sessionId}`
-- Token expires after 24 hours (user can rejoin anytime)
+- Token expires after 15 minutes; the client re-fetches on every connect and
+  reconnect, so long sessions and refreshes are unaffected (F11 asks for a
+  short-lived token, which supersedes the 24h figure written here pre-build)
 - LiveKit SDK handles all participant state
 - Voice is **optional** — joining session doesn't require microphone permission
 
@@ -653,7 +655,7 @@ data: {"type":"done"}
 
 - Auth: `POST /api/auth/signup`, `POST /api/auth/login`, etc.
 - Sessions: `POST /api/sessions`, `GET /api/sessions/:id`, etc.
-- Voice: `POST /api/sessions/:id/voice-token`
+- Voice: `POST /api/sessions/:id/livekit-token`
 - Assistant: `POST /api/sessions/:id/assistant/chat`
 
 **Rule:** No two modules own the same REST prefix or the same socket event namespace (`proposal:*` = pinboard, `vote:*`/`voting:*` = voting, `session:*` = sessions)  
@@ -688,7 +690,7 @@ const proposals = await pinboard.getProposalsForQuestion(questionId);
 | Pinboard  | Proposal, Reaction               | socket `proposal:*`, `reaction:*`                         | Week 1 Day 1 | Session (reads session state)               |
 | Tools     | [none]                           | [none]                                                    | Week 1 Day 1 | Pinboard pipeline exists (already designed) |
 | Voting    | VotingRound, Vote, Answer        | socket `vote:*`/`voting:*`; GET /api/sessions/:id/summary | Week 1 Day 2 | Phase values defined                        |
-| Voice     | [none]                           | /api/voice-token                                          | Week 1 Day 1 | Auth, Session (imports types)               |
+| Voice     | [none]                           | /api/livekit-token                                        | Week 1 Day 1 | Auth, Session (imports types)               |
 | Assistant | [none]                           | /api/assistant/chat                                       | Week 1 Day 2 | Auth (LLM config), Pinboard pipeline        |
 
 **Outcome:** No hard blockers; soft dependencies on type definitions (all locked in setup week)
