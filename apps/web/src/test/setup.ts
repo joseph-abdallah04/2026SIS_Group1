@@ -4,6 +4,8 @@ import { afterEach } from 'vitest';
 
 afterEach(cleanup);
 
+window.confirm = () => true;
+
 if (!globalThis.PointerEvent) {
   class TestPointerEvent extends MouseEvent {
     readonly pointerId: number;

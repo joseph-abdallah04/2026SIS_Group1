@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { diagramNodeSize, type BoardItem, type DiagramNode } from '@roundtable/shared';
+import type { BoardItem, DiagramNode } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
@@ -31,12 +31,16 @@ describe('diagram proposal card', () => {
       />,
     );
 
-    expect(container.querySelectorAll('g > rect')).toHaveLength(2);
+    // Box and container are stroked outlines; text is a bare label with no border.
+    expect(container.querySelectorAll('g > rect[stroke]')).toHaveLength(2);
     expect(container.querySelector('rect[stroke-dasharray="4 3"]')).not.toBeNull();
     const fittedText = [...container.querySelectorAll('text')].find(
       (element) => element.textContent === 'Architecture boundary',
     );
-    expect(fittedText?.getAttribute('textLength')).toBe(String(diagramNodeSize('text').width - 12));
+    // Diagram contract v2 wraps labels into bounded lines instead of squeezing
+    // them onto one line with textLength.
+    expect(fittedText?.getAttribute('textLength')).toBeNull();
+    expect(fittedText?.querySelectorAll('tspan')).toHaveLength(1);
   });
 
   it('renders a legacy node without shape as a box', () => {
@@ -56,12 +60,36 @@ describe('diagram proposal card', () => {
     item.artifactJson.edges = [{ from: 'client', to: 'server', label: 'calls' }];
     const { container } = render(<ProposalCard item={item} />);
 
-    const line = container.querySelector('line[marker-end]');
-    expect(line?.getAttribute('x1')).toBe('144');
-    expect(line?.getAttribute('x2')).toBe('300');
+    // Arrows are paths now, so a bowed reciprocal pair can share the same code
+    // as a straight one; the boundary anchors are unchanged.
+    const arrow = container.querySelector('path[marker-end]');
+    expect(arrow?.getAttribute('d')).toMatch(/^M144,/);
+    expect(arrow?.getAttribute('d')).toContain(' L300,');
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'calls'),
     ).toBe(true);
+  });
+
+  it('bows a reciprocal pair apart on the board card too', () => {
+    const item = diagramItem([
+      { id: 'a', label: 'A', x: 24, y: 24, shape: 'box' },
+      { id: 'b', label: 'B', x: 400, y: 24, shape: 'box' },
+    ]);
+    if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
+    item.artifactJson.edges = [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'a' },
+    ];
+    const { container } = render(<ProposalCard item={item} />);
+
+    // The card shares the editor's routing, so both directions stay readable
+    // instead of one arrow hiding under the other.
+    const paths = [...container.querySelectorAll('path[marker-end]')].map((path) =>
+      path.getAttribute('d'),
+    );
+    expect(paths).toHaveLength(2);
+    expect(paths.every((path) => path?.includes('Q'))).toBe(true);
+    expect(paths[0]).not.toBe(paths[1]);
   });
 
   it('renders the complete diagram rather than truncating after four nodes', () => {
@@ -81,6 +109,6 @@ describe('diagram proposal card', () => {
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'Node 5'),
     ).toBe(true);
-    expect(container.querySelectorAll('line[marker-end]')).toHaveLength(1);
+    expect(container.querySelectorAll('path[marker-end]')).toHaveLength(1);
   });
 });
