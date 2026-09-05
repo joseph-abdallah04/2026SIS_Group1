@@ -25,3 +25,11 @@ test-results/
 # Logs
 *.log
 npm-debug.log*
+
+# Stray emit inside the shared package's source. A `tsc` run without `outDir`
+# drops compiled `.js` next to the `.ts`, which is worse than untidy: those
+# files satisfy the `./x.js` specifiers the sources use, so a build that would
+# fail in production starts working locally and hides the problem.
+packages/shared/src/*.js
+packages/shared/src/*.js.map
+packages/shared/src/*.d.ts
