@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { QuestionStatus } from '@roundtable/shared';
 
 // The write path's rules are the interesting part, not Prisma. Both the
 // database and the sessions adapter are stubbed so each rule can be exercised
@@ -33,6 +34,10 @@ const STICKY = {
   y: 0,
 } as Parameters<typeof createProposal>[0]['input'];
 
+function questionRef(status: QuestionStatus = 'discussion') {
+  return { id: 'q1', sessionId: 's1', text: 'Q', position: 0, status };
+}
+
 function createdRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'p-new',
@@ -52,13 +57,7 @@ function createdRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  question.mockResolvedValue({
-    id: 'q1',
-    sessionId: 's1',
-    text: 'Q',
-    position: 0,
-    status: 'discussion',
-  });
+  question.mockResolvedValue(questionRef('discussion'));
   session.mockResolvedValue({ id: 's1', title: 'Session', status: 'active', leaderId: 'leader-1' });
   create.mockResolvedValue(createdRow() as never);
 });
@@ -88,7 +87,7 @@ describe('createProposal', () => {
   it.each(['pending', 'voting', 'answered', 'skipped'] as const)(
     'refuses to write while the question is %s',
     async (status) => {
-      question.mockResolvedValue({ id: 'q1', sessionId: 's1', text: 'Q', position: 0, status });
+      question.mockResolvedValue(questionRef(status));
       await expect(
         createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
       ).rejects.toThrow(/proposals are closed/);
@@ -204,13 +203,7 @@ describe('proposalCreate handler', () => {
   });
 
   it('rejects a payload whose type contradicts its artifact', async () => {
-    activeQuestion.mockResolvedValue({
-      id: 'q1',
-      sessionId: 's1',
-      text: 'Q',
-      position: 0,
-      status: 'discussion',
-    });
+    activeQuestion.mockResolvedValue(questionRef('discussion'));
     const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
     expect(await propose({ ...STICKY, type: 'drawing' })).toMatchObject({
       ok: false,
@@ -220,13 +213,7 @@ describe('proposalCreate handler', () => {
   });
 
   it('rejects a diagram whose arrow references a missing node', async () => {
-    activeQuestion.mockResolvedValue({
-      id: 'q1',
-      sessionId: 's1',
-      text: 'Q',
-      position: 0,
-      status: 'discussion',
-    });
+    activeQuestion.mockResolvedValue(questionRef('discussion'));
     const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
     expect(
       await propose({
@@ -244,20 +231,8 @@ describe('proposalCreate handler', () => {
   });
 
   it('reports a closed board rather than failing silently', async () => {
-    activeQuestion.mockResolvedValue({
-      id: 'q1',
-      sessionId: 's1',
-      text: 'Q',
-      position: 0,
-      status: 'voting',
-    });
-    question.mockResolvedValue({
-      id: 'q1',
-      sessionId: 's1',
-      text: 'Q',
-      position: 0,
-      status: 'voting',
-    });
+    activeQuestion.mockResolvedValue(questionRef('voting'));
+    question.mockResolvedValue(questionRef('voting'));
     const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
     expect(await propose(STICKY)).toMatchObject({ ok: false, code: 'QUESTION_CLOSED' });
   });
@@ -269,13 +244,7 @@ describe('proposalCreate handler', () => {
   });
 
   it('writes with the socket\u2019s user, ignoring any author in the payload', async () => {
-    activeQuestion.mockResolvedValue({
-      id: 'q1',
-      sessionId: 's1',
-      text: 'Q',
-      position: 0,
-      status: 'discussion',
-    });
+    activeQuestion.mockResolvedValue(questionRef('discussion'));
     const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
 
     expect(await propose({ ...STICKY, authorId: 'someone-else' })).toMatchObject({ ok: true });

@@ -43,7 +43,18 @@ interface SessionPinboardProps {
 export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
+  const {
+    board,
+    loading,
+    error,
+    reload,
+    propose,
+    editProposal,
+    deleteProposal,
+    isLive,
+    newItemIds,
+    viewerId,
+  } = usePinboard(sessionId);
 
   if (!sessionId) {
     return (
@@ -110,12 +121,17 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
 
   return (
     <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
-      <main className="h-screen">
+      {/* `overflow-hidden` so nothing on the board can produce a page-level
+          scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
+      <main className="h-dvh overflow-hidden">
         <PinboardCanvas
           board={board}
           isLive={isLive}
           newItemIds={newItemIds}
           isLeader={isLeader}
+          viewerId={viewerId}
+          editProposal={editProposal}
+          deleteProposal={deleteProposal}
           agenda={
             <AgendaPanel
               sessionId={sessionId}

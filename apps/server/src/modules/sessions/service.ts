@@ -835,9 +835,15 @@ export interface SessionRef {
 
 export interface QuestionRef {
   id: string;
-  // Widened for F32: a caller holding a question needs to reach its session to
-  // ask whether that session still accepts writes. Without it, pinboard could
-  // only see the question's own status, which an ended session doesn't change.
+  /**
+   * Which session this question belongs to. Two callers need it, both in
+   * Pinboard: F16's permission rules check that a proposal a client names sits
+   * on the board that client actually joined (without this, knowing an id would
+   * be enough to reach across sessions), and F32's write gate reaches the
+   * session to ask whether it still accepts writes at all — which the
+   * question's own status cannot answer, since ending a session leaves it
+   * untouched.
+   */
   sessionId: string;
   text: string;
   position: number;

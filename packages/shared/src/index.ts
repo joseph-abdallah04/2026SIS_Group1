@@ -1,9 +1,11 @@
 // Shared domain types — concrete, no `any`. See docs/02-architecture.md §3.
+// `createdAt` is a fixed-width UTC ISO-8601 string (same convention as
+// `BoardItem`) — this is the wire shape sent to clients, not the DB row.
 export interface User {
   id: string;
   email: string;
   displayName: string;
-  createdAt: Date;
+  createdAt: string;
 }
 
 // draft: leader is still setting the session up (F04). lobby: joinable, has a
@@ -40,6 +42,12 @@ export interface SessionSummary {
 }
 
 // === auth module ===
+
+/** Response shape for endpoints that hand back an authenticated session (F02 login). */
+export interface AuthResult {
+  token: string;
+  user: User;
+}
 
 // === sessions module ===
 
@@ -218,6 +226,12 @@ export function compareBoardItems(a: BoardItem, b: BoardItem): number {
 export interface BoardResponse {
   sessionId: string;
   sessionTitle: string;
+  /**
+   * The session's leader. Clients compare it against their own id to decide
+   * whether to offer the leader's board-tidying affordances; the server checks
+   * the same thing again on every write.
+   */
+  leaderId: string;
   questionId: string | null;
   questionText: string | null;
   questionPosition: number | null;

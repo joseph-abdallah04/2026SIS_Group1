@@ -4,7 +4,7 @@
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
 import type { BoardItem, BoardResponse, QuestionStatus, SessionStatus } from './index.js';
-import type { ProposalCreateInput } from './schemas.js';
+import type { ProposalCreateInput, ProposalDeleteInput, ProposalUpdateInput } from './schemas.js';
 
 export interface SessionUserPayload {
   id: string;
@@ -36,11 +36,25 @@ export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   status: SessionStatus;
   leaderId: string;
   participants: SessionUserPayload[];
+  /**
+   * Who the server believes this socket is. The client renders author-only
+   * affordances from this rather than from a locally remembered id, so what the
+   * UI offers and what the server will accept come from one source (F16).
+   * Together with `leaderId` above, one snapshot answers both "is this mine"
+   * and "am I the leader" without a REST call.
+   *
+   * Not part of `BoardResponse`: the REST read has no identity attached, and a
+   * client that only ever managed a REST load cannot write anyway.
+   */
+  viewer: SessionUserPayload;
 }
 
 export interface ClientToServerEvents {
   /** Join a session room; server validates membership then acks with ok/error. */
-  memberJoin(payload: { sessionId: string }, ack?: (res: { ok: boolean; error?: string }) => void): void;
+  memberJoin(
+    payload: { sessionId: string },
+    ack?: (res: { ok: boolean; error?: string }) => void,
+  ): void;
 
   // === sessions module ===
   // `sessionStart` has no client-to-server counterpart — starting is a REST
@@ -60,8 +74,18 @@ export interface ClientToServerEvents {
    * validates, persists, then broadcasts `proposalCreated` to the room.
    */
   proposalCreate(payload: ProposalCreateInput, ack?: (res: WriteAck) => void): void;
-  // `proposalUpdate` / `proposalDelete` arrive with F16 (author CRUD).
-
+  /**
+   * Edit or move a proposal you authored (F16). The server re-checks authorship
+   * against the socket's user, so hiding the affordance in the UI is a courtesy
+   * and this is the enforcement.
+   */
+  proposalUpdate(payload: ProposalUpdateInput, ack?: (res: WriteAck) => void): void;
+  /**
+   * Remove a proposal you authored (F16). Soft-deleted server-side, so a
+   * proposal that others extended (F23) keeps its lineage intact.
+   * Leader moderation over anyone's proposal is F17.
+   */
+  proposalDelete(payload: ProposalDeleteInput, ack?: (res: WriteAck) => void): void;
   // === voting module ===
   // === summary module ===
   // === voice module ===

@@ -1,13 +1,18 @@
-// Placeholder pages — smoke-test targets (docs/05 §10). Owners replace with real UI.
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { normalizeSessionCode, type SessionStatus, type SessionSummary } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../components/RoundTableLogo';
 import { Button } from '../components/ui/Button';
-import { DevUserSwitcher } from '../features/sessions/DevUserSwitcher';
+import { logout } from '../features/auth/api';
 import { useDeleteSession } from '../features/sessions/useDeleteSession';
 import { useSessions } from '../features/sessions/useSessions';
+import { clearToken } from '../lib/auth';
+
+// F01/F02 own these two screens; the dashboard below re-exports them so
+// `App.tsx` keeps importing every page from one barrel.
+export { LoginPage } from '../features/auth/LoginPage';
+export { SignupPage } from '../features/auth/SignupPage';
 
 /** The typed-code path to `/join/:code` — pasting a link goes straight there instead. */
 function JoinByCodeForm() {
@@ -33,22 +38,6 @@ function JoinByCodeForm() {
         Join
       </Button>
     </form>
-  );
-}
-
-export function LoginPage() {
-  return (
-    <main className="flex h-screen items-center justify-center">
-      <h1 className="text-2xl font-bold">Log in</h1>
-    </main>
-  );
-}
-
-export function SignupPage() {
-  return (
-    <main className="flex h-screen items-center justify-center">
-      <h1 className="text-2xl font-bold">Sign up</h1>
-    </main>
   );
 }
 
@@ -189,16 +178,33 @@ export function DashboardPage() {
   const draftSessions = sessions?.filter((s) => s.status === 'draft') ?? [];
   const endedSessions = sessions?.filter((s) => s.status === 'ended') ?? [];
 
+  // Clears the token even if the request fails: the token is stateless, so the
+  // client dropping it *is* the logout (see auth's `/logout` route) — a network
+  // error must not leave someone stuck logged in.
+  async function onLogout() {
+    try {
+      await logout();
+    } finally {
+      clearToken();
+      navigate('/login', { replace: true });
+    }
+  }
+
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
       <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Dashboard</span>
+        <button
+          type="button"
+          onClick={() => void onLogout()}
+          className="ml-auto text-[12px] font-semibold text-white/80 hover:text-white hover:underline"
+        >
+          Log out
+        </button>
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-6 py-8">
-        <DevUserSwitcher />
-
         <div className="flex items-center justify-between">
           <h1 className="text-[19px] font-semibold tracking-[-0.01em]">My sessions</h1>
           <Link to="/sessions/new">

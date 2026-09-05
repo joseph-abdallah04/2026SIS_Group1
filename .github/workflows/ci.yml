@@ -10,6 +10,10 @@ jobs:
   ci:
     name: Lint, typecheck, build, test
     runs-on: ubuntu-latest
+    env:
+      # Not a real secret — just satisfies env.ts's min-length check so tests
+      # that import env.ts (e.g. auth's jwt.test.ts) can run in CI.
+      JWT_SECRET: ci-placeholder-secret-not-used-in-production
     steps:
       - uses: actions/checkout@v4
 

@@ -1,13 +1,24 @@
 import type { BoardItem, BoardResponse } from '@roundtable/shared';
-import { artifactJsonSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
+import {
+  artifactJsonSchema,
+  type ProposalCreateInput,
+  type ProposalUpdateInput,
+} from '@roundtable/shared/schemas';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
+import { requireMutableProposal, type Actor, type ProposalMutation } from './permissions.js';
 import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
-// agreed order) and its create side (F15: proposals land for everyone at once).
-// Edit/delete/reactions are F16–F18.
+// agreed order), its create side (F15: proposals land for everyone at once) and
+// its author-edit side (F16: edit, move, delete your own). Reactions are F18.
+//
+// Every mutation here is deliberately socket-agnostic: the caller broadcasts.
+// That keeps one write path per operation no matter who is calling — a tool
+// editor over a socket, the assistant proposing server-side (F37), or the
+// leader moderating (F17) — so the rules cannot be bypassed by arriving from a
+// different direction.
 
 type ProposalRow = Prisma.ProposalGetPayload<{
   include: { author: { select: { displayName: true } } };
@@ -104,7 +115,11 @@ export async function createProposal({
       select: { id: true },
     });
     if (!parent) {
-      throw new ApiError(400, 'Cannot extend a proposal that is not on this board', 'INVALID_EXTENDS');
+      throw new ApiError(
+        400,
+        'Cannot extend a proposal that is not on this board',
+        'INVALID_EXTENDS',
+      );
     }
   }
 
@@ -124,6 +139,105 @@ export async function createProposal({
   return toBoardItem(row);
 }
 
+/**
+ * Load a proposal together with the board it sits on, and confirm this actor
+ * may change it. Shared by edit and delete so the two can never drift apart on
+ * who is allowed to do what.
+ */
+async function loadForMutation(proposalId: string, actor: Actor, mutation: ProposalMutation) {
+  const row = await prisma.proposal.findUnique({
+    where: { id: proposalId },
+    include: { author: { select: { displayName: true } } },
+  });
+
+  // The question and the session both come from the sessions adapter, not a
+  // Prisma `include`: the pinboard owns proposals, not questions or sessions,
+  // and reading one through a relation is still reaching into another module's
+  // table (docs/02 §2).
+  const question = row ? await getQuestion(row.questionId) : null;
+  const session = question ? await getSession(question.sessionId) : null;
+  const isLeader = session?.leaderId === actor.id;
+
+  return { row: requireMutableProposal(row, question, actor, { mutation, isLeader }), question };
+}
+
+/**
+ * Edit a proposal's content, its position, or both (F16).
+ *
+ * A drag sends coordinates only and a text edit sends the artifact only, so
+ * anything absent from the input is left exactly as it was rather than being
+ * overwritten with a default.
+ */
+export async function updateProposal({
+  proposalId,
+  actor,
+  input,
+}: {
+  proposalId: string;
+  actor: Actor;
+  input: ProposalUpdateInput;
+}): Promise<BoardItem> {
+  // Content and position carry different permissions — the leader may arrange
+  // the shared board without being able to rewrite what anyone said — so which
+  // one this is has to be decided before the check, not after. A payload
+  // carrying both counts as an edit: the stricter rule wins, or a leader could
+  // rewrite anything by attaching coordinates to it.
+  const { row } = await loadForMutation(
+    proposalId,
+    actor,
+    input.artifactJson === undefined ? 'move' : 'edit',
+  );
+
+  // An edit changes what a proposal says, never what kind of thing it is: the
+  // `type` column and the artifact must keep agreeing, and turning a sticky
+  // into a diagram is a new idea rather than an edit of this one.
+  if (input.artifactJson && input.artifactJson.type !== row.type) {
+    throw new ApiError(
+      400,
+      `A ${row.type} proposal cannot become a ${input.artifactJson.type}`,
+      'ARTIFACT_TYPE_MISMATCH',
+    );
+  }
+
+  const updated = await prisma.proposal.update({
+    where: { id: proposalId },
+    data: {
+      ...(input.artifactJson
+        ? { artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue }
+        : {}),
+      ...(input.x === undefined ? {} : { x: input.x }),
+      ...(input.y === undefined ? {} : { y: input.y }),
+    },
+    include: { author: { select: { displayName: true } } },
+  });
+
+  return toBoardItem(updated);
+}
+
+/**
+ * Remove a proposal from the board (F16).
+ *
+ * Soft delete, per docs/02 §3: reactions, votes and extend-children all point
+ * at this row, so the record stays and only its place on the board goes. The
+ * returned questionId lets the caller address the broadcast at the right board.
+ */
+export async function deleteProposal({
+  proposalId,
+  actor,
+}: {
+  proposalId: string;
+  actor: Actor;
+}): Promise<{ proposalId: string; questionId: string }> {
+  const { row } = await loadForMutation(proposalId, actor, 'delete');
+
+  await prisma.proposal.update({
+    where: { id: proposalId },
+    data: { deletedAt: new Date() },
+  });
+
+  return { proposalId: row.id, questionId: row.questionId };
+}
+
 export async function getBoardForSession(sessionId: string): Promise<BoardResponse> {
   const session = await getSession(sessionId);
   if (!session) {
@@ -135,6 +249,7 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
     return {
       sessionId,
       sessionTitle: session.title,
+      leaderId: session.leaderId,
       questionId: null,
       questionText: null,
       questionPosition: null,
@@ -146,6 +261,7 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
   return {
     sessionId,
     sessionTitle: session.title,
+    leaderId: session.leaderId,
     questionId: question.id,
     questionText: question.text,
     questionPosition: question.position,

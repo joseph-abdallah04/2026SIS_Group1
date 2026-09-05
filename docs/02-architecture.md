@@ -215,7 +215,7 @@ Reads of a session (`GET /:id`, `GET /:id/members`) require membership. A sessio
 - **Commits:** Conventional Commits (`feat(voting): …`) — enables readable changelogs.
 - **Testing:** Vitest unit tests per module (pure logic like state machine, tally rules); Playwright smoke test of happy path from Week 3 onward.
 - **Lint/format:** ESLint flat config + Prettier, enforced in CI.
-- **Env/config:** `.env.example` committed, real `.env` ignored. Server config loaded via one `env.ts` module using zod validation at boot. `NODE_ENV` **defaults to `production`** rather than `development`, because it is the single switch on every dev-only identity escape hatch (the `x-dev-user-id` header, the socket handshake's `devUserId`, open board reads) — a forgotten env var must fail closed, not hand out impersonation. Local development opts in with `NODE_ENV=development` in `.env`.
+- **Env/config:** `.env.example` committed, real `.env` ignored. Server config loaded via one `env.ts` module using zod validation at boot. `NODE_ENV` **defaults to `production`** rather than `development`, so that a forgotten env var costs convenience rather than safety. Nothing about identity depends on it any more — REST routes go through `requireAuth` and the socket handshake verifies its token in every environment — but the strict default stays, so the next environment-gated shortcut anyone adds inherits it. Local development opts in with `NODE_ENV=development` in `.env`. `JWT_SECRET` is required (min 32 chars) and the server refuses to boot without it.
 
 ## 8. Key technical decisions & gotchas
 

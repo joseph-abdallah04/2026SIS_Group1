@@ -170,3 +170,33 @@ export const proposalCreateSchema = z
   });
 
 export type ProposalCreateInput = z.infer<typeof proposalCreateSchema>;
+
+/**
+ * Edit contract for F16. Content, position, or both.
+ *
+ * Every field is optional because a drag sends only coordinates and a text edit
+ * sends only the artifact, but an update that changes nothing is a mistake
+ * worth reporting rather than a no-op write.
+ *
+ * `type` is deliberately absent: a sticky cannot become a diagram. Changing the
+ * kind of an artifact would break the column/artifact agreement that
+ * `proposalCreateSchema` establishes, and it is not an edit, it is a new idea,
+ * which is what proposing (or extending, F23) is for.
+ */
+export const proposalUpdateSchema = z
+  .object({
+    id: z.string().min(1),
+    artifactJson: artifactJsonSchema.optional(),
+    x: z.number().min(0).max(100_000).optional(),
+    y: z.number().min(0).max(100_000).optional(),
+  })
+  .refine((v) => v.artifactJson !== undefined || v.x !== undefined || v.y !== undefined, {
+    message: 'An update must change the content or the position',
+    path: ['id'],
+  });
+
+export type ProposalUpdateInput = z.infer<typeof proposalUpdateSchema>;
+
+export const proposalDeleteSchema = z.object({ id: z.string().min(1) });
+
+export type ProposalDeleteInput = z.infer<typeof proposalDeleteSchema>;

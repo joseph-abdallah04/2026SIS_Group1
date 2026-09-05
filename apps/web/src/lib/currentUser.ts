@@ -1,33 +1,31 @@
 // The one place the app answers "who is this browser acting as?".
 //
-// Until F01–F03 land there is no login and no JWT, so identity is a dev-only
-// stand-in: an id pasted into `rt_dev_user_id` (see `DevUserSwitcher`), sent
-// to the server as the `x-dev-user-id` header and as the socket handshake's
-// `devUserId`. The server refuses both unless NODE_ENV is development.
+// The answer comes from the login token (F01/F02): `lib/auth.tsx` reads the
+// `userId` claim out of it. Routing every identity question through here is
+// what made swapping the earlier dev-only stand-in for real auth a change to
+// this file alone, rather than to each call site.
 //
-// TODO(auth, F01–F03): return the authenticated user's id — from the auth
-// context or the verified JWT — and delete `DEV_USER_ID_KEY`. No caller of
-// `useCurrentUserId` needs to change when that happens; that is the point of
-// routing every identity question through here instead of reading
-// localStorage at each call site.
+// It is deliberately only ever used to decide what the UI *offers* — a
+// leader-only button, an author's own edit affordance — by comparing against
+// ids the server sent (`session.leaderId`, `proposal.authorId`). The token is
+// unverified here, so a tampered one changes what a page draws and nothing
+// about what the server accepts; every route and socket handler re-derives the
+// user from the token itself.
+import { getUserId } from './auth';
 
-export const DEV_USER_ID_KEY = 'rt_dev_user_id';
-
-/** Non-hook form, for module-level plumbing (the api client, the socket handshake). */
+/** Non-hook form, for module-level plumbing and event handlers. */
 export function getCurrentUserId(): string | null {
-  return import.meta.env.DEV ? localStorage.getItem(DEV_USER_ID_KEY) : null;
+  return getUserId();
 }
 
 /**
  * Component form — a hook, even though today's body needs no React state, so
- * that real auth (which will come from context) slots in without changing the
- * shape of a single call site.
+ * that moving identity into context later slots in without changing the shape
+ * of a single call site.
  *
- * Returns `null` in every production build, because the dev stand-in is
- * stripped there. Compare, never assume: `session.leaderId === id` is then
- * correctly `false`, so leader-only controls hide instead of leaking. The
- * flip side is that leader UI is inert in production until F01–F03 — which is
- * only acceptable because the API 401s there too, so nothing is half-usable.
+ * `null` only when there is no usable token, which the route guard has already
+ * redirected away from. Compare, never assume: `session.leaderId === id` is
+ * then correctly `false`, so leader-only controls hide rather than leak.
  */
 export function useCurrentUserId(): string | null {
   return getCurrentUserId();
