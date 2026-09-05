@@ -1,12 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Presence is the interesting part here, not Prisma or the pinboard module —
-// both are stubbed so the room/dedup logic can be exercised directly.
+// Presence and the join check are the interesting parts here, not Prisma, JWT
+// signing or the pinboard module — all stubbed so the room/dedup logic and the
+// authenticate-then-authorise order can be exercised directly.
 const getSession = vi.fn();
 const getSessionMemberIdentity = vi.fn();
 const getBoardForSession = vi.fn();
 
-vi.mock('../env.js', () => ({ env: { NODE_ENV: 'test' } }));
+// Stands in for real JWT verification: `token-<userId>` verifies as that user,
+// anything else is rejected the way a tampered or expired token would be. The
+// signing itself is covered by the auth module's own tests.
+const verifyToken = vi.fn((token: string) =>
+  token.startsWith('token-')
+    ? { ok: true as const, userId: token.slice('token-'.length) }
+    : { ok: false as const, code: 'INVALID_TOKEN' as const },
+);
+
+vi.mock('../modules/auth/index.js', () => ({ verifyToken }));
 vi.mock('../modules/pinboard/index.js', () => ({
   getBoardForSession,
   registerPinboardSocketHandlers: vi.fn(),
@@ -18,7 +28,7 @@ const { registerRealtimeGateway } = await import('./gateway.js');
 interface FakeSocket {
   id: string;
   data: { user: { id: string; displayName: string } | null; sessionId: string | null };
-  handshake: { auth: { devUserId?: string } };
+  handshake: { auth: { token?: string } };
   emit: ReturnType<typeof vi.fn>;
   to: (room: string) => { emit: (event: string, payload: unknown) => void };
   join: (room: string) => Promise<void>;
@@ -53,13 +63,15 @@ function createFakeIo() {
     },
   };
 
-  function connect(devUserId?: string): FakeSocket {
+  /** `connect('u1')` is a socket holding a valid token for user `u1`. */
+  function connect(userId?: string, rawToken?: string): FakeSocket {
     const id = `socket-${nextId++}`;
     const listeners = new Map<string, (...args: never[]) => unknown>();
+    const token = rawToken ?? (userId ? `token-${userId}` : undefined);
     const socket: FakeSocket = {
       id,
       data: { user: null, sessionId: null },
-      handshake: { auth: devUserId ? { devUserId } : {} },
+      handshake: { auth: token ? { token } : {} },
       emit: vi.fn(),
       to(room: string) {
         return { emit: (event: string, payload: unknown) => broadcasts.push({ room, event, payload }) };
@@ -100,6 +112,11 @@ function memberJoinAck(socket: FakeSocket, sessionId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  verifyToken.mockImplementation((token: string) =>
+    token.startsWith('token-')
+      ? { ok: true as const, userId: token.slice('token-'.length) }
+      : { ok: false as const, code: 'INVALID_TOKEN' as const },
+  );
   getSession.mockResolvedValue({ id: 's1', title: 'Roadmap', status: 'lobby', leaderId: 'leader-1' });
   getSessionMemberIdentity.mockImplementation(async (_sessionId: string, userId: string) => ({
     id: userId,
@@ -113,6 +130,47 @@ beforeEach(() => {
     questionPosition: null,
     questionStatus: null,
     items: [],
+  });
+});
+
+// Two independent gates, and the tests below pin both: the token decides who
+// you are, membership decides whether you may be in this room. Neither is
+// allowed to stand in for the other.
+describe('join authentication', () => {
+  it('refuses a socket with no handshake token', async () => {
+    const { io, connect } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    expect(await memberJoinAck(connect(), 's1')).toMatchObject({ ok: false });
+    expect(getSessionMemberIdentity).not.toHaveBeenCalled();
+  });
+
+  it('refuses a token that does not verify, without consulting membership', async () => {
+    const { io, connect } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    expect(await memberJoinAck(connect(undefined, 'tampered'), 's1')).toMatchObject({ ok: false });
+    expect(getSessionMemberIdentity).not.toHaveBeenCalled();
+  });
+
+  // Authentication is not authorisation: a perfectly good token for someone who
+  // never joined this session must not get them into its room.
+  it('refuses a verified user who is not a member of the session', async () => {
+    const { io, connect } = createFakeIo();
+    registerRealtimeGateway(io as never);
+    getSessionMemberIdentity.mockResolvedValue(null);
+
+    expect(await memberJoinAck(connect('outsider'), 's1')).toMatchObject({ ok: false });
+  });
+
+  it('identifies the socket from the token, never from the payload', async () => {
+    const { io, connect } = createFakeIo();
+    registerRealtimeGateway(io as never);
+
+    const socket = connect('u1');
+    expect(await memberJoinAck(socket, 's1')).toMatchObject({ ok: true });
+    expect(getSessionMemberIdentity).toHaveBeenCalledWith('s1', 'u1');
+    expect(socket.data.user?.id).toBe('u1');
   });
 });
 

@@ -8,6 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
+import { authRoutes } from './modules/auth/index.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
 import { sessionsRoutes } from './modules/sessions/index.js';
 import { registerRealtimeGateway } from './realtime/gateway.js';
@@ -24,6 +25,12 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
+app.use('/api/auth', authRoutes);
+// Two routers share the `/api/sessions` prefix, so registration order
+// matters: sessions' `GET /:id` matches any single segment and would shadow a
+// one-segment route added to pinboard later. Pinboard's routes are all
+// `/:sessionId/<something>`, so nothing collides today — keep it that way, or
+// mount pinboard first.
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/sessions', pinboardRoutes);
 

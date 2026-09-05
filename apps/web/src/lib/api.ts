@@ -1,5 +1,6 @@
 // Thin fetch wrapper: JSON in/out, throws on !ok with the server's { error } shape.
 // Same-origin in prod (Express serves the SPA); Vite proxy handles /api in dev.
+import { getToken, redirectToLogin } from './auth';
 
 export class ApiClientError extends Error {
   constructor(
@@ -11,33 +12,34 @@ export class ApiClientError extends Error {
   }
 }
 
-// Dev-only escape hatch, matching the realtime gateway and sessions REST
-// routes' stand-in identity (apps/web/src/lib/socket.ts, apps/server/src/
-// modules/sessions/routes.ts): with no login yet there is no JWT to send, so
-// `rt_dev_user_id` lets the server know who a request is acting as. Never
-// sent from a production build, and the server ignores it there regardless.
-/** The same stand-in identity `devHeaders` sends — exported so UI can compare
- * it against a session's `leaderId` (e.g. to show the "Open for joining"
- * button only to the leader) without duplicating the localStorage key. */
-export function getDevUserId(): string | null {
-  return import.meta.env.DEV ? localStorage.getItem('rt_dev_user_id') : null;
-}
-
-function devHeaders(): Record<string, string> {
-  const devUserId = getDevUserId();
-  return devUserId ? { 'x-dev-user-id': devUserId } : {};
-}
+// Codes `requireAuth` itself emits (apps/server/src/middleware/auth.ts) — a
+// response with one of these means the *session* is invalid, distinct from a
+// plain-old 401 a route raises for its own reasons (e.g. login's
+// INVALID_CREDENTIALS), which must NOT bounce the user to /login.
+const AUTH_FAILURE_CODES = new Set(['MISSING_TOKEN', 'INVALID_TOKEN', 'TOKEN_EXPIRED']);
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...devHeaders() },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options?.headers,
+    },
   });
   const body = (await res.json().catch(() => null)) as
     | (T & { error?: string; code?: string })
     | null;
   if (!res.ok) {
-    throw new ApiClientError(res.status, body?.error ?? `Request failed (${res.status})`, body?.code);
+    if (body?.code && AUTH_FAILURE_CODES.has(body.code)) {
+      redirectToLogin();
+    }
+    throw new ApiClientError(
+      res.status,
+      body?.error ?? `Request failed (${res.status})`,
+      body?.code,
+    );
   }
   return body as T;
 }

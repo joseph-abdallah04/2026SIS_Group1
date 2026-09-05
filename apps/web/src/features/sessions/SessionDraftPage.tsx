@@ -3,7 +3,8 @@ import type { Session } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
-import { api, ApiClientError, getDevUserId } from '../../lib/api';
+import { api, ApiClientError } from '../../lib/api';
+import { getUserId } from '../../lib/auth';
 import type { SessionDetail } from './useSessionDetail';
 
 interface CopyFieldProps {
@@ -56,7 +57,7 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isLeader = session.leaderId === getDevUserId();
+  const isLeader = session.leaderId === getUserId();
   const code = opened?.code ?? null;
   const joinLink = code ? `${window.location.origin}/join/${code}` : null;
 

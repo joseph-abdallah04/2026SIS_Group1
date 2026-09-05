@@ -2,6 +2,7 @@
 // Usage (from apps/server): npx tsx prisma/seed.ts
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 
@@ -11,22 +12,39 @@ dotenv.config({ path: path.resolve(here, '../../.env') });
 
 const prisma = new PrismaClient();
 
+/**
+ * The password both demo accounts share. Real bcrypt hashes, not a placeholder
+ * string: now that login is real (F01/F02), a seeded user who cannot log in is
+ * a seeded user nobody can act as — and testing a session needs two people in
+ * two browser windows.
+ *
+ * Rounds are bcrypt's own default rather than a copy of the auth service's
+ * constant; a hash records the cost it was made with, so `bcrypt.compare`
+ * verifies these regardless of what the service later uses.
+ */
+const DEMO_PASSWORD = 'roundtable';
+
 async function main() {
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+
+  // `passwordHash` is set on `update` too, so re-seeding a database that was
+  // seeded before login existed replaces the unusable placeholder hash — an
+  // `update: {}` would leave those accounts permanently unable to log in.
   const alice = await prisma.user.upsert({
     where: { email: 'alice@example.com' },
-    update: {},
+    update: { passwordHash },
     create: {
       email: 'alice@example.com',
-      passwordHash: 'seed-only-not-a-real-hash',
+      passwordHash,
       displayName: 'Alice (demo leader)',
     },
   });
   const bob = await prisma.user.upsert({
     where: { email: 'bob@example.com' },
-    update: {},
+    update: { passwordHash },
     create: {
       email: 'bob@example.com',
-      passwordHash: 'seed-only-not-a-real-hash',
+      passwordHash,
       displayName: 'Bob (demo participant)',
     },
   });
@@ -135,11 +153,10 @@ async function main() {
     'Seeded: alice@example.com, bob@example.com, session DEMO-0001 (2 questions, 2 members, 3 proposals)',
   );
   console.log(`Open: /sessions/${session.id}`);
-  // Paste either id into the dashboard's dev identity box (rt_dev_user_id) —
-  // there is no login yet, so this is how a REST request or socket says who
-  // it is acting as.
-  console.log(`Dev identity — alice (leader): ${alice.id}`);
-  console.log(`Dev identity — bob (participant): ${bob.id}`);
+  console.log(
+    `Log in at /login as alice@example.com (leader) or bob@example.com — password: ${DEMO_PASSWORD}`,
+  );
+  console.log(`  alice: ${alice.id}\n  bob:   ${bob.id}`);
 }
 
 main()

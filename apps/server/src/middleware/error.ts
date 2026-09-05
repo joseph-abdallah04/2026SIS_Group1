@@ -7,6 +7,7 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public code?: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -15,7 +16,11 @@ export class ApiError extends Error {
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
   void _next;
   if (err instanceof ApiError) {
-    res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    res.status(err.status).json({
+      error: err.message,
+      ...(err.code ? { code: err.code } : {}),
+      ...(err.details !== undefined ? { details: err.details } : {}),
+    });
     return;
   }
   console.error('Unhandled error:', err);

@@ -1,6 +1,6 @@
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { Button } from '../../components/ui/Button';
-import { getDevUserId } from '../../lib/api';
+import { getUserId } from '../../lib/auth';
 import type { SessionDetail } from './useSessionDetail';
 import { useWaitingRoom } from './useWaitingRoom';
 
@@ -16,7 +16,7 @@ interface WaitingRoomProps {
  */
 export function WaitingRoom({ session }: WaitingRoomProps) {
   const { participants, loading, error, isLive } = useWaitingRoom(session.id);
-  const isLeader = session.leaderId === getDevUserId();
+  const isLeader = session.leaderId === getUserId();
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">

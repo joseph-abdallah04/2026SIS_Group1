@@ -277,10 +277,26 @@ export interface SessionRef {
 
 export interface QuestionRef {
   id: string;
+  /**
+   * Which session this question belongs to. Required by Pinboard's F16
+   * permission rules: a proposal a client names must be checked against the
+   * board that client actually joined, and without this, knowing an id would
+   * be enough to reach across sessions.
+   */
+  sessionId: string;
   text: string;
   position: number;
   status: Question['status'];
 }
+
+/** Every read that returns a `QuestionRef` selects exactly these columns. */
+const QUESTION_REF_SELECT = {
+  id: true,
+  sessionId: true,
+  text: true,
+  position: true,
+  status: true,
+} as const;
 
 /**
  * Minimal session lookup — the contract Pinboard's temporary adapter already
@@ -299,7 +315,7 @@ export async function getSession(sessionId: string): Promise<SessionRef | null> 
 export async function getQuestion(questionId: string): Promise<QuestionRef | null> {
   return prisma.question.findUnique({
     where: { id: questionId },
-    select: { id: true, text: true, position: true, status: true },
+    select: QUESTION_REF_SELECT,
   });
 }
 
@@ -318,7 +334,7 @@ export async function getActiveQuestion(sessionId: string): Promise<QuestionRef 
   const questions = await prisma.question.findMany({
     where: { sessionId },
     orderBy: { position: 'asc' },
-    select: { id: true, text: true, position: true, status: true },
+    select: QUESTION_REF_SELECT,
   });
 
   return questions.find((q) => q.status === 'discussion') ?? questions[0] ?? null;

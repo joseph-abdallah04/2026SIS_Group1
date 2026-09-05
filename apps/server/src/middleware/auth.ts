@@ -1,12 +1,35 @@
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
-// Stub: real JWT verification is the Auth owner's ticket (docs/05 deferred item 5).
-// Until then every request is rejected so protected endpoints fail loudly
-// instead of silently working without auth.
-//
-// It must NOT call next() — that would send the 401 and then run the route
-// handler anyway, so the response is already sent by the time the handler
-// writes its own.
-export function requireAuth(_req: Request, res: Response): void {
-  res.status(401).json({ error: 'Authentication not implemented yet', code: 'AUTH_NOT_IMPLEMENTED' });
+import { verifyToken } from '../modules/auth/jwt.js';
+
+declare module 'express-serve-static-core' {
+  interface Request {
+    /** Set by `requireAuth` once the bearer token verifies. */
+    userId?: string;
+  }
+}
+
+const BEARER_PREFIX = 'Bearer ';
+
+// Real JWT verification (docs/05 §5 deferred item 5 / docs/06 Auth "Also
+// owns"). Checks the `Authorization: Bearer <token>` header against
+// `verifyToken`; on success attaches `req.userId` and calls `next()` so
+// downstream handlers know who's asking. Never calls next() on failure.
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header?.startsWith(BEARER_PREFIX)) {
+    res.status(401).json({ error: 'Missing authentication token', code: 'MISSING_TOKEN' });
+    return;
+  }
+
+  const token = header.slice(BEARER_PREFIX.length);
+  const result = verifyToken(token);
+  if (!result.ok) {
+    const message = result.code === 'TOKEN_EXPIRED' ? 'Token expired' : 'Invalid token';
+    res.status(401).json({ error: message, code: result.code });
+    return;
+  }
+
+  req.userId = result.userId;
+  next();
 }
