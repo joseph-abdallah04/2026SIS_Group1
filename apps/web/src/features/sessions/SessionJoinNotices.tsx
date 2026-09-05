@@ -20,8 +20,8 @@ interface Notice {
 
 /**
  * F10: tells the people already in a live session when someone arrives or
- * leaves. The waiting room shows presence as a list; the board has no room
- * for one.
+ * leaves. The waiting room shows presence as seats around the table; the
+ * board has no room for a list.
  *
  * `memberJoined` / `memberLeft` are only sent to the *other* sockets in the
  * room (the gateway uses `socket.to`), so a person never gets a notice about
