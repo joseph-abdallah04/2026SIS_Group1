@@ -22,13 +22,18 @@ export interface WriteAck {
  * Everything a client needs to render a session from cold (docs/02 §4 — "full
  * snapshot"). It must stay a superset of `BoardResponse`: a reconnecting client
  * resyncs from this alone, so anything missing here is something the header
- * would render as a placeholder until a REST call happened to fill it in.
+ * would render as a placeholder until some other request happened to fill it in.
  *
  * Sessions-owned fields (phase, presence, vote progress) get added here as
  * those modules land.
  */
 export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
+  status: string;
+  leaderId: string;
+  participants: SessionUserPayload[];
+  viewer: SessionUserPayload;
+  shortlist?: string[];
 }
 
 export interface ClientToServerEvents {
@@ -38,9 +43,19 @@ export interface ClientToServerEvents {
     ack?: (res: { ok: boolean; error?: string }) => void
   ): void;
 
+  /** Leave a session room (explicit leave from client). */
+  memberLeave(
+    payload: { sessionId: string },
+    ack?: (res: { ok: boolean; error?: string }) => void
+  ): void;
+
   // === sessions module ===
 
   // === pinboard module ===
+  /**
+   * Propose an item onto the board of the session this socket has already
+   * joined. The server validates, persists, then broadcasts `proposalCreated`.
+   */
   proposalCreate(
     payload: ProposalCreateInput,
     ack?: (res: WriteAck) => void
@@ -49,7 +64,7 @@ export interface ClientToServerEvents {
   // === voting module ===
   /**
    * Update the shortlist for the session this socket has already joined.
-   * Server validates, persists, then broadcasts `shortlist_updated` to the room.
+   * Server validates, persists, then broadcasts `shortlist_updated`.
    */
   shortlistUpdated(
     payload: { sessionId: string; proposalIds: string[] },
@@ -64,9 +79,11 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   /** Presence update when a member joins the session room. */
   memberJoined(payload: { user: SessionUserPayload }): void;
+
+  /** Presence update when a member leaves the session room. */
   memberLeft(payload: { user: SessionUserPayload }): void;
 
-  /** Full state snapshot sent on join/reconnect so refreshed clients resync (docs/02 §4). */
+  /** Full state snapshot sent on join/reconnect so refreshed clients resync. */
   sessionState(payload: SessionStatePayload): void;
 
   // === sessions module ===
