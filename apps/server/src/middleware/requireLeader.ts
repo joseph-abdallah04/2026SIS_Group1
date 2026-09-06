@@ -4,10 +4,19 @@ import { ApiError } from './error.js';
 
 export const requireLeader: RequestHandler = async (req, _res, next) => {
   try {
-    const sessionId = req.params.sessionId;
+    const sessionId = req.params.sessionId as string;
 
-    // req.get() returns string | undefined (never string[])
-    const userId = req.get('x-rt-dev-user-id');
+    // req.get() may return string | string[] | undefined
+    const raw = req.get('x-rt-dev-user-id');
+    let userId: string | undefined;
+
+    if (typeof raw === 'string') {
+      userId = raw;
+    } else if (Array.isArray(raw)) {
+      userId = raw[0];
+    } else {
+      userId = undefined;
+    }
 
     if (!userId) {
       throw new ApiError(401, 'Missing user identity', 'NOT_AUTHENTICATED');

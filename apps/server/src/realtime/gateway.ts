@@ -124,6 +124,13 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
 
     registerPinboardSocketHandlers(io, socket);
 
+    socket.on('shortlistUpdated', ({ sessionId, proposalIds }) => {
+    socket.to(sessionRoom(sessionId)).emit('shortlist_updated', {
+    sessionId,
+    proposalIds,
+    });
+  });
+
     socket.on('disconnect', () => {
       const { user, sessionId } = socket.data;
       // Presence is per-socket here, so a second tab closing reads as a leave.
