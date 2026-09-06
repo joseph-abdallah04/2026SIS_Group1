@@ -3,6 +3,8 @@ import type { MicStatus, VoiceStatus } from './useVoiceRoom';
 interface VoiceNoticeProps {
   status: VoiceStatus;
   micStatus: MicStatus;
+  /** True once the browser confirms the block is permanent — see useVoiceRoom. */
+  micPermissionDenied: boolean;
   error: string | null;
   audioBlocked: boolean;
   retry: () => void;
@@ -26,7 +28,16 @@ interface Notice {
  * for the top of the board reads as breakage rather than information.
  */
 function currentNotice(props: VoiceNoticeProps): Notice | null {
-  const { status, micStatus, error, audioBlocked, retry, requestMicrophone, unlockAudio } = props;
+  const {
+    status,
+    micStatus,
+    micPermissionDenied,
+    error,
+    audioBlocked,
+    retry,
+    requestMicrophone,
+    unlockAudio,
+  } = props;
 
   // Nothing to hear beats nothing to say: if the browser is holding audio back,
   // the room is silent no matter what the microphone is doing.
@@ -49,15 +60,28 @@ function currentNotice(props: VoiceNoticeProps): Notice | null {
   }
 
   if (micStatus === 'blocked') {
-    return {
-      tone: 'attention',
-      label: 'Mic blocked',
-      // Says what is still true — you can hear the room — so this reads as a
-      // partial state rather than a dead session (docs/06: voice is optional).
-      message:
-        'You can hear everyone, but nobody can hear you. Allow microphone access in your browser, then try again.',
-      action: { label: 'Try again', run: requestMicrophone },
-    };
+    // Once a browser treats a mic denial as permanent, it will never show the
+    // permission prompt again for a page to retry into — that decision can
+    // only be undone in the browser's own site settings. Telling someone to
+    // "try again" in that state describes a button that cannot work.
+    return micPermissionDenied
+      ? {
+          tone: 'attention',
+          label: 'Mic blocked',
+          message:
+            'You can hear everyone, but nobody can hear you. Your browser has blocked the microphone for this site — open the site settings from your address bar (usually the padlock icon) and allow it there.',
+          action: { label: 'Recheck', run: requestMicrophone },
+        }
+      : {
+          tone: 'attention',
+          label: 'Mic blocked',
+          // Says what is still true — you can hear the room — so this reads
+          // as a partial state rather than a dead session (docs/06: voice is
+          // optional).
+          message:
+            'You can hear everyone, but nobody can hear you. Allow microphone access in your browser, then try again.',
+          action: { label: 'Try again', run: requestMicrophone },
+        };
   }
 
   if (micStatus === 'no-device') {

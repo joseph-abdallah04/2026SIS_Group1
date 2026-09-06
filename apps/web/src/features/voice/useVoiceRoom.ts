@@ -76,10 +76,51 @@ export function useVoiceRoom(sessionId: string) {
   const [micEnabled, setMicEnabledState] = useState(false);
   /** Browser autoplay policy is holding remote audio; needs a user gesture. */
   const [audioBlocked, setAudioBlocked] = useState(false);
+  /**
+   * `micStatus === 'blocked'` alone doesn't say whether a retry can work.
+   * Once a user has explicitly clicked "Block" for this site, every browser
+   * refuses to show the permission prompt again — `getUserMedia` just fails
+   * again immediately, with no UI — and no page can override that. This is
+   * `true` only once the Permissions API confirms that persistent state, so
+   * the banner can stop suggesting a retry that cannot succeed.
+   */
+  const [micPermissionDenied, setMicPermissionDenied] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
   const attemptRef = useRef(0);
   const [retryToken, setRetryToken] = useState(0);
+  /** The live subscription behind `micPermissionDenied`, so it can be torn down. */
+  const permissionStatusRef = useRef<PermissionStatus | null>(null);
+
+  /**
+   * Watches the OS/browser-level mic permission so a fix made outside this
+   * page — the address bar's site settings, not our retry button — is picked
+   * up without needing a reload: browsers apply a permission change to
+   * `getUserMedia` immediately, they just never re-show the prompt on their
+   * own. Silently does nothing where the Permissions API can't name
+   * `'microphone'` (older Safari); those browsers keep the plain retry.
+   */
+  const watchMicPermission = useCallback((onRecovered: () => void) => {
+    if (permissionStatusRef.current) permissionStatusRef.current.onchange = null;
+    permissionStatusRef.current = null;
+
+    if (!navigator.permissions?.query) return;
+
+    void navigator.permissions
+      .query({ name: 'microphone' as PermissionName })
+      .then((status) => {
+        permissionStatusRef.current = status;
+        setMicPermissionDenied(status.state === 'denied');
+        status.onchange = () => {
+          setMicPermissionDenied(status.state === 'denied');
+          if (status.state !== 'denied') onRecovered();
+        };
+      })
+      .catch(() => {
+        // Querying itself can throw (unsupported name, disabled feature
+        // policy) — fall back to the plain retry rather than surface this.
+      });
+  }, []);
 
   /** Give up on the current attempt chain and start a fresh one. */
   const retry = useCallback(() => {
@@ -182,10 +223,16 @@ export function useVoiceRoom(sessionId: string) {
         await room.localParticipant.setMicrophoneEnabled(true);
         if (cancelled) return;
         setMicStatus('live');
+        setMicPermissionDenied(false);
       } catch (err) {
         if (cancelled) return;
         const failure = MediaDeviceFailure.getFailure(err);
-        setMicStatus(failure === MediaDeviceFailure.NotFound ? 'no-device' : 'blocked');
+        if (failure === MediaDeviceFailure.NotFound) {
+          setMicStatus('no-device');
+          return;
+        }
+        setMicStatus('blocked');
+        watchMicPermission(() => void enableMicrophone());
       }
     }
 
@@ -260,10 +307,13 @@ export function useVoiceRoom(sessionId: string) {
       void room.disconnect();
       audioContainer.remove();
       roomRef.current = null;
+      if (permissionStatusRef.current) permissionStatusRef.current.onchange = null;
+      permissionStatusRef.current = null;
       setStatus('idle');
       setParticipants([]);
+      setMicPermissionDenied(false);
     };
-  }, [sessionId, retryToken]);
+  }, [sessionId, retryToken, watchMicPermission]);
 
   /** The "mic blocked" banner's retry button. Re-prompts without rejoining. */
   const requestMicrophone = useCallback(async () => {
@@ -275,11 +325,17 @@ export function useVoiceRoom(sessionId: string) {
       await room.localParticipant.setMicrophoneEnabled(true);
       setMicStatus('live');
       setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+      setMicPermissionDenied(false);
     } catch (err) {
       const failure = MediaDeviceFailure.getFailure(err);
-      setMicStatus(failure === MediaDeviceFailure.NotFound ? 'no-device' : 'blocked');
+      if (failure === MediaDeviceFailure.NotFound) {
+        setMicStatus('no-device');
+        return;
+      }
+      setMicStatus('blocked');
+      watchMicPermission(() => void requestMicrophone());
     }
-  }, []);
+  }, [watchMicPermission]);
 
   /** Mute/unmute the local track. The toggle UI and its persistence are F12. */
   const setMicEnabled = useCallback(async (enabled: boolean) => {
@@ -305,6 +361,7 @@ export function useVoiceRoom(sessionId: string) {
     status,
     micStatus,
     micEnabled,
+    micPermissionDenied,
     participants,
     error,
     audioBlocked,

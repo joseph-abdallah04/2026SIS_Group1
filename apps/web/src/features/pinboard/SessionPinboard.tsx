@@ -139,6 +139,7 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
         <VoiceNotice
           status={voice.status}
           micStatus={voice.micStatus}
+          micPermissionDenied={voice.micPermissionDenied}
           error={voice.error}
           audioBlocked={voice.audioBlocked}
           retry={voice.retry}
