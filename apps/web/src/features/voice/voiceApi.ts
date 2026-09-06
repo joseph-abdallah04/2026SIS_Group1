@@ -10,17 +10,10 @@ import { api } from '../../lib/api';
  * an error path. The room name comes back with it — the client never names a
  * room itself, so it cannot ask to be let into someone else's.
  *
- * The dev identity mirrors `lib/socket.ts`: with no login yet there is no JWT,
- * so `rt_dev_user_id` is how two browser windows act as two seeded members.
- * Never sent from a production build, and the server ignores it there anyway.
+ * Identity comes from the request's `Authorization: Bearer` header, which
+ * `api.post` attaches from the logged-in user's token — there is nothing else
+ * for this call to say about who is asking.
  */
 export async function fetchVoiceToken(sessionId: string): Promise<VoiceTokenResponse> {
-  const body: Record<string, string> = {};
-
-  if (import.meta.env.DEV) {
-    const devUserId = localStorage.getItem('rt_dev_user_id');
-    if (devUserId) body.devUserId = devUserId;
-  }
-
-  return api.post<VoiceTokenResponse>(`/api/sessions/${sessionId}/livekit-token`, body);
+  return api.post<VoiceTokenResponse>(`/api/sessions/${sessionId}/livekit-token`, {});
 }
