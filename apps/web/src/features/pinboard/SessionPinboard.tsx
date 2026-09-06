@@ -7,6 +7,7 @@ import { AgendaPanel } from '../agenda/AgendaPanel';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
+import { VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -59,6 +60,11 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     newItemIds,
     viewerId: viewerIdFromPinboard,
   } = usePinboard(sessionId);
+  // Entering the session view joins the room; leaving it (or ending the
+  // session) unmounts this and disconnects — F11's connect/disconnect points.
+  // Called before any early return so the room is not torn down and rebuilt
+  // every time the board flips between loading, error and loaded.
+  const voice = useVoiceRoom(sessionId);
 
   //
   // ─────────────────────────────────────────────────────────────
@@ -187,7 +193,21 @@ function toggleShortlist(id: string) {
       proposals={board.items}
       propose={propose}
     >
-      <main className="h-dvh overflow-hidden relative">
+      {/* `relative` so VoiceNotice's `absolute` banner positions against this
+          frame; `overflow-hidden` so nothing on the board can produce a
+          page-level scrollbar; `h-dvh` so mobile browser chrome does not cut
+          it off. */}
+      <main className="relative h-dvh overflow-hidden">
+        <VoiceNotice
+          status={voice.status}
+          micStatus={voice.micStatus}
+          micPermissionDenied={voice.micPermissionDenied}
+          error={voice.error}
+          audioBlocked={voice.audioBlocked}
+          retry={voice.retry}
+          requestMicrophone={voice.requestMicrophone}
+          unlockAudio={voice.unlockAudio}
+        />
         <PinboardCanvas
           board={board}
           isLive={isLive}
