@@ -29,15 +29,14 @@ import {
 
 interface ProposalCardProps {
   item: BoardItem;
-  /** The viewer wrote this: show "You" as the author name. */
   isOwnedByViewer?: boolean;
-  /** The author runs this session, marked with an L beside their name. */
   isAuthorLeader?: boolean;
-  /** Arrived on a live broadcast just now, so it gets a one-off highlight (F15). */
   isNew?: boolean;
+
+  // F27
+  isShortlisted?: boolean;
 }
 
-/** Clock time only. A board is one sitting, so the date is never in doubt. */
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, {
     hour: '2-digit',
@@ -46,10 +45,6 @@ function formatTime(iso: string): string {
   });
 }
 
-/**
- * Who wrote this and when. Author on the left, time on the right — matches the
- * sticky editor's board preview so what you compose is what lands.
- */
 function CardFoot({
   item,
   isOwnedByViewer,
@@ -63,8 +58,6 @@ function CardFoot({
     <footer className="flex items-center justify-between gap-2 px-3 pt-1 pb-2 text-[11px] text-rt-ink-faint">
       <span className="min-w-0 truncate font-medium text-rt-ink-muted">
         {isOwnedByViewer ? 'You' : item.authorName}
-        {/* Never beside "You": the mark is there to say whose cards belong to the
-            leader, and the viewer does not need telling who they are. */}
         {isAuthorLeader && !isOwnedByViewer ? (
           <span title="Session leader" className="ml-1 text-[9.5px]" style={{ color: OWNED_INK }}>
             L
@@ -78,24 +71,19 @@ function CardFoot({
   );
 }
 
-/**
- * Full diagram preview (F21): every shape, arrow, label, size and style the
- * editor produced. Geometry, palettes, routing and outlines all come from
- * `@roundtable/shared`, so the board cannot drift from the editor.
- */
 function DiagramBody({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
+
   const { nodes, edges } = item.artifactJson;
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
   const svgWidth =
     Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + 28;
   const svgHeight =
     Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) + 24;
-  // Proposal-scoped marker ids prevent arrows in separate diagram cards from
-  // colliding; one per resolved colour keeps each arrowhead matching its line.
+
   const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
   const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
-  // Reciprocal pairs bow apart here exactly as they do in the editor.
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);
 
   return (
@@ -127,14 +115,16 @@ function DiagramBody({ item }: { item: BoardItem }) {
               </marker>
             ))}
           </defs>
+
           {edges.map((edge, index) => {
             const from = nodeById.get(edge.from);
             const to = nodeById.get(edge.to);
             const route = edgeRoutes[index];
             if (!from || !to || !route) return null;
+
             const stroke = diagramEdgeStroke(edge);
-            // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
             const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
+
             return (
               <g key={`${edge.from}-${edge.to}`}>
                 <path
@@ -162,8 +152,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
               </g>
             );
           })}
-          {/* Containers are drawn before what they hold, so a group reads as a
-              backdrop rather than covering its own contents. */}
+
           {diagramNodesInDrawOrder(nodes).map((node) => {
             const shape = node.shape ?? 'box';
             const size = effectiveDiagramNodeSize(node);
@@ -175,7 +164,6 @@ function DiagramBody({ item }: { item: BoardItem }) {
                   shape={shape}
                   size={size}
                   fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
-                  // '#8CA4AC', 1 and '4 3' are this preview's own pre-v2 border.
                   stroke={diagramNodeStroke(node, '#8CA4AC')}
                   strokeWidth={diagramNodeStrokeWidth(node, 1)}
                   containerDashArray="4 3"
@@ -213,73 +201,73 @@ export function ProposalCard({
   isOwnedByViewer = false,
   isAuthorLeader = false,
   isNew = false,
+  isShortlisted = false,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
-  // A sticky keeps the colour its author chose, in its own matching edge.
   const theme = isSticky ? STICKY_THEMES[artifact.color] : null;
 
-  // Never inject a peer's SVG into this document: it is arbitrary user-authored
-  // markup, so an inline <svg> would run any <script>/onload it carries in every
-  // viewer's session. An <img> renders SVG with scripting and external fetches
-  // disabled, so a hostile drawing is inert.
   const svg = artifact.type === 'drawing' ? artifact.svg.trim() : '';
   const drawingSrc = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : null;
 
   return (
-    // Always wrapped, highlighted or not: toggling the wrapper in and out would
-    // remount the card and make drawings refetch their image mid-animation.
     <div
       className={isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
-      <article
-        className="flex shrink-0 flex-col overflow-hidden border"
-        style={{
-          width: CARD_WIDTH[item.type],
-          borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
-          borderColor: theme ? theme.border : CARD_BORDER,
-          background: theme ? theme.bg : '#FFFFFF',
-          boxShadow: CARD_SHADOW,
-        }}
+      <div
+        className={`relative ${isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''}`}
+        style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
       >
-        {artifact.type === 'sticky' ? (
-          <p
-            className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
-            style={{
-              minHeight: 128,
-              padding: '16px 14px 10px',
-              // Shared with the editor's preview, so a note that had to shrink
-              // to fit while you were writing it looks the same on the board.
-              ...stickyTypography(artifact.text),
-            }}
-          >
-            {artifact.text}
-          </p>
-        ) : null}
+        <article
+          className="flex shrink-0 flex-col overflow-hidden border"
+          style={{
+            width: CARD_WIDTH[item.type],
+            borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
+            borderColor: theme ? theme.border : CARD_BORDER,
+            background: theme ? theme.bg : '#FFFFFF',
+            boxShadow: CARD_SHADOW,
+          }}
+        >
+          {artifact.type === 'sticky' ? (
+            <p
+              className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
+              style={{
+                minHeight: 128,
+                padding: '16px 14px 10px',
+                ...stickyTypography(artifact.text),
+              }}
+            >
+              {artifact.text}
+            </p>
+          ) : null}
 
-        {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}
+          {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}
 
-        {artifact.type === 'drawing' ? (
-          <div
-            className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg"
-            style={{ height: 160, background: THUMB_BACKGROUND }}
-          >
-            {drawingSrc ? (
-              <img
-                src={drawingSrc}
-                alt={`Drawing by ${item.authorName}`}
-                loading="lazy"
-                // Images are natively draggable, which would hijack a card drag.
-                draggable={false}
-                className="block h-full w-full object-contain"
-              />
-            ) : null}
-          </div>
-        ) : null}
+          {artifact.type === 'drawing' ? (
+            <div
+              className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg"
+              style={{ height: 160, background: THUMB_BACKGROUND }}
+            >
+              {drawingSrc ? (
+                <img
+                  src={drawingSrc}
+                  alt={`Drawing by ${item.authorName}`}
+                  loading="lazy"
+                  draggable={false}
+                  className="block h-full w-full object-contain"
+                />
+              ) : null}
+            </div>
+          ) : null}
 
-        <CardFoot item={item} isOwnedByViewer={isOwnedByViewer} isAuthorLeader={isAuthorLeader} />
-      </article>
+          <CardFoot
+            item={item}
+            isOwnedByViewer={isOwnedByViewer}
+            isAuthorLeader={isAuthorLeader}
+          />
+        </article>
+      </div>
     </div>
   );
 }

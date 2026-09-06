@@ -4,7 +4,8 @@ import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 import { ProposalCard } from './ProposalCard';
 import { CARD_INK, CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
 
-/** Matches `stickyArtifactSchema` — the server rejects anything longer. */
+import { toggleShortlist } from '../../lib/sessionStore';
+
 const STICKY_MAX_CHARS = 2000;
 
 interface DragHandlers {
@@ -16,46 +17,24 @@ interface DragHandlers {
 
 interface PositionedProposalProps {
   item: BoardItem;
-  /**
-   * Board coordinates to render at — mid-drag this is not `item.x/y`. Board
-   * units, not screen pixels: the canvas scales the whole scene, so a card is
-   * always laid out at its natural size and never consults the zoom.
-   */
   position: { x: number; y: number };
   isNew: boolean;
-  /** The viewer authored this, so they get the edit/delete affordances. */
   isOwn: boolean;
-  /** The author runs this session, marked with an L beside their name. */
   isAuthorLeader: boolean;
-  /**
-   * The viewer may reposition this card: its author, or the leader arranging
-   * the shared board. A move is visible to everyone.
-   */
   canMove: boolean;
-  /**
-   * The viewer may take this card off the board — its author, or the leader
-   * moderating. Editing stays strictly with the author, so this is separate.
-   */
   canDelete: boolean;
   isDragging: boolean;
   dragHandlers: DragHandlers;
   onEditText: (item: BoardItem, text: string) => Promise<void>;
   onDelete: (item: BoardItem) => Promise<void>;
+
+  // F27 shortlist props
+  isShortlisted: boolean;
+  shortlistLocked: boolean;
+  isLeader: boolean;
 }
 
-/**
- * Inline text editor for a sticky you authored.
- *
- * Stickies edit here; drawings and diagrams reopen in the Creative Tools
- * studio (F19–F21) — that wire-up is a follow-up, so those cards can only be
- * moved or deleted for now.
- */
-function StickyTextEditor({
-  artifact,
-  width,
-  onSave,
-  onCancel,
-}: {
+function StickyTextEditor({ artifact, width, onSave, onCancel }: {
   artifact: StickyArtifact;
   width: number;
   onSave: (text: string) => Promise<void>;
@@ -79,13 +58,8 @@ function StickyTextEditor({
     if (!submittable) return;
     setSaving(true);
     void onSave(trimmed)
-      .then(() => {
-        // Parent closes the editor on success.
-      })
-      .catch(() => {
-        // Keep the editor open with the typed text so a rejected save is not lost.
-        setSaving(false);
-      });
+      .then(() => {})
+      .catch(() => setSaving(false));
   };
 
   return (
@@ -106,8 +80,6 @@ function StickyTextEditor({
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onCancel();
-          // Enter saves, Shift+Enter adds a line — the usual bargain for a
-          // one-field editor people use dozens of times in a session.
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             submit();
@@ -129,14 +101,14 @@ function StickyTextEditor({
           type="button"
           onClick={submit}
           disabled={!submittable}
-          className="rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink disabled:opacity-45 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
+          className="rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink disabled:opacity-45"
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-full px-2.5 py-[5px] text-[11px] font-medium text-rt-ink-muted hover:bg-white/60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
+          className="rounded-full px-2.5 py-[5px] text-[11px] font-medium text-rt-ink-muted hover:bg-white/60"
         >
           Cancel
         </button>
@@ -146,24 +118,13 @@ function StickyTextEditor({
   );
 }
 
-/** Edit / delete controls, shown only on a card the viewer authored. */
-function OwnerControls({
-  canEditText,
-  canDelete,
-  isOwn,
-  onEdit,
-  onDelete,
-}: {
+function OwnerControls({ canEditText, canDelete, isOwn, onEdit, onDelete }: {
   canEditText: boolean;
   canDelete: boolean;
-  /** False when the leader is moderating a card someone else proposed. */
   isOwn: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  // Two-step rather than a confirm dialog: a proposal others may have reacted
-  // to or extended should not vanish on one stray click, but a modal is heavier
-  // than this decision deserves. Disarms itself so it cannot sit primed.
   const [armed, setArmed] = useState(false);
 
   useEffect(() => {
@@ -173,24 +134,21 @@ function OwnerControls({
   }, [armed]);
 
   return (
-    <div className="absolute -top-2.5 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-      {canEditText ? (
+    <div className="absolute -top-2.5 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      {canEditText && (
         <button
           type="button"
           onClick={onEdit}
-          className="rounded-full border border-rt-tertiary bg-white px-2.5 py-[3px] text-[10.5px] font-medium text-rt-ink-muted shadow-sm hover:text-rt-ink focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-secondary"
+          className="rounded-full border bg-white px-2.5 py-[3px] text-[10.5px] font-medium text-rt-ink-muted shadow-sm hover:text-rt-ink"
         >
           Edit
         </button>
-      ) : null}
-      {canDelete ? (
+      )}
+      {canDelete && (
         <button
           type="button"
           onClick={() => (armed ? onDelete() : setArmed(true))}
-          // Removing someone else's idea deserves naming what is happening.
-          title={isOwn ? 'Remove your proposal' : 'Remove as session leader'}
-          aria-label={armed ? 'Confirm delete' : isOwn ? 'Delete proposal' : 'Remove as leader'}
-          className={`rounded-full border px-2.5 py-[3px] text-[10.5px] font-medium shadow-sm focus:outline focus:outline-2 focus:outline-offset-1 focus:outline-rt-secondary ${
+          className={`rounded-full border px-2.5 py-[3px] text-[10.5px] font-medium shadow-sm ${
             armed
               ? 'border-rt-secondary bg-rt-secondary-wash text-rt-secondary-deep'
               : 'border-rt-tertiary bg-white text-rt-ink-muted hover:text-rt-ink'
@@ -198,18 +156,11 @@ function OwnerControls({
         >
           {armed ? 'Remove?' : isOwn ? 'Delete' : 'Remove'}
         </button>
-      ) : null}
+      )}
     </div>
   );
 }
 
-/**
- * One card placed on the board (F16).
- *
- * `ProposalCard` stays presentational: this wrapper owns where a card sits and
- * who may change it, so a card renders identically for a viewer with no rights
- * over it.
- */
 export function PositionedProposal({
   item,
   position,
@@ -222,37 +173,28 @@ export function PositionedProposal({
   dragHandlers,
   onEditText,
   onDelete,
+  isShortlisted,
+  shortlistLocked,
+  isLeader,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
-  // Stickies edit inline; drawings/diagrams wait for studio reopen (F20/F21).
   const canEditText = isOwn && item.artifactJson.type === 'sticky';
   const draggable = canMove && !editing;
 
   return (
     <div
-      className="group absolute"
-      // Tells the canvas to leave this pointer gesture alone: dragging a card
-      // you may move must not also pan the board underneath it. A card you may
-      // not move carries no flag, so dragging it pans, which is what every
-      // canvas tool does with something you cannot pick up.
+      className={`group absolute ${
+        isShortlisted ? "ring-2 ring-rt-secondary bg-rt-secondary-wash" : ""
+      }`}
       data-card-draggable={draggable ? 'true' : undefined}
       style={{
         left: position.x,
         top: position.y,
-        // A card being dragged, or edited, belongs above its neighbours.
+        borderRadius: STICKY_RADIUS,
         zIndex: isDragging ? 30 : editing ? 20 : 1,
-        // An arrow at rest, even on a card you may move. A hand on hover would
-        // promise that grabbing is the only thing a card does, when clicking it
-        // also reaches its Edit and Remove controls — and it would put a hand
-        // over most of a busy board. The cursor changes once a drag is actually
-        // under way, which is the moment it means something.
         cursor: isDragging ? 'grabbing' : 'default',
-        // Without this the browser claims touch drags for scrolling first.
         touchAction: draggable ? 'none' : undefined,
-        // Text inside a card must not become a selection while dragging it.
         userSelect: draggable ? 'none' : undefined,
-        // No easing while dragging: the pointer is the animation, and easing
-        // toward it reads as lag. Other people's moves do animate.
         transition: isDragging ? undefined : 'left 120ms ease-out, top 120ms ease-out',
       }}
       onPointerDown={draggable ? (e) => dragHandlers.onPointerDown(item, e) : undefined}
@@ -260,6 +202,49 @@ export function PositionedProposal({
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
     >
+
+      {isShortlisted && (
+        <div className="absolute top-1 right-1 rounded bg-rt-secondary text-white text-[10px] px-2 py-0.5">
+          Shortlisted
+        </div>
+      )}
+
+      {isLeader && !shortlistLocked && (
+        <button
+          type="button"
+          onClick={() => {
+  console.log("CLICKED!");
+  toggleShortlist(item.id);
+}}
+
+          className={`
+            absolute -top-2 -left-2 h-5 w-5 flex items-center justify-center
+            rounded-full border transition-colors z-50
+            ${isShortlisted
+              ? "bg-rt-secondary border-rt-secondary text-white"
+              : "bg-white border-rt-secondary text-rt-secondary"
+            }
+          `}
+          style={{
+            transform: "translate(-20%, -20%)",
+            cursor: "pointer",
+          }}
+        >
+          {isShortlisted && (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-3 w-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </button>
+      )}
+
       {editing && item.artifactJson.type === 'sticky' ? (
         <StickyTextEditor
           artifact={item.artifactJson}
@@ -277,8 +262,10 @@ export function PositionedProposal({
             isNew={isNew}
             isOwnedByViewer={isOwn}
             isAuthorLeader={isAuthorLeader}
+            isShortlisted={isShortlisted}
           />
-          {canEditText || canDelete ? (
+
+          {(canEditText || canDelete) && (
             <OwnerControls
               canEditText={canEditText}
               canDelete={canDelete}
@@ -286,7 +273,7 @@ export function PositionedProposal({
               onEdit={() => setEditing(true)}
               onDelete={() => void onDelete(item)}
             />
-          ) : null}
+          )}
         </>
       )}
     </div>

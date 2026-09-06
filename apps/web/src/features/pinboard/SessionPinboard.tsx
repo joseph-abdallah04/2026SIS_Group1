@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Question } from '@roundtable/shared';
 
@@ -8,6 +9,9 @@ import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
+
+import { useSessionStore } from '../../lib/sessionStore';
+import { api } from '../../lib/api';
 
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
@@ -30,19 +34,19 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
 }
 
 interface SessionPinboardProps {
-  /**
-   * Decides which of the two exits the header offers: "Leave session" for a
-   * member (F07), "End session" for the leader (F32). Required, not
-   * defaulted — guessing would silently drop someone's only way out.
-   */
   isLeader: boolean;
-  /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
   questions: Question[];
 }
 
 export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
+
+  //
+  // ─────────────────────────────────────────────────────────────
+  //   PINBOARD FETCH + LOCAL STATE
+  // ─────────────────────────────────────────────────────────────
+  //
   const {
     board,
     loading,
@@ -53,9 +57,62 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     deleteProposal,
     isLive,
     newItemIds,
-    viewerId,
+    viewerId: viewerIdFromPinboard,
   } = usePinboard(sessionId);
 
+  //
+  // ─────────────────────────────────────────────────────────────
+  //   GLOBAL SESSION STORE (REALTIME SNAPSHOT)
+  // ─────────────────────────────────────────────────────────────
+  //
+  const shortlist = useSessionStore((s) => s.shortlist);
+  const viewerId = useSessionStore((s) => s.viewerId);
+  const leaderId = useSessionStore((s) => s.leaderId);
+  const status = useSessionStore((s) => s.status);
+
+  const isLeaderFromStore = viewerId === leaderId;
+  const isLeaderFinal = isLeader || isLeaderFromStore;
+  const votingLocked = status === 'voting';
+
+  //
+  // ─────────────────────────────────────────────────────────────
+  //   LOCAL SHORTLIST STATE (LEADER ONLY)
+  // ─────────────────────────────────────────────────────────────
+  //
+  const [localShortlist, setLocalShortlist] = useState<string[]>(shortlist);
+
+  useEffect(() => {
+    setLocalShortlist(shortlist);
+  }, [shortlist]);
+
+function toggleShortlist(id: string) {
+  if (!isLeaderFinal || votingLocked) return;
+
+  setLocalShortlist((prev) => {
+    const updated = prev.includes(id)
+      ? prev.filter((x) => x !== id)
+      : [...prev, id];
+      
+    window.socket.emit("shortlist_updated", {
+      sessionId,
+      shortlist: updated
+    });
+
+    return updated;
+  });
+}
+
+  async function saveShortlist() {
+    await api.post(`/api/sessions/${sessionId}/shortlist`, {
+      proposalIds: localShortlist,
+    });
+  }
+
+  //
+  // ─────────────────────────────────────────────────────────────
+  //   EXISTING PINBOARD LOADING STATES
+  // ─────────────────────────────────────────────────────────────
+  //
   if (!sessionId) {
     return (
       <main className="flex h-screen items-center justify-center bg-rt-surface">
@@ -72,8 +129,6 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     );
   }
 
-  // Only when there is nothing to show: if the REST load failed but the socket
-  // snapshot produced a board, the board is what the user wants to see.
   if (error && !board) {
     return (
       <BoardFrame>
@@ -119,34 +174,53 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     );
   }
 
+  //
+  // ─────────────────────────────────────────────────────────────
+  //   MAIN PINBOARD RENDER
+  // ─────────────────────────────────────────────────────────────
+  //
   return (
     <CreativeToolsProvider
       isLive={isLive && board.questionStatus === 'discussion'}
       proposals={board.items}
       propose={propose}
     >
-      {/* `overflow-hidden` so nothing on the board can produce a page-level
-          scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
-      <main className="h-dvh overflow-hidden">
+      <main className="h-dvh overflow-hidden relative">
         <PinboardCanvas
           board={board}
           isLive={isLive}
           newItemIds={newItemIds}
-          isLeader={isLeader}
-          viewerId={viewerId}
+          isLeader={isLeaderFinal}
+          viewerId={viewerIdFromPinboard}
           editProposal={editProposal}
           deleteProposal={deleteProposal}
+          shortlist={localShortlist}
+          onToggleShortlist={toggleShortlist}
+          shortlistLocked={votingLocked}
           agenda={
             <AgendaPanel
               sessionId={sessionId}
               questions={questions}
               activeQuestionId={board.questionId}
-              isLeader={isLeader}
+              isLeader={isLeaderFinal}
             />
           }
         />
+
+        {/* Leader-only shortlist save button */}
+        {isLeaderFinal && !votingLocked && (
+          <button
+            type="button"
+            onClick={saveShortlist}
+            className="absolute bottom-20 right-9 rounded-full bg-rt-secondary px-4 py-2 text-[13px] font-semibold text-rt-ink hover:bg-rt-secondary-deep"
+          >
+            Proceed To Vote
+          </button>
+        )}
+
         <SessionJoinNotices />
       </main>
+
       <CreativeStudio />
     </CreativeToolsProvider>
   );

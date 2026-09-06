@@ -56,6 +56,10 @@ interface PinboardCanvasProps {
   viewerId: string | null;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
   deleteProposal: (proposalId: string) => Promise<void>;
+  /*F27 */
+  shortlist: string[];
+  onToggleShortlist: (id: string) => void;
+  shortlistLocked: boolean;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -195,6 +199,8 @@ export function PinboardCanvas({
   viewerId,
   editProposal,
   deleteProposal,
+  shortlist,
+  shortlistLocked,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -590,22 +596,26 @@ export function PinboardCanvas({
                   boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
                 }}
               >
-                {board.items.map((item) => (
-                  <PositionedProposal
-                    key={item.id}
-                    item={item}
-                    position={positionOf(item)}
-                    isNew={newItemIds.has(item.id)}
-                    isOwn={viewerId !== null && item.authorId === viewerId}
-                    isAuthorLeader={item.authorId === board.leaderId}
-                    canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
-                    canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
-                    isDragging={draggingId === item.id}
-                    dragHandlers={dragHandlers}
-                    onEditText={onEditText}
-                    onDelete={onDelete}
-                  />
-                ))}
+  {board.items.map((item) => (
+  <PositionedProposal
+    key={item.id}
+    item={item}
+    position={positionOf(item)}
+    isNew={newItemIds.has(item.id)}
+    isOwn={viewerId !== null && item.authorId === viewerId}
+    isAuthorLeader={item.authorId === board.leaderId}
+    canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
+    canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
+    isDragging={draggingId === item.id}
+    dragHandlers={dragHandlers}
+    onEditText={onEditText}
+    onDelete={onDelete}
+    /* F27 */
+    isShortlisted={shortlist.includes(item.id)}
+    shortlistLocked={shortlistLocked}
+    isLeader={isLeader}
+  />
+))}
               </div>
             </div>
           )}

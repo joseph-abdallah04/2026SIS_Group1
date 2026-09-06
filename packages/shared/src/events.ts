@@ -1,17 +1,19 @@
 // Socket.IO event contracts — the single source of truth for realtime types.
-// Server: `new Server<ClientToServerEvents, ServerToClientEvents>(...)`
-// Client: `io<ServerToClientEvents, ClientToServerEvents>(...)`
-// Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
+// Server: new Server<ClientToServerEvents, ServerToClientEvents>(...)
+// Client: io<ServerToClientEvents, ClientToServerEvents>(...)
 
 import type { BoardItem, BoardResponse } from './index.js';
 import type { ProposalCreateInput } from './schemas.js';
+
+//
+// Shared payload types
+//
 
 export interface SessionUserPayload {
   id: string;
   displayName: string;
 }
 
-/** Result of a write intent: the fact itself arrives on the broadcast, not here. */
 export interface WriteAck {
   ok: boolean;
   error?: string;
@@ -19,13 +21,8 @@ export interface WriteAck {
 }
 
 /**
- * Everything a client needs to render a session from cold (docs/02 §4 — "full
- * snapshot"). It must stay a superset of `BoardResponse`: a reconnecting client
- * resyncs from this alone, so anything missing here is something the header
- * would render as a placeholder until some other request happened to fill it in.
- *
- * Sessions-owned fields (phase, presence, vote progress) get added here as
- * those modules land.
+ * Full session snapshot sent on join/reconnect.
+ * Must remain a superset of BoardResponse.
  */
 export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
@@ -36,71 +33,81 @@ export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   shortlist?: string[];
 }
 
+//
+// ─────────────────────────────────────────────
+//   CLIENT → SERVER EVENTS
+// ─────────────────────────────────────────────
+//
+
 export interface ClientToServerEvents {
-  /** Join a session room; server validates membership then acks with ok/error. */
-  memberJoin(
-    payload: { sessionId: string },
-    ack?: (res: { ok: boolean; error?: string }) => void
-  ): void;
-
-  /** Leave a session room (explicit leave from client). */
-  memberLeave(
-    payload: { sessionId: string },
-    ack?: (res: { ok: boolean; error?: string }) => void
-  ): void;
-
-  // === sessions module ===
-
-  // === pinboard module ===
-  /**
-   * Propose an item onto the board of the session this socket has already
-   * joined. The server validates, persists, then broadcasts `proposalCreated`.
-   */
-  proposalCreate(
-    payload: ProposalCreateInput,
+  shortlist_updated(
+    payload: { sessionId: string; shortlist: string[] },
     ack?: (res: WriteAck) => void
   ): void;
 
-  // === voting module ===
-  /**
-   * Update the shortlist for the session this socket has already joined.
-   * Server validates, persists, then broadcasts `shortlist_updated`.
-   */
-  shortlistUpdated(
-    payload: { sessionId: string; proposalIds: string[] },
-    ack?: (res: WriteAck) => void
-  ): void;
+  shortlist_locked(payload: { sessionId: string }): void;
+  voting_started(payload: { sessionId: string }): void;
 
-  // === summary module ===
-  // === voice module ===
-  // === assistant module ===
+  memberJoin(payload: { sessionId: string }, ack?: (res: WriteAck) => void): void;
+  memberLeave(payload: { sessionId: string }, ack?: (res: WriteAck) => void): void;
+  proposalCreate(payload: ProposalCreateInput, ack?: (res: WriteAck) => void): void;
 }
 
+//
+// SERVER → CLIENT EVENTS
+//
 export interface ServerToClientEvents {
-  /** Presence update when a member joins the session room. */
+  shortlist_updated(shortlist: string[]): void;
+  shortlist_locked(): void;
+  voting_started(): void;
+
   memberJoined(payload: { user: SessionUserPayload }): void;
-
-  /** Presence update when a member leaves the session room. */
   memberLeft(payload: { user: SessionUserPayload }): void;
+  sessionState(payload: SessionStatePayload): void;
+  sessionFocus(payload: { sessionId: string; questionId: string }): void;
+  sessionPhase(payload: { sessionId: string; questionId: string; status: string }): void;
+  sessionStarted(payload: { sessionId: string; startedAt?: string }): void;
+  sessionEnded(payload: { sessionId: string; endedAt?: string }): void;
+  proposalCreated(payload: { proposal: BoardItem }): void;
+  proposalUpdated(payload: { proposal: BoardItem }): void;
+  proposalDeleted(payload: { proposalId: string; questionId: string }): void;
+}
 
-  /** Full state snapshot sent on join/reconnect so refreshed clients resync. */
+//
+// ─────────────────────────────────────────────
+//   SERVER → CLIENT EVENTS
+// ─────────────────────────────────────────────
+//
+
+export interface ServerToClientEvents {
+  memberJoined(payload: { user: SessionUserPayload }): void;
+  memberLeft(payload: { user: SessionUserPayload }): void;
   sessionState(payload: SessionStatePayload): void;
 
-  // === sessions module ===
+  sessionFocus(payload: { sessionId: string; questionId: string }): void;
 
-  // === pinboard module ===
+  sessionPhase(payload: {
+    sessionId: string;
+    questionId: string;
+    status: string;
+  }): void;
+
+  sessionStarted(payload: {
+    sessionId: string;
+    startedAt?: string;
+  }): void;
+
+  sessionEnded(payload: {
+    sessionId: string;
+    endedAt?: string;
+  }): void;
+
   proposalCreated(payload: { proposal: BoardItem }): void;
   proposalUpdated(payload: { proposal: BoardItem }): void;
   proposalDeleted(payload: { proposalId: string; questionId: string }): void;
 
-  // === voting module ===
-  /**
-   * Broadcast when the shortlist for a session changes.
-   * Sent to the entire `session:{id}` room.
-   */
-  shortlist_updated(payload: { sessionId: string; proposalIds: string[] }): void;
+ shortlist_updated(shortlist: string[]): void;
 
-  // === summary module ===
-  // === voice module ===
-  // === assistant module ===
+  shortlist_locked(): void;
+  voting_started(): void;
 }

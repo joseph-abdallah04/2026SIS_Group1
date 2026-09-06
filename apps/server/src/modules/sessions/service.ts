@@ -161,6 +161,43 @@ async function requireDraftOwnedBy(
   return session;
 }
 
+
+// F27 — update shortlist (leader-only, active-only)
+export async function updateSessionShortlist({
+  sessionId,
+  leaderId,
+  proposalIds,
+}: {
+  sessionId: string;
+  leaderId: string;
+  proposalIds: string[];
+}) {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { leaderId: true, status: true },
+  });
+
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+
+  if (session.leaderId !== leaderId) {
+    throw new ApiError(403, 'Only the session leader can do that', 'NOT_SESSION_LEADER');
+  }
+
+  if (session.status !== 'active') {
+    throw new ApiError(
+      409,
+      `Cannot update shortlist while session is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
+  }
+
+  return { sessionId, shortlist: proposalIds };
+
+}
+
+
 export interface UpdateSessionDraftArgs extends MutateDraftArgs {
   /** Already validated by the caller against `updateSessionSchema`. */
   input: UpdateSessionInput;
