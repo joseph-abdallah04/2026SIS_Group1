@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react';
+import type { RoundTableSocket } from './socket';
 import type { BoardItem } from '@roundtable/shared';
 
 declare global {
   interface Window {
-    socket?: any;
+    socket?: RoundTableSocket;
   }
 }
 

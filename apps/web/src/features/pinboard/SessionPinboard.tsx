@@ -92,11 +92,13 @@ function toggleShortlist(id: string) {
     const updated = prev.includes(id)
       ? prev.filter((x) => x !== id)
       : [...prev, id];
-      
-    window.socket.emit("shortlist_updated", {
-      sessionId,
-      shortlist: updated
-    });
+
+    if (window.socket) {
+      window.socket.emit("shortlist_updated", {
+        sessionId,
+        shortlist: updated
+      });
+    }
 
     return updated;
   });
