@@ -1,80 +1,94 @@
-// ⚠️ STAND-IN — this file belongs to the Session Lifecycle track.
+// Session Lifecycle's realtime gateway (F08): room membership, presence, and
+// the join-time snapshot every module's socket handlers build on.
 //
-// docs/06 ("Session Lifecycle Owner → Also owns (deferred from setup)") assigns
-// socket authentication, room management and `memberJoin` routing to that
-// owner. None of it exists yet, and F15 cannot broadcast into a room nobody has
-// joined — so this is the smallest gateway that unblocks the pinboard, kept in
-// ONE file so the real one replaces it wholesale:
-//
-//   1. `authenticateJoin` becomes "verify handshake JWT + check membership".
-//   2. Everything else (rooms, snapshot, presence) is already the shape docs/06
-//      describes and should survive largely as-is.
-//
-// Nothing in `modules/pinboard/` depends on the stand-in behaviour: it only
-// relies on `socket.data.user` / `socket.data.sessionId` being trustworthy.
+// Both halves of the join check are now real. The stand-in this file used to
+// carry — trust a client-claimed `devUserId`, refuse outright in production —
+// is gone, because the Auth module (F01/F02) landed the JWT verification it
+// was waiting on. Nothing in `modules/pinboard/` had to change for that: it
+// only ever relied on `socket.data.user` / `socket.data.sessionId` being
+// trustworthy, which is now true in production too.
 import type { SessionStatePayload } from '@roundtable/shared/events';
 
-import { prisma } from '../db.js';
-import { env } from '../env.js';
+import { verifyToken } from '../modules/auth/index.js';
 import { getBoardForSession, registerPinboardSocketHandlers } from '../modules/pinboard/index.js';
+import { getSession, getSessionMemberIdentity } from '../modules/sessions/index.js';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket, type SocketUser } from './types.js';
 
-const IS_PRODUCTION = env.NODE_ENV === 'production';
-
 /**
- * Decide who this socket is, for this session.
+ * Decide who this socket is, and confirm they belong in this session.
  *
- * TODO(auth/sessions): replace the whole body with
- *   `verifyJwt(socket.handshake.auth.token)` → membership lookup → user.
+ * Two independent checks, and both must pass: the handshake token has to
+ * verify (who you are), and that user has to be a member of this session
+ * (whether you may be here). A valid token for a session you never joined is
+ * refused — authentication is not authorisation.
+ *
+ * Returns the identity from `getSessionMemberIdentity` rather than anything the
+ * client sent, so `socket.data.user` can never carry a display name or id the
+ * client chose. There is deliberately no fallback: a socket with no usable
+ * token does not join, because the alternatives (guess the leader, trust a
+ * claimed id) both attribute one person's actions to another.
  */
 async function authenticateJoin(
   socket: RealtimeSocket,
   sessionId: string,
 ): Promise<SocketUser | null> {
-  if (IS_PRODUCTION) {
-    // A real identity can only come from a verified JWT, and JWT verification
-    // is the auth owner's ticket. Refuse rather than trust a client-sent id.
+  // Same token the REST client sends as `Authorization: Bearer` — Socket.IO
+  // has no headers on the handshake, so it travels in `auth` instead.
+  const token = socket.handshake.auth?.token;
+  if (typeof token !== 'string' || token.length === 0) {
+    console.warn(`[realtime] rejected join for ${sessionId}: no handshake token`);
     return null;
   }
 
-  const claimedId = socket.handshake.auth?.devUserId;
-
-  // A claimed id is checked, never trusted-then-downgraded: an id that is not a
-  // member of this session is refused outright. Silently substituting the
-  // leader would attribute one member's proposals to another, and would hide a
-  // typo'd `rt_dev_user_id` behind a board that looks like it works.
-  if (typeof claimedId === 'string' && claimedId.length > 0) {
-    const membership = await prisma.sessionMember.findUnique({
-      where: { sessionId_userId: { sessionId, userId: claimedId } },
-      select: { user: { select: { id: true, displayName: true } } },
-    });
-    if (!membership) {
-      console.warn(`[realtime] rejected join: ${claimedId} is not a member of ${sessionId}`);
-      return null;
-    }
-    return membership.user;
+  const verified = verifyToken(token);
+  if (!verified.ok) {
+    console.warn(`[realtime] rejected join for ${sessionId}: ${verified.code}`);
+    return null;
   }
 
-  // No id at all: fall back to the leader so a single-window demo just works.
-  const session = await prisma.session.findUnique({
-    where: { id: sessionId },
-    select: { leader: { select: { id: true, displayName: true } } },
-  });
-  if (!session) return null;
+  const identity = await getSessionMemberIdentity(sessionId, verified.userId);
+  if (!identity) {
+    console.warn(`[realtime] rejected join: ${verified.userId} is not a member of ${sessionId}`);
+    return null;
+  }
+  return identity;
+}
 
-  console.warn(
-    `[realtime] socket joined ${sessionId} as the leader; set localStorage.rt_dev_user_id to act as another member`,
-  );
-  return session.leader;
+/** Every distinct user currently connected to this session's room. */
+async function getRoomParticipants(io: RealtimeServer, sessionId: string): Promise<SocketUser[]> {
+  const sockets = await io.in(sessionRoom(sessionId)).fetchSockets();
+  const byUserId = new Map<string, SocketUser>();
+  for (const s of sockets) {
+    if (s.data.user) byUserId.set(s.data.user.id, s.data.user);
+  }
+  return [...byUserId.values()];
+}
+
+/** Whether any *other* socket for this user is still in the room. */
+async function userHasAnotherSocketInRoom(
+  io: RealtimeServer,
+  sessionId: string,
+  userId: string,
+  excludeSocketId: string,
+): Promise<boolean> {
+  const sockets = await io.in(sessionRoom(sessionId)).fetchSockets();
+  return sockets.some((s) => s.id !== excludeSocketId && s.data.user?.id === userId);
+}
+
+/** Presence is per-user, not per-socket: a second tab closing is not a leave. */
+async function emitMemberLeftIfLast(
+  io: RealtimeServer,
+  socket: RealtimeSocket,
+  sessionId: string,
+  user: SocketUser,
+): Promise<void> {
+  const stillThere = await userHasAnotherSocketInRoom(io, sessionId, user.id, socket.id);
+  if (!stillThere) {
+    socket.to(sessionRoom(sessionId)).emit('memberLeft', { user });
+  }
 }
 
 export function registerRealtimeGateway(io: RealtimeServer): void {
-  if (!IS_PRODUCTION) {
-    console.warn(
-      '[realtime] stand-in gateway active: sockets are NOT JWT-authenticated (development only)',
-    );
-  }
-
   io.on('connection', (socket) => {
     socket.data.user = null;
     socket.data.sessionId = null;
@@ -93,29 +107,60 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
             return;
           }
 
+          const session = await getSession(sessionId);
+          if (!session) {
+            ack?.({ ok: false, error: 'Session not found' });
+            return;
+          }
+
           // Moving between sessions on one socket must not leave it subscribed
-          // to the old room, or it keeps receiving a board it no longer shows.
+          // to the old room, or it keeps receiving events for a session it no
+          // longer shows. Only announce a leave if this was this user's last
+          // socket in that room — a second tab closing is not the user leaving.
           const previous = socket.data.sessionId;
           if (previous && previous !== sessionId) {
             await socket.leave(sessionRoom(previous));
-            socket.to(sessionRoom(previous)).emit('memberLeft', { user });
+            await emitMemberLeftIfLast(io, socket, previous, user);
           }
+
+          // Checked *before* this socket joins, so it reflects only other
+          // sockets — the question is "was this user already present", not
+          // "is this socket in the room yet". Rejoining the *same* socket
+          // (React Strict Mode remounts `memberJoin` without leaving the
+          // room) must also count as already present, or the room gets a
+          // second `memberJoined` for someone who never left.
+          const alreadyPresent =
+            socket.data.sessionId === sessionId ||
+            (await userHasAnotherSocketInRoom(io, sessionId, user.id, socket.id));
 
           socket.data.user = user;
           socket.data.sessionId = sessionId;
           await socket.join(sessionRoom(sessionId));
 
-          // Snapshot on join (docs/02 §4). It carries the whole board, not just
-          // the proposals: a reconnecting client resyncs from this alone, so
+          // Snapshot on join (docs/02 §4). It carries the whole board plus the
+          // sessions-owned fields the join screens need (status, leader,
+          // who's here) — a reconnecting client resyncs from this alone, so
           // anything left out would render as a placeholder until some other
           // request happened to fill it in.
           const { items, ...meta } = await getBoardForSession(sessionId);
-          // `viewer` tells the client who the server thinks it is, so the board
-          // can offer author-only controls (F16) against the same identity the
-          // write path will check, rather than a locally remembered guess.
-          const snapshot: SessionStatePayload = { ...meta, proposals: items, viewer: user };
+          const snapshot: SessionStatePayload = {
+            ...meta,
+            proposals: items,
+            status: session.status,
+            leaderId: session.leaderId,
+            participants: await getRoomParticipants(io, sessionId),
+            // `viewer` tells the client who the server thinks it is, so the
+            // board can offer author-only controls (F16) against the same
+            // identity the write path will check, rather than a locally
+            // remembered guess. With `leaderId` beside it, one snapshot answers
+            // both "is this mine" and "am I the leader".
+            viewer: user,
+          };
           socket.emit('sessionState', snapshot);
-          socket.to(sessionRoom(sessionId)).emit('memberJoined', { user });
+
+          if (!alreadyPresent) {
+            socket.to(sessionRoom(sessionId)).emit('memberJoined', { user });
+          }
 
           ack?.({ ok: true });
         } catch (err) {
@@ -125,16 +170,49 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
       })();
     });
 
+    // Clients cannot `socket.leave()` a server room themselves; the waiting
+    // room and pinboard emit this on unmount so a trip to the dashboard
+    // drops the user from "Here now" without tearing down the singleton.
+    socket.on('memberLeave', ({ sessionId }, ack) => {
+      void (async () => {
+        try {
+          if (typeof sessionId !== 'string' || sessionId.length === 0) {
+            ack?.({ ok: false, error: 'sessionId is required' });
+            return;
+          }
+          // A leave for a room this socket is not in is a no-op — the
+          // deferred client leave can fire after a remount already joined
+          // a different session, or after REST leave already kicked us.
+          if (socket.data.sessionId !== sessionId) {
+            ack?.({ ok: true });
+            return;
+          }
+
+          const user = socket.data.user;
+          await socket.leave(sessionRoom(sessionId));
+          socket.data.sessionId = null;
+          if (user) {
+            await emitMemberLeftIfLast(io, socket, sessionId, user);
+          }
+          ack?.({ ok: true });
+        } catch (err) {
+          console.error('[realtime] memberLeave failed:', err);
+          ack?.({ ok: false, error: 'Failed to leave session' });
+        }
+      })();
+    });
+
     registerPinboardSocketHandlers(io, socket);
 
     socket.on('disconnect', () => {
       const { user, sessionId } = socket.data;
-      // Presence is per-socket here, so a second tab closing reads as a leave.
-      // Real presence (distinct connected users) is the sessions owner's to get
-      // right; docs/02 §4 keeps it in memory, never in `SessionMember`.
-      if (user && sessionId) {
-        socket.to(sessionRoom(sessionId)).emit('memberLeft', { user });
-      }
+      if (!user || !sessionId) return;
+
+      void (async () => {
+        // By the time `disconnect` fires the socket has already left every
+        // room, so this reflects only sockets other than the one closing.
+        await emitMemberLeftIfLast(io, socket, sessionId, user);
+      })();
     });
   });
 }

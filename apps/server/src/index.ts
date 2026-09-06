@@ -10,6 +10,7 @@ import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { authRoutes } from './modules/auth/index.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
+import { createSessionsRoutes } from './modules/sessions/index.js';
 import { voiceRoutes } from './modules/voice/index.js';
 import { registerRealtimeGateway } from './realtime/gateway.js';
 import type { RealtimeServer } from './realtime/types.js';
@@ -21,11 +22,24 @@ const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json({ limit: '256kb' }));
 
+// `io` is created before the routes that need it (rather than after, as
+// there is no socket-only reason to delay it) — F09's `POST /:id/start`
+// broadcasts on this exact instance once it succeeds, so `sessionsRoutes`
+// is a factory that takes it, not a module-level `Router`.
+const httpServer = http.createServer(app);
+const io: RealtimeServer = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
 app.use('/api/auth', authRoutes);
+// Two routers share the `/api/sessions` prefix, so registration order
+// matters: sessions' `GET /:id` matches any single segment and would shadow a
+// one-segment route added to pinboard later. Pinboard's routes are all
+// `/:sessionId/<something>`, so nothing collides today — keep it that way, or
+// mount pinboard first.
+app.use('/api/sessions', createSessionsRoutes(io));
 app.use('/api/sessions', pinboardRoutes);
 // Both routers mount on the same prefix and own disjoint sub-paths
 // (docs/06 §6): pinboard has `:id/proposals*`, voice has `:id/livekit-token`.
@@ -42,9 +56,6 @@ if (fs.existsSync(webDist)) {
     res.sendFile(path.join(webDist, 'index.html'));
   });
 }
-
-const httpServer = http.createServer(app);
-const io: RealtimeServer = new SocketServer(httpServer, { cors: { origin: CLIENT_ORIGIN } });
 
 registerRealtimeGateway(io);
 

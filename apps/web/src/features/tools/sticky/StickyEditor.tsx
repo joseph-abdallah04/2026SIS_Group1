@@ -128,7 +128,7 @@ export function StickyEditor() {
                     aria-pressed={selected}
                     title={option[0]?.toUpperCase() + option.slice(1)}
                     onClick={() => setColor(option)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
                     style={{
                       background: optionTheme.bg,
                       borderColor: selected ? '#4D6A74' : optionTheme.border,

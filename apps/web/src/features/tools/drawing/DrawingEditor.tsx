@@ -233,7 +233,7 @@ export function DrawingEditor() {
             aria-label="Pen"
             aria-pressed={mode === 'pen'}
             onClick={() => setMode('pen')}
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
           >
             <Pencil aria-hidden="true" size={15} />
             <span className="hidden sm:inline">Pen</span>
@@ -243,7 +243,7 @@ export function DrawingEditor() {
             aria-label="Eraser"
             aria-pressed={mode === 'eraser'}
             onClick={() => setMode('eraser')}
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
           >
             <Eraser aria-hidden="true" size={15} />
             <span className="hidden sm:inline">Eraser</span>
@@ -264,7 +264,7 @@ export function DrawingEditor() {
                   setInk(option as DrawingInk);
                   setMode('pen');
                 }}
-                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white shadow-sm ring-1 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:ring-offset-2 focus-visible:outline-none"
+                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white shadow-sm ring-1 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
                 style={
                   {
                     background: color,
@@ -290,7 +290,7 @@ export function DrawingEditor() {
                 setPenWidth(option);
                 setMode('pen');
               }}
-              className="flex h-full w-9 items-center justify-center border-r border-rt-tertiary last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-primary focus-visible:outline-none aria-pressed:bg-rt-primary-tint"
+              className="flex h-full w-9 items-center justify-center border-r border-rt-tertiary last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-primary-tint"
             >
               <span
                 aria-hidden="true"

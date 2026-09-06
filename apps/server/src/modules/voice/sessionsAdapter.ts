@@ -1,38 +1,14 @@
-// Temporary adapter over the `sessions` module.
+// The Session Lifecycle owner's module has landed, exactly as anticipated
+// below — this collapses to a thin re-export of its public surface, and no
+// other voice file changes (`service.ts` still imports `findSessionParticipant`
+// by that name and gets the same `{id, displayName} | null` shape).
 //
-// docs/02 §2: a module never queries another module's tables. The `sessions`
-// module does not exist yet, so this file stands in for its public surface —
-// and it is the ONLY file in `voice/` allowed to read `sessions`/
-// `session_members` rows. Everything else in this module goes through it.
-//
-// When the Session Lifecycle owner lands their module, this file collapses to:
-//   export { getMember } from '../sessions/index.js';
-// and no other voice file changes.
-//
-// Mirrors `modules/pinboard/sessionsAdapter.ts`, which set this pattern.
-import { prisma } from '../../db.js';
-
-/** A person entitled to be in a session's room, as voice needs to know them. */
-export interface SessionParticipant {
-  id: string;
-  displayName: string;
-}
-
-/**
- * The membership row behind "only current participants get a token" (F11).
- *
- * `null` covers both "not a member" and "no such session", deliberately: the
- * route turns both into the same 403, so a caller cannot use the status code to
- * discover which session ids exist.
- */
-export async function findSessionParticipant(
-  sessionId: string,
-  userId: string,
-): Promise<SessionParticipant | null> {
-  const membership = await prisma.sessionMember.findUnique({
-    where: { sessionId_userId: { sessionId, userId } },
-    select: { user: { select: { id: true, displayName: true } } },
-  });
-
-  return membership?.user ?? null;
-}
+// `getSessionMemberIdentity` is the right function to reuse rather than
+// `assertSessionMember`: it requires `leftAt: null` ("having once been in a
+// session is not permission to sit in its room" — sessions/service.ts), which
+// is exactly F11's "only current participants get one". `assertSessionMember`
+// deliberately lets someone who has *left* through, because it guards
+// read-only access to a session's history — the wrong rule for handing out a
+// live voice-room token.
+export { getSessionMemberIdentity as findSessionParticipant } from '../sessions/index.js';
+export type { SessionMemberIdentity as SessionParticipant } from '../sessions/index.js';

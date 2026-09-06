@@ -61,7 +61,7 @@ beforeEach(() => {
   findUnique.mockResolvedValue(row() as never);
   update.mockResolvedValue(row() as never);
   question.mockResolvedValue(questionRef());
-  session.mockResolvedValue({ id: 's1', title: 'Demo', leaderId: 'leader-1' });
+  session.mockResolvedValue({ id: 's1', title: 'Demo', status: 'active', leaderId: 'leader-1' });
 });
 
 describe('requireMutableProposal', () => {

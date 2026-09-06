@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BoardItem, BoardResponse } from '@roundtable/shared';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
 import type { ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { EndSessionControl } from '../sessions/EndSessionControl';
+import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -35,6 +37,19 @@ interface PinboardCanvasProps {
   /** Proposals that arrived on a live broadcast moments ago (F15). */
   newItemIds: ReadonlySet<string>;
   /**
+   * Leaders cannot leave (F07), they end the session (F32) — this header
+   * offers whichever of the two applies. It also decides who may moderate
+   * anyone's card (F17), which `PositionedProposal` enforces per proposal.
+   */
+  isLeader: boolean;
+  /**
+   * F24's agenda rail, rendered beside the board. A node rather than the
+   * question list itself: the agenda belongs to the sessions side of the app,
+   * and passing it in keeps this component about the board while still owning
+   * the header/board/footer split the rail has to sit inside.
+   */
+  agenda?: ReactNode;
+  /**
    * Who the server believes this client is, or null before the join snapshot.
    * Author-only affordances key off this; the server re-checks regardless (F16).
    */
@@ -42,6 +57,16 @@ interface PinboardCanvasProps {
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
   deleteProposal: (proposalId: string) => Promise<void>;
 }
+
+const PHASE_LABELS: Record<QuestionStatus, string> = {
+  // "Up next" rather than "Pending": the board is showing the question the
+  // leader has not opened yet, and it stays closed to proposals until they do.
+  pending: 'Up next',
+  discussion: 'Discussing',
+  voting: 'Voting',
+  answered: 'Answered',
+  skipped: 'Skipped',
+};
 
 function EmptyBoardPlate() {
   return (
@@ -85,7 +110,7 @@ function EmptyBoardPlate() {
             </p>
           </div>
           <div className="flex items-center gap-3 py-2.5">
-            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-primary-tint" />
+            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-cool-tint" />
             <p className="text-[12.5px] font-medium text-rt-ink">
               Diagram
               <span className="font-normal text-rt-ink-faint"> — soft border, box preview</span>
@@ -101,7 +126,7 @@ function EmptyBoardPlate() {
         <button
           type="button"
           disabled
-          className="rounded-full bg-rt-primary px-[18px] py-[9px] text-[12px] font-semibold text-white opacity-90"
+          className="rounded-full bg-rt-secondary px-[18px] py-[9px] text-[12px] font-semibold text-rt-ink opacity-90"
           title="Coming in F22"
         >
           Propose the first idea
@@ -134,7 +159,7 @@ function ZoomControl({
         onClick={onZoomOut}
         disabled={!canZoomOut}
         title={canZoomOut ? 'Zoom out' : 'The whole board is already in view'}
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
       >
         −
       </button>
@@ -146,14 +171,14 @@ function ZoomControl({
         onClick={onZoomIn}
         disabled={!canZoomIn}
         title="Zoom in"
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
       >
         +
       </button>
       <button
         type="button"
         onClick={onFit}
-        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
+        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary"
       >
         Fit
       </button>
@@ -165,6 +190,8 @@ export function PinboardCanvas({
   board,
   isLive,
   newItemIds,
+  isLeader,
+  agenda,
   viewerId,
   editProposal,
   deleteProposal,
@@ -173,9 +200,12 @@ export function PinboardCanvas({
   const [writeError, setWriteError] = useState<string | null>(null);
   const scale = ZOOM_SCALE[zoom];
   const isEmpty = board.items.length === 0;
-  // Leadership is per-session and decided by the server; this only decides
-  // what the UI offers, and every write is re-checked server-side regardless.
-  const isLeader = viewerId !== null && viewerId === board.leaderId;
+  // `isLeader` arrives as a prop rather than being derived from
+  // `viewerId === board.leaderId` here: the header needs it to choose between
+  // "Leave session" and "End session" from the first render, and `viewerId` is
+  // null until the join snapshot lands, which would briefly offer the leader
+  // the wrong exit. Either way it only decides what the UI offers — every
+  // write is re-checked server-side.
 
   // A rejected write is the one thing the board cannot show by itself: the card
   // simply stays where it was, which on its own looks like nothing happened.
@@ -446,17 +476,22 @@ export function PinboardCanvas({
   // than tiling out over the surrounding desk.
   const dotBackground = `radial-gradient(${DOT_COLOR} ${DOT_RADIUS}px, transparent ${DOT_RADIUS}px)`;
 
+  // Human wording, not the raw enum: "Q2 · pending" reads as a bug, and the
+  // difference between the phases is the difference between the board taking
+  // proposals and not (F25).
   const phaseLabel =
     board.questionPosition != null && board.questionStatus
-      ? `Q${board.questionPosition + 1} · ${board.questionStatus}`
-      : 'Discussion';
+      ? `Q${board.questionPosition + 1} · ${PHASE_LABELS[board.questionStatus]}`
+      : // No active question at all: every question has been answered or
+        // skipped, so the agenda is done and the leader's move is to end it.
+        'Agenda complete';
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-3 border-b border-rt-primary-tint bg-rt-primary px-6 py-3 text-white">
+      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-6 py-3 text-rt-ink">
         <RoundTableLogo />
-        <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-white/25 bg-white px-3.5 py-1.5 shadow-sm">
-          <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-primary-deep uppercase">
+        <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
+          <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
             {phaseLabel}
           </span>
           {board.questionText ? (
@@ -468,11 +503,11 @@ export function PinboardCanvas({
           )}
         </div>
         <div className="ml-auto flex items-center gap-2.5">
-          <span className="rounded-full border border-rt-primary-tint bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-primary-deep shadow-sm">
+          <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
           </span>
           <div
-            className="flex items-center gap-[7px] rounded-full border border-rt-primary-tint bg-white px-2.5 py-1 shadow-sm"
+            className="flex items-center gap-[7px] rounded-full border border-rt-secondary/25 bg-white px-2.5 py-1 shadow-sm"
             title={
               isLive
                 ? 'Connected: new proposals appear here as they are made'
@@ -480,119 +515,130 @@ export function PinboardCanvas({
             }
           >
             <div
-              className={`h-[7px] w-[7px] rounded-full ${isLive ? 'bg-rt-primary' : 'bg-rt-tertiary'}`}
+              className={`h-[7px] w-[7px] rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
             />
-            <span className="text-[10.5px] font-medium text-rt-primary-deep">
+            <span className="text-[10.5px] font-medium text-rt-secondary-deep">
               {isLive ? 'live' : 'offline'}
             </span>
           </div>
+          {isLeader ? (
+            <EndSessionControl sessionId={board.sessionId} />
+          ) : (
+            <LeaveSessionControl sessionId={board.sessionId} />
+          )}
         </div>
       </header>
 
-      {/*
+      {/* The agenda sits beside the board and above the footer, so the toolbar
+          and zoom control keep the full width they had. */}
+      <div className="flex min-h-0 flex-1">
+        {agenda}
+
+        {/*
         A window onto the board, not a scroller: it clips, and the board is
         moved underneath it by a transform. That is what removes the browser's
         scrollbars rather than trying to style them, and it lets the dots be
         tiled across the whole window and simply offset by the pan, so they run
         on in every direction instead of stopping where the cards do.
       */}
-      <div
-        ref={viewportRef}
-        className="relative min-h-0 flex-1 overflow-hidden bg-rt-surface-alt"
-        style={{
-          // Only promise a grab when one is actually on offer. Showing `grab`
-          // everywhere implied the whole board could be dragged, including over
-          // cards, where a left drag moves the card instead.
-          cursor: isPanning ? 'grabbing' : isSpaceHeld ? 'grab' : 'default',
-          touchAction: 'none',
-        }}
-        {...panHandlers}
-      >
-        {isEmpty ? (
-          // Nothing to pan over, so the plate sits in the window rather than on
-          // the board.
-          <div className="absolute inset-0 flex items-center justify-center">
-            <EmptyBoardPlate />
-          </div>
-        ) : (
-          <div
-            className="absolute top-0 left-0"
-            style={{
-              // The single place zoom is applied. Everything inside is laid out
-              // at its natural size and magnified as one scene, so a card never
-              // reflows or changes shape as you zoom — it just gets bigger.
-              // Pan is in screen pixels, so it is applied before the scale, and
-              // rounded because a fractional offset renders text softly.
-              // The margin is added outside the scale, so the desk stays the
-              // same width on screen however far the board is magnified.
-              transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
-              transformOrigin: '0 0',
-            }}
-          >
-            {/*
+        <div
+          ref={viewportRef}
+          className="relative min-h-0 flex-1 overflow-hidden bg-rt-surface-alt"
+          style={{
+            // Only promise a grab when one is actually on offer. Showing `grab`
+            // everywhere implied the whole board could be dragged, including over
+            // cards, where a left drag moves the card instead.
+            cursor: isPanning ? 'grabbing' : isSpaceHeld ? 'grab' : 'default',
+            touchAction: 'none',
+          }}
+          {...panHandlers}
+        >
+          {isEmpty ? (
+            // Nothing to pan over, so the plate sits in the window rather than on
+            // the board.
+            <div className="absolute inset-0 flex items-center justify-center">
+              <EmptyBoardPlate />
+            </div>
+          ) : (
+            <div
+              className="absolute top-0 left-0"
+              style={{
+                // The single place zoom is applied. Everything inside is laid out
+                // at its natural size and magnified as one scene, so a card never
+                // reflows or changes shape as you zoom — it just gets bigger.
+                // Pan is in screen pixels, so it is applied before the scale, and
+                // rounded because a fractional offset renders text softly.
+                // The margin is added outside the scale, so the desk stays the
+                // same width on screen however far the board is magnified.
+                transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
+                transformOrigin: '0 0',
+              }}
+            >
+              {/*
               The sheet. One fixed size in board units, so it is the same board
               at every zoom — cards are clamped inside it and nothing can be
               dragged off its edge. x/y are where a card actually sits, in a
               coordinate space every participant shares.
             */}
-            <div
-              className="relative rounded-lg bg-rt-surface"
-              style={{
-                width: BOARD_SIZE.width,
-                height: BOARD_SIZE.height,
-                backgroundImage: dotBackground,
-                backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
-                boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
-              }}
-            >
-              {board.items.map((item) => (
-                <PositionedProposal
-                  key={item.id}
-                  item={item}
-                  position={positionOf(item)}
-                  isNew={newItemIds.has(item.id)}
-                  isOwn={viewerId !== null && item.authorId === viewerId}
-                  isAuthorLeader={item.authorId === board.leaderId}
-                  canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
-                  canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
-                  isDragging={draggingId === item.id}
-                  dragHandlers={dragHandlers}
-                  onEditText={onEditText}
-                  onDelete={onDelete}
-                />
-              ))}
+              <div
+                className="relative rounded-lg bg-rt-surface"
+                style={{
+                  width: BOARD_SIZE.width,
+                  height: BOARD_SIZE.height,
+                  backgroundImage: dotBackground,
+                  backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
+                  boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
+                }}
+              >
+                {board.items.map((item) => (
+                  <PositionedProposal
+                    key={item.id}
+                    item={item}
+                    position={positionOf(item)}
+                    isNew={newItemIds.has(item.id)}
+                    isOwn={viewerId !== null && item.authorId === viewerId}
+                    isAuthorLeader={item.authorId === board.leaderId}
+                    canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
+                    canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
+                    isDragging={draggingId === item.id}
+                    dragHandlers={dragHandlers}
+                    onEditText={onEditText}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/*
+          {/*
           Only past 100%: below that the whole board is on screen or a pan away,
           and bars are furniture. Magnified, the board really does continue past
           the window and needs saying so. Both axes are shown together, since a
           board that runs off one edge almost always runs off the other.
         */}
-        <BoardScrollbar
-          orientation="horizontal"
-          enabled={zoom > 100}
-          viewportLength={viewport.width}
-          contentLength={contentWidth}
-          pan={pan.x}
-          maxPan={maxPanX}
-          overflow={overflowX}
-          isPanning={isPanning}
-          onPan={(x) => panTo({ x, y: pan.y })}
-        />
-        <BoardScrollbar
-          orientation="vertical"
-          enabled={zoom > 100}
-          viewportLength={viewport.height}
-          contentLength={contentHeight}
-          pan={pan.y}
-          maxPan={maxPanY}
-          overflow={overflowY}
-          isPanning={isPanning}
-          onPan={(y) => panTo({ x: pan.x, y })}
-        />
+          <BoardScrollbar
+            orientation="horizontal"
+            enabled={zoom > 100}
+            viewportLength={viewport.width}
+            contentLength={contentWidth}
+            pan={pan.x}
+            maxPan={maxPanX}
+            overflow={overflowX}
+            isPanning={isPanning}
+            onPan={(x) => panTo({ x, y: pan.y })}
+          />
+          <BoardScrollbar
+            orientation="vertical"
+            enabled={zoom > 100}
+            viewportLength={viewport.height}
+            contentLength={contentHeight}
+            pan={pan.y}
+            maxPan={maxPanY}
+            overflow={overflowY}
+            isPanning={isPanning}
+            onPan={(y) => panTo({ x: pan.x, y })}
+          />
+        </div>
       </div>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
