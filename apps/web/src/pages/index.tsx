@@ -7,7 +7,6 @@ import { RoundTableLogo } from '../components/RoundTableLogo';
 import { Button } from '../components/ui/Button';
 import { logout } from '../features/auth/api';
 import { JoinByCodeForm } from '../features/sessions/JoinByCodeForm';
-import { LlmSettingsForm } from '../features/settings';
 import { SessionCardActions } from '../features/sessions/SessionCardActions';
 import { useSessions } from '../features/sessions/useSessions';
 import { clearToken } from '../lib/auth';
@@ -198,13 +197,15 @@ export function DashboardPage() {
 
   // Clears the token even if the request fails: the token is stateless, so the
   // client dropping it *is* the logout (see auth's `/logout` route) — a network
-  // error must not leave someone stuck logged in.
+  // error must not leave someone stuck logged in. Also drops the socket
+  // singleton, otherwise a same-tab login as someone else would keep the
+  // previous identity's live connection around.
   async function onLogout() {
     try {
       await logout();
     } finally {
-      disconnectSocket();
       clearToken();
+      disconnectSocket();
       navigate('/login', { replace: true });
     }
   }
@@ -214,10 +215,16 @@ export function DashboardPage() {
       <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Dashboard</span>
+        <Link
+          to="/settings"
+          className="ml-auto text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
+        >
+          Profile
+        </Link>
         <button
           type="button"
           onClick={() => void onLogout()}
-          className="ml-auto text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
+          className="text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
         >
           Log out
         </button>
@@ -299,19 +306,7 @@ export function SessionPage() {
   );
 }
 
-export function SettingsPage() {
-  return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
-      <div className="mb-8 flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold text-rt-ink">Settings</h1>
-        <Link to="/dashboard" className="text-sm text-rt-primary-deep hover:underline">
-          Back to dashboard
-        </Link>
-      </div>
-      <LlmSettingsForm />
-    </main>
-  );
-}
+export { SettingsPage } from '../features/settings/SettingsPage';
 
 export function NotFoundPage() {
   return (

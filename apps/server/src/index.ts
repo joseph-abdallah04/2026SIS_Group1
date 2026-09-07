@@ -9,7 +9,7 @@ import { Server as SocketServer } from 'socket.io';
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { assistantRouter } from './modules/assistant/index.js';
-import { authRoutes } from './modules/auth/index.js';
+import { authRoutes, usersRoutes } from './modules/auth/index.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
 import { createSessionsRoutes } from './modules/sessions/index.js';
 import { voiceRoutes } from './modules/voice/index.js';
@@ -37,6 +37,7 @@ app.get('/api/health', (_req, res) => {
 // Module owners mount their routers here (docs/02 §6). Each module exports an index.ts
 // with its public surface.
 app.use('/api/auth', authRoutes);
+app.use('/api/users', usersRoutes);
 // Two routers share the `/api/sessions` prefix, so registration order
 // matters: sessions' `GET /:id` matches any single segment and would shadow a
 // one-segment route added to pinboard later. Pinboard's routes are all
