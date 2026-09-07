@@ -109,6 +109,11 @@ export function useVoiceRoom(sessionId: string) {
   /** Guards `micBusy` without waiting for a render to land. */
   const micBusyRef = useRef(false);
   /**
+   * The mic operation currently settling, if any. The join path waits on it
+   * rather than being turned away by the guard above — see `connect`.
+   */
+  const micOpRef = useRef<Promise<void> | null>(null);
+  /**
    * Who the server says we are, from the token. The mute preference is stored
    * per user, and this is the only place the client learns its own id.
    */
@@ -166,9 +171,9 @@ export function useVoiceRoom(sessionId: string) {
    * inside this function and needs to run it again.
    */
   const applyMicEnabled = useCallback(
-    async function applyMic(enabled: boolean): Promise<void> {
+    function applyMic(enabled: boolean): Promise<void> {
       const room = roomRef.current;
-      if (!room || micBusyRef.current) return;
+      if (!room || micBusyRef.current) return Promise.resolve();
 
       // Unmuting with nothing published means `getUserMedia` — a permission
       // prompt, or several hundred milliseconds of device startup. Muting, and
@@ -181,36 +186,55 @@ export function useVoiceRoom(sessionId: string) {
       setMicBusy(true);
       if (needsDevice) setMicStatus('requesting');
 
-      try {
-        await room.localParticipant.setMicrophoneEnabled(enabled);
-        // The view was left, or the room was rebuilt, while this was in flight.
-        if (roomRef.current !== room) return;
+      // Kept in a ref as well as returned: the join path has no handle on a
+      // toggle a user started, and needs one to wait for.
+      const op = (async () => {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(enabled);
+          // The view was left, or the room was rebuilt, while this was in flight.
+          if (roomRef.current !== room) return;
 
-        // Read back rather than assume: muting while nothing was ever
-        // published is a no-op inside the SDK, and claiming `live` off the back
-        // of it would show a toggle that thinks it holds a device it does not.
-        const publishing =
-          room.localParticipant.getTrackPublication(Track.Source.Microphone) !== undefined;
-        setMicStatus(publishing ? 'live' : 'idle');
-        setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
-        // Only an unmute proves the permission is ours; a mute proves nothing.
-        if (enabled) setMicPermissionDenied(false);
-        if (identityRef.current) writeMicMuted(sessionId, identityRef.current, !enabled);
-      } catch (err) {
-        if (roomRef.current !== room) return;
+          // Read back rather than assume: muting while nothing was ever
+          // published is a no-op inside the SDK, and claiming `live` off the back
+          // of it would show a toggle that thinks it holds a device it does not.
+          const publishing =
+            room.localParticipant.getTrackPublication(Track.Source.Microphone) !== undefined;
+          setMicStatus(publishing ? 'live' : 'idle');
+          setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+          // Only an unmute proves the permission is ours; a mute proves nothing.
+          if (enabled) setMicPermissionDenied(false);
+          if (identityRef.current) writeMicMuted(sessionId, identityRef.current, !enabled);
+        } catch (err) {
+          if (roomRef.current !== room) return;
 
-        // Only unmuting can fail this way; muting touches no device.
-        const failure = MediaDeviceFailure.getFailure(err);
-        if (failure === MediaDeviceFailure.NotFound) {
-          setMicStatus('no-device');
-          return;
+          // Whatever went wrong, the room is the authority on what is actually
+          // going out. Leaving `micEnabled` at its old value is how the toggle
+          // ends up reading "Mic on" for someone nobody can hear — nothing else
+          // corrects it, because a failure fires no track event.
+          setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+
+          // Only acquiring a device can fail for want of permission. Muting
+          // rejects for unrelated reasons — `mute()` waits on a lock and on a
+          // republish, either of which can throw mid-reconnect — and calling
+          // that "blocked" would raise a false "nobody can hear you" over a live
+          // mic, then arm the permission watcher to silently unmute later.
+          if (!enabled) return;
+
+          const failure = MediaDeviceFailure.getFailure(err);
+          if (failure === MediaDeviceFailure.NotFound) {
+            setMicStatus('no-device');
+            return;
+          }
+          setMicStatus('blocked');
+          watchMicPermission(() => void applyMic(true));
+        } finally {
+          micBusyRef.current = false;
+          setMicBusy(false);
         }
-        setMicStatus('blocked');
-        watchMicPermission(() => void applyMic(true));
-      } finally {
-        micBusyRef.current = false;
-        setMicBusy(false);
-      }
+      })();
+
+      micOpRef.current = op;
+      return op;
     },
     [sessionId, watchMicPermission],
   );
@@ -326,9 +350,23 @@ export function useVoiceRoom(sessionId: string) {
         // someone who chose silence, and it must not raise a permission prompt
         // at somebody who has never granted one. Unmuting later acquires the
         // device then, which is the same path a blocked-then-allowed mic takes.
+        // A toggle can still be settling from before a drop — a permission
+        // prompt left open, say. It was aimed at a connection that no longer
+        // exists, and its guard would silently swallow the calls below,
+        // leaving us connected with no microphone and nothing to retry it.
+        if (micOpRef.current) await micOpRef.current.catch(() => {});
+        if (cancelled) return;
+
         if (readMicMuted(sessionId, identity)) {
-          setMicEnabledState(false);
-          setMicStatus('idle');
+          // Normally there is nothing to mute and that is the point — the
+          // device is never opened. But if that settling toggle did publish
+          // one, it must not go out hot just because we skipped the acquire.
+          if (room.localParticipant.getTrackPublication(Track.Source.Microphone)) {
+            await applyMicEnabled(false);
+          } else {
+            setMicEnabledState(false);
+            setMicStatus('idle');
+          }
         } else {
           await applyMicEnabled(true);
         }
@@ -437,7 +475,6 @@ export function useVoiceRoom(sessionId: string) {
     audioBlocked,
     retry,
     requestMicrophone,
-    setMicEnabled: applyMicEnabled,
     toggleMic,
     unlockAudio,
   };

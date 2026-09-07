@@ -27,6 +27,18 @@ class FakeLocalParticipant {
   published = false;
   muted = false;
   readonly calls: boolean[] = [];
+  /** Make the next call reject without changing the track's state. */
+  failNext: Error | null = null;
+  /** Make the next call hang, as an open permission prompt does. */
+  private hanging: (() => void) | null = null;
+  hangNext = false;
+
+  /** Let a hung call finish. */
+  release(): void {
+    const resume = this.hanging;
+    this.hanging = null;
+    resume?.();
+  }
 
   get isMicrophoneEnabled(): boolean {
     return this.published && !this.muted;
@@ -38,6 +50,17 @@ class FakeLocalParticipant {
 
   async setMicrophoneEnabled(enabled: boolean): Promise<void> {
     this.calls.push(enabled);
+    if (this.hangNext) {
+      this.hangNext = false;
+      await new Promise<void>((resolve) => {
+        this.hanging = resolve;
+      });
+    }
+    const failure = this.failNext;
+    if (failure) {
+      this.failNext = null;
+      throw failure;
+    }
     if (enabled && !this.published) {
       if (acquireError) throw acquireError;
       this.published = true;
@@ -68,6 +91,10 @@ class FakeRoom {
     this.handlers.clear();
   }
 
+  emit(event: string, ...args: unknown[]): void {
+    for (const handler of this.handlers.get(event) ?? []) handler(...args);
+  }
+
   async connect(): Promise<void> {}
   async disconnect(): Promise<void> {}
   async startAudio(): Promise<void> {}
@@ -88,6 +115,10 @@ vi.mock('./voiceApi', () => ({
   })),
 }));
 
+// Imported after the mock factory, not statically: a top-level
+// `import ... from 'livekit-client'` runs the hoisted factory above before
+// `FakeRoom` is initialised.
+const { DisconnectReason, RoomEvent } = await import('livekit-client');
 const { useVoiceRoom } = await import('./useVoiceRoom');
 
 /** Mount the hook and wait for the join to settle. */
@@ -103,6 +134,13 @@ describe('useVoiceRoom mute (F12)', () => {
     FakeRoom.last = null;
     acquireError = null;
   });
+
+  /** Let pending timers and promises run for `ms`. */
+  async function elapse(ms: number) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    });
+  }
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -178,6 +216,81 @@ describe('useVoiceRoom mute (F12)', () => {
 
     expect(view.result.current.micEnabled).toBe(true);
     expect(view.result.current.micStatus).toBe('live');
+  });
+
+  it('does not call a failed mute a blocked microphone', async () => {
+    const view = await joinRoom();
+    await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+    const participant = FakeRoom.last!.localParticipant;
+
+    // `mute()` waits on a lock and a republish; either can throw mid-reconnect.
+    participant.failNext = new Error('republish failed');
+    await act(async () => {
+      await view.result.current.toggleMic();
+    });
+
+    // The mic never stopped being live, and nobody should be told otherwise.
+    expect(view.result.current.micStatus).toBe('live');
+    expect(view.result.current.micEnabled).toBe(true);
+    expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBeNull();
+  });
+
+  it('resyncs the toggle from the room when a mic call fails', async () => {
+    const view = await joinRoom();
+    await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+    const participant = FakeRoom.last!.localParticipant;
+
+    // The track goes quiet underneath us — a device unplugged, a track ended —
+    // without an event we are listening for, so `micEnabled` is now stale.
+    participant.muted = true;
+    participant.failNext = refusal();
+
+    await act(async () => {
+      await view.result.current.toggleMic();
+    });
+
+    // The failure is the last word on this, and it must not leave the button
+    // claiming "Mic on" for someone nobody can hear: no track event fires on
+    // a failure, so nothing else would ever correct it.
+    expect(view.result.current.micStatus).toBe('blocked');
+    expect(view.result.current.micEnabled).toBe(false);
+  });
+
+  it('honours a toggle that was still settling when the connection dropped', async () => {
+    const view = await joinRoom();
+    await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+    const participant = FakeRoom.last!.localParticipant;
+
+    // A toggle the user started, still open — a permission prompt, say.
+    participant.hangNext = true;
+    act(() => {
+      void view.result.current.toggleMic();
+    });
+    const callsBeforeDrop = participant.calls.length;
+
+    // The connection drops under it and the retry chain reconnects.
+    act(() => {
+      FakeRoom.last!.emit(RoomEvent.Disconnected, DisconnectReason.SIGNAL_CLOSE);
+    });
+    await elapse(700);
+    expect(view.result.current.status).toBe('connected');
+
+    // Still nothing new: the join path is waiting the settling toggle out
+    // rather than being turned away by its guard.
+    expect(participant.calls.length).toBe(callsBeforeDrop);
+
+    await act(async () => {
+      participant.release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    // Having waited, it applies this connection's own mic state — which is
+    // the mute the user asked for, carried across the reconnect rather than
+    // lost with the connection it was issued against.
+    expect(participant.calls.length).toBeGreaterThan(callsBeforeDrop);
+    expect(participant.calls.at(-1)).toBe(false);
+    expect(view.result.current.micEnabled).toBe(false);
+    expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBe('1');
   });
 
   it('does not remember a mute that a refused prompt caused', async () => {
