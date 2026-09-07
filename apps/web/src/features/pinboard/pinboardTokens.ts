@@ -25,6 +25,49 @@ export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21
 /** Soft accent for the leader mark in a card's footer. */
 export const OWNED_INK = '#7A6A4C';
 
+/**
+ * The slate a chip you reacted with is shaded in.
+ *
+ * The board's own blue-grey (`#8CA4AC`), the one already ringing the sheet and
+ * edging a blue sticky, rather than the amber accent every button in the app
+ * uses.
+ *
+ * Solid, not translucent. A chip straddles the card's bottom edge, so a
+ * see-through fill picked up the paper above the edge and the board's dots
+ * below it, and the chip read as two halves.
+ *
+ * Both are that slate mixed down over white, the fill at about a seventh
+ * strength and the edge at a little over two fifths. Light enough that a row
+ * of them settles into the card rather than banding across its bottom edge,
+ * dark enough that a reacted chip is still plainly not a white one.
+ */
+export const REACTION_ON_FILL = '#EFF2F3';
+export const REACTION_ON_BORDER = '#CFD9DC';
+
+/**
+ * What an unpressed chip does under the pointer.
+ *
+ * The same slate again, so hovering previews the colour that pressing gives
+ * rather than flashing an unrelated one on the way to it. Kept a clear step
+ * lighter than `REACTION_ON_FILL`: close enough to read as the same idea, far
+ * enough that hovering a chip you have not pressed never looks as though you
+ * have.
+ */
+export const REACTION_HOVER_FILL = '#F4F6F7';
+
+/**
+ * What the bin does under the pointer.
+ *
+ * The one red in the app, and it is here because removing a proposal is the
+ * one action on a card that cannot be undone. Every other control on the board
+ * hovers to the slate; this one should not, or the difference between tidying
+ * a card and destroying it would be a matter of which icon you happened to be
+ * over.
+ */
+export const REMOVE_HOVER_FILL = '#FDECEC';
+export const REMOVE_HOVER_BORDER = '#EFBDBD';
+export const REMOVE_HOVER_INK = '#A93B34';
+
 /** Plate behind a drawing's artwork. */
 export const THUMB_BACKGROUND = '#F7F7F8';
 

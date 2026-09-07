@@ -9,6 +9,7 @@ import {
 } from '@roundtable/shared';
 
 import { EmojiPicker } from './EmojiPicker';
+import { REACTION_HOVER_FILL, REACTION_ON_BORDER, REACTION_ON_FILL } from './pinboardTokens';
 
 interface ReactionRowProps {
   /** Every emoji anyone used here, in the order they first appeared. */
@@ -56,14 +57,27 @@ function ReactionChip({
       // chip straddles the card's border, so half of it is over the board and
       // it cannot borrow a background from either side.
       //
+      // A reacted chip is shaded in the board's own slate rather than the amber
+      // accent. Amber is the palette's only accent and is already carrying
+      // every button, focus ring and sticky in the app, so spending it here
+      // made a row of chips shout for attention they do not need.
+      //
       // Sized to the glyph and nothing more. The minimum width matches the
       // height, so a chip nobody has used yet is a circle around its emoji
       // rather than a capsule with empty room in it, and only a count widens
       // one.
+      style={
+        mine
+          ? { background: REACTION_ON_FILL, borderColor: REACTION_ON_BORDER }
+          : ({
+              '--rt-chip-hover': REACTION_HOVER_FILL,
+              '--rt-chip-edge': REACTION_ON_BORDER,
+            } as React.CSSProperties)
+      }
       className={`inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
         mine
-          ? 'border-rt-primary/50 bg-rt-primary-tint text-rt-ink'
-          : 'border-rt-tertiary bg-white hover:bg-rt-primary-tint'
+          ? 'text-rt-ink'
+          : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'
       } ${
         dim ? 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100' : 'opacity-100'
       } ${busy ? 'scale-95' : ''}`}
@@ -170,7 +184,13 @@ export function ReactionRow({ reactions, viewerId, onReact }: ReactionRowProps) 
             open ? null : (pickerButton.current?.getBoundingClientRect() ?? null),
           )
         }
-        className={`inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,opacity] hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+        style={
+          {
+            '--rt-chip-hover': REACTION_HOVER_FILL,
+            '--rt-chip-edge': REACTION_ON_BORDER,
+          } as React.CSSProperties
+        }
+        className={`inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,border-color,opacity] hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover) hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
           pickerAnchor
             ? 'opacity-100'
             : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'

@@ -9,6 +9,11 @@ import { ReactionRow } from './ReactionRow';
 import {
   CARD_INK,
   CARD_WIDTH,
+  REACTION_HOVER_FILL,
+  REACTION_ON_BORDER,
+  REMOVE_HOVER_BORDER,
+  REMOVE_HOVER_FILL,
+  REMOVE_HOVER_INK,
   STICKY_RADIUS,
   STICKY_SHADOW,
   STICKY_SIZE,
@@ -210,21 +215,27 @@ function CardControl({
 }: {
   label: string;
   onClick: () => void;
-  /** Warms the hover colour, so removal does not look like every other action. */
+  /** Turns the hover red, so removal does not look like every other action. */
   destructive?: boolean;
   children: ReactNode;
 }) {
+  // Both controls share one hover rule and differ only in the colours handed
+  // to it, because a hover colour cannot be an inline style. Editing takes the
+  // same slate the reaction chips use; removing takes the red.
   return (
     <button
       type="button"
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
-        destructive
-          ? 'hover:border-rt-secondary hover:bg-rt-secondary-wash hover:text-rt-secondary-deep'
-          : 'hover:bg-rt-primary-tint hover:text-rt-ink'
-      }`}
+      style={
+        {
+          '--rt-control-fill': destructive ? REMOVE_HOVER_FILL : REACTION_HOVER_FILL,
+          '--rt-control-edge': destructive ? REMOVE_HOVER_BORDER : REACTION_ON_BORDER,
+          '--rt-control-ink': destructive ? REMOVE_HOVER_INK : CARD_INK,
+        } as React.CSSProperties
+      }
+      className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
     >
       {children}
     </button>

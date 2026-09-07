@@ -4,6 +4,7 @@ import { Search } from 'lucide-react';
 import { reactionLabel } from '@roundtable/shared';
 
 import { EMOJI_GROUPS, searchEmojis, type EmojiEntry } from './emojiCatalog';
+import { REACTION_ON_FILL } from './pinboardTokens';
 
 /** Panel geometry, fixed so the placement can be decided before it renders. */
 const PANEL_WIDTH = 296;
@@ -163,8 +164,11 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
                 setQuery('');
                 setGroupIndex(index);
               }}
+              // Marked in the same slate the pressed emoji use, so one panel
+              // does not carry two different ideas of "selected".
+              style={active ? { background: REACTION_ON_FILL } : undefined}
               className={`flex h-[26px] w-[26px] items-center justify-center rounded-md text-[14px] transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
-                active ? 'bg-rt-primary-tint' : 'hover:bg-rt-surface-alt'
+                active ? '' : 'hover:bg-rt-surface-alt'
               }`}
             >
               <span aria-hidden="true">{candidate.icon}</span>
@@ -194,8 +198,11 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
                   aria-pressed={mine}
                   aria-label={reactionLabel(emoji)}
                   onClick={() => onPick(emoji)}
+                  // Marked in the same slate the chips use, so what is pressed
+                  // here and what is pressed on a card read as one state.
+                  style={mine ? { background: REACTION_ON_FILL } : undefined}
                   className={`flex h-[32px] w-[32px] items-center justify-center rounded-md text-[18px] leading-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
-                    mine ? 'bg-rt-primary-tint' : 'hover:bg-rt-surface-alt'
+                    mine ? '' : 'hover:bg-rt-surface-alt'
                   }`}
                 >
                   <span aria-hidden="true">{emoji}</span>
