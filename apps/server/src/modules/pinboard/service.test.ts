@@ -20,6 +20,7 @@ function row(overrides: Partial<ProposalRow> = {}): ProposalRow {
     x: 10,
     y: 20,
     extendsProposalId: null,
+    reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
     deletedAt: null,
     ...overrides,
@@ -38,6 +39,7 @@ function item(overrides: Partial<BoardItem> = {}): BoardItem {
     y: 0,
     createdAt: '2026-08-31T10:00:00.000Z',
     extendsProposalId: null,
+    reactions: [],
     ...overrides,
   };
 }
@@ -55,6 +57,7 @@ describe('toBoardItem', () => {
       y: 20,
       createdAt: '2026-08-31T10:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     });
   });
 

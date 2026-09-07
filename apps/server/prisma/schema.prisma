@@ -28,6 +28,7 @@ model User {
   sessionMemberships SessionMember[]
   llmConfig          UserLLMConfig?
   proposals          Proposal[]
+  reactions          ProposalReaction[]
 
   @@map("users")
 }
@@ -156,9 +157,34 @@ model Proposal {
   extensions        Proposal[] @relation("ProposalExtends")
   createdAt         DateTime  @default(now())
   deletedAt         DateTime?
+  reactions         ProposalReaction[]
 
   @@index([questionId, createdAt])
   @@map("proposals")
+}
+
+// One person's emoji reaction to one proposal (F18). Deliberately not a vote:
+// formal voting is F27-F31 and gets its own tables.
+model ProposalReaction {
+  id         String   @id @default(cuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // One of the fixed set in packages/shared (`REACTION_EMOJIS`), checked on the
+  // way in. A plain string rather than an enum because which glyphs are offered
+  // is a product decision that should not need a migration, and because the
+  // rest of this module already validates its payloads in code.
+  emoji      String
+  createdAt  DateTime @default(now())
+
+  // The reason a reaction cannot be double-counted: pressing the chip twice
+  // asks for a row that already exists, and the database refuses it. The rule
+  // is here rather than only in service code so no future caller can lose it.
+  @@unique([proposalId, userId, emoji])
+  // Reads are always "every reaction on this proposal, oldest first".
+  @@index([proposalId, createdAt])
+  @@map("proposal_reactions")
 }
 
 // === creative tools module ===

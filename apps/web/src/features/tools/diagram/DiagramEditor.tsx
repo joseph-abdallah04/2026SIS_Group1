@@ -378,6 +378,7 @@ export function DiagramEditor() {
   const {
     closeTool,
     extensionSource,
+    editSource,
     isLive,
     resetSubmission,
     setCloseGuard,
@@ -385,8 +386,10 @@ export function DiagramEditor() {
     submissionStatus,
     submitArtifact,
   } = useCreativeTools();
+  // Editing rewrites this proposal; extending starts a new one from it.
+  const sourceProposal = editSource ?? extensionSource;
   const sourceArtifact =
-    extensionSource?.artifactJson.type === 'diagram' ? extensionSource.artifactJson : null;
+    sourceProposal?.artifactJson.type === 'diagram' ? sourceProposal.artifactJson : null;
   const initialSnapshotRef = useRef<DiagramSnapshot | null>(null);
   if (!initialSnapshotRef.current) {
     initialSnapshotRef.current = {

@@ -30,6 +30,7 @@ import {
   clientPointToDrawingPoint,
   eraseStrokesAtPoint,
   eraserRadiusForSurface,
+  dataToStrokes,
   prepareDrawing,
   serializeDrawingSvg,
   strokePathData,
@@ -52,10 +53,27 @@ function formatArtifactSize(length: number): string {
 }
 
 export function DrawingEditor() {
-  const { closeTool, isLive, resetSubmission, submissionError, submissionStatus, submitArtifact } =
-    useCreativeTools();
+  const {
+    closeTool,
+    editSource,
+    extensionSource,
+    isLive,
+    resetSubmission,
+    submissionError,
+    submissionStatus,
+    submitArtifact,
+  } = useCreativeTools();
+
+  // Editing rewrites this drawing; extending starts a new one from it. Either
+  // way the canvas opens on the strokes that made it, which is only possible
+  // because they are stored beside the rendered SVG.
+  const sourceProposal = editSource ?? extensionSource;
+  const sourceStrokes =
+    sourceProposal?.artifactJson.type === 'drawing' && sourceProposal.artifactJson.strokes
+      ? dataToStrokes(sourceProposal.artifactJson.strokes)
+      : [];
   const { strokes, strokesRef, canUndo, canRedo, commit, preview, recordPreview, undo, redo } =
-    useDrawingHistory();
+    useDrawingHistory(sourceStrokes);
   const [mode, setMode] = useState<DrawingMode>('pen');
   const [ink, setInk] = useState<DrawingInk>('ink');
   const [penWidth, setPenWidth] = useState<PenWidth>(8);
@@ -178,7 +196,7 @@ export function DrawingEditor() {
     }
 
     setValidationError(null);
-    await submitArtifact({ type: 'drawing', svg: prepared.svg });
+    await submitArtifact({ type: 'drawing', svg: prepared.svg, strokes: prepared.strokes });
   }
 
   function onEditorKeyDown(event: KeyboardEvent<HTMLFormElement>) {

@@ -4,6 +4,7 @@ import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
+import { ReactionRow } from './ReactionRow';
 import { CARD_INK, CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
 
 /** Matches `stickyArtifactSchema` — the server rejects anything longer. */
@@ -30,6 +31,11 @@ interface PositionedProposalProps {
   /** The author runs this session, marked with an L beside their name. */
   isAuthorLeader: boolean;
   /**
+   * Reopen this proposal in its own tool. Absent for kinds that cannot be
+   * reopened, which is what decides whether the pencil is offered at all.
+   */
+  onOpenEditor?: (item: BoardItem) => void;
+  /**
    * The viewer may reposition this card: its author, or the leader arranging
    * the shared board. A move is visible to everyone.
    */
@@ -43,6 +49,13 @@ interface PositionedProposalProps {
   dragHandlers: DragHandlers;
   onEditText: (item: BoardItem, text: string) => Promise<void>;
   onDelete: (item: BoardItem) => Promise<void>;
+  /**
+   * Who the server says this client is, so the reaction row knows which chips
+   * the viewer has already pressed. Null until the board is joined.
+   */
+  viewerId: string | null;
+  /** Toggle one of this viewer's reactions on this proposal (F18). */
+  onReact: (item: BoardItem, emoji: string) => Promise<void>;
 }
 
 /**
@@ -142,7 +155,6 @@ function StickyTextEditor({
         >
           Cancel
         </button>
-        <span className="ml-auto text-[10px] text-rt-ink-faint">Esc to cancel</span>
       </div>
     </div>
   );
@@ -185,13 +197,13 @@ function CardControl({
 
 /** Edit / delete controls, shown on a card the viewer may change. */
 function OwnerControls({
-  canEditText,
+  canEdit,
   canDelete,
   isOwn,
   onEdit,
   onDelete,
 }: {
-  canEditText: boolean;
+  canEdit: boolean;
   canDelete: boolean;
   /** False when the leader is moderating a card someone else proposed. */
   isOwn: boolean;
@@ -202,7 +214,7 @@ function OwnerControls({
   // sits centred on the card's top-right corner rather than tucked inside it.
   return (
     <div className="absolute -top-2.5 -right-2.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-      {canEditText ? (
+      {canEdit ? (
         <CardControl label="Edit proposal" onClick={onEdit}>
           <Pencil aria-hidden="true" size={12} strokeWidth={2} />
         </CardControl>
@@ -241,20 +253,26 @@ export function PositionedProposal({
   isNew,
   isOwn,
   isAuthorLeader,
+  onOpenEditor,
   canMove,
   canDelete,
   isDragging,
   dragHandlers,
   onEditText,
   onDelete,
+  viewerId,
+  onReact,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
   // Removal is destructive and cannot be undone, so it always passes through a
   // confirmation (F17) — for the author and the moderating leader alike.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // Stickies edit inline; drawings/diagrams wait for studio reopen (F20/F21).
-  const canEditText = isOwn && item.artifactJson.type === 'sticky';
+  // A sticky is edited in place — it is one field, and a full-screen editor for
+  // it would be heavier than the change. Anything else reopens in the tool that
+  // made it, which is the only place its shape can be manipulated.
+  const editsInline = isOwn && item.artifactJson.type === 'sticky';
+  const canEdit = isOwn && (editsInline || onOpenEditor !== undefined);
   const draggable = canMove && !editing;
 
   const confirmRemove = () => {
@@ -321,12 +339,19 @@ export function PositionedProposal({
             isOwnedByViewer={isOwn}
             isAuthorLeader={isAuthorLeader}
           />
-          {canEditText || canDelete ? (
+
+          <ReactionRow
+            reactions={item.reactions}
+            viewerId={viewerId}
+            onReact={(emoji) => onReact(item, emoji)}
+          />
+
+          {canEdit || canDelete ? (
             <OwnerControls
-              canEditText={canEditText}
+              canEdit={canEdit}
               canDelete={canDelete}
               isOwn={isOwn}
-              onEdit={() => setEditing(true)}
+              onEdit={() => (editsInline ? setEditing(true) : onOpenEditor?.(item))}
               onDelete={() => setConfirmingRemove(true)}
             />
           ) : null}

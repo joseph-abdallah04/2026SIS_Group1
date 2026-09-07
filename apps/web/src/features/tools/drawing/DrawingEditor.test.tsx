@@ -12,7 +12,7 @@ import { DRAWING_VIEWBOX_HEIGHT, DRAWING_VIEWBOX_WIDTH } from './drawingModel';
 function Harness({ propose }: { propose: (input: ProposalCreateInput) => Promise<void> }) {
   return (
     <MemoryRouter initialEntries={['/sessions/demo']}>
-      <CreativeToolsProvider isLive proposals={[]} propose={propose}>
+      <CreativeToolsProvider isLive proposals={[]} propose={propose} editProposal={async () => {}}>
         <CreativeToolbar />
         <CreativeStudio />
       </CreativeToolsProvider>
