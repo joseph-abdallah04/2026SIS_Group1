@@ -12,7 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { LlmStreamChunk } from './llm.js';
 
 vi.stubEnv('NODE_ENV', 'development');
-vi.stubEnv('DEV_USER_ID', 'demo-user-alice');
+vi.stubEnv('JWT_SECRET', 'test-jwt-secret-at-least-32-characters-long');
 vi.stubEnv('LLM_KEY_ENCRYPTION_SECRET', 'test-encryption-secret-value-32ch');
 
 // --- fake database ---------------------------------------------------------
@@ -70,6 +70,17 @@ vi.mock('./llm.js', () => ({
 
 const { assistantRouter } = await import('./routes.js');
 const { errorHandler } = await import('../../middleware/error.js');
+const { signToken } = await import('../auth/jwt.js');
+
+// A real token from the real signer: every request below is authenticated the way a browser
+// authenticates, so `requireAuth` is exercised rather than bypassed.
+const USER_ID = 'demo-user-alice';
+const TOKEN = signToken({ userId: USER_ID });
+
+/** Request headers with the bearer token attached. */
+function authed(extra?: Record<string, string>): Record<string, string> {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}`, ...extra };
+}
 
 let server: http.Server;
 let base: string;
@@ -121,14 +132,14 @@ async function readStream(response: Response): Promise<Array<Record<string, unkn
 function chat(body: unknown, sessionId = 's1') {
   return fetch(`${base}/api/sessions/${sessionId}/assistant/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authed(),
     body: JSON.stringify(body),
   });
 }
 
 describe('llm-config endpoints (F33)', () => {
   it('reports no config for a fresh user', async () => {
-    const response = await fetch(`${base}/api/me/llm-config`);
+    const response = await fetch(`${base}/api/me/llm-config`, { headers: authed() });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ config: null });
   });
@@ -136,12 +147,12 @@ describe('llm-config endpoints (F33)', () => {
   it('saves a config and never returns the key again', async () => {
     const save = await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
     expect(save.status).toBe(200);
 
-    const read = await fetch(`${base}/api/me/llm-config`);
+    const read = await fetch(`${base}/api/me/llm-config`, { headers: authed() });
     const body = (await read.json()) as { config: Record<string, unknown> };
     expect(body.config).toEqual({ baseUrl: CONFIG.baseUrl, model: CONFIG.model, hasKey: true });
     expect(JSON.stringify(body)).not.toContain(CONFIG.apiKey);
@@ -150,7 +161,7 @@ describe('llm-config endpoints (F33)', () => {
   it('stores the key encrypted, not in plain text', async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
     const stored = configs.get('demo-user-alice');
@@ -162,7 +173,7 @@ describe('llm-config endpoints (F33)', () => {
   it('rejects an invalid base URL with 400 and a reason', async () => {
     const response = await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify({ ...CONFIG, baseUrl: 'not-a-url' }),
     });
     expect(response.status).toBe(400);
@@ -172,7 +183,7 @@ describe('llm-config endpoints (F33)', () => {
   it('tests a connection without saving anything', async () => {
     const response = await fetch(`${base}/api/me/llm-config/test`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
     expect(await response.json()).toMatchObject({ ok: true, model: 'test-model' });
@@ -182,10 +193,10 @@ describe('llm-config endpoints (F33)', () => {
   it('deletes the config', async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
-    await fetch(`${base}/api/me/llm-config`, { method: 'DELETE' });
+    await fetch(`${base}/api/me/llm-config`, { method: 'DELETE', headers: authed() });
     expect(configs.size).toBe(0);
   });
 
@@ -194,14 +205,14 @@ describe('llm-config endpoints (F33)', () => {
   it('keeps the stored key when a save omits it', async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
     const originalCiphertext = configs.get('demo-user-alice')?.apiKeyEncrypted;
 
     const response = await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify({ baseUrl: CONFIG.baseUrl, model: 'a-different-model' }),
     });
 
@@ -215,7 +226,7 @@ describe('llm-config endpoints (F33)', () => {
   it('refuses a first save with no key', async () => {
     const response = await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify({ baseUrl: CONFIG.baseUrl, model: CONFIG.model }),
     });
     expect(response.status).toBe(400);
@@ -226,12 +237,12 @@ describe('llm-config endpoints (F33)', () => {
   it('tests a new model against the stored key', async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
     const response = await fetch(`${base}/api/me/llm-config/test`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify({ baseUrl: CONFIG.baseUrl, model: 'some-new-model' }),
     });
     expect(await response.json()).toMatchObject({ ok: true });
@@ -242,7 +253,7 @@ describe('chat stream (F35/F36)', () => {
   beforeEach(async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authed(),
       body: JSON.stringify(CONFIG),
     });
   });

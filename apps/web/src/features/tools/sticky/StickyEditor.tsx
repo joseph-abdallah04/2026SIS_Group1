@@ -19,14 +19,17 @@ export function StickyEditor() {
   const {
     closeTool,
     extensionSource,
+    editSource,
     isLive,
     resetSubmission,
     submissionError,
     submissionStatus,
     submitArtifact,
   } = useCreativeTools();
+  // Editing rewrites this proposal; extending starts a new one from it.
+  const sourceProposal = editSource ?? extensionSource;
   const sourceArtifact =
-    extensionSource?.artifactJson.type === 'sticky' ? extensionSource.artifactJson : null;
+    sourceProposal?.artifactJson.type === 'sticky' ? sourceProposal.artifactJson : null;
   const [text, setText] = useState(sourceArtifact?.text ?? '');
   const [color, setColor] = useState<StickyColor>(sourceArtifact?.color ?? 'yellow');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -128,7 +131,7 @@ export function StickyEditor() {
                     aria-pressed={selected}
                     title={option[0]?.toUpperCase() + option.slice(1)}
                     onClick={() => setColor(option)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
                     style={{
                       background: optionTheme.bg,
                       borderColor: selected ? '#4D6A74' : optionTheme.border,
@@ -190,17 +193,18 @@ export function StickyEditor() {
           <p
             className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
             style={{
-              minHeight: 128,
-              padding: '16px 14px 10px',
+              minHeight: 112,
+              padding: '14px 14px 6px',
               fontSize: typography.fontSize,
               lineHeight: typography.lineHeight,
             }}
           >
             {previewText || '\u00a0'}
           </p>
-          <footer className="px-3 pt-2 pb-2.5 text-[11px] text-rt-ink-faint">
+          {/* Bottom-left with the board card's own spacing, so what you compose
+              is the size and shape of what lands. */}
+          <footer className="flex items-center justify-between gap-2 px-3 pt-0.5 pb-3 text-[11px] text-rt-ink-faint">
             <span className="font-medium text-rt-ink-muted">You</span>
-            <span className="mx-1">·</span>
             <span>now</span>
           </footer>
         </article>

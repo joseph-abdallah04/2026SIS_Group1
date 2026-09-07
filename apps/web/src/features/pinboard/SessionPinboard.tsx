@@ -1,25 +1,33 @@
 import { useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { summarizeArtifact, type AssistantContext, type BoardResponse } from '@roundtable/shared';
+import {
+  summarizeArtifact,
+  type AssistantContext,
+  type BoardResponse,
+  type Question,
+} from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { AgendaPanel } from '../agenda/AgendaPanel';
 import { AssistantBubble } from '../assistant';
+import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
+import { VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-primary-tint bg-rt-primary px-6 py-[13px] text-white">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Loading session…</span>
       </header>
       <div
         className="relative min-h-0 flex-1 bg-rt-surface"
         style={{
-          backgroundImage: 'radial-gradient(rgba(140,164,172,0.42) 1.4px, transparent 1.4px)',
+          backgroundImage: 'radial-gradient(rgba(224,163,60,0.35) 1.4px, transparent 1.4px)',
           backgroundSize: '24px 24px',
         }}
       >
@@ -29,15 +37,40 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SessionPinboard() {
+interface SessionPinboardProps {
+  /**
+   * Decides which of the two exits the header offers: "Leave session" for a
+   * member (F07), "End session" for the leader (F32). Required, not
+   * defaulted — guessing would silently drop someone's only way out.
+   */
+  isLeader: boolean;
+  /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
+  questions: Question[];
+}
+
+export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { board, loading, error, reload, propose, isLive, newItemIds } = usePinboard(sessionId);
-
-  /**
-   * What the assistant is told about the session (F35). Read fresh on every send, so a
-   * proposal that landed seconds ago is already in the agent's view of the board.
-   */
+  const {
+    board,
+    loading,
+    error,
+    reload,
+    propose,
+    editProposal,
+    deleteProposal,
+    reactToProposal,
+    isLive,
+    newItemIds,
+    viewerId,
+  } = usePinboard(sessionId);
+  // Entering the session view joins the room; leaving it (or ending the
+  // session) unmounts this and disconnects — F11's connect/disconnect points.
+  // Called before any early return so the room is not torn down and rebuilt
+  // every time the board flips between loading, error and loaded.
+  const voice = useVoiceRoom(sessionId);
+  // Also before the early returns, for the same reason. Reads `board` at call time, so the
+  // assistant is handed the board as it is when the user hits send (F35).
   const buildAssistantContext = useCallback((): AssistantContext => describeBoard(board), [board]);
 
   if (!sessionId) {
@@ -62,16 +95,16 @@ export function SessionPinboard() {
     return (
       <BoardFrame>
         <div className="relative w-[400px] border border-rt-ink bg-rt-surface">
-          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -left-1 -top-1.5 text-[12px] leading-none text-rt-secondary">
             +
           </span>
-          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -right-1 -top-1.5 text-[12px] leading-none text-rt-secondary">
             +
           </span>
-          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -bottom-1.5 -left-1 text-[12px] leading-none text-rt-secondary">
             +
           </span>
-          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-primary">
+          <span className="pointer-events-none absolute -bottom-1.5 -right-1 text-[12px] leading-none text-rt-secondary">
             +
           </span>
           <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
@@ -85,7 +118,7 @@ export function SessionPinboard() {
             <button
               type="button"
               onClick={() => void reload()}
-              className="mt-5 bg-rt-primary px-[18px] py-[9px] text-[12px] font-semibold text-white hover:opacity-90 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
+              className="mt-5 rounded-full bg-rt-secondary px-[18px] py-[9px] text-[12px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
             >
               Retry
             </button>
@@ -104,32 +137,62 @@ export function SessionPinboard() {
   }
 
   return (
-    <CreativeToolsProvider isLive={isLive} proposals={board.items} propose={propose}>
-      <main className="h-screen">
-        <PinboardCanvas board={board} isLive={isLive} newItemIds={newItemIds} />
+    <CreativeToolsProvider
+      isLive={isLive && board.questionStatus === 'discussion'}
+      proposals={board.items}
+      propose={propose}
+      editProposal={editProposal}
+    >
+      {/* `relative` so VoiceNotice's `absolute` banner positions against this
+          frame; `overflow-hidden` so nothing on the board can produce a
+          page-level scrollbar; `h-dvh` so mobile browser chrome does not cut
+          it off. */}
+      <main className="relative h-dvh overflow-hidden">
+        <VoiceNotice
+          status={voice.status}
+          micStatus={voice.micStatus}
+          micPermissionDenied={voice.micPermissionDenied}
+          error={voice.error}
+          audioBlocked={voice.audioBlocked}
+          retry={voice.retry}
+          requestMicrophone={voice.requestMicrophone}
+          unlockAudio={voice.unlockAudio}
+        />
+        <PinboardCanvas
+          board={board}
+          isLive={isLive}
+          newItemIds={newItemIds}
+          isLeader={isLeader}
+          viewerId={viewerId}
+          editProposal={editProposal}
+          deleteProposal={deleteProposal}
+          agenda={
+            <AgendaPanel
+              sessionId={sessionId}
+              questions={questions}
+              activeQuestionId={board.questionId}
+              isLeader={isLeader}
+            />
+          }
+          reactToProposal={reactToProposal}
+        />
+        <SessionJoinNotices />
       </main>
       <CreativeStudio />
-      {/*
-        F34 — inside the provider on purpose: Propose from chat (F37) goes through
-        `submitArtifact`, the same path the sticky and drawing editors use, so an
-        AI-suggested proposal is authored and broadcast exactly like a hand-made one.
-      */}
       <AssistantBubble sessionId={sessionId} getContext={buildAssistantContext} />
     </CreativeToolsProvider>
   );
 }
 
 /**
- * Turns the board into the compact context the agent reads (F35).
- *
- * Only the most recent handful of proposals are sent: the whole board would dominate the
- * prompt on a busy question, and the tail is what the conversation is usually about.
+ * What the assistant is told about the board (F35). Read fresh on every send, so a question
+ * like "what have we proposed so far?" sees the board as it is now rather than as it was
+ * when the panel opened. The server merges this with anything it can see server-side; the
+ * client is a convenience, never the authority.
  */
 function describeBoard(board: BoardResponse | null): AssistantContext {
   if (!board) return {};
-
   const recent = board.items.slice(-8);
-
   return {
     sessionTitle: board.sessionTitle,
     ...(board.questionText ? { activeQuestion: board.questionText } : {}),

@@ -7,7 +7,7 @@
 import type { ArtifactJson } from '@roundtable/shared';
 
 import { Button } from '../../components/ui/Button';
-import { STICKY_RADIUS, STICKY_THEMES } from '../pinboard/pinboardTokens';
+import { CARD_INK, STICKY_RADIUS, STICKY_THEMES } from '../pinboard/pinboardTokens';
 import { DiagramPreview } from './DiagramPreview';
 import type { ProposeState } from './useAssistantChat';
 
@@ -48,7 +48,7 @@ export function ArtifactCard({
             borderRadius: STICKY_RADIUS,
             background: STICKY_THEMES[artifact.color].bg,
             border: `1px solid ${STICKY_THEMES[artifact.color].border}`,
-            color: STICKY_THEMES[artifact.color].ink,
+            color: CARD_INK,
           }}
         >
           {artifact.text}

@@ -59,7 +59,7 @@ export async function saveLlmConfig(
     });
   } catch (cause) {
     // The only realistic failure is the FK: no such user. Worth naming, because with the
-    // dev auth shim a stale DEV_USER_ID produces exactly this.
+    // a config row whose user has since been deleted produces exactly this.
     console.error('assistant: failed to save LLM config', cause);
     throw new ApiError(
       400,

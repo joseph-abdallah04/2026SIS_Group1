@@ -116,7 +116,7 @@
 
 - [x] `src/events.ts`: typed `ClientToServerEvents` + `ServerToClientEvents` maps with payload types, seeded with core events (`member:join`, room join/leave); module owners extend.
 - [x] `src/schemas.ts`: zod pattern established with 1–2 example schemas (signup, login); owners follow it for their DTOs.
-- [x] Both apps successfully import from `@roundtable/shared`; no duplicate type definitions; package exports point to `src/`.
+- [x] Both apps successfully import from `@roundtable/shared`; no duplicate type definitions. Package exports are conditional: `types` and `default` point at `src/` (so typechecking never waits on a build, and Vite stays on source), while `node` points at the compiled `dist/` the deployed server loads.
 
 **Cut from setup:** full domain-type mirror of docs/02 §3, proposal/artifact subtypes.
 

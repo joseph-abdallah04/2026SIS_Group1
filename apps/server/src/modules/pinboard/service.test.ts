@@ -20,6 +20,7 @@ function row(overrides: Partial<ProposalRow> = {}): ProposalRow {
     x: 10,
     y: 20,
     extendsProposalId: null,
+    reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
     deletedAt: null,
     ...overrides,
@@ -38,6 +39,7 @@ function item(overrides: Partial<BoardItem> = {}): BoardItem {
     y: 0,
     createdAt: '2026-08-31T10:00:00.000Z',
     extendsProposalId: null,
+    reactions: [],
     ...overrides,
   };
 }
@@ -55,6 +57,7 @@ describe('toBoardItem', () => {
       y: 20,
       createdAt: '2026-08-31T10:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     });
   });
 
@@ -70,10 +73,7 @@ describe('toBoardItem', () => {
 
   it.each([
     ['drawing', { type: 'drawing', svg: '<svg />' }],
-    [
-      'diagram',
-      { type: 'diagram', nodes: [{ id: 'a', label: 'A', x: 0, y: 0 }], edges: [] },
-    ],
+    ['diagram', { type: 'diagram', nodes: [{ id: 'a', label: 'A', x: 0, y: 0 }], edges: [] }],
   ])('passes a %s artifact through unchanged', (type, artifactJson) => {
     const mapped = toBoardItem(row({ type: type as ProposalRow['type'], artifactJson }));
     expect(mapped.artifactJson).toEqual(artifactJson);
@@ -81,10 +81,20 @@ describe('toBoardItem', () => {
 
   it('rejects a row whose stored artifact does not match its type', () => {
     // A sticky row carrying a diagram payload is corrupt data, not something to
-    // render — the discriminated union catches it before it reaches a client.
+    // render — the row/artifact type check catches it before it reaches a client.
     expect(() => toBoardItem(row({ artifactJson: { type: 'diagram', nodes: [] } }))).toThrow(
       /Invalid artifact/,
     );
+  });
+
+  it('keeps a structurally valid legacy diagram readable despite a dangling edge', () => {
+    const artifactJson = {
+      type: 'diagram',
+      nodes: [{ id: 'a', label: 'A', x: 0, y: 0 }],
+      edges: [{ from: 'a', to: 'removed-node' }],
+    };
+
+    expect(toBoardItem(row({ type: 'diagram', artifactJson })).artifactJson).toEqual(artifactJson);
   });
 
   it('rejects an artifact with an unknown type', () => {
@@ -106,7 +116,12 @@ describe('compareBoardItems', () => {
     const items = [item({ id: 'c', createdAt: at }), item({ id: 'a', createdAt: at })];
     expect([...items].sort(compareBoardItems).map((i) => i.id)).toEqual(['a', 'c']);
     // Same input in the opposite arrival order must produce the same board.
-    expect([...items].reverse().sort(compareBoardItems).map((i) => i.id)).toEqual(['a', 'c']);
+    expect(
+      [...items]
+        .reverse()
+        .sort(compareBoardItems)
+        .map((i) => i.id),
+    ).toEqual(['a', 'c']);
   });
 
   it('treats an item as equal to itself', () => {

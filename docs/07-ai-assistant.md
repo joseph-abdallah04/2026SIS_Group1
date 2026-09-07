@@ -23,30 +23,28 @@ All commands run from the **repo root**, where `.env` lives.
 
 ```bash
 cp .env.example .env
-openssl rand -base64 32
+openssl rand -base64 32   # -> LLM_KEY_ENCRYPTION_SECRET
+openssl rand -base64 32   # -> JWT_SECRET
 ```
 
-Put that value in `LLM_KEY_ENCRYPTION_SECRET`, your Neon connection string in `DATABASE_URL`,
-and `DEV_USER_ID=demo-user-alice`. Then:
+Leave `DATABASE_URL` as it ships — it points at the local Docker Postgres. Then:
 
 ```bash
 npm install
-npm run generate     # Prisma client
-npm run db:deploy    # apply migrations
-npm run db:seed      # demo users + session
+npm run db:up                                # Docker Postgres on :5433
+npm run db:deploy --workspace @roundtable/server
+npm run db:seed   --workspace @roundtable/server
 npm run dev
 ```
 
-> The `generate` / `db:*` scripts exist at the root **because `.env` does**. Run them through
-> `--workspace @roundtable/server` and the working directory becomes `apps/server`, where the
-> Prisma CLI looks for `.env` and finds nothing — every variable reads as undefined. The server
-> itself is immune: `src/env.ts` resolves the root `.env` by path rather than by cwd.
+> The `db:*` scripts live in the server workspace and are wrapped in `dotenv -e ../../.env`,
+> because the Prisma CLI looks for `.env` beside itself and the repo keeps one at the root.
+> The server is immune either way: `src/env.ts` resolves the root `.env` by path, not by cwd.
 
-Then open <http://localhost:5173/settings>, add a provider (Groq's free tier and a local
-Ollama both work), press **Test connection**, and go to
-<http://localhost:5173/sessions/demo-session-1>. The bubble is bottom-right.
-
-> `DEV_USER_ID` is a temporary stand-in for login — see [Shims](#shims-to-remove) below.
+Log in at <http://localhost:5173/login> as `alice@example.com` (the seed prints the password),
+add a provider at <http://localhost:5173/settings> — Groq's free tier and a local Ollama both
+work — press **Test connection**, then open the session the seed prints. The bubble is
+bottom-right.
 
 ## How a turn works
 
@@ -159,28 +157,24 @@ what puts that context in reach.
 from `modules/assistant/index.js`. Either way `lib/crypto.ts` is shared infrastructure — the
 JWT work can use it too.
 
-## Shims to remove
+## Auth
 
-Two temporary pieces, each marked in the code. The artifact shapes and the propose event
-that used to be listed here are gone — the pinboard and tools modules landed and this module
-now imports theirs.
+There are no shims left. Both temporary bypasses this module carried while login was being
+built — the server's `DEV_USER_ID` and the client's dev-only route bypass — were deleted when
+F01/F02 landed, along with `DEV_USER_ID` in `env.ts` and `.env.example`.
 
-1. **`DEV_USER_ID` auth bypass** (`src/middleware/auth.ts`, `src/env.ts`, `.env.example`).
-   Outside production, setting `DEV_USER_ID` makes every request act as that user so the
-   assistant works before login exists. Replace the body of `requireAuth` with real JWT
-   verification that sets `req.userId`; every caller already reads `getUserId(req)`, so nothing
-   else changes.
-2. **Client-side auth bypass** (`apps/web/src/lib/auth.tsx`). Login does not exist, so every
-   protected route bounced to a page that cannot log anyone in. In dev only, a missing token
-   falls through; `import.meta.env.DEV` is false in a production build, so the real gate
-   stands there. Delete it with the server shim above.
+The module needed no other change to work with real auth, because it never read identity
+itself: `requireAuth` sets `req.userId` and every handler goes through `getUserId(req)`, which
+throws a 401 rather than returning `undefined` if the route is ever mounted without the
+middleware. `routes.test.ts` mints a real token with the auth module's own `signToken`, so the
+integration test exercises `requireAuth` rather than going around it.
 
 ## Known gaps
 
-- **No membership check on the chat endpoint.** `SessionMember` now exists (main added it), so
-  this is newly fixable: any authenticated user can still open a chat scoped to any session id.
-  One call in `routes.ts` against the sessions module closes it. Worth doing before the
-  assistant sees real board content in a session the caller has not joined.
+- **No membership check on the chat endpoint.** Now that auth is real this is the one gap that
+  matters: a logged-in user can open a chat scoped to any session id, and the assistant will
+  describe a board they never joined. `SessionMember` and the membership helpers exist, so it
+  is one call in `routes.ts`. **Do this before the assistant is demoed on real sessions.**
 - **`UserLLMConfig` has no `updatedAt`**, although docs/02 §3 lists one. Adding it needs a
   migration, which belongs to whoever owns that table; the code does not depend on it.
 - **Context is assembled client-side.** `SessionPinboard` builds it from the live board
@@ -189,13 +183,19 @@ now imports theirs.
   currently unused.
 - **Generated diagrams carry no title.** The shared `DiagramArtifact` has no `title` field, so
   `create_diagram` no longer asks for one. If the tools owner adds it, re-enable it there.
+- **`diagramWriteArtifactSchema` does not check edge endpoints or duplicate node ids.** It
+  validates container nesting but not referential integrity, so `parseArtifact` checks it
+  locally for model output. A hand-built diagram can still carry a dangling edge — worth
+  lifting the check into the shared schema.
 - **Web search is unofficial.** DuckDuckGo's HTML endpoint has no API and rate-limits; there is
   an Instant Answer fallback and then a graceful "search unavailable". `webSearch.test.ts` is
   the canary if their markup changes.
 
 ## Tests
 
-`npm run test --workspace @roundtable/server` — 81 tests, no network and no API key needed.
+`npm run test --workspace @roundtable/server` — 74 assistant tests, no network and no API
+key needed. The web side adds `useAssistantChat.test.ts`, which asserts the transcript reducer
+is pure by applying every event twice from the same state, the way React does under StrictMode.
 
 The one worth knowing about is `routes.test.ts`: it runs the real Express router over real HTTP
 with only the database and the LLM provider faked, and asserts the docs/06 acceptance criteria —

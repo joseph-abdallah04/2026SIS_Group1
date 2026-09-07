@@ -13,7 +13,8 @@ import {
   type LlmConfigTestResult,
 } from '@roundtable/shared';
 
-import { api, authHeaders } from '../../lib/api';
+import { api } from '../../lib/api';
+import { getToken } from '../../lib/auth';
 
 export function fetchLlmConfig(): Promise<{ config: LlmConfigPublic | null }> {
   return api.get('/api/me/llm-config');
@@ -24,7 +25,7 @@ export function saveLlmConfig(input: LlmConfigUpsert): Promise<{ config: LlmConf
 }
 
 export function deleteLlmConfig(): Promise<{ ok: boolean }> {
-  return api.del('/api/me/llm-config');
+  return api.delete('/api/me/llm-config');
 }
 
 /**
@@ -53,11 +54,17 @@ export interface StreamAssistantChatOptions {
 export async function streamAssistantChat(options: StreamAssistantChatOptions): Promise<void> {
   const { sessionId, message, context, history, signal, onEvent } = options;
 
+  const token = getToken();
+
   let response: Response;
   try {
     response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/assistant/chat`, {
       method: 'POST',
-      headers: { ...authHeaders(), Accept: 'text/event-stream' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ message, context, history }),
       signal,
     });

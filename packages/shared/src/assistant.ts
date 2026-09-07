@@ -5,7 +5,7 @@
 import { z } from 'zod';
 
 import type { ArtifactJson, StickyColor } from './index.js';
-import { artifactJsonSchema } from './schemas.js';
+import { artifactWriteJsonSchema } from './schemas.js';
 
 // ---------------------------------------------------------------------------
 // Artifact helpers the agent needs
@@ -34,12 +34,17 @@ export type ArtifactParseResult =
 /**
  * Validates an artifact the model produced, before it is shown with a Propose button.
  *
+ * Deliberately the *write* schema, not the lenient read one: everything the agent makes is
+ * a candidate for the board, so it is held to the rules `proposalCreate` enforces — no
+ * dangling edges, no duplicate node ids. Failing here means the model can be told to fix
+ * it; failing at the board means the Propose button breaks in the user's hand.
+ *
  * The pinboard revalidates on the way in — this is not a substitute for that. It exists so
  * a malformed tool call fails inside the chat, where the model can be told to fix it, and
  * never reaches the point of being offered to the user.
  */
 export function parseArtifact(input: unknown): ArtifactParseResult {
-  const parsed = artifactJsonSchema.safeParse(input);
+  const parsed = artifactWriteJsonSchema.safeParse(input);
   if (!parsed.success) {
     return {
       ok: false,
@@ -57,7 +62,33 @@ export function parseArtifact(input: unknown): ArtifactParseResult {
     return { ok: false, error: `Artifact is ${size} bytes; limit is ${MAX_ARTIFACT_BYTES}` };
   }
 
+  // Referential integrity the shared write schema does not currently check: it validates
+  // container nesting, but not that an edge's endpoints exist or that ids are unique. A
+  // model inventing an edge to a node it forgot to emit is a normal failure, and it renders
+  // as an arrow pointing at nothing. (Tools owner: worth lifting into
+  // `diagramWriteArtifactSchema` — a hand-built diagram can carry the same fault.)
+  if (parsed.data.type === 'diagram') {
+    const problem = checkDiagramIntegrity(parsed.data.nodes, parsed.data.edges);
+    if (problem) return { ok: false, error: problem };
+  }
+
   return { ok: true, artifact: parsed.data };
+}
+
+function checkDiagramIntegrity(
+  nodes: ReadonlyArray<{ id: string }>,
+  edges: ReadonlyArray<{ from: string; to: string }>,
+): string | null {
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    if (ids.has(node.id)) return `Duplicate node id "${node.id}"`;
+    ids.add(node.id);
+  }
+  for (const edge of edges) {
+    if (!ids.has(edge.from)) return `Edge references unknown node "${edge.from}"`;
+    if (!ids.has(edge.to)) return `Edge references unknown node "${edge.to}"`;
+  }
+  return null;
 }
 
 /** One-line human summary — used in chat and in the agent's own context block. */
@@ -249,5 +280,5 @@ export const assistantArtifactFrameSchema = z.object({
   type: z.literal('artifact'),
   artifactId: z.string().min(1).max(64),
   source: z.enum(ASSISTANT_TOOL_NAMES),
-  artifact: artifactJsonSchema,
+  artifact: artifactWriteJsonSchema,
 });
