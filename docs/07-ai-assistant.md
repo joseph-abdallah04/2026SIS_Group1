@@ -183,10 +183,13 @@ integration test exercises `requireAuth` rather than going around it.
   currently unused.
 - **Generated diagrams carry no title.** The shared `DiagramArtifact` has no `title` field, so
   `create_diagram` no longer asks for one. If the tools owner adds it, re-enable it there.
-- **`diagramWriteArtifactSchema` does not check edge endpoints or duplicate node ids.** It
-  validates container nesting but not referential integrity, so `parseArtifact` checks it
-  locally for model output. A hand-built diagram can still carry a dangling edge — worth
-  lifting the check into the shared schema.
+- **The board's cross-field diagram rules are duplicated here, deliberately.**
+  `artifactWriteJsonSchema` is a discriminated union and can only carry field-level rules;
+  the cross-field ones (unique ids, live edge endpoints, no self-edges, no repeated directed
+  edges) live in `proposalCreateSchema`'s refinement, which does not run until Propose. So
+  `parseArtifact` re-checks the structural ones, and `create_diagram` silently drops
+  self-edges and duplicate edges. If the tools owner changes those rules, this is the second
+  place to change.
 - **Web search is unofficial.** DuckDuckGo's HTML endpoint has no API and rate-limits; there is
   an Instant Answer fallback and then a graceful "search unavailable". `webSearch.test.ts` is
   the canary if their markup changes.

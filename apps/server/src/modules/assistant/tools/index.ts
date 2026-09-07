@@ -192,10 +192,18 @@ const createDiagramTool: AssistantTool = {
       };
     }
 
+    // The board's write path rejects self-edges and repeated directed edges, and a model
+    // describing the same relationship twice produces both routinely. Those are the model
+    // being sloppy, not the user being wrong, so they are cleaned up here rather than
+    // surfaced as a Propose that fails in the user's hand. Node ids and dangling edges are
+    // checked above and below, because those mean the model got the *structure* wrong and it
+    // should be told to try again.
+    const edges = dropRedundantEdges(args.data.edges);
+
     const candidate: DiagramArtifact = {
       type: 'diagram',
-      nodes: layoutDiagram(args.data.nodes, args.data.edges),
-      edges: args.data.edges,
+      nodes: layoutDiagram(args.data.nodes, edges),
+      edges,
     };
 
     const parsed = parseArtifact(candidate);
@@ -336,6 +344,22 @@ export const assistantTools: Record<AssistantToolName, AssistantTool> = {
   create_diagram: createDiagramTool,
   sticky_ideation: stickyIdeationTool,
 };
+
+/**
+ * Removes edges the pinboard's write path would reject: a node pointing at itself, and the
+ * same directed pair listed more than once. Order is preserved, so the diagram still reads
+ * the way the model wrote it.
+ */
+function dropRedundantEdges<T extends { from: string; to: string }>(edges: T[]): T[] {
+  const seen = new Set<string>();
+  return edges.filter((edge) => {
+    if (edge.from === edge.to) return false;
+    const key = `${edge.from}\u0000${edge.to}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 export const assistantToolDefinitions: LlmToolDefinition[] = Object.values(assistantTools).map(
   (tool) => tool.definition,

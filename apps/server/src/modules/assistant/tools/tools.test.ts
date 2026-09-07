@@ -36,6 +36,36 @@ describe('tool registry', () => {
 });
 
 describe('create_diagram', () => {
+  it('drops self-edges and repeated directed edges the board would reject', async () => {
+    const context = harness();
+    const result = await assistantTools.create_diagram.run(
+      {
+        nodes: [
+          { id: 'a', label: 'Draft' },
+          { id: 'b', label: 'Review' },
+        ],
+        edges: [
+          { from: 'a', to: 'b' },
+          { from: 'a', to: 'b' },
+          { from: 'b', to: 'b' },
+          { from: 'b', to: 'a' },
+        ],
+      },
+      context,
+    );
+
+    expect(result.ok).toBe(true);
+    const artifact = context.artifacts[0]?.artifact;
+    if (artifact?.type === 'diagram') {
+      // A → B kept once, B → B dropped, B → A kept: the model's sloppiness never becomes a
+      // Propose that fails in the user's hand.
+      expect(artifact.edges).toEqual([
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ]);
+    }
+  });
+
   it('lays out the nodes it was given and emits one artifact', async () => {
     const context = harness();
     const result = await assistantTools.create_diagram.run(

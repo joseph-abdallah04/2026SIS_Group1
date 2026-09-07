@@ -62,11 +62,11 @@ export function parseArtifact(input: unknown): ArtifactParseResult {
     return { ok: false, error: `Artifact is ${size} bytes; limit is ${MAX_ARTIFACT_BYTES}` };
   }
 
-  // Referential integrity the shared write schema does not currently check: it validates
-  // container nesting, but not that an edge's endpoints exist or that ids are unique. A
-  // model inventing an edge to a node it forgot to emit is a normal failure, and it renders
-  // as an arrow pointing at nothing. (Tools owner: worth lifting into
-  // `diagramWriteArtifactSchema` — a hand-built diagram can carry the same fault.)
+  // Referential integrity. `artifactWriteJsonSchema` is a discriminated union, so it can
+  // only carry field-level rules — the cross-field ones live in `proposalCreateSchema`'s
+  // refinement and therefore do not run here. Checking them now means a bad diagram fails
+  // inside the chat, where the model can be told to fix it, instead of failing when the user
+  // presses Propose.
   if (parsed.data.type === 'diagram') {
     const problem = checkDiagramIntegrity(parsed.data.nodes, parsed.data.edges);
     if (problem) return { ok: false, error: problem };
