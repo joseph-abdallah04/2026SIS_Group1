@@ -171,11 +171,13 @@ model ProposalReaction {
   proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // One of the fixed set in packages/shared (`REACTION_EMOJIS`), checked on the
-  // way in. A plain string rather than an enum because which glyphs are offered
-  // is a product decision that should not need a migration, and because the
-  // rest of this module already validates its payloads in code.
-  emoji      String
+  // Any single emoji, checked on the way in by `isEmoji` in packages/shared.
+  // A plain string rather than an enum because which glyphs are offered is a
+  // product decision that should not need a migration, and because the rest of
+  // this module already validates its payloads in code. The width matches
+  // `MAX_REACTION_LENGTH`, so the column cannot hold more than the contract
+  // admits even if a future caller skips the guard.
+  emoji      String   @db.VarChar(32)
   createdAt  DateTime @default(now())
 
   // The reason a reaction cannot be double-counted: pressing the chip twice

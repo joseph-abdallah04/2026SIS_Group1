@@ -61,9 +61,10 @@ interface PositionedProposalProps {
 /**
  * Inline text editor for a sticky you authored.
  *
- * Stickies edit here; drawings and diagrams reopen in the Creative Tools
- * studio (F19–F21) — that wire-up is a follow-up, so those cards can only be
- * moved or deleted for now.
+ * Stickies edit here, because a sticky is one field and a full-screen editor
+ * for it would be heavier than the change. Drawings and diagrams reopen in the
+ * Creative Tools studio (F19–F21) instead, which is the only place their
+ * shapes can be manipulated.
  */
 function StickyTextEditor({
   artifact,

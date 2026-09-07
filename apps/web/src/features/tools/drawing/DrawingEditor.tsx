@@ -32,6 +32,7 @@ import {
   eraserRadiusForSurface,
   dataToStrokes,
   prepareDrawing,
+  drawingArtifactSize,
   serializeDrawingSvg,
   strokePathData,
   type DrawingInk,
@@ -83,6 +84,9 @@ export function DrawingEditor() {
   const activePointerId = useRef<number | null>(null);
   const eraserStartRef = useRef<DrawingStroke[] | null>(null);
   const svg = useMemo(() => serializeDrawingSvg(strokes), [strokes]);
+  // What the save will actually measure: the artwork and the strokes stored
+  // beside it share one budget, so the meter has to show both.
+  const artifactSize = useMemo(() => drawingArtifactSize(svg, strokes), [svg, strokes]);
 
   function clearError() {
     setValidationError(null);
@@ -394,7 +398,7 @@ export function DrawingEditor() {
           ) : (
             <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
               {strokes.length} {strokes.length === 1 ? 'stroke' : 'strokes'} ·{' '}
-              {formatArtifactSize(svg.length)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
+              {formatArtifactSize(artifactSize)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
             </p>
           )}
         </div>

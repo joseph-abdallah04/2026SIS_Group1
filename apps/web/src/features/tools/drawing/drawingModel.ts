@@ -257,6 +257,21 @@ export function serializeDrawingSvg(strokes: readonly DrawingStroke[]): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${DRAWING_VIEWBOX_WIDTH} ${DRAWING_VIEWBOX_HEIGHT}" fill="none">${paths}</svg>`;
 }
 
+/**
+ * How much of the artifact budget a drawing uses.
+ *
+ * The rendered SVG and the strokes are stored together and share one limit, so
+ * anything reporting or enforcing that budget has to count both. This exists so
+ * the editor's meter and the check on save cannot drift: metering the SVG alone
+ * let a dense sketch look comfortably under budget and then be refused.
+ *
+ * Takes the SVG rather than the strokes it came from, because the caller has
+ * already serialised it and doing so again on every stroke is not free.
+ */
+export function drawingArtifactSize(svg: string, strokes: readonly DrawingStroke[]): number {
+  return svg.length + JSON.stringify(strokesToData(strokes)).length;
+}
+
 export function prepareDrawing(strokes: readonly DrawingStroke[]): PreparedDrawing {
   if (!strokes.some((stroke) => stroke.points.length > 0)) {
     return { ok: false, error: 'Draw something before proposing this sketch.' };
@@ -268,7 +283,7 @@ export function prepareDrawing(strokes: readonly DrawingStroke[]): PreparedDrawi
   // Both halves share one budget, and they are stored together, so they are
   // measured together. Checking only the SVG would let a drawing through that
   // the server then rejects for the size of its strokes.
-  if (svg.length + JSON.stringify(stored).length > DRAWING_SVG_LIMIT) {
+  if (drawingArtifactSize(svg, strokes) > DRAWING_SVG_LIMIT) {
     return {
       ok: false,
       error: 'This sketch is too detailed to propose. Undo a few strokes and try again.',

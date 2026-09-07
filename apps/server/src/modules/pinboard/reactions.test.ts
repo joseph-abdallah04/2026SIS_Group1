@@ -71,7 +71,7 @@ beforeEach(() => {
   create.mockResolvedValue({} as never);
   findMany.mockResolvedValue([] as never);
   question.mockResolvedValue(questionRef());
-  session.mockResolvedValue({ id: 's1', title: 'Demo', leaderId: 'leader-1' });
+  session.mockResolvedValue({ id: 's1', title: 'Demo', status: 'active', leaderId: 'leader-1' });
 });
 
 describe('who may react', () => {
