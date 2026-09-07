@@ -14,7 +14,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => navigateMock };
 });
 
-vi.mock('./api', () => ({ login: vi.fn() }));
+vi.mock('./api', () => ({ login: vi.fn(), resendVerification: vi.fn() }));
 vi.mock('../../lib/socket', () => ({ disconnectSocket: vi.fn(), getSocket: vi.fn() }));
 
 function renderPage(path = '/login') {
@@ -72,6 +72,28 @@ describe('LoginPage', () => {
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true }));
     expect(localStorage.getItem('rt_token')).toBe('test-token');
+  });
+
+  it('offers a resend button on EMAIL_NOT_VERIFIED and sends to the submitted email', async () => {
+    vi.mocked(authApi.login).mockRejectedValue(
+      new ApiClientError(403, 'Please verify your email before logging in', 'EMAIL_NOT_VERIFIED'),
+    );
+    vi.mocked(authApi.resendVerification).mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByLabelText(/email/i), 'unverified@example.com');
+    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.click(screen.getByRole('button', { name: /log in/i }));
+
+    const resendButton = await screen.findByRole('button', { name: /resend verification email/i });
+    await user.click(resendButton);
+
+    await waitFor(() =>
+      expect(authApi.resendVerification).toHaveBeenCalledWith({ email: 'unverified@example.com' }),
+    );
+    expect(await screen.findByText(/check your email/i)).toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('returns to the join link after login when next is a same-origin path', async () => {

@@ -18,11 +18,15 @@ datasource db {
 // === auth module ===
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   passwordHash String
   displayName  String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
+  // NULL means unverified. Signup no longer issues a working session — a
+  // login is rejected with EMAIL_NOT_VERIFIED until this is set by clicking
+  // the emailed link.
+  emailVerifiedAt DateTime?
 
   ledSessions        Session[]       @relation("SessionLeader")
   sessionMemberships SessionMember[]

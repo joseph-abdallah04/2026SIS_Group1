@@ -17,3 +17,16 @@ export function validateBody<T>(schema: ZodSchema<T>): RequestHandler {
     next();
   };
 }
+
+/** Same pattern as `validateBody`, for `req.query` (e.g. `?token=...` links). */
+export function validateQuery<T>(schema: ZodSchema<T>): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const parsed = schema.safeParse(req.query);
+    if (!parsed.success) {
+      next(new ApiError(400, 'Invalid input', 'INVALID_INPUT', parsed.error.flatten()));
+      return;
+    }
+    req.query = parsed.data as typeof req.query;
+    next();
+  };
+}

@@ -6,7 +6,7 @@ import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { ApiClientError } from '../../lib/api';
 import { setToken, safeReturnPath } from '../../lib/auth';
 import { disconnectSocket } from '../../lib/socket';
-import { login, signup } from './api';
+import { login, resendVerification, signup } from './api';
 
 const INPUT_CLASSES =
   'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none';
@@ -60,6 +60,12 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Set only on a 403 EMAIL_NOT_VERIFIED — an unverified account has no
+  // working session, so this is the only place a blocked user can ask for
+  // the link again (the ticket's "banner", relocated: there's no in-app
+  // state to show it in anymore).
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,6 +77,8 @@ function LoginForm() {
     }
 
     setError(null);
+    setUnverifiedEmail(null);
+    setResendState('idle');
     setSubmitting(true);
     try {
       const { token } = await login(parsed.data);
@@ -80,11 +88,30 @@ function LoginForm() {
       disconnectSocket();
       navigate(safeReturnPath(searchParams.get('next')), { replace: true });
     } catch (err) {
-      setError(
-        err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
-      );
+      if (err instanceof ApiClientError && err.code === 'EMAIL_NOT_VERIFIED') {
+        setError(err.message);
+        setUnverifiedEmail(parsed.data.email);
+      } else {
+        setError(
+          err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
+        );
+      }
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function onResend() {
+    if (!unverifiedEmail) return;
+    setResendState('sending');
+    try {
+      await resendVerification({ email: unverifiedEmail });
+      setResendState('sent');
+    } catch {
+      // Same generic wording either way — this endpoint never distinguishes
+      // "already sent", "unknown email", or a transient failure to the
+      // caller, so neither does this button.
+      setResendState('sent');
     }
   }
 
@@ -121,22 +148,45 @@ function LoginForm() {
         </p>
       ) : null}
 
+      {unverifiedEmail ? (
+        resendState === 'sent' ? (
+          <p className="text-sm text-rt-primary-deep">Check your email for a new link.</p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void onResend()}
+            disabled={resendState === 'sending'}
+            className="self-start text-sm font-semibold text-rt-primary-deep hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {resendState === 'sending' ? 'Sending…' : 'Resend verification email'}
+          </button>
+        )
+      ) : null}
+
       <SubmitButton disabled={submitting}>{submitting ? 'Logging in…' : 'Log in'}</SubmitButton>
     </form>
   );
 }
 
 function SignupForm() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // No token comes back from signup — this is a confirmation screen, not a
+  // pre-navigation flag. The account has no working session until the
+  // emailed link is clicked.
+  const [submitted, setSubmitted] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
 
     const parsed = signupSchema.safeParse({ email, password, displayName });
     if (!parsed.success) {
@@ -147,10 +197,8 @@ function SignupForm() {
     setError(null);
     setSubmitting(true);
     try {
-      const { token } = await signup(parsed.data);
-      setToken(token);
-      disconnectSocket();
-      navigate(safeReturnPath(searchParams.get('next')), { replace: true });
+      await signup(parsed.data);
+      setSubmitted(true);
     } catch (err) {
       setError(
         err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
@@ -158,6 +206,19 @@ function SignupForm() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (submitted) {
+    return (
+      <div className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-rt-ink">Check your email</h2>
+        <p className="text-sm text-rt-ink-muted">
+          We sent a verification link to <span className="font-semibold text-rt-ink">{email}</span>.
+          Click it to finish setting up your account — you won&apos;t be able to log in until you
+          do.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -196,6 +257,19 @@ function SignupForm() {
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          minLength={8}
+          required
+        />
+      </label>
+
+      <label className={LABEL_CLASSES}>
+        Confirm password
+        <input
+          className={INPUT_CLASSES}
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
           minLength={8}
           required
         />

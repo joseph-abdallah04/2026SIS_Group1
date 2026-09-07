@@ -1,10 +1,15 @@
 import { Router } from 'express';
-import { loginSchema, signupSchema } from '@roundtable/shared/schemas';
+import {
+  loginSchema,
+  resendVerificationSchema,
+  signupSchema,
+  verifyEmailQuerySchema,
+} from '@roundtable/shared/schemas';
 
 import { requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
-import { validateBody } from '../../middleware/validate.js';
-import { getUserById, login, signup } from './service.js';
+import { validateBody, validateQuery } from '../../middleware/validate.js';
+import { getUserById, login, resendVerification, signup, verifyEmail } from './service.js';
 
 export const authRoutes = Router();
 
@@ -27,6 +32,33 @@ authRoutes.post('/login', validateBody(loginSchema), async (req, res, next) => {
     next(err);
   }
 });
+
+// Public — the token in the query string *is* the credential (docs/06 §6:
+// this is auth's own /api/auth/* namespace, no requireAuth involved).
+authRoutes.get('/verify-email', validateQuery(verifyEmailQuerySchema), async (req, res, next) => {
+  try {
+    const result = await verifyEmail(req.query.token as string);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Also public and deliberately not behind requireAuth: an unverified account
+// has no working session to authenticate with (that's the whole point of
+// this ticket), so this can only be reached by email address.
+authRoutes.post(
+  '/resend-verification',
+  validateBody(resendVerificationSchema),
+  async (req, res, next) => {
+    try {
+      await resendVerification(req.body.email);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // Stateless JWTs — nothing to revoke server-side in this MVP. This exists so
 // there's a real endpoint to call (and a live route for `requireAuth` to run

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
+import { VerifyEmailPage } from './features/auth/VerifyEmailPage';
 import { CreateSessionPage } from './features/sessions/CreateSessionPage';
 import { EditSessionPage } from './features/sessions/EditSessionPage';
 import { JoinSessionPage } from './features/sessions/JoinSessionPage';
@@ -22,6 +23,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         {CreativeToolsWorkbench ? (
           <Route
             path="/dev/creative-tools"

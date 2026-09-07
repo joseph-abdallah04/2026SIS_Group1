@@ -2,7 +2,8 @@ import jwt from 'jsonwebtoken';
 
 import { env } from '../../env.js';
 
-const EXPIRES_IN = '7d';
+const SESSION_EXPIRES_IN = '7d';
+const EMAIL_VERIFY_EXPIRES_IN = '24h';
 
 export interface TokenPayload {
   userId: string;
@@ -12,18 +13,29 @@ export type VerifyResult =
   | { ok: true; userId: string }
   | { ok: false; code: 'TOKEN_EXPIRED' | 'INVALID_TOKEN' };
 
-// Payload is deliberately just `{ userId }` — jsonwebtoken adds `iat`/`exp`
-// itself from `expiresIn`, giving the `{ userId, iat, exp }` shape the F01
-// ticket specifies. Nothing else is embedded, so a stale token can't carry a
-// display name that's since changed.
-export function signToken({ userId }: TokenPayload): string {
-  return jwt.sign({ userId }, env.JWT_SECRET, { expiresIn: EXPIRES_IN });
+// Session tokens and email-verification tokens are both plain JWTs signed
+// with the same JWT_SECRET (no reason to provision a second secret for this).
+// Without a purpose claim, a verification token — which also just carries a
+// `userId` — would pass verifyToken's only check and work as a Bearer token
+// through requireAuth, letting an emailed verification link double as a
+// login credential. Each verifier below rejects the other purpose.
+function signPurposeToken(
+  purpose: string,
+  { userId }: TokenPayload,
+  expiresIn: jwt.SignOptions['expiresIn'],
+): string {
+  return jwt.sign({ userId, purpose }, env.JWT_SECRET, { expiresIn });
 }
 
-export function verifyToken(token: string): VerifyResult {
+function verifyPurposeToken(purpose: string, token: string): VerifyResult {
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    if (typeof decoded !== 'object' || decoded === null || typeof decoded.userId !== 'string') {
+    if (
+      typeof decoded !== 'object' ||
+      decoded === null ||
+      typeof decoded.userId !== 'string' ||
+      decoded.purpose !== purpose
+    ) {
       return { ok: false, code: 'INVALID_TOKEN' };
     }
     return { ok: true, userId: decoded.userId };
@@ -31,7 +43,25 @@ export function verifyToken(token: string): VerifyResult {
     if (err instanceof jwt.TokenExpiredError) {
       return { ok: false, code: 'TOKEN_EXPIRED' };
     }
-    // Malformed, tampered signature, wrong algorithm, etc.
     return { ok: false, code: 'INVALID_TOKEN' };
   }
+}
+
+// Payload is deliberately just `{ userId, purpose }` — jsonwebtoken adds
+// `iat`/`exp` itself from `expiresIn`. Nothing else is embedded, so a stale
+// token can't carry a display name that's since changed.
+export function signToken(payload: TokenPayload): string {
+  return signPurposeToken('session', payload, SESSION_EXPIRES_IN);
+}
+
+export function verifyToken(token: string): VerifyResult {
+  return verifyPurposeToken('session', token);
+}
+
+export function signEmailVerificationToken(payload: TokenPayload): string {
+  return signPurposeToken('email-verify', payload, EMAIL_VERIFY_EXPIRES_IN);
+}
+
+export function verifyEmailVerificationToken(token: string): VerifyResult {
+  return verifyPurposeToken('email-verify', token);
 }

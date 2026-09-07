@@ -40,9 +40,19 @@ export const updateProfileSchema = z.object({
   displayName: z.string().trim().min(1).max(50),
 });
 
+export const verifyEmailQuerySchema = z.object({
+  token: z.string().min(1),
+});
+
+export const resendVerificationSchema = z.object({
+  email: z.string().email(),
+});
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type VerifyEmailQuery = z.infer<typeof verifyEmailQuerySchema>;
+export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 
 // === sessions module ===
 

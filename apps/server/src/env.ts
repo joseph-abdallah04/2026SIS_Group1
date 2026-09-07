@@ -28,6 +28,12 @@ const envSchema = z.object({
   LIVEKIT_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   LIVEKIT_API_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
   LLM_KEY_ENCRYPTION_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  // Optional, unlike JWT_SECRET: without it, apps/server/src/lib/email.ts logs
+  // the email instead of sending it, so local dev never needs a Resend
+  // account. Required in practice for a real deploy, but that's an
+  // operational fact, not something to fail boot over.
+  RESEND_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
+  EMAIL_FROM: z.preprocess(emptyToUndefined, z.string().email().default('onboarding@resend.dev')),
 });
 
 const parsed = envSchema.safeParse(process.env);
