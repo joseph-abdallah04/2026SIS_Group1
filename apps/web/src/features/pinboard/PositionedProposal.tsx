@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
+import { prepareStickyText, STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
@@ -13,9 +14,6 @@ import {
   STICKY_SIZE,
   STICKY_THEMES,
 } from './pinboardTokens';
-
-/** Matches `stickyArtifactSchema` — the server rejects anything longer. */
-const STICKY_MAX_CHARS = 2000;
 
 interface DragHandlers {
   onPointerDown: (item: BoardItem, event: React.PointerEvent<HTMLElement>) => void;
@@ -72,6 +70,11 @@ interface PositionedProposalProps {
  * for it would be heavier than the change. Drawings and diagrams reopen in the
  * Creative Tools studio (F19–F21) instead, which is the only place their
  * shapes can be manipulated.
+ *
+ * The length rule is the same one the tool enforces when a sticky is written,
+ * and comes from the same place. Editing used to stop only at the schema's
+ * outer bound, so a note capped at 280 characters on the way in could be grown
+ * to 2000 immediately afterwards, on a card that is only 210px square.
  */
 function StickyTextEditor({
   artifact,
@@ -96,7 +99,17 @@ function StickyTextEditor({
 
   const trimmed = text.trim();
   const unchanged = trimmed === artifact.text.trim();
-  const submittable = !saving && !unchanged && trimmed.length > 0;
+  const prepared = prepareStickyText(text);
+  const submittable = !saving && !unchanged && prepared.ok;
+  /**
+   * Shown as soon as it is true, not on a press.
+   *
+   * Save is disabled while the note is too long, so a message that waited for
+   * a click would wait for one that cannot land. Typing cannot get you here —
+   * the field stops at the limit — but a note written before the limit
+   * existed, or through another client, opens over it.
+   */
+  const tooLong = !prepared.ok && trimmed.length > STICKY_TEXT_LIMIT ? prepared.error : null;
 
   const submit = () => {
     if (!submittable) return;
@@ -125,7 +138,7 @@ function StickyTextEditor({
       <textarea
         ref={ref}
         value={text}
-        maxLength={STICKY_MAX_CHARS}
+        maxLength={STICKY_TEXT_LIMIT}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onCancel();
@@ -146,6 +159,12 @@ function StickyTextEditor({
         }}
         aria-label="Edit sticky note text"
       />
+      {tooLong ? (
+        <p role="alert" className="px-3 pb-1 text-[10.5px] leading-snug text-rt-secondary-deep">
+          {tooLong}
+        </p>
+      ) : null}
+
       <div className="flex items-center gap-2 px-3 pb-2.5">
         <button
           type="button"
@@ -162,6 +181,16 @@ function StickyTextEditor({
         >
           Cancel
         </button>
+        {/* The same count the tool shows while a sticky is being written, so
+            the ceiling does not appear to move between writing and editing. */}
+        <span
+          aria-live="polite"
+          className={`ml-auto text-[10px] tabular-nums ${
+            trimmed.length >= STICKY_TEXT_LIMIT ? 'text-rt-secondary-deep' : 'text-rt-ink-faint'
+          }`}
+        >
+          {trimmed.length}/{STICKY_TEXT_LIMIT}
+        </span>
       </div>
     </div>
   );
