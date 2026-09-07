@@ -5,6 +5,7 @@ import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/share
 
 import { api } from '../../lib/api';
 import { getSocket, joinSessionRoom, scheduleLeaveSessionRoom } from '../../lib/socket';
+import { sessionStore_getState } from '../../lib/sessionStore';
 
 /** How long a card that arrived while you were watching stays highlighted (F15). */
 const HIGHLIGHT_MS = 2400;
@@ -255,24 +256,49 @@ export function usePinboard(sessionId: string) {
    * The one exception is a drag in flight, which `useProposalDrag` holds on
    * screen so the card does not snap back for the round trip.
    */
-  const editProposal = useCallback(
-    (input: ProposalUpdateInput) =>
-      writeIntent(
-        (ack) => getSocket().emit('proposalUpdate', input, ack),
-        'That change was rejected',
-      ),
-    [],
-  );
+const editProposal = useCallback(
+  (input: ProposalUpdateInput) =>
+    writeIntent((ack) => {
+      const { proposals } = sessionStore_getState();
 
-  /** Remove a proposal you authored (F16). Server soft-deletes and broadcasts. */
-  const deleteProposal = useCallback(
-    (proposalId: string) =>
-      writeIntent(
-        (ack) => getSocket().emit('proposalDelete', { id: proposalId }, ack),
-        'That proposal could not be removed',
-      ),
-    [],
-  );
+      const existing = proposals.find((p) => p.id === input.id);
+      if (!existing) {
+        ack?.({ ok: false, error: 'Proposal not found' });
+        return;
+      }
+
+      const updated: BoardItem = {
+        ...existing,
+        ...input,
+      };
+
+      getSocket().emit('proposalUpdate', { proposal: updated }, ack);
+    }, 'That change was rejected'),
+  [],
+);
+
+const deleteProposal = useCallback(
+  (proposalId: string) =>
+    writeIntent((ack) => {
+      const { proposals } = sessionStore_getState();
+
+      const existing = proposals.find((p) => p.id === proposalId);
+      if (!existing) {
+        ack?.({ ok: false, error: 'Proposal not found' });
+        return;
+      }
+
+      getSocket().emit(
+        'proposalDelete',
+        {
+          proposalId,
+          questionId: existing.questionId,
+        },
+        ack
+      );
+    }, 'That proposal could not be removed'),
+  [],
+);
 
   return {
     board,

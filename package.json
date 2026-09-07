@@ -37,6 +37,7 @@
     "typescript-eslint": "^8.18.2"
   },
   "dependencies": {
+    "livekit-client": "^2.22.2",
     "lucide-react": "^1.41.0"
   }
 }

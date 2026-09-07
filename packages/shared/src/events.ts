@@ -51,6 +51,8 @@ export interface ClientToServerEvents {
   memberJoin(payload: { sessionId: string }, ack?: (res: WriteAck) => void): void;
   memberLeave(payload: { sessionId: string }, ack?: (res: WriteAck) => void): void;
   proposalCreate(payload: ProposalCreateInput, ack?: (res: WriteAck) => void): void;
+  proposalUpdate(payload: { proposal: BoardItem }, ack?: (res: WriteAck) => void): void;
+  proposalDelete(payload: { proposalId: string; questionId: string }, ack?: (res: WriteAck) => void): void;
 }
 
 //
