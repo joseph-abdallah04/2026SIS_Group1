@@ -24,6 +24,7 @@ export function ProfilePage() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +50,12 @@ export function ProfilePage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    // A second submit while one is already in flight would race the first's
+    // rollback: if the first request fails after the second's optimistic
+    // update has already landed, the failure handler would restore the
+    // pre-first-submit value and silently wipe the second, in-flight name.
+    if (saving) return;
+
     const parsed = updateProfileSchema.safeParse({ displayName });
     if (!parsed.success) {
       setValidationError(parsed.error.issues[0]?.message ?? 'Please check your display name');
@@ -58,6 +65,7 @@ export function ProfilePage() {
     setValidationError(null);
     setSaveError(null);
     setJustSaved(false);
+    setSaving(true);
 
     // Optimistic: the input already shows the new value; commit it as the
     // rollback target immediately rather than waiting on the network, then
@@ -75,6 +83,8 @@ export function ProfilePage() {
       setSavedDisplayName(previous);
       setDisplayName(previous);
       setSaveError(err instanceof ApiClientError ? err.message : 'Could not save your profile');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -135,9 +145,10 @@ export function ProfilePage() {
           {justSaved ? <span className="text-sm text-rt-primary-deep">Saved.</span> : null}
           <button
             type="submit"
+            disabled={saving}
             className="rounded-full bg-rt-secondary px-6 py-3 text-sm font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Save
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </form>

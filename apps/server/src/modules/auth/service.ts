@@ -134,6 +134,16 @@ export async function updateDisplayName(
   userId: string,
   displayName: UpdateProfileInput['displayName'],
 ): Promise<User> {
-  const user = await prisma.user.update({ where: { id: userId }, data: { displayName } });
-  return toPublicUser(user);
+  try {
+    const user = await prisma.user.update({ where: { id: userId }, data: { displayName } });
+    return toPublicUser(user);
+  } catch (err) {
+    // The account behind a still-valid JWT was deleted between the request
+    // arriving and this write — same 404 `getUserById` gives for a missing
+    // row, rather than a raw P2025 surfacing as a 500.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+      throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+    }
+    throw err;
+  }
 }

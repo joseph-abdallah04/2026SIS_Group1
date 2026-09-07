@@ -69,6 +69,33 @@ describe('ProfilePage', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument();
   });
 
+  it('disables Save and ignores a second submit while one is already in flight', async () => {
+    vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+    let resolveUpdate: (value: typeof USER) => void = () => {};
+    vi.mocked(authApi.updateProfile).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    const input = await screen.findByLabelText(/display name/i);
+    await user.clear(input);
+    // Enter submits the form directly, bypassing the Save button's own
+    // `disabled` attribute — this is the actual race a double-submit could
+    // come from, not just a second click on a disabled button.
+    await user.type(input, 'Bob{Enter}{Enter}');
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled());
+    expect(authApi.updateProfile).toHaveBeenCalledTimes(1);
+
+    resolveUpdate({ ...USER, displayName: 'Bob' });
+    await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled();
+  });
+
   it('saves successfully and shows a confirmation', async () => {
     vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
     vi.mocked(authApi.updateProfile).mockResolvedValue({ ...USER, displayName: 'Bob' });
