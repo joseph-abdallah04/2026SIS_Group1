@@ -29,13 +29,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
   const body = (await res.json().catch(() => null)) as
-    | (T & { error?: string; code?: string })
-    | null;
+    (T & { error?: string; code?: string }) | null;
   if (!res.ok) {
     if (body?.code && AUTH_FAILURE_CODES.has(body.code)) {
       redirectToLogin();
     }
-    throw new ApiClientError(res.status, body?.error ?? `Request failed (${res.status})`, body?.code);
+    throw new ApiClientError(
+      res.status,
+      body?.error ?? `Request failed (${res.status})`,
+      body?.code,
+    );
   }
   return body as T;
 }
@@ -46,4 +49,5 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(data) }),
   patch: <T>(path: string, data: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };

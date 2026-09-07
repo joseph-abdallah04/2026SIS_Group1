@@ -5,10 +5,12 @@
 import type {
   ProposalType as PrismaProposalType,
   QuestionStatus as PrismaQuestionStatus,
+  SessionStatus as PrismaSessionStatus,
 } from './generated/prisma/enums.js';
 import type {
   ProposalType as SharedProposalType,
   QuestionStatus as SharedQuestionStatus,
+  SessionStatus as SharedSessionStatus,
 } from '@roundtable/shared';
 
 type AssertEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
@@ -20,3 +22,7 @@ export const _questionStatusInSync: AssertEqual<PrismaQuestionStatus, SharedQues
 // Same guard for the pinboard's artifact kind (docs/06 Coordination Point 3 —
 // artifact shapes are shared between tools, pinboard, and assistant).
 export const _proposalTypeInSync: AssertEqual<PrismaProposalType, SharedProposalType> = true;
+
+// Same guard for Session.status (F04) — added alongside the `draft` value so
+// the two lists cannot silently diverge in either direction from here on.
+export const _sessionStatusInSync: AssertEqual<PrismaSessionStatus, SharedSessionStatus> = true;

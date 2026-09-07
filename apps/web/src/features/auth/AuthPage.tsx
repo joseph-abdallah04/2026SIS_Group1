@@ -1,14 +1,15 @@
 import { useState, type ButtonHTMLAttributes, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { loginSchema, signupSchema } from '@roundtable/shared/schemas';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { ApiClientError } from '../../lib/api';
-import { setToken } from '../../lib/auth';
+import { setToken, safeReturnPath } from '../../lib/auth';
+import { disconnectSocket } from '../../lib/socket';
 import { login, signup } from './api';
 
 const INPUT_CLASSES =
-  'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:outline-none';
+  'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none';
 
 const LABEL_CLASSES =
   'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
@@ -18,16 +19,13 @@ const LABEL_CLASSES =
  * `rounded-lg` for every other button in the app, and a `className` override
  * can't reliably win that fight (Tailwind resolves conflicting utilities like
  * `rounded-lg`/`rounded-full` by generation order, not DOM order). Uses the
- * existing gold `rt-secondary` token as the warm accent — no new colors.
+ * mustard `rt-secondary` token as the CTA — same gold as the rest of the app.
  */
-function SubmitButton({
-  children,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement>) {
+function SubmitButton({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="submit"
-      className="mt-2 w-full rounded-full bg-rt-secondary px-4 py-3 text-sm font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+      className="mt-2 w-full rounded-full bg-rt-secondary px-4 py-3 text-sm font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
       {...props}
     >
       {children}
@@ -35,7 +33,7 @@ function SubmitButton({
   );
 }
 
-function TabBar({ activeTab }: { activeTab: 'login' | 'signup' }) {
+function TabBar({ activeTab, nextQuery }: { activeTab: 'login' | 'signup'; nextQuery: string }) {
   const tabClasses = (tab: 'login' | 'signup') =>
     `pb-3 text-sm font-semibold border-b-2 transition-colors ${
       activeTab === tab
@@ -45,10 +43,10 @@ function TabBar({ activeTab }: { activeTab: 'login' | 'signup' }) {
 
   return (
     <div className="mb-6 flex gap-6 border-b border-rt-tertiary">
-      <Link to="/login" className={tabClasses('login')}>
+      <Link to={`/login${nextQuery}`} className={tabClasses('login')}>
         Log in
       </Link>
-      <Link to="/signup" className={tabClasses('signup')}>
+      <Link to={`/signup${nextQuery}`} className={tabClasses('signup')}>
         Sign up
       </Link>
     </div>
@@ -57,6 +55,7 @@ function TabBar({ activeTab }: { activeTab: 'login' | 'signup' }) {
 
 function LoginForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +75,10 @@ function LoginForm() {
     try {
       const { token } = await login(parsed.data);
       setToken(token);
-      navigate('/dashboard', { replace: true });
+      // Handshake identity is read once when the socket is created — drop any
+      // socket from a previous account before routing into the app.
+      disconnectSocket();
+      navigate(safeReturnPath(searchParams.get('next')), { replace: true });
     } catch (err) {
       setError(
         err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
@@ -119,15 +121,14 @@ function LoginForm() {
         </p>
       ) : null}
 
-      <SubmitButton disabled={submitting}>
-        {submitting ? 'Logging in…' : 'Log in'}
-      </SubmitButton>
+      <SubmitButton disabled={submitting}>{submitting ? 'Logging in…' : 'Log in'}</SubmitButton>
     </form>
   );
 }
 
 function SignupForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -148,7 +149,8 @@ function SignupForm() {
     try {
       const { token } = await signup(parsed.data);
       setToken(token);
-      navigate('/dashboard', { replace: true });
+      disconnectSocket();
+      navigate(safeReturnPath(searchParams.get('next')), { replace: true });
     } catch (err) {
       setError(
         err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
@@ -217,6 +219,10 @@ export interface AuthPageProps {
 }
 
 export function AuthPage({ activeTab }: AuthPageProps) {
+  const [searchParams] = useSearchParams();
+  const next = searchParams.get('next');
+  const nextQuery = next ? `?next=${encodeURIComponent(next)}` : '';
+
   return (
     <main className="grid min-h-screen md:grid-cols-2">
       <div className="flex flex-col justify-start gap-4 bg-rt-secondary-wash px-10 py-10 md:px-16 lg:px-24">
@@ -234,7 +240,7 @@ export function AuthPage({ activeTab }: AuthPageProps) {
 
       <div className="flex flex-col justify-center bg-rt-surface px-10 py-10 md:px-16 lg:px-24">
         <div className="w-full max-w-sm">
-          <TabBar activeTab={activeTab} />
+          <TabBar activeTab={activeTab} nextQuery={nextQuery} />
           {activeTab === 'login' ? <LoginForm /> : <SignupForm />}
         </div>
       </div>

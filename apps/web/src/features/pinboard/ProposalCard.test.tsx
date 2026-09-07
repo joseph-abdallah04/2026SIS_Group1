@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react';
-import { diagramNodeSize, type BoardItem, type DiagramNode } from '@roundtable/shared';
+import { render, screen } from '@testing-library/react';
+import type { BoardItem, DiagramNode } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
@@ -16,6 +16,7 @@ function diagramItem(nodes: DiagramNode[]): BoardItem {
     y: 0,
     createdAt: '2026-09-03T00:00:00.000Z',
     extendsProposalId: null,
+    reactions: [],
   };
 }
 
@@ -28,21 +29,24 @@ describe('diagram proposal card', () => {
           { id: 'container', label: 'Platform', x: 100, y: 0, shape: 'container' },
           { id: 'text', label: 'Architecture boundary', x: 200, y: 0, shape: 'text' },
         ])}
-        zoom={100}
       />,
     );
 
-    expect(container.querySelectorAll('g > rect')).toHaveLength(2);
+    // Box and container are stroked outlines; text is a bare label with no border.
+    expect(container.querySelectorAll('g > rect[stroke]')).toHaveLength(2);
     expect(container.querySelector('rect[stroke-dasharray="4 3"]')).not.toBeNull();
     const fittedText = [...container.querySelectorAll('text')].find(
       (element) => element.textContent === 'Architecture boundary',
     );
-    expect(fittedText?.getAttribute('textLength')).toBe(String(diagramNodeSize('text').width - 12));
+    // Diagram contract v2 wraps labels into bounded lines instead of squeezing
+    // them onto one line with textLength.
+    expect(fittedText?.getAttribute('textLength')).toBeNull();
+    expect(fittedText?.querySelectorAll('tspan')).toHaveLength(1);
   });
 
   it('renders a legacy node without shape as a box', () => {
     const { container } = render(
-      <ProposalCard item={diagramItem([{ id: 'legacy', label: 'Idea', x: 0, y: 0 }])} zoom={100} />,
+      <ProposalCard item={diagramItem([{ id: 'legacy', label: 'Idea', x: 0, y: 0 }])} />,
     );
 
     expect(container.querySelector('g > rect[rx="8"]')).not.toBeNull();
@@ -55,14 +59,38 @@ describe('diagram proposal card', () => {
     ]);
     if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
     item.artifactJson.edges = [{ from: 'client', to: 'server', label: 'calls' }];
-    const { container } = render(<ProposalCard item={item} zoom={100} />);
+    const { container } = render(<ProposalCard item={item} />);
 
-    const line = container.querySelector('line[marker-end]');
-    expect(line?.getAttribute('x1')).toBe('144');
-    expect(line?.getAttribute('x2')).toBe('300');
+    // Arrows are paths now, so a bowed reciprocal pair can share the same code
+    // as a straight one; the boundary anchors are unchanged.
+    const arrow = container.querySelector('path[marker-end]');
+    expect(arrow?.getAttribute('d')).toMatch(/^M144,/);
+    expect(arrow?.getAttribute('d')).toContain(' L300,');
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'calls'),
     ).toBe(true);
+  });
+
+  it('bows a reciprocal pair apart on the board card too', () => {
+    const item = diagramItem([
+      { id: 'a', label: 'A', x: 24, y: 24, shape: 'box' },
+      { id: 'b', label: 'B', x: 400, y: 24, shape: 'box' },
+    ]);
+    if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
+    item.artifactJson.edges = [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'a' },
+    ];
+    const { container } = render(<ProposalCard item={item} />);
+
+    // The card shares the editor's routing, so both directions stay readable
+    // instead of one arrow hiding under the other.
+    const paths = [...container.querySelectorAll('path[marker-end]')].map((path) =>
+      path.getAttribute('d'),
+    );
+    expect(paths).toHaveLength(2);
+    expect(paths.every((path) => path?.includes('Q'))).toBe(true);
+    expect(paths[0]).not.toBe(paths[1]);
   });
 
   it('renders the complete diagram rather than truncating after four nodes', () => {
@@ -77,11 +105,56 @@ describe('diagram proposal card', () => {
     );
     if (item.artifactJson.type !== 'diagram') throw new Error('Expected diagram fixture');
     item.artifactJson.edges = [{ from: 'n4', to: 'n5' }];
-    const { container } = render(<ProposalCard item={item} zoom={100} />);
+    const { container } = render(<ProposalCard item={item} />);
 
     expect(
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'Node 5'),
     ).toBe(true);
-    expect(container.querySelectorAll('line[marker-end]')).toHaveLength(1);
+    expect(container.querySelectorAll('path[marker-end]')).toHaveLength(1);
+  });
+});
+
+describe('card layout', () => {
+  // The artifact opens the card and the attribution closes it. The byline sits
+  // bottom-right, clear of both things the board draws over this card: the
+  // edit and remove controls on the top-right corner, and the reaction chips
+  // along the bottom-left.
+  it('leads with the artifact and signs off underneath it', () => {
+    const { container } = render(
+      <ProposalCard item={diagramItem([{ id: 'n1', label: 'Idea', x: 0, y: 0, shape: 'box' }])} />,
+    );
+
+    const article = container.querySelector('article');
+    expect(article?.firstElementChild?.querySelector('svg')).not.toBeNull();
+    expect(article?.lastElementChild?.tagName).toBe('FOOTER');
+  });
+
+  it('carries the author and the time in that footer', () => {
+    render(<ProposalCard item={diagramItem([])} />);
+
+    const footer = screen.getByText('Alice').closest('footer');
+    expect(footer).not.toBeNull();
+    expect(footer?.querySelector('time')?.getAttribute('datetime')).toBe(
+      '2026-09-03T00:00:00.000Z',
+    );
+  });
+
+  // The board draws the reaction chips over this card's bottom-left corner,
+  // reaching up into it. The byline's inset has to clear them, and it has to
+  // do so at a fixed size: a card that resized as chips came and went drew the
+  // eye to its own edges rather than to what was written on it.
+  it('keeps the same bottom inset whether or not it has reactions', () => {
+    const bare = render(<ProposalCard item={diagramItem([])} />);
+    const bareFooter = bare.container.querySelector('footer')?.className;
+    bare.unmount();
+
+    const reacted = render(
+      <ProposalCard
+        item={{ ...diagramItem([]), reactions: [{ emoji: '👍', userIds: ['someone'] }] }}
+      />,
+    );
+
+    expect(reacted.container.querySelector('footer')?.className).toBe(bareFooter);
+    expect(bareFooter).toContain('pb-3');
   });
 });

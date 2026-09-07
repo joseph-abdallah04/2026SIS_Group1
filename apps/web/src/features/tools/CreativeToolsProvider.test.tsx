@@ -25,7 +25,12 @@ function Harness({
 }: HarnessProps) {
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
-      <CreativeToolsProvider isLive={isLive} proposals={proposals} propose={propose}>
+      <CreativeToolsProvider
+        isLive={isLive}
+        proposals={proposals}
+        propose={propose}
+        editProposal={async () => {}}
+      >
         <CreativeToolbar />
         <CreativeStudio />
       </CreativeToolsProvider>
@@ -144,11 +149,17 @@ describe('creative sticky flow', () => {
       y: 32,
       createdAt: '2026-09-02T00:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     };
 
     render(
       <MemoryRouter initialEntries={['/sessions/demo']}>
-        <CreativeToolsProvider isLive proposals={[parent]} propose={propose}>
+        <CreativeToolsProvider
+          isLive
+          proposals={[parent]}
+          propose={propose}
+          editProposal={async () => {}}
+        >
           <ExtendButton proposal={parent} />
           <CreativeStudio />
         </CreativeToolsProvider>

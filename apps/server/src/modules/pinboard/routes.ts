@@ -1,41 +1,28 @@
-import { Router, type RequestHandler } from 'express';
+import { Router } from 'express';
 
-import { env } from '../../env.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { assertSessionMember } from '../sessions/index.js';
 import { getBoardForSession } from './service.js';
 
 export const pinboardRoutes = Router();
 
-// A session board is member-scoped data, so reading it must require an
-// authenticated member of that session (docs/02 §8.3). `requireAuth` now does
-// real JWT verification (F01/F02), but membership lives in the sessions
-// module and doesn't exist yet — so this only checks "some logged-in user",
-// not "a member of this session". Until membership lands the endpoint is
-// open in local dev only; in production it's behind real auth, but without
-// a membership check yet.
-//
-// TODO(F15/sessions): add a membership check via the sessions module's
-// public surface once it exists, and delete the dev branch.
-const DEV_OPEN_BOARD = env.NODE_ENV !== 'production';
-
-const requireBoardAccess: RequestHandler = DEV_OPEN_BOARD
-  ? (_req, _res, next) => next()
-  : requireAuth;
-
-if (DEV_OPEN_BOARD) {
-  console.warn(
-    '[pinboard] GET /api/sessions/:id/proposals is unauthenticated (development only)',
-  );
-}
-
 // docs/06 §6: pinboard owns `/api/sessions/:id/proposals*`; the sessions owner
 // owns the rest of `/api/sessions/:id`. Returns the whole board snapshot —
 // active question plus its proposals — so one request renders the page.
+//
+// A board is member-scoped data (docs/02 §8.3), so both halves of the check
+// now run for real: `requireAuth` establishes who is asking, and
+// `assertSessionMember` — reached through the sessions module's public surface
+// — establishes that they belong to this session. This used to be open in
+// development, back when neither half existed; a session id is a shareable URL
+// fragment rather than a secret, so being able to name one was never meant to
+// be enough on its own.
 pinboardRoutes.get<{ sessionId: string }>(
   '/:sessionId/proposals',
-  requireBoardAccess,
+  requireAuth,
   async (req, res, next) => {
     try {
+      await assertSessionMember(req.params.sessionId, req.userId!);
       const board = await getBoardForSession(req.params.sessionId);
       res.json(board);
     } catch (err) {
