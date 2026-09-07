@@ -10,7 +10,7 @@
 
 // Type-only, so the runtime import graph stays one-directional:
 // `studioElements` imports this module's palettes, and nothing comes back.
-import type { InkElement, PathElement } from './studioElements.js';
+import type { InkElement, PathElement, TableElement } from './studioElements.js';
 
 export type DiagramNodeShape =
   'box' | 'container' | 'text' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'cylinder';
@@ -725,6 +725,8 @@ export interface DiagramArtifact {
    * semantic: it takes no part in routing, layout or grouping.
    */
   paths?: PathElement[];
+  /** v4 tables: a grid of cells with explicit column widths and row heights. */
+  tables?: TableElement[];
   /**
    * v4 paint order, as element keys — node, ink and path ids, and `edgeKey`
    * strings

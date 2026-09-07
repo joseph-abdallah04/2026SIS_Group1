@@ -238,6 +238,57 @@ describe('studio path proposal card (v4)', () => {
   });
 });
 
+describe('studio table proposal card (v4)', () => {
+  const table = {
+    id: 'table-1',
+    x: 0,
+    y: 0,
+    colWidths: [96, 96],
+    rowHeights: [32, 32],
+    cells: [{ text: 'Idea' }, { text: 'Owner' }, { text: 'Search' }, { text: 'Ana' }],
+    headerRow: true,
+  };
+
+  function tableItem(artifact: Partial<Extract<BoardItem['artifactJson'], { type: 'diagram' }>>) {
+    return {
+      ...diagramItem([]),
+      artifactJson: { type: 'diagram' as const, nodes: [], edges: [], ...artifact },
+    };
+  }
+
+  it('draws every cell of a proposed table', () => {
+    const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
+    const texts = [...container.querySelectorAll('text')].map((node) => node.textContent);
+    expect(texts).toContain('Idea');
+    expect(texts).toContain('Ana');
+    // One rect per cell.
+    expect(container.querySelectorAll('rect')).toHaveLength(4);
+  });
+
+  it('frames a canvas that holds only a table', () => {
+    const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.border-dashed')).toBeNull();
+  });
+
+  it('tints the header row so it reads as a heading', () => {
+    const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
+    const fills = [...container.querySelectorAll('rect')].map((rect) => rect.getAttribute('fill'));
+    // The first row is tinted and the body is not.
+    expect(fills[0]).not.toBe(fills[2]);
+  });
+
+  it('honours a cell fill over the header tint', () => {
+    const filled = {
+      ...table,
+      cells: [{ text: 'Idea', fill: 'rose' as const }, {}, {}, {}],
+    };
+    const { container } = render(<ProposalCard item={tableItem({ tables: [filled] })} />);
+    const fills = [...container.querySelectorAll('rect')].map((rect) => rect.getAttribute('fill'));
+    expect(fills).toContain('#FAE0E0');
+  });
+});
+
 describe('card layout', () => {
   // The artifact opens the card and the attribution closes it. The byline sits
   // bottom-right, clear of both things the board draws over this card: the

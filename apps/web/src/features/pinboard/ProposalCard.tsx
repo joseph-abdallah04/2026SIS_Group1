@@ -16,6 +16,17 @@ import {
   pathStrokeWidth,
   pathSvgData,
   strokePathData,
+  TABLE_CELL_PADDING,
+  tableCellAt,
+  tableCellFill,
+  tableCellLines,
+  tableColCount,
+  tableColumnOffsets,
+  tableFontSize,
+  tableRowOffsets,
+  tableSize,
+  tableStrokeColor,
+  tableStrokeWidth,
   inkStrokeColor,
   inkStrokeWidth,
   studioPaintOrder,
@@ -107,22 +118,26 @@ function DiagramBody({ item }: { item: BoardItem }) {
   const { nodes, edges } = item.artifactJson;
   const ink = item.artifactJson.ink ?? [];
   const paths = item.artifactJson.paths ?? [];
+  const tables = item.artifactJson.tables ?? [];
   // Unpacked once per render: the extent needs every point, and so does each
   // stroke's path data.
   const unpackedInk = ink.map((stroke) => ({ ...stroke, points: inkPoints(stroke) }));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const inkById = new Map(unpackedInk.map((stroke) => [stroke.id, stroke]));
   const pathById = new Map(paths.map((path) => [path.id, path]));
+  const tableById = new Map(tables.map((table) => [table.id, table]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
   // The card frames whatever the artifact contains, so ink counts towards the
   // extent exactly as a node does — otherwise a sketch would be cropped.
   const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
   const allAnchors = paths.flatMap((path) => path.anchors);
+  const tableCorners = tables.map((table) => ({ table, size: tableSize(table) }));
   const svgWidth =
     Math.max(
       ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
       ...allInkPoints.map((point) => point.x),
       ...allAnchors.map((anchor) => anchor.x),
+      ...tableCorners.map(({ table, size }) => table.x + size.width),
       72,
     ) + 28;
   const svgHeight =
@@ -130,6 +145,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
       ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
       ...allInkPoints.map((point) => point.y),
       ...allAnchors.map((anchor) => anchor.y),
+      ...tableCorners.map(({ table, size }) => table.y + size.height),
       32,
     ) + 24;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
@@ -191,6 +207,77 @@ function DiagramBody({ item }: { item: BoardItem }) {
     );
   }
 
+  function renderTable(table: (typeof tables)[number]) {
+    const cols = tableColCount(table);
+    const colOffsets = tableColumnOffsets(table);
+    const rowOffsets = tableRowOffsets(table);
+    const fontSize = tableFontSize(table);
+    const lineHeight = fontSize * 1.25;
+    const stroke = tableStrokeColor(table);
+    const strokeWidth = tableStrokeWidth(table);
+
+    return (
+      <g key={table.id} transform={`translate(${table.x}, ${table.y})`}>
+        {table.cells.map((_, index) => {
+          const row = Math.floor(index / cols);
+          const col = index % cols;
+          const cell = tableCellAt(table, row, col);
+          const x = colOffsets[col] ?? 0;
+          const y = rowOffsets[row] ?? 0;
+          const width = table.colWidths[col] ?? 0;
+          const height = table.rowHeights[row] ?? 0;
+          const lines = tableCellLines(table, cell, col, row);
+          const align = cell?.align ?? 'left';
+          const textX =
+            align === 'center'
+              ? x + width / 2
+              : align === 'right'
+                ? x + width - TABLE_CELL_PADDING
+                : x + TABLE_CELL_PADDING;
+
+          return (
+            <g key={`${table.id}-${row}-${col}`}>
+              <rect
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill={tableCellFill(table, cell, row)}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+              />
+              <text
+                fill={DIAGRAM_LABEL_INK}
+                textAnchor={align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start'}
+                style={{
+                  fontSize: `${fontSize}px`,
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  fontWeight: table.headerRow && row === 0 ? 600 : 400,
+                }}
+              >
+                {lines.map((line, lineIndex) => (
+                  <tspan
+                    key={line + String(lineIndex)}
+                    x={textX}
+                    y={
+                      y +
+                      height / 2 +
+                      fontSize / 3 -
+                      ((lines.length - 1) * lineHeight) / 2 +
+                      lineIndex * lineHeight
+                    }
+                  >
+                    {line}
+                  </tspan>
+                ))}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+
   function renderInk(stroke: (typeof unpackedInk)[number]) {
     return (
       <path
@@ -249,7 +336,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
       className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg bg-rt-surface-alt"
       style={{ minHeight: 96 }}
     >
-      {nodes.length === 0 && ink.length === 0 && paths.length === 0 ? (
+      {nodes.length === 0 && ink.length === 0 && paths.length === 0 && tables.length === 0 ? (
         <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
       ) : (
         <svg
@@ -288,6 +375,10 @@ function DiagramBody({ item }: { item: BoardItem }) {
             if (ref.kind === 'path') {
               const path = pathById.get(ref.key);
               return path ? renderPath(path) : null;
+            }
+            if (ref.kind === 'table') {
+              const table = tableById.get(ref.key);
+              return table ? renderTable(table) : null;
             }
             const node = nodeById.get(ref.key);
             return node ? renderNode(node) : null;

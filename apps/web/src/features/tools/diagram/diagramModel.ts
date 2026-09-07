@@ -5,6 +5,7 @@ import type {
   DiagramNodeShape,
   DiagramNodeSize,
   PathElement,
+  TableElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_NODE_SHAPE_KEYS,
@@ -18,6 +19,7 @@ import {
   diagramIsAncestor,
   diagramNodeSize,
   effectiveDiagramNodeSize,
+  tableSize,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
@@ -875,6 +877,7 @@ function normalizationDelta(
   nodes: readonly DiagramNode[],
   ink: readonly StudioInkStroke[],
   paths: readonly PathElement[] = [],
+  tables: readonly TableElement[] = [],
 ): DiagramPoint {
   const xs: number[] = [];
   const ys: number[] = [];
@@ -903,6 +906,13 @@ function normalizationDelta(
       rights.push(anchor.x);
       bottoms.push(anchor.y);
     }
+  }
+  for (const table of tables) {
+    const size = tableSize(table);
+    xs.push(table.x);
+    ys.push(table.y);
+    rights.push(table.x + size.width);
+    bottoms.push(table.y + size.height);
   }
 
   if (xs.length === 0) return { x: 0, y: 0 };
@@ -935,10 +945,11 @@ export function prepareDiagram(
   ink: readonly StudioInkStroke[] = [],
   z: readonly string[] = [],
   paths: readonly PathElement[] = [],
+  tables: readonly TableElement[] = [],
 ): PreparedDiagram {
   // v4: a sketch is a legitimate studio artifact on its own, so "something to
   // propose" now means any element, not specifically a shape.
-  if (nodes.length === 0 && ink.length === 0 && paths.length === 0) {
+  if (nodes.length === 0 && ink.length === 0 && paths.length === 0 && tables.length === 0) {
     return { ok: false, error: 'Add an element or draw something before proposing.' };
   }
 
@@ -976,7 +987,7 @@ export function prepareDiagram(
 
   // Shapes and ink shift together, so a sketch drawn around a diagram stays
   // registered with it once the whole thing is framed for the board preview.
-  const delta = normalizationDelta(normalizedNodes, ink, paths);
+  const delta = normalizationDelta(normalizedNodes, ink, paths, tables);
   const shiftedNodes = normalizedNodes.map((node) => ({
     ...node,
     x: Math.round(node.x + delta.x),
@@ -1010,11 +1021,26 @@ export function prepareDiagram(
     })),
   }));
 
+  const tableIds = new Set(tables.map((table) => table.id));
+  if (
+    tableIds.size !== tables.length ||
+    tables.some((table) => nodeIds.has(table.id) || inkIds.has(table.id) || pathIds.has(table.id))
+  ) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  const shiftedTables = tables.map((table) => ({
+    ...table,
+    x: Math.round(table.x + delta.x),
+    y: Math.round(table.y + delta.y),
+  }));
+
   const known = new Set<string>([
     ...shiftedNodes.map((node) => node.id),
     ...normalizedEdges.map(edgeKey),
     ...inkIds,
     ...pathIds,
+    ...tableIds,
   ]);
   // Drop anything the order names that is no longer on the canvas — deleting an
   // element must not make the whole artifact unproposable.
@@ -1026,6 +1052,7 @@ export function prepareDiagram(
     edges: normalizedEdges,
     ...(shiftedInk.length > 0 ? { ink: shiftedInk } : {}),
     ...(shiftedPaths.length > 0 ? { paths: shiftedPaths } : {}),
+    ...(shiftedTables.length > 0 ? { tables: shiftedTables } : {}),
     ...(prunedOrder.length > 0 ? { z: prunedOrder } : {}),
   });
   if (!parsed.success) {

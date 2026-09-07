@@ -40,6 +40,7 @@ import {
   RotateCcw,
   RectangleHorizontal,
   Send,
+  Table,
   BringToFront,
   SendToBack,
   Trash2,
@@ -55,6 +56,7 @@ import {
 import type {
   PathAnchor,
   PathElement,
+  TableElement,
   DiagramEdge,
   DiagramFontSizePreset,
   DiagramNode,
@@ -91,6 +93,21 @@ import {
   pathFill,
   pathStrokeColor,
   pathHandlePoint,
+  TABLE_CELL_PADDING,
+  TABLE_CELL_TEXT_LIMIT,
+  tableCellAt,
+  tableCellFill,
+  tableCellLines,
+  tableColCount,
+  tableColumnOffsets,
+  tableFontSize,
+  tableRowOffsets,
+  tableSize,
+  tableStrokeColor,
+  tableStrokeWidth,
+  TABLE_CELL_ALIGNS,
+  TABLE_MAX_COLS,
+  TABLE_MAX_ROWS,
   pathStrokeWidth,
   pathSvgData,
   strokePathData,
@@ -171,6 +188,25 @@ import {
   type StudioInkStroke,
 } from '../studio/studioInk';
 import {
+  clampCellRef,
+  createTable,
+  deleteColumn,
+  deleteRow,
+  fillCellRange,
+  insertColumn,
+  insertRow,
+  alignCellRange,
+  clearCellRange,
+  isCellInRange,
+  moveTableSelection,
+  resizeColumn,
+  resizeRow,
+  setCell,
+  type CellRange,
+  type CellRef,
+  type TableNavKey,
+} from '../studio/studioTables';
+import {
   anchorAtPoint,
   moveAnchor,
   moveHandle,
@@ -192,7 +228,12 @@ import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates
  * by `draw`/`erase`: the ink tools only take over the canvas background, so a
  * node is still draggable while the pencil is held.
  */
-type CanvasTool = 'select' | 'draw' | 'erase' | 'pen' | 'line';
+type CanvasTool = 'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table';
+
+// The size picker offers a sensible span, not the whole allowed range: the
+// number inputs beside it reach the rest.
+const TABLE_PICKER_ROWS = 6;
+const TABLE_PICKER_COLS = 8;
 
 const CANVAS_TOOLS: {
   tool: CanvasTool;
@@ -219,6 +260,12 @@ const CANVAS_TOOLS: {
     label: 'Line',
     hint: 'Drag one straight line. Hold Shift for 45°',
     Icon: Minus,
+  },
+  {
+    tool: 'table',
+    label: 'Table',
+    hint: 'Choose a size, then click the canvas to place a table',
+    Icon: Table,
   },
 ];
 
@@ -517,6 +564,23 @@ export function DiagramEditor() {
   // An existing path being edited, and which of its anchors is in hand.
   const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
   const [selectedAnchor, setSelectedAnchor] = useState<number | null>(null);
+  // Table creation size, and which cell of which table is in hand.
+  const [tableRows, setTableRows] = useState(3);
+  const [tableCols, setTableCols] = useState(3);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [cellRange, setCellRange] = useState<CellRange | null>(null);
+  const [editingCell, setEditingCell] = useState<CellRef | null>(null);
+  const cellInputRef = useRef<HTMLInputElement>(null);
+  // Closing the editor unmounts the input, which fires its own blur. Without
+  // this flag that blur would commit the very text Escape just abandoned.
+  const cellEditCancelledRef = useRef(false);
+  const tableResizeRef = useRef<{
+    pointerId: number;
+    tableId: string;
+    axis: 'col' | 'row';
+    index: number;
+    previous: DiagramSnapshot;
+  } | null>(null);
   const pathEditRef = useRef<{
     pointerId: number;
     pathId: string;
@@ -580,6 +644,9 @@ export function DiagramEditor() {
   const inkById = new Map(ink.map((stroke) => [stroke.id, stroke]));
   const pathById = new Map(paths.map((path) => [path.id, path]));
   const selectedPath = selectedPathId ? (pathById.get(selectedPathId) ?? null) : null;
+  const tables = history.snapshot.tables ?? [];
+  const tableById = new Map(tables.map((table) => [table.id, table]));
+  const selectedTable = selectedTableId ? (tableById.get(selectedTableId) ?? null) : null;
   const edgeIndexByKey = new Map(edges.map((edge, index) => [edgeKey(edge), index]));
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
   // Routing is derived from the edge set, never stored: a reciprocal pair bows
@@ -632,6 +699,12 @@ export function DiagramEditor() {
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
+
+  useEffect(() => {
+    if (!editingCell) return;
+    cellInputRef.current?.focus();
+    cellInputRef.current?.select();
+  }, [editingCell]);
 
   function clearError() {
     setValidationError(null);
@@ -1240,6 +1313,131 @@ export function DiagramEditor() {
     return true;
   }
 
+  function replaceTable(next: TableElement | null, id: string) {
+    const graph = history.snapshotRef.current;
+    const current = graph.tables ?? [];
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      tables: next
+        ? current.map((table) => (table.id === id ? next : table))
+        : current.filter((table) => table.id !== id),
+      ...(next ? {} : graph.z ? { z: graph.z.filter((key) => key !== id) } : {}),
+    });
+  }
+
+  function clearTableSelection() {
+    setSelectedTableId(null);
+    setCellRange(null);
+    setEditingCell(null);
+  }
+
+  function placeTable(at: DiagramPoint) {
+    clearError();
+    const table = createTable(tableRows, tableCols, at);
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      tables: [...(graph.tables ?? []), table],
+      ...(graph.z ? { z: [...graph.z, table.id] } : {}),
+    });
+    setCanvasTool('select');
+    setSelectedTableId(table.id);
+    setCellRange({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } });
+    canvasRef.current?.focus({ preventScroll: true });
+  }
+
+  /** The one cell a keystroke acts on: the focus end of the current range. */
+  function activeCell(): CellRef | null {
+    return cellRange?.focus ?? null;
+  }
+
+  function selectCell(table: TableElement, row: number, col: number, extend: boolean) {
+    setSelectedTableId(table.id);
+    setSelectedIds([]);
+    setSelectedEdgeKey(null);
+    clearPathSelection();
+    setEditingCell(null);
+    setCellRange((current) =>
+      extend && current
+        ? { anchor: current.anchor, focus: { row, col } }
+        : {
+            anchor: { row, col },
+            focus: { row, col },
+          },
+    );
+  }
+
+  function commitCellText(table: TableElement, cell: CellRef, text: string) {
+    replaceTable(setCell(table, cell.row, cell.col, { text }), table.id);
+  }
+
+  function beginTableResize(
+    event: PointerEvent<SVGElement>,
+    table: TableElement,
+    axis: 'col' | 'row',
+    index: number,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(event.pointerId);
+    setSelectedTableId(table.id);
+    tableResizeRef.current = {
+      pointerId: event.pointerId,
+      tableId: table.id,
+      axis,
+      index,
+      previous: history.snapshotRef.current,
+    };
+  }
+
+  function updateTableResize(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = tableResizeRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+
+    const graph = history.snapshotRef.current;
+    const table = (graph.tables ?? []).find((current) => current.id === session.tableId);
+    if (!table) return true;
+
+    const point = surfacePoint(event);
+    // The boundary being dragged is measured from where its own track starts,
+    // so the neighbouring columns keep the widths their authors chose.
+    const next =
+      session.axis === 'col'
+        ? resizeColumn(
+            table,
+            session.index,
+            point.x - (table.x + (tableColumnOffsets(table)[session.index] ?? 0)),
+          )
+        : resizeRow(
+            table,
+            session.index,
+            point.y - (table.y + (tableRowOffsets(table)[session.index] ?? 0)),
+          );
+
+    history.preview({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      tables: (graph.tables ?? []).map((current) =>
+        current.id === session.tableId ? next : current,
+      ),
+    });
+    return true;
+  }
+
+  function endTableResize(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = tableResizeRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    tableResizeRef.current = null;
+    history.recordPreview(session.previous);
+    releaseCapture(event);
+    return true;
+  }
+
   function surfaceBounds() {
     const canvas = canvasRef.current;
     if (!canvas) return { left: 0, top: 0, width: 0, height: 0 };
@@ -1342,6 +1540,12 @@ export function DiagramEditor() {
       return;
     }
 
+    if (canvasTool === 'table') {
+      event.preventDefault();
+      placeTable(surfacePoint(event));
+      return;
+    }
+
     // The pen and line tools own a press on the canvas background.
     if (canvasTool === 'pen' || canvasTool === 'line') {
       event.preventDefault();
@@ -1390,6 +1594,7 @@ export function DiagramEditor() {
     }
 
     clearPathSelection();
+    clearTableSelection();
     const origin = surfacePoint(event);
     const base = event.shiftKey ? selectedIds : [];
     const session: MarqueeSession = {
@@ -1428,6 +1633,7 @@ export function DiagramEditor() {
     if (updatePan(event)) return;
     if (updateResize(event)) return;
     if (updatePathEdit(event)) return;
+    if (updateTableResize(event)) return;
 
     if (inkPointerRef.current === event.pointerId) {
       event.preventDefault();
@@ -1555,6 +1761,7 @@ export function DiagramEditor() {
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
     if (endPan(event)) return;
     if (endPathEdit(event)) return;
+    if (endTableResize(event)) return;
     if (endPath(event)) return;
     if (endResize(event)) return;
     if (endInk(event)) return;
@@ -1599,6 +1806,11 @@ export function DiagramEditor() {
     if (pathPointerRef.current === event.pointerId) {
       pathPointerRef.current = null;
       if (canvasTool === 'line') clearPathDraft();
+    }
+    const tableResize = tableResizeRef.current;
+    if (tableResize?.pointerId === event.pointerId) {
+      history.recordPreview(tableResize.previous);
+      tableResizeRef.current = null;
     }
     const pathEdit = pathEditRef.current;
     if (pathEdit?.pointerId === event.pointerId) {
@@ -1684,6 +1896,52 @@ export function DiagramEditor() {
       event.preventDefault();
       beginInlineNodeEdit(selectedNode);
       return;
+    }
+
+    // A selected table takes the navigation and typing keys first: inside a grid
+    // the arrows move between cells rather than nudging an element.
+    if (selectedTable && cellRange && !editingCell) {
+      const cell = activeCell();
+      const withModifier = event.ctrlKey || event.metaKey || event.altKey;
+      const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'];
+      if (cell && navKeys.includes(event.key) && !withModifier) {
+        event.preventDefault();
+        // Enter on a cell opens it for editing rather than moving on; Tab and
+        // the arrows move, which is how a spreadsheet behaves.
+        if (event.key === 'Enter') {
+          setEditingCell(cell);
+          return;
+        }
+        const next = moveTableSelection(
+          selectedTable,
+          cell,
+          event.key as TableNavKey,
+          event.shiftKey,
+        );
+        setCellRange(
+          event.shiftKey && event.key.startsWith('Arrow')
+            ? { anchor: cellRange.anchor, focus: next }
+            : { anchor: next, focus: next },
+        );
+        return;
+      }
+
+      if (cell && (event.key === 'Delete' || event.key === 'Backspace')) {
+        event.preventDefault();
+        replaceTable(clearCellRange(selectedTable, cellRange), selectedTable.id);
+        return;
+      }
+
+      // Typing replaces the cell, exactly as it does in a spreadsheet.
+      if (cell && !withModifier && event.key.length === 1) {
+        event.preventDefault();
+        replaceTable(
+          setCell(selectedTable, cell.row, cell.col, { text: event.key }),
+          selectedTable.id,
+        );
+        setEditingCell(cell);
+        return;
+      }
     }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -1833,6 +2091,7 @@ export function DiagramEditor() {
       graph.ink ?? [],
       graph.z ?? [],
       graph.paths ?? [],
+      graph.tables ?? [],
     );
     if (!prepared.ok) {
       setValidationError(prepared.error);
@@ -2036,6 +2295,217 @@ export function DiagramEditor() {
               </g>
             ))
           : null}
+      </g>
+    );
+  }
+
+  function renderTable(table: TableElement) {
+    const cols = tableColCount(table);
+    const colOffsets = tableColumnOffsets(table);
+    const rowOffsets = tableRowOffsets(table);
+    const size = tableSize(table);
+    const fontSize = tableFontSize(table);
+    const lineHeight = fontSize * 1.25;
+    const stroke = tableStrokeColor(table);
+    const strokeWidth = tableStrokeWidth(table);
+    const selected = selectedTableId === table.id;
+
+    return (
+      <g key={table.id} transform={`translate(${table.x}, ${table.y})`}>
+        {table.cells.map((_, index) => {
+          const row = Math.floor(index / cols);
+          const col = index % cols;
+          const cell = tableCellAt(table, row, col);
+          const x = colOffsets[col] ?? 0;
+          const y = rowOffsets[row] ?? 0;
+          const width = table.colWidths[col] ?? 0;
+          const height = table.rowHeights[row] ?? 0;
+          const lines = tableCellLines(table, cell, col, row);
+          const align = cell?.align ?? 'left';
+          const textX =
+            align === 'center'
+              ? x + width / 2
+              : align === 'right'
+                ? x + width - TABLE_CELL_PADDING
+                : x + TABLE_CELL_PADDING;
+          const inRange = cellRange ? isCellInRange(cellRange, row, col) : false;
+          const isEditing =
+            editingCell !== null && editingCell.row === row && editingCell.col === col;
+
+          return (
+            <g key={`${table.id}-${row}-${col}`}>
+              <rect
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill={tableCellFill(table, cell, row)}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+              />
+              {selected && inRange ? (
+                <rect
+                  x={x}
+                  y={y}
+                  width={width}
+                  height={height}
+                  fill="rgba(224,163,60,0.16)"
+                  pointerEvents="none"
+                />
+              ) : null}
+              {isEditing ? (
+                <foreignObject
+                  x={x + 1}
+                  y={y + 1}
+                  width={Math.max(10, width - 2)}
+                  height={Math.max(10, height - 2)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="flex h-full w-full items-center px-0.5">
+                    <input
+                      ref={cellInputRef}
+                      aria-label={`Cell row ${row + 1} column ${col + 1}`}
+                      defaultValue={cell?.text ?? ''}
+                      maxLength={TABLE_CELL_TEXT_LIMIT}
+                      onBlur={(event) => {
+                        if (cellEditCancelledRef.current) {
+                          cellEditCancelledRef.current = false;
+                          return;
+                        }
+                        commitCellText(table, { row, col }, event.target.value);
+                        setEditingCell(null);
+                      }}
+                      onKeyDown={(event) => {
+                        event.stopPropagation();
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          // Escape abandons the edit and keeps what was there.
+                          cellEditCancelledRef.current = true;
+                          setEditingCell(null);
+                          canvasRef.current?.focus({ preventScroll: true });
+                          return;
+                        }
+                        if (event.key === 'Enter' || event.key === 'Tab') {
+                          event.preventDefault();
+                          commitCellText(table, { row, col }, event.currentTarget.value);
+                          const next = moveTableSelection(
+                            table,
+                            { row, col },
+                            event.key as TableNavKey,
+                            event.shiftKey,
+                          );
+                          setEditingCell(null);
+                          setCellRange({ anchor: next, focus: next });
+                          canvasRef.current?.focus({ preventScroll: true });
+                        }
+                      }}
+                      className="h-full w-full rounded-sm border border-rt-primary-deep bg-white px-1 text-[11px] text-rt-ink outline-none select-text"
+                    />
+                  </div>
+                </foreignObject>
+              ) : (
+                <>
+                  <text
+                    fill={DIAGRAM_LABEL_INK}
+                    textAnchor={align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start'}
+                    style={{
+                      fontSize: `${fontSize}px`,
+                      fontFamily: 'Inter, system-ui, sans-serif',
+                      fontWeight: table.headerRow && row === 0 ? 600 : 400,
+                    }}
+                    pointerEvents="none"
+                  >
+                    {lines.map((line, lineIndex) => (
+                      <tspan
+                        key={line + String(lineIndex)}
+                        x={textX}
+                        y={
+                          y +
+                          height / 2 +
+                          fontSize / 3 -
+                          ((lines.length - 1) * lineHeight) / 2 +
+                          lineIndex * lineHeight
+                        }
+                      >
+                        {line}
+                      </tspan>
+                    ))}
+                  </text>
+                  {canvasTool === 'select' ? (
+                    <rect
+                      role="button"
+                      aria-label={`Cell row ${row + 1} column ${col + 1}`}
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      fill="transparent"
+                      className="cursor-cell"
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return;
+                        event.stopPropagation();
+                        canvasRef.current?.focus({ preventScroll: true });
+                        selectCell(table, row, col, event.shiftKey);
+                      }}
+                      onDoubleClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedTableId(table.id);
+                        setCellRange({ anchor: { row, col }, focus: { row, col } });
+                        setEditingCell({ row, col });
+                      }}
+                    />
+                  ) : null}
+                </>
+              )}
+            </g>
+          );
+        })}
+
+        {selected ? (
+          <>
+            <rect
+              x={-1}
+              y={-1}
+              width={size.width + 2}
+              height={size.height + 2}
+              fill="none"
+              stroke={SELECTION_ACCENT}
+              strokeWidth={1.5}
+              pointerEvents="none"
+            />
+            {/* Drag a boundary to resize the track before it. The grab strip is
+                wider than the line so it can actually be hit. */}
+            {table.colWidths.map((_, col) => (
+              <rect
+                key={`col-grip-${col}`}
+                role="button"
+                aria-label={`Resize column ${col + 1}`}
+                x={(colOffsets[col + 1] ?? 0) - 3}
+                y={0}
+                width={6}
+                height={size.height}
+                fill="transparent"
+                className="cursor-col-resize"
+                onPointerDown={(event) => beginTableResize(event, table, 'col', col)}
+              />
+            ))}
+            {table.rowHeights.map((_, row) => (
+              <rect
+                key={`row-grip-${row}`}
+                role="button"
+                aria-label={`Resize row ${row + 1}`}
+                x={0}
+                y={(rowOffsets[row + 1] ?? 0) - 3}
+                width={size.width}
+                height={6}
+                fill="transparent"
+                className="cursor-row-resize"
+                onPointerDown={(event) => beginTableResize(event, table, 'row', row)}
+              />
+            ))}
+          </>
+        ) : null}
       </g>
     );
   }
@@ -2380,6 +2850,179 @@ export function DiagramEditor() {
               ))}
             </div>
           </fieldset>
+        ) : null}
+
+        {canvasTool === 'table' ? (
+          <fieldset className="mb-4">
+            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              New table
+            </legend>
+            {/* The grid is the quick way to pick a size; the two number inputs
+                beside it are the same choice for anyone not using a pointer. */}
+            <div
+              className="mt-2 grid gap-0.5"
+              style={{ gridTemplateColumns: `repeat(${TABLE_PICKER_COLS}, minmax(0, 1fr))` }}
+            >
+              {Array.from({ length: TABLE_PICKER_ROWS * TABLE_PICKER_COLS }, (_, index) => {
+                const row = Math.floor(index / TABLE_PICKER_COLS) + 1;
+                const col = (index % TABLE_PICKER_COLS) + 1;
+                const covered = row <= tableRows && col <= tableCols;
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    aria-label={`${row} by ${col} table`}
+                    onPointerEnter={() => {
+                      setTableRows(row);
+                      setTableCols(col);
+                    }}
+                    onClick={() => {
+                      setTableRows(row);
+                      setTableCols(col);
+                    }}
+                    className={`aspect-square rounded-[2px] border ${
+                      covered
+                        ? 'border-rt-primary bg-rt-primary-tint'
+                        : 'border-rt-tertiary bg-rt-surface'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
+                Rows
+                <input
+                  type="number"
+                  min={1}
+                  max={TABLE_MAX_ROWS}
+                  value={tableRows}
+                  onChange={(event) =>
+                    setTableRows(Math.max(1, Math.min(TABLE_MAX_ROWS, Number(event.target.value))))
+                  }
+                  className="w-full rounded border border-rt-tertiary px-1 py-0.5 text-[11px]"
+                />
+              </label>
+              <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
+                Cols
+                <input
+                  type="number"
+                  min={1}
+                  max={TABLE_MAX_COLS}
+                  value={tableCols}
+                  onChange={(event) =>
+                    setTableCols(Math.max(1, Math.min(TABLE_MAX_COLS, Number(event.target.value))))
+                  }
+                  className="w-full rounded border border-rt-tertiary px-1 py-0.5 text-[11px]"
+                />
+              </label>
+            </div>
+            <p className="mt-1.5 text-[10px] text-rt-ink-faint">
+              {tableRows} × {tableCols} — click the canvas to place it
+            </p>
+          </fieldset>
+        ) : null}
+
+        {selectedTable && cellRange ? (
+          <section className="mt-4" aria-label="Table">
+            <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Table
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  replaceTable(insertRow(selectedTable, cellRange.focus.row + 1), selectedTable.id)
+                }
+              >
+                Row below
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  replaceTable(
+                    insertColumn(selectedTable, cellRange.focus.col + 1),
+                    selectedTable.id,
+                  )
+                }
+              >
+                Column right
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const next = deleteRow(selectedTable, cellRange.focus.row);
+                  replaceTable(next, selectedTable.id);
+                  const clamped = clampCellRef(next, cellRange.focus);
+                  setCellRange({ anchor: clamped, focus: clamped });
+                }}
+              >
+                Delete row
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const next = deleteColumn(selectedTable, cellRange.focus.col);
+                  replaceTable(next, selectedTable.id);
+                  const clamped = clampCellRef(next, cellRange.focus);
+                  setCellRange({ anchor: clamped, focus: clamped });
+                }}
+              >
+                Delete column
+              </Button>
+            </div>
+
+            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Cell fill
+            </p>
+            <div className="mt-2 grid grid-cols-8 gap-1.5">
+              {DIAGRAM_FILL_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`${key} cell fill`}
+                  color={DIAGRAM_FILL_COLORS[key]}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id)
+                  }
+                />
+              ))}
+              <IconButton
+                label="Clear cell fill"
+                className="h-full w-full"
+                onClick={() =>
+                  replaceTable(fillCellRange(selectedTable, cellRange, null), selectedTable.id)
+                }
+              >
+                <X aria-hidden="true" size={13} />
+              </IconButton>
+            </div>
+
+            <div className="mt-2 flex gap-1.5">
+              {TABLE_CELL_ALIGNS.map((align) => (
+                <PresetButton
+                  key={align}
+                  label={align[0]!.toUpperCase()}
+                  name={`Align ${align}`}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(alignCellRange(selectedTable, cellRange, align), selectedTable.id)
+                  }
+                />
+              ))}
+              <PresetButton
+                label="H"
+                name={selectedTable.headerRow ? 'Turn header row off' : 'Turn header row on'}
+                active={Boolean(selectedTable.headerRow)}
+                onSelect={() =>
+                  replaceTable(
+                    { ...selectedTable, headerRow: !selectedTable.headerRow },
+                    selectedTable.id,
+                  )
+                }
+              />
+            </div>
+          </section>
         ) : null}
 
         <fieldset>
@@ -3068,6 +3711,10 @@ export function DiagramEditor() {
             if (ref.kind === 'path') {
               const path = pathById.get(ref.key);
               return path ? renderPath(path) : null;
+            }
+            if (ref.kind === 'table') {
+              const table = tableById.get(ref.key);
+              return table ? renderTable(table) : null;
             }
             const node = nodeById.get(ref.key);
             return node ? renderNode(node) : null;

@@ -1,4 +1,4 @@
-import type { DiagramEdge, DiagramNode, PathElement } from '@roundtable/shared';
+import type { DiagramEdge, DiagramNode, PathElement, TableElement } from '@roundtable/shared';
 
 import type { StudioInkStroke } from '../studio/studioInk';
 
@@ -12,6 +12,7 @@ export interface DiagramSnapshot {
    */
   ink?: StudioInkStroke[];
   paths?: PathElement[];
+  tables?: TableElement[];
   z?: string[];
 }
 
@@ -45,6 +46,16 @@ function cloneSnapshot(snapshot: DiagramSnapshot): DiagramSnapshot {
           })),
         }
       : {}),
+    ...(snapshot.tables
+      ? {
+          tables: snapshot.tables.map((table) => ({
+            ...table,
+            colWidths: [...table.colWidths],
+            rowHeights: [...table.rowHeights],
+            cells: table.cells.map((cell) => ({ ...cell })),
+          })),
+        }
+      : {}),
     ...(snapshot.z ? { z: [...snapshot.z] } : {}),
   };
 }
@@ -63,6 +74,7 @@ export function diagramSnapshotKey(snapshot: DiagramSnapshot): string {
     edges: snapshot.edges,
     ink: snapshot.ink ?? [],
     paths: snapshot.paths ?? [],
+    tables: snapshot.tables ?? [],
     z: snapshot.z ?? [],
   });
 }

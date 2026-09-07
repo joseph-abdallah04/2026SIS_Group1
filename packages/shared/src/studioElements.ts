@@ -17,11 +17,17 @@ import { packDrawingPoints, unpackDrawingPoints, type StrokePoint } from './draw
 import {
   DIAGRAM_EDGE_STROKE_WIDTHS,
   DIAGRAM_FILL_COLORS,
+  DIAGRAM_FONT_SIZES,
+  DIAGRAM_LEGACY_FONT_SIZE,
+  DIAGRAM_NODE_STROKE_WIDTHS,
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
+  wrapDiagramLabel,
   type DiagramEdge,
   type DiagramFillKey,
+  type DiagramFontSizePreset,
   type DiagramNode,
+  type DiagramNodeSize,
   type DiagramStrokeKey,
   type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
@@ -252,9 +258,194 @@ export function mirroredAnchorHandles(handle: PathHandle): Pick<PathAnchor, 'in'
 export const DIAGRAM_PATH_LIMIT = 100;
 export const DIAGRAM_PATH_ANCHOR_LIMIT = 100;
 
+// --- Tables ---------------------------------------------------------------
+//
+// A table is a grid of cells with explicit column widths and row heights, so a
+// resized column is representable rather than derived. Cells are stored
+// row-major in one flat array whose length is exactly rows × columns: a sparse
+// map would be smaller for an empty table and worse for every other one, and a
+// flat array makes "is this grid well-formed" a single check at the boundary.
+
+export type TableCellAlign = 'left' | 'center' | 'right';
+
+export const TABLE_CELL_ALIGNS = [
+  'left',
+  'center',
+  'right',
+] as const satisfies readonly TableCellAlign[];
+
+export interface TableCell {
+  text?: string;
+  fill?: DiagramFillKey;
+  align?: TableCellAlign;
+}
+
+export interface TableElement {
+  id: string;
+  x: number;
+  y: number;
+  /** Widths and heights double as the grid's dimensions. */
+  colWidths: number[];
+  rowHeights: number[];
+  /** Row-major, exactly `rowHeights.length * colWidths.length` entries. */
+  cells: TableCell[];
+  /** Draws the first row as a heading: heavier weight over a tinted fill. */
+  headerRow?: boolean;
+  strokeColor?: DiagramStrokeKey;
+  strokeWidthPreset?: DiagramStrokeWidthPreset;
+  fontSizePreset?: DiagramFontSizePreset;
+}
+
+export const TABLE_DEFAULT_COL_WIDTH = 96;
+export const TABLE_DEFAULT_ROW_HEIGHT = 32;
+
+// A table has to stay legible once the sheet is scaled into a 300px board card,
+// which is what sets the lower bounds; the upper ones keep one table from
+// covering the whole canvas.
+export const TABLE_MIN_COL_WIDTH = 40;
+export const TABLE_MAX_COL_WIDTH = 400;
+export const TABLE_MIN_ROW_HEIGHT = 24;
+export const TABLE_MAX_ROW_HEIGHT = 200;
+
+export const TABLE_MAX_ROWS = 20;
+export const TABLE_MAX_COLS = 12;
+export const TABLE_CELL_TEXT_LIMIT = 200;
+export const DIAGRAM_TABLE_LIMIT = 20;
+
+export const TABLE_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'grey';
+export const TABLE_DEFAULT_STROKE_WIDTH: DiagramStrokeWidthPreset = 'thin';
+
+export function tableRowCount(table: Pick<TableElement, 'rowHeights'>): number {
+  return table.rowHeights.length;
+}
+
+export function tableColCount(table: Pick<TableElement, 'colWidths'>): number {
+  return table.colWidths.length;
+}
+
+/** Row-major index of a cell, or -1 when it is outside the grid. */
+export function tableCellIndex(
+  table: Pick<TableElement, 'colWidths' | 'rowHeights'>,
+  row: number,
+  col: number,
+): number {
+  const rows = tableRowCount(table);
+  const cols = tableColCount(table);
+  if (row < 0 || col < 0 || row >= rows || col >= cols) return -1;
+  return row * cols + col;
+}
+
+export function tableCellAt(
+  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells'>,
+  row: number,
+  col: number,
+): TableCell | null {
+  const index = tableCellIndex(table, row, col);
+  return index === -1 ? null : (table.cells[index] ?? null);
+}
+
+/** Running offsets down each axis, with a final entry for the far edge. */
+function offsets(sizes: readonly number[]): number[] {
+  const result = [0];
+  for (const size of sizes) result.push(result[result.length - 1]! + size);
+  return result;
+}
+
+export function tableColumnOffsets(table: Pick<TableElement, 'colWidths'>): number[] {
+  return offsets(table.colWidths);
+}
+
+export function tableRowOffsets(table: Pick<TableElement, 'rowHeights'>): number[] {
+  return offsets(table.rowHeights);
+}
+
+export function tableSize(table: Pick<TableElement, 'colWidths' | 'rowHeights'>): DiagramNodeSize {
+  return {
+    width: table.colWidths.reduce((total, width) => total + width, 0),
+    height: table.rowHeights.reduce((total, height) => total + height, 0),
+  };
+}
+
+export function tableStrokeColor(table: Pick<TableElement, 'strokeColor'>): string {
+  return DIAGRAM_STROKE_COLORS[table.strokeColor ?? TABLE_DEFAULT_STROKE_COLOR];
+}
+
+/** Grid lines use the node width scale: they are borders, not arrows. */
+export function tableStrokeWidth(table: Pick<TableElement, 'strokeWidthPreset'>): number {
+  return DIAGRAM_NODE_STROKE_WIDTHS[table.strokeWidthPreset ?? TABLE_DEFAULT_STROKE_WIDTH];
+}
+
+export function tableFontSize(table: Pick<TableElement, 'fontSizePreset'>): number {
+  return table.fontSizePreset ? DIAGRAM_FONT_SIZES[table.fontSizePreset] : DIAGRAM_LEGACY_FONT_SIZE;
+}
+
+/** Header cells sit on a tint so the first row reads as a heading. */
+export const TABLE_HEADER_FILL: DiagramFillKey = 'neutral';
+
+export function tableCellFill(
+  table: Pick<TableElement, 'headerRow'>,
+  cell: TableCell | null,
+  row: number,
+): string {
+  if (cell?.fill) return DIAGRAM_FILL_COLORS[cell.fill];
+  if (table.headerRow && row === 0) return DIAGRAM_FILL_COLORS[TABLE_HEADER_FILL];
+  return DIAGRAM_FILL_COLORS.surface;
+}
+
+/** Padding either side of cell text, in table units. */
+export const TABLE_CELL_PADDING = 6;
+
+/**
+ * The lines of a cell's text, wrapped to its column and clipped to its row.
+ *
+ * Reuses the diagram's label wrapper so a table, a node label and a board card
+ * all break text the same way and at the same measured-free glyph ratio.
+ */
+export function tableCellLines(
+  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'fontSizePreset'>,
+  cell: TableCell | null,
+  col: number,
+  row: number,
+): string[] {
+  const text = cell?.text?.trim();
+  if (!text) return [];
+  const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
+  const height = table.rowHeights[row] ?? TABLE_DEFAULT_ROW_HEIGHT;
+  const fontSize = tableFontSize(table);
+  const lineHeight = fontSize * 1.25;
+  const maxLines = Math.max(1, Math.floor((height - 2) / lineHeight));
+  return wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, maxLines);
+}
+
+/** How tall a row needs to be for its tallest cell's wrapped text to fit. */
+export function tableAutoRowHeight(
+  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset'>,
+  row: number,
+): number {
+  const fontSize = tableFontSize(table);
+  const lineHeight = fontSize * 1.25;
+  let lines = 1;
+  for (let col = 0; col < tableColCount(table); col += 1) {
+    const cell = tableCellAt(table, row, col);
+    const text = cell?.text?.trim();
+    if (!text) continue;
+    const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
+    // Wrapped against a tall row so the count is what the text needs, not what
+    // the row currently allows.
+    lines = Math.max(
+      lines,
+      wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, TABLE_MAX_ROWS).length,
+    );
+  }
+  return Math.min(
+    TABLE_MAX_ROW_HEIGHT,
+    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(lines * lineHeight + 10)),
+  );
+}
+
 // --- Paint order ----------------------------------------------------------
 
-export type StudioElementKind = 'node' | 'edge' | 'ink' | 'path';
+export type StudioElementKind = 'node' | 'edge' | 'ink' | 'path' | 'table';
 
 export interface StudioElementRef {
   kind: StudioElementKind;
@@ -279,6 +470,7 @@ interface PaintableArtifact {
   /** Only the ids are needed, so the editor's unpacked strokes fit too. */
   ink?: readonly { id: string }[];
   paths?: readonly { id: string }[];
+  tables?: readonly { id: string }[];
   z?: readonly string[];
 }
 
@@ -303,6 +495,7 @@ export function studioPaintOrder(artifact: PaintableArtifact): StudioElementRef[
     })),
     ...(artifact.ink ?? []).map((stroke) => ({ kind: 'ink' as const, key: stroke.id })),
     ...(artifact.paths ?? []).map((path) => ({ kind: 'path' as const, key: path.id })),
+    ...(artifact.tables ?? []).map((table) => ({ kind: 'table' as const, key: table.id })),
   ];
 
   const order = artifact.z;

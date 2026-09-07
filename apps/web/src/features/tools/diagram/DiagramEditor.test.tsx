@@ -2376,3 +2376,227 @@ describe('studio path editing', () => {
     expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
   });
 });
+
+describe('studio tables', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  /** Pick a size, drop a table on the canvas, and land back on the select tool. */
+  async function placeTable(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+    size = '3 by 3 table',
+  ) {
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: size }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 200, clientY: 200 });
+  }
+
+  it('places a table of the chosen size and proposes its grid', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 400, '2 by 4 table');
+    expect(screen.getByRole('button', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.rowHeights).toHaveLength(2);
+    expect(table.colWidths).toHaveLength(4);
+    expect(table.cells).toHaveLength(8);
+    expect(proposalCreateSchema.safeParse(propose.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('proposes a canvas holding nothing but a table', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 405);
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.nodes).toHaveLength(0);
+    expect(artifact.tables).toHaveLength(1);
+  });
+
+  it('types into the selected cell and moves on with Tab', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 410);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.keyboard('Q');
+    // Typing opens the cell for editing with that character already in it.
+    const input = screen.getByRole('textbox', { name: 'Cell row 1 column 1' });
+    await user.clear(input);
+    await user.type(input, 'Question{Tab}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells[0]!.text).toBe('Question');
+  });
+
+  it('opens a cell for editing on Enter and commits it on Enter again', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 415);
+    await user.click(screen.getByRole('button', { name: 'Cell row 2 column 2' }));
+    await user.keyboard('{Enter}');
+
+    const input = screen.getByRole('textbox', { name: 'Cell row 2 column 2' });
+    await user.type(input, 'Middle{Enter}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    // Row 2, column 2 of a 3x3 grid is index 4.
+    expect(table.cells[4]!.text).toBe('Middle');
+  });
+
+  it('abandons an edit on Escape and keeps what was there', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 420);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.keyboard('{Enter}');
+    await user.type(screen.getByRole('textbox', { name: 'Cell row 1 column 1' }), 'draft{Escape}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells[0]!.text).toBeUndefined();
+  });
+
+  it('adds and removes rows from the inspector', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 425);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.click(screen.getByRole('button', { name: 'Row below' }));
+    expect(screen.getByRole('button', { name: 'Cell row 4 column 1' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete row' }));
+    expect(screen.queryByRole('button', { name: 'Cell row 4 column 1' })).toBeNull();
+  });
+
+  it('adds a column and keeps every row the same length', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 430);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.click(screen.getByRole('button', { name: 'Column right' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.colWidths).toHaveLength(4);
+    expect(table.cells).toHaveLength(table.rowHeights.length * table.colWidths.length);
+  });
+
+  it('fills a shift-selected block of cells in one go', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 435);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Cell row 2 column 2' }), {
+      button: 0,
+      pointerId: 436,
+      shiftKey: true,
+    });
+    await user.click(screen.getByRole('button', { name: 'blue cell fill' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    // A 2x2 block of a 3-wide grid: indices 0, 1, 3, 4.
+    expect(table.cells[0]!.fill).toBe('blue');
+    expect(table.cells[4]!.fill).toBe('blue');
+    expect(table.cells[2]!.fill).toBeUndefined();
+  });
+
+  it('resizes a column by dragging its boundary, in one undo step', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 440);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize column 1' }), {
+      button: 0,
+      pointerId: 445,
+      clientX: 296,
+      clientY: 220,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 445, clientX: 360, clientY: 220 });
+    fireEvent.pointerUp(canvas, { pointerId: 445, clientX: 360, clientY: 220 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.colWidths[0]).toBeGreaterThan(96);
+    expect(table.colWidths[1]).toBe(96);
+  });
+
+  it('undoes a whole table in one step', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await placeTable(user, canvas, 450);
+    expect(screen.getByRole('button', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.queryByRole('button', { name: 'Cell row 1 column 1' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+  });
+});

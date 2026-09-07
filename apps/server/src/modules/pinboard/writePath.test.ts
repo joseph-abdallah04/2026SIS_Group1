@@ -696,4 +696,90 @@ describe('proposalCreate handler', () => {
       expect(create).not.toHaveBeenCalled();
     });
   });
+
+  describe('studio tables (v4)', () => {
+    function studio(artifact: Record<string, unknown>) {
+      return {
+        type: 'diagram',
+        artifactJson: { type: 'diagram', nodes: [], edges: [], ...artifact },
+        x: 0,
+        y: 0,
+      } as Parameters<typeof createProposal>[0]['input'];
+    }
+
+    const table = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id,
+      x: 0,
+      y: 0,
+      colWidths: [96, 96],
+      rowHeights: [32, 32],
+      cells: [{}, {}, {}, {}],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('accepts a well-formed table', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(studio({ tables: [table('table-1')] }))).toMatchObject({ ok: true });
+    });
+
+    it('rejects a grid whose cells do not match its rows and columns', async () => {
+      // Every reader would disagree about which cell belongs where.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ tables: [table('table-1', { cells: [{}, {}, {}] })] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a column narrower than the bounds allow', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ tables: [table('table-1', { colWidths: [1, 96] })] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a raw colour smuggled into a cell', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            tables: [table('table-1', { cells: [{ fill: '#ff0000' }, {}, {}, {}] })],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a table that reuses a node id', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24 }],
+            tables: [table('n1')],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a grid with more columns than the contract allows', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const wide = table('table-1', {
+        colWidths: Array.from({ length: 40 }, () => 96),
+        rowHeights: [32],
+        cells: Array.from({ length: 40 }, () => ({})),
+      });
+      expect(await propose(studio({ tables: [wide] }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
 });

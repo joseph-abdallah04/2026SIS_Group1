@@ -27,6 +27,15 @@ import {
   DIAGRAM_INK_POINT_LIMIT,
   DIAGRAM_PATH_ANCHOR_LIMIT,
   DIAGRAM_PATH_LIMIT,
+  DIAGRAM_TABLE_LIMIT,
+  TABLE_CELL_ALIGNS,
+  TABLE_CELL_TEXT_LIMIT,
+  TABLE_MAX_COLS,
+  TABLE_MAX_COL_WIDTH,
+  TABLE_MAX_ROWS,
+  TABLE_MAX_ROW_HEIGHT,
+  TABLE_MIN_COL_WIDTH,
+  TABLE_MIN_ROW_HEIGHT,
   DIAGRAM_Z_LIMIT,
   diagramEdgeKey,
 } from './studioElements.js';
@@ -244,6 +253,33 @@ export const pathElementSchema = z.object({
   fillColor: diagramFillKeySchema.optional(),
 });
 
+export const tableCellSchema = z.object({
+  text: z.string().max(TABLE_CELL_TEXT_LIMIT).optional(),
+  fill: diagramFillKeySchema.optional(),
+  align: z.enum(TABLE_CELL_ALIGNS).optional(),
+});
+
+// v4 tables. The cell array's length against the grid's dimensions is a write
+// invariant rather than a shape rule, since it spans three fields.
+export const tableElementSchema = z.object({
+  id: z.string().min(1),
+  x: z.number(),
+  y: z.number(),
+  colWidths: z
+    .array(z.number().min(TABLE_MIN_COL_WIDTH).max(TABLE_MAX_COL_WIDTH))
+    .min(1)
+    .max(TABLE_MAX_COLS),
+  rowHeights: z
+    .array(z.number().min(TABLE_MIN_ROW_HEIGHT).max(TABLE_MAX_ROW_HEIGHT))
+    .min(1)
+    .max(TABLE_MAX_ROWS),
+  cells: z.array(tableCellSchema).max(TABLE_MAX_ROWS * TABLE_MAX_COLS),
+  headerRow: z.boolean().optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
+});
+
 /**
  * Reading is deliberately more forgiving than writing.
  *
@@ -276,6 +312,19 @@ const diagramReadEdgeSchema = diagramEdgeSchema.extend({
   strokeStyle: lenient(diagramStrokeStyleSchema),
 });
 
+const diagramReadTableSchema = tableElementSchema.extend({
+  cells: z.array(
+    tableCellSchema.extend({
+      fill: lenient(diagramFillKeySchema),
+      align: lenient(z.enum(TABLE_CELL_ALIGNS)),
+    }),
+  ),
+  headerRow: lenient(z.boolean()),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  fontSizePreset: lenient(diagramFontSizePresetSchema),
+});
+
 const diagramReadPathSchema = pathElementSchema.extend({
   closed: lenient(z.boolean()),
   strokeColor: lenient(diagramStrokeKeySchema),
@@ -299,6 +348,7 @@ export const diagramArtifactSchema = z.object({
   // rather than failing the parse and taking the whole board down.
   ink: z.array(diagramReadInkSchema).max(DIAGRAM_INK_LIMIT).optional().catch(undefined),
   paths: z.array(diagramReadPathSchema).max(DIAGRAM_PATH_LIMIT).optional().catch(undefined),
+  tables: z.array(diagramReadTableSchema).max(DIAGRAM_TABLE_LIMIT).optional().catch(undefined),
   z: z.array(z.string()).max(DIAGRAM_Z_LIMIT).optional().catch(undefined),
 });
 
@@ -309,13 +359,14 @@ const diagramStrictArtifactSchema = z.object({
   edges: z.array(diagramEdgeSchema).max(200),
   ink: z.array(inkElementSchema).max(DIAGRAM_INK_LIMIT).optional(),
   paths: z.array(pathElementSchema).max(DIAGRAM_PATH_LIMIT).optional(),
+  tables: z.array(tableElementSchema).max(DIAGRAM_TABLE_LIMIT).optional(),
   z: z.array(z.string().min(1)).max(DIAGRAM_Z_LIMIT).optional(),
 });
 
 export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefine(
   // `z` is destructured under another name: it would otherwise shadow the zod
   // import for the whole refinement.
-  ({ nodes, edges, ink, paths, z: paintOrder }, context) => {
+  ({ nodes, edges, ink, paths, tables, z: paintOrder }, context) => {
     const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
 
     nodes.forEach((node, index) => {
@@ -478,8 +529,37 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
       }
     });
 
+    const tableIds = new Set<string>();
+    (tables ?? []).forEach((table, index) => {
+      if (
+        tableIds.has(table.id) ||
+        nodeIds.has(table.id) ||
+        edgeKeys.has(table.id) ||
+        inkIds.has(table.id) ||
+        pathIds.has(table.id)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across every kind of element',
+          path: ['tables', index, 'id'],
+        });
+      }
+      tableIds.add(table.id);
+
+      // The cell array is the grid: a mismatch would leave rows without cells
+      // or cells without a row, and every reader would disagree about which.
+      const expected = table.rowHeights.length * table.colWidths.length;
+      if (table.cells.length !== expected) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `A table needs exactly one cell per column per row (expected ${expected})`,
+          path: ['tables', index, 'cells'],
+        });
+      }
+    });
+
     if (paintOrder !== undefined) {
-      const known = new Set<string>([...nodeIds, ...edgeKeys, ...inkIds, ...pathIds]);
+      const known = new Set<string>([...nodeIds, ...edgeKeys, ...inkIds, ...pathIds, ...tableIds]);
       const seen = new Set<string>();
 
       paintOrder.forEach((key, index) => {
