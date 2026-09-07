@@ -312,6 +312,7 @@ export function PositionedProposal({
       data-card-draggable={draggable ? 'true' : undefined}
       style={{
         left: position.x,
+        borderRadius: STICKY_RADIUS,
         top: position.y,
         // A card being dragged, or edited, belongs above its neighbours.
         zIndex: isDragging ? 30 : editing ? 20 : 1,
@@ -334,11 +335,6 @@ export function PositionedProposal({
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
     >
-      {isShortlisted ? (
-        <div className="absolute top-1 right-1 rounded bg-rt-secondary px-2 py-0.5 text-[10px] text-white">
-          Shortlisted
-        </div>
-      ) : null}
 
       {isLeader && !shortlistLocked ? (
         <button
