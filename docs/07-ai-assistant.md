@@ -191,6 +191,32 @@ integration test exercises `requireAuth` rather than going around it.
   an Instant Answer fallback and then a graceful "search unavailable". `webSearch.test.ts` is
   the canary if their markup changes.
 
+## Behaviour eval
+
+Unit tests script the provider, so they prove the plumbing and nothing about the model's
+judgement — whether it reaches for a tool when it should, and stays quiet when it should not.
+That is what `npm run eval --workspace @roundtable/server` checks, against a real provider.
+
+```bash
+EVAL_BASE_URL=https://api.groq.com/openai/v1 \
+EVAL_API_KEY=gsk_... \
+EVAL_MODEL=openai/gpt-oss-120b \
+npm run eval --workspace @roundtable/server
+```
+
+Pass a substring to run a subset (`… npm run eval -- prose`). Exit code is non-zero if any
+case fails, and each failure prints the reason the case exists.
+
+**Not in CI**, on purpose: it costs money, it needs a key, and a provider having a bad
+afternoon is not a reason to fail someone's pull request. Run it after editing `prompt.ts` or
+a tool description, and before a demo.
+
+Cases live in `eval/cases.ts` and are behaviour regressions rather than hypotheticals — the
+sticky-note fixation (every message answered with notes once notes were asked for), searching
+the web for something already on the board, and the universal check that a turn never comes
+back empty. Credentials come from the environment, not the database, so it needs neither
+Postgres nor a login.
+
 ## Tests
 
 `npm run test --workspace @roundtable/server` — 74 assistant tests, no network and no API
