@@ -1,8 +1,17 @@
+import {
+  DRAWING_PEN_WIDTHS,
+  DRAWING_VIEWBOX_HEIGHT,
+  DRAWING_VIEWBOX_WIDTH,
+  packDrawingPoints,
+  unpackDrawingPoints,
+  type DrawingInk,
+  type DrawingPenWidth,
+  type DrawingStrokeData,
+} from '@roundtable/shared';
+
 import { DRAWING_SVG_LIMIT } from '../artifactLimits';
 
 // This ratio closely matches the board card's 230x160 preview, avoiding visible distortion.
-export const DRAWING_VIEWBOX_WIDTH = 720;
-export const DRAWING_VIEWBOX_HEIGHT = 500;
 
 export const DRAWING_INKS = {
   ink: '#080C15',
@@ -12,10 +21,11 @@ export const DRAWING_INKS = {
 } as const;
 
 // Three widths stay distinct after the 720x500 artwork scales into the board preview.
-export const PEN_WIDTHS = [4, 8, 14] as const;
 
-export type DrawingInk = keyof typeof DRAWING_INKS;
-export type PenWidth = (typeof PEN_WIDTHS)[number];
+export type PenWidth = DrawingPenWidth;
+export const PEN_WIDTHS = DRAWING_PEN_WIDTHS;
+export { DRAWING_VIEWBOX_WIDTH, DRAWING_VIEWBOX_HEIGHT };
+export type { DrawingInk };
 
 export interface DrawingPoint {
   x: number;
@@ -36,7 +46,8 @@ export interface DrawingSurfaceBounds {
   height: number;
 }
 
-export type PreparedDrawing = { ok: true; svg: string } | { ok: false; error: string };
+export type PreparedDrawing =
+  { ok: true; svg: string; strokes: DrawingStrokeData[] } | { ok: false; error: string };
 
 // Sub-two-unit tolerance removes pointer noise without flattening intentional corners.
 const SIMPLIFICATION_TOLERANCE = 1.5;
@@ -246,18 +257,65 @@ export function serializeDrawingSvg(strokes: readonly DrawingStroke[]): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${DRAWING_VIEWBOX_WIDTH} ${DRAWING_VIEWBOX_HEIGHT}" fill="none">${paths}</svg>`;
 }
 
+/**
+ * How much of the artifact budget a drawing uses.
+ *
+ * The rendered SVG and the strokes are stored together and share one limit, so
+ * anything reporting or enforcing that budget has to count both. This exists so
+ * the editor's meter and the check on save cannot drift: metering the SVG alone
+ * let a dense sketch look comfortably under budget and then be refused.
+ *
+ * Takes the SVG rather than the strokes it came from, because the caller has
+ * already serialised it and doing so again on every stroke is not free.
+ */
+export function drawingArtifactSize(svg: string, strokes: readonly DrawingStroke[]): number {
+  return svg.length + JSON.stringify(strokesToData(strokes)).length;
+}
+
 export function prepareDrawing(strokes: readonly DrawingStroke[]): PreparedDrawing {
   if (!strokes.some((stroke) => stroke.points.length > 0)) {
     return { ok: false, error: 'Draw something before proposing this sketch.' };
   }
 
   const svg = serializeDrawingSvg(strokes);
-  if (svg.length > DRAWING_SVG_LIMIT) {
+  const stored = strokesToData(strokes);
+
+  // Both halves share one budget, and they are stored together, so they are
+  // measured together. Checking only the SVG would let a drawing through that
+  // the server then rejects for the size of its strokes.
+  if (drawingArtifactSize(svg, strokes) > DRAWING_SVG_LIMIT) {
     return {
       ok: false,
       error: 'This sketch is too detailed to propose. Undo a few strokes and try again.',
     };
   }
 
-  return { ok: true, svg };
+  return { ok: true, svg, strokes: stored };
+}
+
+/**
+ * Strokes as they are stored.
+ *
+ * Simplified first, so what is kept is exactly what the SVG draws — storing the
+ * raw pointer samples would cost far more and reproduce detail the rendering
+ * already discarded.
+ */
+export function strokesToData(strokes: readonly DrawingStroke[]): DrawingStrokeData[] {
+  return strokes
+    .filter((stroke) => stroke.points.length > 0)
+    .map((stroke) => ({
+      ink: stroke.ink,
+      width: stroke.width,
+      points: packDrawingPoints(simplifyStroke(stroke.points)),
+    }));
+}
+
+/** Strokes as the editor works on them. Ids are local, so they are minted here. */
+export function dataToStrokes(strokes: readonly DrawingStrokeData[]): DrawingStroke[] {
+  return strokes.map((stroke, index) => ({
+    id: `stored-${index}`,
+    ink: stroke.ink,
+    width: stroke.width,
+    points: unpackDrawingPoints(stroke.points),
+  }));
 }

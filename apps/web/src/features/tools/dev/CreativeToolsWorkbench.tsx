@@ -27,23 +27,29 @@ export function CreativeToolsWorkbench() {
         y: input.y,
         createdAt: new Date().toISOString(),
         extendsProposalId: input.extendsProposalId ?? null,
+        reactions: [],
       },
     ]);
   }
 
   return (
-    <CreativeToolsProvider isLive proposals={proposals} propose={propose}>
+    <CreativeToolsProvider
+      isLive
+      proposals={proposals}
+      propose={propose}
+      editProposal={async () => {}}
+    >
       <main className="flex h-screen min-h-0 flex-col bg-rt-surface text-rt-ink">
-        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-primary-tint bg-rt-primary px-5 text-white">
+        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-5 text-rt-ink">
           <RoundTableLogo />
-          <div className="h-7 w-px bg-white/30" />
+          <div className="h-7 w-px bg-rt-ink/15" />
           <div className="min-w-0">
-            <p className="text-[9px] font-semibold tracking-[0.14em] text-white/75 uppercase">
+            <p className="text-[9px] font-semibold tracking-[0.14em] text-rt-ink/60 uppercase">
               Development workbench
             </p>
             <h1 className="truncate text-[14px] font-semibold">Creative tools</h1>
           </div>
-          <span className="ml-auto flex items-center gap-1.5 rounded-full border border-white/30 bg-white/10 px-3 py-1.5 text-[10px] font-semibold">
+          <span className="ml-auto flex items-center gap-1.5 rounded-full border border-rt-ink/15 bg-white/60 px-3 py-1.5 text-[10px] font-semibold">
             <FlaskConical aria-hidden="true" size={13} />
             Dev only
           </span>
@@ -60,7 +66,7 @@ export function CreativeToolsWorkbench() {
           {proposals.length ? (
             <div className="flex flex-wrap items-start gap-5">
               {proposals.map((proposal) => (
-                <ProposalCard key={proposal.id} item={proposal} zoom={100} isNew />
+                <ProposalCard key={proposal.id} item={proposal} isNew />
               ))}
             </div>
           ) : (

@@ -6,10 +6,10 @@ import { TOOL_LABELS } from './toolRegistry';
 import { useCreativeTools } from './CreativeToolsContext';
 
 export function CreativeStudio() {
-  const { activeTool, closeTool, extensionSource, isLive } = useCreativeTools();
+  const { activeTool, closeTool, editSource, extensionSource, isLive } = useCreativeTools();
   if (!activeTool) return null;
 
-  const action = extensionSource ? 'Extend' : 'New';
+  const action = editSource ? 'Edit' : extensionSource ? 'Extend' : 'New';
   const title = `${action} ${TOOL_LABELS[activeTool].toLowerCase()}`;
 
   return (

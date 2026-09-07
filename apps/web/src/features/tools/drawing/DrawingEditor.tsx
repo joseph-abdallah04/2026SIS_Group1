@@ -30,7 +30,9 @@ import {
   clientPointToDrawingPoint,
   eraseStrokesAtPoint,
   eraserRadiusForSurface,
+  dataToStrokes,
   prepareDrawing,
+  drawingArtifactSize,
   serializeDrawingSvg,
   strokePathData,
   type DrawingInk,
@@ -52,10 +54,27 @@ function formatArtifactSize(length: number): string {
 }
 
 export function DrawingEditor() {
-  const { closeTool, isLive, resetSubmission, submissionError, submissionStatus, submitArtifact } =
-    useCreativeTools();
+  const {
+    closeTool,
+    editSource,
+    extensionSource,
+    isLive,
+    resetSubmission,
+    submissionError,
+    submissionStatus,
+    submitArtifact,
+  } = useCreativeTools();
+
+  // Editing rewrites this drawing; extending starts a new one from it. Either
+  // way the canvas opens on the strokes that made it, which is only possible
+  // because they are stored beside the rendered SVG.
+  const sourceProposal = editSource ?? extensionSource;
+  const sourceStrokes =
+    sourceProposal?.artifactJson.type === 'drawing' && sourceProposal.artifactJson.strokes
+      ? dataToStrokes(sourceProposal.artifactJson.strokes)
+      : [];
   const { strokes, strokesRef, canUndo, canRedo, commit, preview, recordPreview, undo, redo } =
-    useDrawingHistory();
+    useDrawingHistory(sourceStrokes);
   const [mode, setMode] = useState<DrawingMode>('pen');
   const [ink, setInk] = useState<DrawingInk>('ink');
   const [penWidth, setPenWidth] = useState<PenWidth>(8);
@@ -65,6 +84,9 @@ export function DrawingEditor() {
   const activePointerId = useRef<number | null>(null);
   const eraserStartRef = useRef<DrawingStroke[] | null>(null);
   const svg = useMemo(() => serializeDrawingSvg(strokes), [strokes]);
+  // What the save will actually measure: the artwork and the strokes stored
+  // beside it share one budget, so the meter has to show both.
+  const artifactSize = useMemo(() => drawingArtifactSize(svg, strokes), [svg, strokes]);
 
   function clearError() {
     setValidationError(null);
@@ -178,7 +200,7 @@ export function DrawingEditor() {
     }
 
     setValidationError(null);
-    await submitArtifact({ type: 'drawing', svg: prepared.svg });
+    await submitArtifact({ type: 'drawing', svg: prepared.svg, strokes: prepared.strokes });
   }
 
   function onEditorKeyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -233,7 +255,7 @@ export function DrawingEditor() {
             aria-label="Pen"
             aria-pressed={mode === 'pen'}
             onClick={() => setMode('pen')}
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
           >
             <Pencil aria-hidden="true" size={15} />
             <span className="hidden sm:inline">Pen</span>
@@ -243,7 +265,7 @@ export function DrawingEditor() {
             aria-label="Eraser"
             aria-pressed={mode === 'eraser'}
             onClick={() => setMode('eraser')}
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
           >
             <Eraser aria-hidden="true" size={15} />
             <span className="hidden sm:inline">Eraser</span>
@@ -264,7 +286,7 @@ export function DrawingEditor() {
                   setInk(option as DrawingInk);
                   setMode('pen');
                 }}
-                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white shadow-sm ring-1 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:ring-offset-2 focus-visible:outline-none"
+                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white shadow-sm ring-1 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
                 style={
                   {
                     background: color,
@@ -290,7 +312,7 @@ export function DrawingEditor() {
                 setPenWidth(option);
                 setMode('pen');
               }}
-              className="flex h-full w-9 items-center justify-center border-r border-rt-tertiary last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-primary focus-visible:outline-none aria-pressed:bg-rt-primary-tint"
+              className="flex h-full w-9 items-center justify-center border-r border-rt-tertiary last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-primary-tint"
             >
               <span
                 aria-hidden="true"
@@ -376,7 +398,7 @@ export function DrawingEditor() {
           ) : (
             <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
               {strokes.length} {strokes.length === 1 ? 'stroke' : 'strokes'} ·{' '}
-              {formatArtifactSize(svg.length)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
+              {formatArtifactSize(artifactSize)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
             </p>
           )}
         </div>
