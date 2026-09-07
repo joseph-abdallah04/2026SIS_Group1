@@ -20,6 +20,7 @@ import {
   DOT_RADIUS,
   DOT_SPACING,
   ZOOM_LEVELS,
+  ZOOM_STEP_RATIO,
   ZOOM_SCALE,
   type ZoomLevel,
 } from './pinboardTokens';
@@ -310,12 +311,29 @@ export function PinboardCanvas({
    * happens about the top-left corner: the further from that corner you were
    * looking, the further your subject travels. Anchoring is what makes zoom
    * feel like moving a magnifier over the board rather than resizing a page.
+   *
+   * A press moves by `ZOOM_STEP_RATIO` rather than by one stop, landing on the
+   * first stop that carries it that far. One stop at a time meant a press
+   * covered a fifth of the board at the bottom of the ladder and a fortieth at
+   * the top; a ratio is the same size move wherever you are.
    */
   const stepZoom = useCallback(
     (direction: 'in' | 'out', anchor: Point) => {
       const idx = ZOOM_LEVELS.indexOf(zoom);
       const floor = ZOOM_LEVELS.indexOf(minZoom);
-      const clamped = Math.min(Math.max(direction === 'in' ? idx - 1 : idx + 1, 0), floor);
+      const target = direction === 'in' ? zoom * ZOOM_STEP_RATIO : zoom / ZOOM_STEP_RATIO;
+
+      // Levels descend, so walking towards index 0 magnifies. Either loop runs
+      // at least once, so a press always moves even where the stops are wider
+      // apart than the ratio asks for.
+      let step = idx;
+      if (direction === 'in') {
+        while (step > 0 && (ZOOM_LEVELS[step] ?? 0) < target) step -= 1;
+      } else {
+        while (step < floor && (ZOOM_LEVELS[step] ?? 0) > target) step += 1;
+      }
+
+      const clamped = Math.min(Math.max(step, 0), floor);
       const next = ZOOM_LEVELS[clamped];
       if (!next || next === zoom) return;
 

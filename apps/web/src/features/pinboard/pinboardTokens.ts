@@ -5,11 +5,44 @@ import type { StickyColor } from '@roundtable/shared';
 /**
  * Zoom stops, largest first. Above 100% for reading a dense corner of the
  * board; down to 25% for finding your way around a big one.
+ *
+ * The steps get finer towards the middle. A fixed step is not a fixed change:
+ * ten points off 400% is a barely visible nudge, while ten points off 30% is a
+ * third of the board. Spacing them by where the eye actually notices keeps a
+ * press feeling like the same size move wherever you are on the ladder, and
+ * puts the finest control where people spend their time, either side of
+ * natural size.
  */
+// prettier-ignore
 export const ZOOM_LEVELS = [
-  400, 350, 300, 250, 200, 175, 150, 125, 110, 100, 90, 80, 70, 60, 50, 40, 30, 25,
+  // Coarse at the far end, where a step is a big move and nobody is reading.
+  400, 350,
+  // Twenty-fives through the range you magnify a corner of the board in.
+  300, 275, 250, 225,
+  // Tens either side of natural size, which is where most zooming happens.
+  200, 190, 180, 170, 160, 150, 140, 130, 120, 110,
+  100,
+  // Fives on the way out: below natural size a ten-point step throws away a
+  // tenth of the board at once, and fitting a card into view needs finer
+  // control than that.
+  95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25,
 ] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+
+/**
+ * How much bigger or smaller one press, notch or pinch makes the board.
+ *
+ * A press moves by a proportion rather than by one stop on the ladder. Stepping
+ * one stop at a time made every press cover a different amount of ground: ten
+ * points is a fifth of the board at 50% and a fortieth of it at 400%, so the
+ * same action crawled at one end and lurched at the other. Zooming by a ratio
+ * is the same size move wherever you are, and it crosses the whole range in
+ * about seven presses instead of sixteen.
+ *
+ * The finer stops are still worth having. They are where a press lands, so the
+ * ratio can be honoured closely rather than rounded to the nearest quarter.
+ */
+export const ZOOM_STEP_RATIO = 1.2;
 
 /**
  * Card styling. The project palette throughout — the Organic wireframes
