@@ -42,8 +42,25 @@ export const STICKY_THEMES: Record<StickyColor, { bg: string; border: string }> 
   green: { bg: '#EEF4F0', border: '#4D6A74' },
 };
 
-/** Kept for the tools' sticky editor; board cards use `CARD_RADIUS`. */
-export const STICKY_RADIUS = '14px';
+/**
+ * Square corners, because a sticky note has square corners.
+ *
+ * Every other card on the board is a rounded panel. A sticky is meant to read
+ * as a piece of paper somebody stuck there, and rounding it is the single
+ * change that makes it read as a UI card instead.
+ */
+export const STICKY_RADIUS = '0px';
+
+/**
+ * The shadow a sticky casts.
+ *
+ * Weighted downward rather than spread evenly like `CARD_SHADOW`: paper is lit
+ * from above and lifts slightly at its bottom edge, so the shadow gathers under
+ * it. An even shadow reads as a floating panel, which is what the other cards
+ * are and this one is not.
+ */
+export const STICKY_SHADOW =
+  '0 7px 10px -5px rgba(8,12,21,0.30), 0 2px 3px -1px rgba(8,12,21,0.16)';
 
 /** Intrinsic widths — types differ on purpose. */
 export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
@@ -51,6 +68,16 @@ export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
   drawing: 250,
   diagram: 300,
 };
+
+/**
+ * A sticky is square, so it is as tall as it is wide.
+ *
+ * Unlike the other cards it does not grow to fit its contents: a pad of notes
+ * comes in one size, and a wall of them reads as a wall precisely because they
+ * all match. Text that would overflow is clamped rather than allowed to
+ * stretch the paper.
+ */
+export const STICKY_SIZE = CARD_WIDTH.sticky;
 
 /**
  * Zoom is a property of the view, not of the cards: the board is drawn once at

@@ -5,7 +5,14 @@ import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
-import { CARD_INK, CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
+import {
+  CARD_INK,
+  CARD_WIDTH,
+  STICKY_RADIUS,
+  STICKY_SHADOW,
+  STICKY_SIZE,
+  STICKY_THEMES,
+} from './pinboardTokens';
 
 /** Matches `stickyArtifactSchema` — the server rejects anything longer. */
 const STICKY_MAX_CHARS = 2000;
@@ -106,13 +113,13 @@ function StickyTextEditor({
 
   return (
     <div
-      className="flex flex-col overflow-hidden border"
+      className="flex flex-col overflow-hidden"
       style={{
         width,
+        height: STICKY_SIZE,
         borderRadius: STICKY_RADIUS,
-        borderColor: theme.border,
         background: theme.bg,
-        boxShadow: CARD_SHADOW,
+        boxShadow: STICKY_SHADOW,
       }}
     >
       <textarea
@@ -129,10 +136,9 @@ function StickyTextEditor({
             submit();
           }
         }}
-        className="resize-none bg-transparent outline-none"
+        className="min-h-0 flex-1 resize-none bg-transparent outline-none"
         style={{
-          minHeight: 128,
-          padding: '16px 14px 8px',
+          padding: '14px 14px 6px',
           fontSize: '14px',
           fontWeight: 500,
           lineHeight: 1.45,

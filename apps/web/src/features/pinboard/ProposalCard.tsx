@@ -23,6 +23,8 @@ import {
   CARD_WIDTH,
   OWNED_INK,
   STICKY_RADIUS,
+  STICKY_SHADOW,
+  STICKY_SIZE,
   STICKY_THEMES,
   THUMB_BACKGROUND,
 } from './pinboardTokens';
@@ -243,21 +245,26 @@ export function ProposalCard({
       className={isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
+      {/* A sticky is bare paper: no outline, square corners, and a square
+          footprint that does not grow with its contents. Everything else is a
+          panel, so it keeps its border and its rounded edge. */}
       <article
-        className="flex shrink-0 flex-col overflow-hidden border"
+        className={`flex shrink-0 flex-col overflow-hidden ${isSticky ? '' : 'border'}`}
         style={{
           width: CARD_WIDTH[item.type],
+          ...(isSticky ? { height: STICKY_SIZE } : {}),
           borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
-          borderColor: theme ? theme.border : CARD_BORDER,
+          ...(isSticky ? {} : { borderColor: theme ? theme.border : CARD_BORDER }),
           background: theme ? theme.bg : '#FFFFFF',
-          boxShadow: CARD_SHADOW,
+          boxShadow: isSticky ? STICKY_SHADOW : CARD_SHADOW,
         }}
       >
         {artifact.type === 'sticky' ? (
+          // Fills whatever the square leaves above the byline, so a short note
+          // sits at the top of the paper rather than centred in it.
           <p
-            className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
+            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
             style={{
-              minHeight: 112,
               padding: '14px 14px 6px',
               // Shared with the editor's preview, so a note that had to shrink
               // to fit while you were writing it looks the same on the board.
