@@ -54,9 +54,6 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  // Which assistant bubble the next text delta appends to. Reset by tool activity so the
-  // reply after a tool call starts a fresh bubble instead of growing the old one.
-  const openBubbleRef = useRef<string | null>(null);
 
   const send = useCallback(
     async (message: string) => {
@@ -64,8 +61,8 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
       if (!trimmed || abortRef.current) return;
 
       const history = toHistory(entries);
-      setEntries((prev) => [...prev, { kind: 'user', id: nextId(), text: trimmed }]);
-      openBubbleRef.current = null;
+      const userEntryId = nextId();
+      setEntries((prev) => [...prev, { kind: 'user', id: userEntryId, text: trimmed }]);
       setStreaming(true);
 
       const controller = new AbortController();
@@ -78,11 +75,15 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
           context: getContext(),
           history,
           signal: controller.signal,
-          onEvent: (event) => setEntries((prev) => applyEvent(prev, event, openBubbleRef)),
+          // Both the id and the event are settled *before* the updater runs, so the updater
+          // itself is a pure function of `prev`. See the note on applyEvent.
+          onEvent: (event) => {
+            const entryId = nextId();
+            setEntries((prev) => applyEvent(prev, event, entryId));
+          },
         });
       } finally {
         abortRef.current = null;
-        openBubbleRef.current = null;
         setStreaming(false);
         setEntries((prev) =>
           prev.map((e) => (e.kind === 'assistant' ? { ...e, streaming: false } : e)),
@@ -128,32 +129,36 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
  */
 export type AssistantChat = ReturnType<typeof useAssistantChat>;
 
-function applyEvent(
+/**
+ * Folds one stream event into the transcript.
+ *
+ * This MUST be a pure function of `entries` — no refs, no counters, no I/O. React invokes
+ * state updaters twice under StrictMode precisely to surface impurity, and an earlier
+ * version of this tracked "the bubble currently being streamed" in a ref that it wrote to
+ * from in here. On the second invocation that ref already pointed at a bubble the (unchanged)
+ * `entries` did not contain, so the append found nothing to append to and returned the array
+ * untouched: every assistant word was silently dropped, while tool and artifact events —
+ * plain appends, harmless to run twice — kept rendering. Which bubble is open is therefore
+ * derived from the transcript itself, and `newId` is minted by the caller.
+ */
+export function applyEvent(
   entries: ChatEntry[],
   event: AssistantStreamEvent,
-  openBubbleRef: { current: string | null },
+  newId: string,
 ): ChatEntry[] {
   switch (event.type) {
     case 'message': {
-      const openId = openBubbleRef.current;
-      if (openId) {
-        return entries.map((entry) =>
-          entry.kind === 'assistant' && entry.id === openId
-            ? { ...entry, text: entry.text + event.content }
-            : entry,
-        );
+      // Grow the bubble still streaming at the tail; anything else (a tool call, an
+      // artifact) has ended it, so the text after it starts a fresh one.
+      const last = entries[entries.length - 1];
+      if (last?.kind === 'assistant' && last.streaming) {
+        return [...entries.slice(0, -1), { ...last, text: last.text + event.content }];
       }
-      const id = nextId();
-      openBubbleRef.current = id;
-      return [...entries, { kind: 'assistant', id, text: event.content, streaming: true }];
+      return [...entries, { kind: 'assistant', id: newId, text: event.content, streaming: true }];
     }
 
     case 'tool': {
-      openBubbleRef.current = null;
-      return [
-        ...entries,
-        { kind: 'tool', id: nextId(), toolName: event.toolName, status: 'running' },
-      ];
+      return [...entries, { kind: 'tool', id: newId, toolName: event.toolName, status: 'running' }];
     }
 
     case 'tool-result': {
@@ -175,7 +180,6 @@ function applyEvent(
     }
 
     case 'artifact': {
-      openBubbleRef.current = null;
       return [
         ...entries,
         {
@@ -190,12 +194,10 @@ function applyEvent(
     }
 
     case 'error': {
-      openBubbleRef.current = null;
-      return [...entries, { kind: 'error', id: nextId(), message: event.message }];
+      return [...entries, { kind: 'error', id: newId, message: event.message }];
     }
 
     case 'done':
-      openBubbleRef.current = null;
       return entries.map((entry) =>
         entry.kind === 'assistant' ? { ...entry, streaming: false } : entry,
       );

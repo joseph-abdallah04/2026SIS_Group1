@@ -43,7 +43,19 @@ interface LlmApiToolCall {
 
 export type LlmStreamChunk =
   | { type: 'content'; text: string }
-  | { type: 'finish'; toolCalls: LlmToolCall[]; finishReason: string | null };
+  | {
+      type: 'finish';
+      toolCalls: LlmToolCall[];
+      finishReason: string | null;
+      /**
+       * Thinking a reasoning model streamed on its own channel. Deliberately *not* yielded
+       * as content — nobody wants a chain of thought typed into the chat. It rides here
+       * only as a fallback for the failure mode where a model spends its whole response
+       * reasoning and never writes a final answer, which would otherwise leave the panel
+       * showing a question with nothing underneath it.
+       */
+      reasoningText?: string;
+    };
 
 export interface StreamChatOptions {
   messages: LlmMessage[];
@@ -87,6 +99,7 @@ export async function* streamChatCompletion(
 
   const toolCalls = new ToolCallAccumulator();
   let finishReason: string | null = null;
+  let reasoningText = '';
 
   for await (const payload of readSseData(response.body)) {
     if (payload === '[DONE]') break;
@@ -112,6 +125,11 @@ export async function* streamChatCompletion(
       yield { type: 'content', text };
     }
 
+    const thinking = choice.delta?.reasoning ?? choice.delta?.reasoning_content;
+    if (typeof thinking === 'string' && thinking.length > 0) {
+      reasoningText += thinking;
+    }
+
     for (const partial of choice.delta?.tool_calls ?? []) {
       toolCalls.absorb(partial);
     }
@@ -121,7 +139,12 @@ export async function* streamChatCompletion(
     }
   }
 
-  yield { type: 'finish', toolCalls: toolCalls.toArray(), finishReason };
+  yield {
+    type: 'finish',
+    toolCalls: toolCalls.toArray(),
+    finishReason,
+    ...(reasoningText.length > 0 ? { reasoningText } : {}),
+  };
 }
 
 /**
@@ -318,7 +341,15 @@ interface PartialToolCall {
 interface ChatCompletionChunk {
   error?: { message?: string };
   choices?: Array<{
-    delta?: { content?: string | null; tool_calls?: PartialToolCall[] };
+    delta?: {
+      content?: string | null;
+      tool_calls?: PartialToolCall[];
+      // Reasoning models stream their thinking on a separate channel. Groq's gpt-oss calls
+      // it `reasoning`; DeepSeek and several OpenAI-compatible proxies use
+      // `reasoning_content`. Both are read, neither is shown.
+      reasoning?: string | null;
+      reasoning_content?: string | null;
+    };
     finish_reason?: string | null;
   }>;
 }

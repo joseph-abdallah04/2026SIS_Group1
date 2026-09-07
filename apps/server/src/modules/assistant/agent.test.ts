@@ -57,6 +57,57 @@ describe('runAssistantTurn', () => {
     ]);
   });
 
+  // A turn that emits nothing renders as a question with no answer under it and no error —
+  // indistinguishable from a broken app. Every turn must produce at least one message.
+  it('explains itself when the model finishes without writing anything', async () => {
+    script.push([{ type: 'finish', toolCalls: [], finishReason: 'stop' }]);
+
+    const { events, promise } = run();
+    expect(await promise).toBe('complete');
+
+    const messages = events.filter((e) => e.type === 'message');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toMatch(/empty reply/i);
+  });
+
+  it('falls back to the reasoning channel when the model answers only there', async () => {
+    script.push([
+      {
+        type: 'finish',
+        toolCalls: [],
+        finishReason: 'stop',
+        reasoningText: '  Three proposals so far: A, B and C.  ',
+      },
+    ]);
+
+    const { events, promise } = run();
+    await promise;
+    expect(events.filter((e) => e.type === 'message').map((e) => e.content)).toEqual([
+      'Three proposals so far: A, B and C.',
+    ]);
+  });
+
+  it('names the token limit when that is what silenced the model', async () => {
+    script.push([{ type: 'finish', toolCalls: [], finishReason: 'length' }]);
+
+    const { events, promise } = run();
+    await promise;
+    expect(events.find((e) => e.type === 'message')?.content).toMatch(/ran out of tokens/i);
+  });
+
+  it('does not add a fallback when the model did write an answer', async () => {
+    script.push([
+      { type: 'content', text: 'Two so far.' },
+      { type: 'finish', toolCalls: [], finishReason: 'stop', reasoningText: 'thinking…' },
+    ]);
+
+    const { events, promise } = run();
+    await promise;
+    expect(events.filter((e) => e.type === 'message').map((e) => e.content)).toEqual([
+      'Two so far.',
+    ]);
+  });
+
   it('sends the system prompt and user message to the model', async () => {
     script.push([{ type: 'finish', toolCalls: [], finishReason: 'stop' }]);
     await run().promise;

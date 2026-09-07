@@ -64,6 +64,17 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
     toolCalls = turn.toolCalls;
 
     if (toolCalls.length === 0) {
+      // A turn that asks for no tool and writes no text would leave the panel showing the
+      // question with nothing underneath it — no answer, no error, no clue. Reasoning
+      // models do this: everything lands on the reasoning channel and the final channel
+      // stays empty. Say *something*, always.
+      if (assistantText.trim().length === 0) {
+        emit({
+          type: 'message',
+          role: 'assistant',
+          content: recoverEmptyReply(turn.reasoningText, turn.finishReason),
+        });
+      }
       return 'complete';
     }
 
@@ -94,12 +105,33 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
   return 'max-steps';
 }
 
+/**
+ * What to show when the model finished without writing an answer.
+ *
+ * If it streamed its thinking on a reasoning channel, that thinking *is* the answer in this
+ * failure mode, so it is better shown than swallowed. Otherwise explain the silence — an
+ * empty panel reads as a broken app, and the most common cause (the token budget going
+ * entirely on reasoning) is something the user can act on.
+ */
+function recoverEmptyReply(reasoningText: string | undefined, finishReason: string | null): string {
+  const thinking = reasoningText?.trim();
+  if (thinking) return thinking;
+  if (finishReason === 'length') {
+    return '_(The model ran out of tokens before writing an answer — try a shorter question, or raise the output limit on your provider.)_';
+  }
+  return '_(The model returned an empty reply. Try asking again — if it keeps happening, a different model on the same provider usually fixes it.)_';
+}
+
 async function collectTurn(
   credentials: LlmCredentials,
   messages: LlmMessage[],
   signal: AbortSignal,
   onDelta: (delta: string) => void,
-): Promise<{ toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
+): Promise<{
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  finishReason: string | null;
+  reasoningText?: string;
+}> {
   const stream = streamChatCompletion(credentials, {
     messages,
     tools: assistantToolDefinitions,
@@ -111,10 +143,15 @@ async function collectTurn(
     if (chunk.type === 'content') {
       onDelta(chunk.text);
     } else {
-      return { toolCalls: chunk.toolCalls };
+      return {
+        toolCalls: chunk.toolCalls,
+        finishReason: chunk.finishReason,
+        ...(chunk.reasoningText ? { reasoningText: chunk.reasoningText } : {}),
+      };
     }
   }
-  return { toolCalls: [] };
+  // Stream ended without a `finish` chunk — a provider cutting the connection short.
+  return { toolCalls: [], finishReason: null };
 }
 
 async function executeToolCall(
