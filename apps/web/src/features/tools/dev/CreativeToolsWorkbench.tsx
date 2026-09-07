@@ -27,12 +27,18 @@ export function CreativeToolsWorkbench() {
         y: input.y,
         createdAt: new Date().toISOString(),
         extendsProposalId: input.extendsProposalId ?? null,
+        reactions: [],
       },
     ]);
   }
 
   return (
-    <CreativeToolsProvider isLive proposals={proposals} propose={propose}>
+    <CreativeToolsProvider
+      isLive
+      proposals={proposals}
+      propose={propose}
+      editProposal={async () => {}}
+    >
       <main className="flex h-screen min-h-0 flex-col bg-rt-surface text-rt-ink">
         <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-5 text-rt-ink">
           <RoundTableLogo />

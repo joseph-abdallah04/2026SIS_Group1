@@ -98,14 +98,25 @@ export interface StickyArtifact {
 
 export interface DrawingArtifact {
   type: 'drawing';
+  /** Rendering of the strokes, so a card can be shown without the editor. */
   svg: string;
+  /**
+   * The editable source. Optional because drawings proposed before strokes
+   * were stored have none — those can still be shown, moved and removed, but
+   * not reopened, because there is nothing to reopen them from.
+   */
+  strokes?: DrawingStrokeData[];
 }
 
 // The diagram artifact contract (shapes, sizes, palettes, grouping, routing)
 // lives in its own module; re-exported here so `@roundtable/shared` is still
 // the single import for domain types.
 export * from './diagramContract.js';
+export * from './drawingContract.js';
+export * from './reactionContract.js';
 import type { DiagramArtifact } from './diagramContract.js';
+import type { DrawingStrokeData } from './drawingContract.js';
+import type { ReactionGroup } from './reactionContract.js';
 
 export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
 
@@ -121,6 +132,13 @@ export interface BoardItem {
   y: number;
   createdAt: string;
   extendsProposalId: string | null;
+  /**
+   * Emoji reactions left on this proposal (F18), only for emoji somebody has
+   * actually used. The card offers the whole fixed set regardless, so an empty
+   * list is a card nobody has reacted to yet rather than a card without the
+   * row.
+   */
+  reactions: ReactionGroup[];
 }
 
 /**

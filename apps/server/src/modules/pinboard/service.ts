@@ -1,4 +1,9 @@
-import type { BoardItem, BoardResponse } from '@roundtable/shared';
+import {
+  isEmoji,
+  type BoardItem,
+  type BoardResponse,
+  type ReactionGroup,
+} from '@roundtable/shared';
 import {
   artifactJsonSchema,
   type ProposalCreateInput,
@@ -11,8 +16,9 @@ import { requireMutableProposal, type Actor, type ProposalMutation } from './per
 import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
-// agreed order), its create side (F15: proposals land for everyone at once) and
-// its author-edit side (F16: edit, move, delete your own). Reactions are F18.
+// agreed order), its create side (F15: proposals land for everyone at once),
+// its author-edit side (F16: edit, move, delete your own) and its reactions
+// (F18).
 //
 // Every mutation here is deliberately socket-agnostic: the caller broadcasts.
 // That keeps one write path per operation no matter who is calling — a tool
@@ -20,9 +26,48 @@ import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js
 // leader moderating (F17) — so the rules cannot be bypassed by arriving from a
 // different direction.
 
-type ProposalRow = Prisma.ProposalGetPayload<{
-  include: { author: { select: { displayName: true } } };
-}>;
+/**
+ * Everything a `BoardItem` is built from, in one place.
+ *
+ * Every query that produces a card uses this, so a path cannot quietly return
+ * a row missing a field the board needs. That matters most for reactions: a
+ * move broadcasts the whole row, so an include that forgot them would clear
+ * every count on the card the moment somebody nudged it.
+ */
+const BOARD_ITEM_INCLUDE = {
+  author: { select: { displayName: true } },
+  // Oldest first, so the order people reacted in is the order they are listed.
+  reactions: { select: { emoji: true, userId: true }, orderBy: { createdAt: 'asc' } },
+} satisfies Prisma.ProposalInclude;
+
+type ProposalRow = Prisma.ProposalGetPayload<{ include: typeof BOARD_ITEM_INCLUDE }>;
+
+/**
+ * Reaction rows folded into the per-emoji groups a card renders (F18).
+ *
+ * Every emoji anyone used is kept, not just the three a card offers as chips:
+ * the quick set decides what is one press away, never what may exist.
+ *
+ * Order is first-reaction order, which falls out of reading the rows oldest
+ * first — the emoji somebody reached for first sits leftmost. It comes from
+ * the server so that every client arranges an unfamiliar reaction the same
+ * way rather than each inventing an order of its own.
+ */
+function toReactionGroups(rows: readonly { emoji: string; userId: string }[]): ReactionGroup[] {
+  const byEmoji = new Map<string, string[]>();
+
+  for (const row of rows) {
+    // Defensive: the write path admits nothing but a single emoji. A row that
+    // slipped past it would render as loose text among the chips, which is
+    // somewhere nobody agreed could be written to.
+    if (!isEmoji(row.emoji)) continue;
+    const users = byEmoji.get(row.emoji);
+    if (users) users.push(row.userId);
+    else byEmoji.set(row.emoji, [row.userId]);
+  }
+
+  return [...byEmoji].map(([emoji, userIds]) => ({ emoji, userIds }));
+}
 
 export function toBoardItem(row: ProposalRow): BoardItem {
   const parsed = artifactJsonSchema.safeParse(row.artifactJson);
@@ -41,13 +86,14 @@ export function toBoardItem(row: ProposalRow): BoardItem {
     y: row.y,
     createdAt: row.createdAt.toISOString(),
     extendsProposalId: row.extendsProposalId,
+    reactions: toReactionGroups(row.reactions),
   };
 }
 
 export async function listProposals(questionId: string): Promise<BoardItem[]> {
   const rows = await prisma.proposal.findMany({
     where: { questionId, deletedAt: null },
-    include: { author: { select: { displayName: true } } },
+    include: BOARD_ITEM_INCLUDE,
     // The total order every client agrees on: creation time, then id to break
     // same-millisecond ties (F14 — "identical boards in identical order").
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -133,7 +179,7 @@ export async function createProposal({
       y: input.y,
       extendsProposalId: input.extendsProposalId ?? null,
     },
-    include: { author: { select: { displayName: true } } },
+    include: BOARD_ITEM_INCLUDE,
   });
 
   return toBoardItem(row);
@@ -147,7 +193,7 @@ export async function createProposal({
 async function loadForMutation(proposalId: string, actor: Actor, mutation: ProposalMutation) {
   const row = await prisma.proposal.findUnique({
     where: { id: proposalId },
-    include: { author: { select: { displayName: true } } },
+    include: BOARD_ITEM_INCLUDE,
   });
 
   // The question and the session both come from the sessions adapter, not a
@@ -208,7 +254,7 @@ export async function updateProposal({
       ...(input.x === undefined ? {} : { x: input.x }),
       ...(input.y === undefined ? {} : { y: input.y }),
     },
-    include: { author: { select: { displayName: true } } },
+    include: BOARD_ITEM_INCLUDE,
   });
 
   return toBoardItem(updated);
@@ -236,6 +282,86 @@ export async function deleteProposal({
   });
 
   return { proposalId: row.id, questionId: row.questionId };
+}
+
+/** Every reaction on one proposal, already grouped for the wire. */
+async function listReactions(proposalId: string): Promise<ReactionGroup[]> {
+  const rows = await prisma.proposalReaction.findMany({
+    where: { proposalId },
+    select: { emoji: true, userId: true },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return toReactionGroups(rows);
+}
+
+/**
+ * A write refused because the row is already there.
+ *
+ * Read off the error shape rather than through `instanceof`: this module keeps
+ * its Prisma import type-only, and importing the client namespace as a value
+ * just to name an error class would pull the generated runtime into a file
+ * whose job is rules.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'P2002'
+  );
+}
+
+/**
+ * Add or take back one person's emoji reaction (F18).
+ *
+ * The direction is decided here, from what is stored, rather than by the
+ * client saying "add" or "remove". A client that has fallen behind would
+ * otherwise ask to remove a reaction it no longer has, or add one it already
+ * left, and the board would end up reflecting the order intents happened to
+ * arrive in instead of how many times the chip was pressed.
+ *
+ * Double-counting is impossible by construction: one row per person, per
+ * emoji, per proposal is a unique index, so the tenth press of a chip can
+ * neither insert a second row nor remove one that was never there. A press
+ * that races itself across two tabs lands on "reacted", which is what was
+ * asked for both times.
+ *
+ * Returns the proposal's whole reaction state, not a delta, so the broadcast
+ * corrects any client that missed an earlier one.
+ */
+export async function toggleReaction({
+  proposalId,
+  actor,
+  emoji,
+}: {
+  proposalId: string;
+  actor: Actor;
+  /** Confirmed to be a single emoji by the caller's schema. */
+  emoji: string;
+}): Promise<{ proposalId: string; questionId: string; reactions: ReactionGroup[] }> {
+  const { row } = await loadForMutation(proposalId, actor, 'react');
+
+  const { count } = await prisma.proposalReaction.deleteMany({
+    where: { proposalId, userId: actor.id, emoji },
+  });
+
+  if (count === 0) {
+    try {
+      await prisma.proposalReaction.create({ data: { proposalId, userId: actor.id, emoji } });
+    } catch (err) {
+      // Two of this person's own clients pressed the same chip at once. The
+      // unique index refused the second, and the reaction is on, which is
+      // exactly what both presses asked for. Anything else is a real failure.
+      if (!isUniqueViolation(err)) throw err;
+    }
+  }
+
+  return {
+    proposalId: row.id,
+    questionId: row.questionId,
+    reactions: await listReactions(proposalId),
+  };
 }
 
 export async function getBoardForSession(sessionId: string): Promise<BoardResponse> {

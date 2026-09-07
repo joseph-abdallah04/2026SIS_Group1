@@ -50,6 +50,7 @@ function row(overrides: Record<string, unknown> = {}) {
     x: 10,
     y: 20,
     extendsProposalId: null,
+    reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
     deletedAt: null,
     ...overrides,

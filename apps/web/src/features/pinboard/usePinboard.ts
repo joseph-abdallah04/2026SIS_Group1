@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { compareBoardItems, type BoardItem, type BoardResponse } from '@roundtable/shared';
+import {
+  compareBoardItems,
+  type BoardItem,
+  type BoardResponse,
+  type ReactionGroup,
+} from '@roundtable/shared';
 import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { api } from '../../lib/api';
 import { getSocket, joinSessionRoom, scheduleLeaveSessionRoom } from '../../lib/socket';
-import { sessionStore_getState } from '../../lib/sessionStore';
 
 /** How long a card that arrived while you were watching stays highlighted (F15). */
 const HIGHLIGHT_MS = 2400;
@@ -136,6 +140,35 @@ export function usePinboard(sessionId: string) {
     });
   }, []);
 
+  /**
+   * Apply a proposal's new reaction state (F18).
+   *
+   * Only the reaction list is replaced, so a reaction arriving mid-drag cannot
+   * move a card, and the board keeps the order it already has — nothing a
+   * reaction changes can affect where a card sits or how it sorts.
+   */
+  const applyReactions = useCallback(
+    ({
+      proposalId,
+      questionId,
+      reactions,
+    }: {
+      proposalId: string;
+      questionId: string;
+      reactions: ReactionGroup[];
+    }) => {
+      setBoard((prev) => {
+        if (!prev || questionId !== prev.questionId) return prev;
+        if (!prev.items.some((item) => item.id === proposalId)) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((item) => (item.id === proposalId ? { ...item, reactions } : item)),
+        };
+      });
+    },
+    [],
+  );
+
   const removeItem = useCallback((proposalId: string, questionId: string) => {
     setBoard((prev) => {
       if (!prev || questionId !== prev.questionId) return prev;
@@ -227,6 +260,7 @@ export function usePinboard(sessionId: string) {
     socket.on('proposalDeleted', onDeleted);
     socket.on('sessionPhase', onPhase);
     socket.on('sessionFocus', onFocus);
+    socket.on('proposalReactionsUpdated', applyReactions);
 
     return () => {
       cancelled = true;
@@ -239,8 +273,9 @@ export function usePinboard(sessionId: string) {
       socket.off('proposalDeleted', onDeleted);
       socket.off('sessionPhase', onPhase);
       socket.off('sessionFocus', onFocus);
+      socket.off('proposalReactionsUpdated', applyReactions);
     };
-  }, [sessionId, applySnapshot, highlight, reload, removeItem, upsertItem]);
+  }, [sessionId, applyReactions, applySnapshot, highlight, reload, removeItem, upsertItem]);
 
   /** Propose a new item onto the board (F15). */
   const propose = useCallback(
@@ -256,49 +291,44 @@ export function usePinboard(sessionId: string) {
    * The one exception is a drag in flight, which `useProposalDrag` holds on
    * screen so the card does not snap back for the round trip.
    */
-const editProposal = useCallback(
-  (input: ProposalUpdateInput) =>
-    writeIntent((ack) => {
-      const { proposals } = sessionStore_getState();
+  const editProposal = useCallback(
+    (input: ProposalUpdateInput) =>
+      writeIntent(
+        (ack) => getSocket().emit('proposalUpdate', input, ack),
+        'That change was rejected',
+      ),
+    [],
+  );
 
-      const existing = proposals.find((p) => p.id === input.id);
-      if (!existing) {
-        ack?.({ ok: false, error: 'Proposal not found' });
-        return;
-      }
+  /**
+   * Remove a proposal: your own (F16), or anyone's if you lead the session
+   * (F17). The server re-checks that before it soft-deletes and broadcasts.
+   */
+  const deleteProposal = useCallback(
+    (proposalId: string) =>
+      writeIntent(
+        (ack) => getSocket().emit('proposalDelete', { id: proposalId }, ack),
+        'That proposal could not be removed',
+      ),
+    [],
+  );
 
-      const updated: BoardItem = {
-        ...existing,
-        ...input,
-      };
-
-      getSocket().emit('proposalUpdate', { proposal: updated }, ack);
-    }, 'That change was rejected'),
-  [],
-);
-
-const deleteProposal = useCallback(
-  (proposalId: string) =>
-    writeIntent((ack) => {
-      const { proposals } = sessionStore_getState();
-
-      const existing = proposals.find((p) => p.id === proposalId);
-      if (!existing) {
-        ack?.({ ok: false, error: 'Proposal not found' });
-        return;
-      }
-
-      getSocket().emit(
-        'proposalDelete',
-        {
-          proposalId,
-          questionId: existing.questionId,
-        },
-        ack
-      );
-    }, 'That proposal could not be removed'),
-  [],
-);
+  /**
+   * Add or take back an emoji reaction (F18).
+   *
+   * A toggle with no local guess: the server decides the direction from what
+   * it has stored and broadcasts the whole reaction list back, so pressing a
+   * chip repeatedly cannot leave this client counting something the board does
+   * not have.
+   */
+  const reactToProposal = useCallback(
+    (proposalId: string, emoji: string) =>
+      writeIntent(
+        (ack) => getSocket().emit('proposalReact', { id: proposalId, emoji }, ack),
+        'That reaction could not be saved',
+      ),
+    [],
+  );
 
   return {
     board,
@@ -308,6 +338,7 @@ const deleteProposal = useCallback(
     propose,
     editProposal,
     deleteProposal,
+    reactToProposal,
     isLive,
     newItemIds,
     viewerId,

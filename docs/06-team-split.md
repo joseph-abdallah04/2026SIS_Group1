@@ -208,24 +208,38 @@ Frontend: apps/web/src/features/pinboard/
 
 ```
 Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
-Reaction (id, proposalId, userId, emoji) — unique(proposalId, userId, emoji)
+ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId, emoji)
 ```
 
 ### Socket events
 
+Names are camelCase to match the rest of `ClientToServerEvents` /
+`ServerToClientEvents` in `packages/shared/src/events.ts`, which is the
+contract these implement.
+
 ```
 # Client → Server (validated: membership + phase + ownership)
-proposal:create            → { type, artifactJson, x, y, extendsProposalId? }
-proposal:update            → { id, artifactJson?, x?, y? }        (author-only)
-proposal:delete            → { id }                               (author or leader)
-reaction:toggle            → { proposalId, emoji }
+proposalCreate             → { type, artifactJson, x, y, extendsProposalId? }
+proposalUpdate             → { id, artifactJson?, x?, y? }        (author; leader may move)
+proposalDelete             → { id }                               (author or leader)
+proposalReact              → { id, emoji }                        (anyone in the session)
 
 # Server → Client (broadcast to session room)
-proposal:created           → { proposal: Proposal }
-proposal:updated           → { proposal: Proposal }
-proposal:deleted           → { proposalId }
-reaction:toggled           → { proposalId, emoji, counts, byUser }
+proposalCreated            → { proposal: BoardItem }
+proposalUpdated            → { proposal: BoardItem }
+proposalDeleted            → { proposalId, questionId }
+proposalReactionsUpdated   → { proposalId, questionId, reactions: ReactionGroup[] }
 ```
+
+`proposalReact` is a toggle: the server decides from what is stored whether a
+press adds or removes, so a client that has fallen behind cannot ask for the
+wrong direction. `proposalReactionsUpdated` carries that proposal's whole
+reaction state rather than a delta, so a missed event is corrected by the next
+one instead of leaving a count adrift. Each `ReactionGroup` is
+`{ emoji, userIds }` — the count is the list's length, and whether _you_
+reacted is a question only the viewer can answer from its own id. Groups arrive
+in the order each emoji first appeared on that proposal, so an unfamiliar
+reaction lands in the same place on every board.
 
 ### UI: Right-click context menu
 
@@ -252,7 +266,8 @@ reaction:toggled           → { proposalId, emoji, counts, byUser }
 
 - Proposal artifacts are **editable by their author only** (F16); other users build on them via the separate "Extend" flow (F23), which creates a new proposal owned by that user
 - `extendsProposalId` links child proposals to parents; never delete parent if child exists
-- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction
+- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
+- Reactions are held to the same phase lock as every other board write: they move only while the question is in `discussion`. They are not votes (F27–F31), and a tally moving beside a live ballot would be read as one
 
 ---
 

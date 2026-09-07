@@ -56,6 +56,7 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     propose,
     editProposal,
     deleteProposal,
+    reactToProposal,
     isLive,
     newItemIds,
     viewerId: viewerIdFromPinboard,
@@ -192,6 +193,7 @@ function toggleShortlist(id: string) {
       isLive={isLive && board.questionStatus === 'discussion'}
       proposals={board.items}
       propose={propose}
+      editProposal={editProposal}
     >
       {/* `relative` so VoiceNotice's `absolute` banner positions against this
           frame; `overflow-hidden` so nothing on the board can produce a
@@ -227,6 +229,7 @@ function toggleShortlist(id: string) {
               isLeader={isLeaderFinal}
             />
           }
+          reactToProposal={reactToProposal}
         />
 
         {/* Leader-only shortlist save button */}
