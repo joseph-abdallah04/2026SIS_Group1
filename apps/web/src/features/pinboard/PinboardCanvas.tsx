@@ -51,6 +51,12 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
   /**
+   * F12's mute toggle, for the header. A node for the same reason `agenda` is:
+   * the board does not know what a LiveKit room is, and should not start
+   * knowing in order to give voice somewhere prominent to sit.
+   */
+  micControl?: ReactNode;
+  /**
    * Who the server believes this client is, or null before the join snapshot.
    * Author-only affordances key off this; the server re-checks regardless (F16).
    */
@@ -194,6 +200,7 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  micControl,
   viewerId,
   editProposal,
   deleteProposal,
@@ -548,6 +555,7 @@ export function PinboardCanvas({
           )}
         </div>
         <div className="ml-auto flex items-center gap-2.5">
+          {micControl}
           <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
           </span>
