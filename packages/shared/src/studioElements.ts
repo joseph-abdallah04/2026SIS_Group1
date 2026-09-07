@@ -8,11 +8,12 @@
 // and must keep rendering exactly as it did — the same additive rule that v2
 // styling and v3 grouping already follow.
 //
-// Geometry and style resolution live here rather than in either surface,
-// because the editor and the board card have to draw an element identically.
-// That is the rule `diagramContract.ts` already applies to nodes and edges, and
-// it is why the drawing tool's stroke maths moved here rather than being copied.
+// Stroke geometry is NOT duplicated here: simplification, path data and
+// hit-testing live in `drawingContract.ts` and are shared with the drawing
+// tool, because both surfaces draw the same kind of mark and the board card
+// renders both without either editor.
 
+import { packDrawingPoints, unpackDrawingPoints, type StrokePoint } from './drawingContract.js';
 import {
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
@@ -22,44 +23,32 @@ import {
   type DiagramStrokeWidthPreset,
 } from './diagramContract.js';
 
-export interface InkPoint {
-  x: number;
-  y: number;
-}
-
 /**
- * One freehand stroke.
+ * One freehand stroke, as stored.
  *
- * Points are in the diagram's own coordinate space rather than on a surface of
- * their own, so ink pans, zooms and sits beside shapes instead of living on the
- * separate fixed sheet the standalone drawing tool uses.
+ * Points are a flat `[x0, y0, x1, y1, …]` list for the same reason the drawing
+ * artifact packs its strokes: the same path costs roughly half as many
+ * characters, and ink shares the artifact's ~100KB budget with the nodes,
+ * edges and everything else on the canvas. `studioInk.ts` holds the unpacked
+ * `{x, y}` form the editor works in, and converts at the boundary — exactly the
+ * split `DrawingStroke` / `DrawingStrokeData` already uses.
+ *
+ * The coordinate space is the diagram's own, not a surface of the stroke's own,
+ * so ink pans, zooms and sits beside shapes rather than on a separate sheet.
  *
  * Both style fields are optional for the same reason node styling is: a stroke
- * written by a build with a wider palette must still load and draw with the
- * default appearance rather than taking the whole board down.
+ * written by a build with a wider palette must still load and draw, with the
+ * default appearance, rather than taking the whole board down.
  */
 export interface InkElement {
   id: string;
-  points: InkPoint[];
+  points: number[];
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
 }
 
 export const INK_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
 export const INK_DEFAULT_STROKE_WIDTH: DiagramStrokeWidthPreset = 'regular';
-
-/**
- * Bounds on ink, alongside the existing 100 nodes / 200 edges.
- *
- * These are shape limits, not the real ceiling: a sketch is bounded by the
- * serialized-artifact budget the editor checks before proposing (docs/02 §8.5),
- * which is what actually stops a 100KB payload. They exist so a crafted payload
- * cannot make the server parse an unbounded array.
- */
-export const DIAGRAM_INK_LIMIT = 200;
-export const DIAGRAM_INK_POINT_LIMIT = 400;
-/** One `z` entry per element: nodes + edges + ink, with headroom. */
-export const DIAGRAM_Z_LIMIT = 600;
 
 /**
  * Ink is heavier than an arrow at the same preset name. A 2-unit line reads as
@@ -81,172 +70,29 @@ export function inkStrokeWidth(ink: Pick<InkElement, 'strokeWidthPreset'>): numb
   return DIAGRAM_INK_STROKE_WIDTHS[ink.strokeWidthPreset ?? INK_DEFAULT_STROKE_WIDTH];
 }
 
-// --- Stroke geometry ------------------------------------------------------
-//
-// Moved here from the drawing tool's model so the studio editor, the board card
-// and the drawing tool all simplify and draw a stroke identically.
-
-/** Sub-two-unit tolerance removes pointer noise without flattening corners. */
-const SIMPLIFICATION_TOLERANCE = 1.5;
-
-function squaredDistance(first: InkPoint, second: InkPoint): number {
-  const deltaX = first.x - second.x;
-  const deltaY = first.y - second.y;
-  return deltaX * deltaX + deltaY * deltaY;
+/** The stroke's points in the `{x, y}` form the geometry helpers take. */
+export function inkPoints(ink: Pick<InkElement, 'points'>): StrokePoint[] {
+  return unpackDrawingPoints(ink.points);
 }
 
-function squaredSegmentDistance(point: InkPoint, start: InkPoint, end: InkPoint): number {
-  let x = start.x;
-  let y = start.y;
-  let deltaX = end.x - x;
-  let deltaY = end.y - y;
-
-  if (deltaX !== 0 || deltaY !== 0) {
-    const ratio =
-      ((point.x - x) * deltaX + (point.y - y) * deltaY) / (deltaX * deltaX + deltaY * deltaY);
-
-    if (ratio > 1) {
-      x = end.x;
-      y = end.y;
-    } else if (ratio > 0) {
-      x += deltaX * ratio;
-      y += deltaY * ratio;
-    }
-  }
-
-  deltaX = point.x - x;
-  deltaY = point.y - y;
-  return deltaX * deltaX + deltaY * deltaY;
-}
-
-function simplifyRadialDistance(points: readonly InkPoint[], squaredTolerance: number): InkPoint[] {
-  const first = points[0];
-  if (!first) return [];
-
-  const simplified = [first];
-  let previous = first;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const point = points[index];
-    if (point && squaredDistance(point, previous) > squaredTolerance) {
-      simplified.push(point);
-      previous = point;
-    }
-  }
-
-  const last = points.at(-1);
-  if (last && previous !== last) simplified.push(last);
-  return simplified;
-}
-
-function simplifyDouglasPeucker(points: readonly InkPoint[], squaredTolerance: number): InkPoint[] {
-  const first = points[0];
-  const last = points.at(-1);
-  if (!first || !last || points.length <= 2) return [...points];
-
-  const markers = new Uint8Array(points.length);
-  const pendingRanges: Array<[number, number]> = [[0, points.length - 1]];
-  markers[0] = 1;
-  markers[points.length - 1] = 1;
-
-  while (pendingRanges.length > 0) {
-    const range = pendingRanges.pop();
-    if (!range) break;
-    const [startIndex, endIndex] = range;
-    const rangeStart = points[startIndex];
-    const rangeEnd = points[endIndex];
-    if (!rangeStart || !rangeEnd) continue;
-
-    let furthestIndex = -1;
-    let furthestDistance = squaredTolerance;
-
-    for (let index = startIndex + 1; index < endIndex; index += 1) {
-      const point = points[index];
-      if (!point) continue;
-      const distance = squaredSegmentDistance(point, rangeStart, rangeEnd);
-      if (distance > furthestDistance) {
-        furthestDistance = distance;
-        furthestIndex = index;
-      }
-    }
-
-    if (furthestIndex > startIndex && furthestIndex < endIndex) {
-      markers[furthestIndex] = 1;
-      pendingRanges.push([startIndex, furthestIndex], [furthestIndex, endIndex]);
-    }
-  }
-
-  return points.filter((_, index) => markers[index] === 1);
-}
-
-export function simplifyInkPoints(
-  points: readonly InkPoint[],
-  tolerance = SIMPLIFICATION_TOLERANCE,
-): InkPoint[] {
-  if (points.length <= 2) return [...points];
-  const squaredTolerance = tolerance * tolerance;
-  return simplifyDouglasPeucker(simplifyRadialDistance(points, squaredTolerance), squaredTolerance);
-}
-
-function roundCoordinate(value: number): string {
-  return String(Math.round(value * 10) / 10);
+/** Flatten editor points for storage, at one decimal place. */
+export function packInkPoints(points: readonly StrokePoint[]): number[] {
+  return packDrawingPoints(points);
 }
 
 /**
- * Path data for a stroke: quadratics through the midpoints, so a hand-drawn
- * line stays smooth instead of showing every sampled point as a corner.
+ * Bounds on ink, alongside the existing 100 nodes / 200 edges.
+ *
+ * These are shape limits, not the real ceiling: a sketch is bounded by the
+ * serialized-artifact budget the editor checks before proposing (docs/02 §8.5),
+ * which is what actually stops a 100KB payload. They exist so a crafted payload
+ * cannot make the server parse an unbounded array. The point cap counts packed
+ * numbers, so it is two per drawn point.
  */
-export function inkPathData(points: readonly InkPoint[]): string {
-  const first = points[0];
-  if (!first) return '';
-  if (points.length === 1) {
-    // A dot still has to paint, and a zero-length path does not.
-    return `M ${roundCoordinate(first.x)} ${roundCoordinate(first.y)} l 0.1 0`;
-  }
-
-  let path = `M ${roundCoordinate(first.x)} ${roundCoordinate(first.y)}`;
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const point = points[index];
-    const next = points[index + 1];
-    if (!point || !next) continue;
-    const midpoint = { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 };
-    path += ` Q ${roundCoordinate(point.x)} ${roundCoordinate(point.y)} ${roundCoordinate(midpoint.x)} ${roundCoordinate(midpoint.y)}`;
-  }
-
-  const last = points.at(-1);
-  return last ? `${path} L ${roundCoordinate(last.x)} ${roundCoordinate(last.y)}` : path;
-}
-
-/** True when an eraser of `radius` at `point` covers any part of the stroke. */
-export function inkTouchesPoint(ink: InkElement, point: InkPoint, radius: number): boolean {
-  const hitRadius = radius + inkStrokeWidth(ink) / 2;
-  const squaredHitRadius = hitRadius * hitRadius;
-
-  if (ink.points.length === 1) {
-    const onlyPoint = ink.points[0];
-    return onlyPoint ? squaredDistance(onlyPoint, point) <= squaredHitRadius : false;
-  }
-
-  for (let index = 1; index < ink.points.length; index += 1) {
-    const start = ink.points[index - 1];
-    const end = ink.points[index];
-    if (start && end && squaredSegmentDistance(point, start, end) <= squaredHitRadius) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/** Whole-stroke eraser, matching the drawing tool: a touched stroke goes entirely. */
-export function eraseInkAtPoint(
-  ink: readonly InkElement[],
-  point: InkPoint,
-  radius: number,
-): InkElement[] {
-  return ink.filter((stroke) => !inkTouchesPoint(stroke, point, radius));
-}
+export const DIAGRAM_INK_LIMIT = 200;
+export const DIAGRAM_INK_POINT_LIMIT = 800;
+/** One `z` entry per element: nodes + edges + ink, with headroom. */
+export const DIAGRAM_Z_LIMIT = 600;
 
 // --- Paint order ----------------------------------------------------------
 
@@ -272,7 +118,8 @@ export function diagramEdgeKey(edge: Pick<DiagramEdge, 'from' | 'to'>): string {
 interface PaintableArtifact {
   nodes: readonly DiagramNode[];
   edges: readonly DiagramEdge[];
-  ink?: readonly InkElement[];
+  /** Only the ids are needed, so the editor's unpacked strokes fit too. */
+  ink?: readonly { id: string }[];
   z?: readonly string[];
 }
 
@@ -287,7 +134,6 @@ interface PaintableArtifact {
  * it does not mention is appended in the same legacy order. `z` is deliberately
  * allowed to be partial: a build that adds an element kind this one cannot draw
  * must not be able to drop the elements this one *can*.
- *
  */
 export function studioPaintOrder(artifact: PaintableArtifact): StudioElementRef[] {
   const legacy: StudioElementRef[] = [

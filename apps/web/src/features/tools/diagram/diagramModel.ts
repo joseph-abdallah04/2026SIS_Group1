@@ -4,7 +4,6 @@ import type {
   DiagramNode,
   DiagramNodeShape,
   DiagramNodeSize,
-  InkElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_NODE_SHAPE_KEYS,
@@ -18,11 +17,11 @@ import {
   diagramIsAncestor,
   diagramNodeSize,
   effectiveDiagramNodeSize,
-  simplifyInkPoints,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
+import { inkToData, type StudioInkStroke } from '../studio/studioInk';
 
 export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
 
@@ -873,7 +872,7 @@ export function deleteEdge(
  */
 function normalizationDelta(
   nodes: readonly DiagramNode[],
-  ink: readonly InkElement[],
+  ink: readonly StudioInkStroke[],
 ): DiagramPoint {
   const xs: number[] = [];
   const ys: number[] = [];
@@ -923,7 +922,7 @@ export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): Diag
 export function prepareDiagram(
   nodes: readonly DiagramNode[],
   edges: readonly DiagramEdge[],
-  ink: readonly InkElement[] = [],
+  ink: readonly StudioInkStroke[] = [],
   z: readonly string[] = [],
 ): PreparedDiagram {
   // v4: a sketch is a legitimate studio artifact on its own, so "something to
@@ -972,15 +971,14 @@ export function prepareDiagram(
     x: Math.round(node.x + delta.x),
     y: Math.round(node.y + delta.y),
   }));
-  const shiftedInk = ink.map((stroke) => ({
-    ...stroke,
-    // Simplified once, at the boundary: the editor keeps every sampled point
-    // for a faithful undo, and only what is proposed needs to be compact.
-    points: simplifyInkPoints(stroke.points).map((point) => ({
-      x: Math.round((point.x + delta.x) * 10) / 10,
-      y: Math.round((point.y + delta.y) * 10) / 10,
+  // Simplified and packed once, at the boundary: the editor keeps every sampled
+  // point for a faithful undo, and only what is proposed needs to be compact.
+  const shiftedInk = inkToData(
+    ink.map((stroke) => ({
+      ...stroke,
+      points: stroke.points.map((point) => ({ x: point.x + delta.x, y: point.y + delta.y })),
     })),
-  }));
+  );
 
   const known = new Set<string>([
     ...shiftedNodes.map((node) => node.id),

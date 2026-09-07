@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   diagramEdgeKey,
-  eraseInkAtPoint,
-  inkPathData,
+  inkPoints,
   inkStrokeColor,
   inkStrokeWidth,
+  packInkPoints,
   reorderStudioElements,
-  simplifyInkPoints,
+  simplifyStrokePoints,
+  strokePathData,
   studioPaintOrder,
   type DiagramEdge,
   type DiagramNode,
   type InkElement,
 } from '@roundtable/shared';
+
+import { eraseInkAtPoint, type StudioInkStroke } from './studioInk';
 import { diagramArtifactSchema, diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 const box = (id: string, extra: Partial<DiagramNode> = {}): DiagramNode => ({
@@ -22,13 +25,17 @@ const box = (id: string, extra: Partial<DiagramNode> = {}): DiagramNode => ({
   ...extra,
 });
 
+/** A stored stroke: points packed, as they are on the wire. */
 const stroke = (id: string, extra: Partial<InkElement> = {}): InkElement => ({
   id,
-  points: [
-    { x: 0, y: 0 },
-    { x: 10, y: 10 },
-  ],
+  points: [0, 0, 10, 10],
   ...extra,
+});
+
+/** A stroke mid-edit, as the editor holds it. */
+const editorStroke = (id: string, points: { x: number; y: number }[]): StudioInkStroke => ({
+  id,
+  points,
 });
 
 const edge = (from: string, to: string): DiagramEdge => ({ from, to });
@@ -108,7 +115,20 @@ describe('reorderStudioElements', () => {
 
 describe('ink geometry', () => {
   it('paints a single-point stroke as a dot rather than nothing', () => {
-    expect(inkPathData([{ x: 3, y: 4 }])).toBe('M 3 4 l 0.1 0');
+    expect(strokePathData([{ x: 3, y: 4 }])).toBe('M 3 4 l 0.1 0');
+  });
+
+  it('round-trips points through the packed storage form', () => {
+    const points = [
+      { x: 12.34, y: 56.78 },
+      { x: 90, y: 1 },
+    ];
+    // One decimal place, which is finer than a pen stroke reads at.
+    expect(packInkPoints(points)).toEqual([12.3, 56.8, 90, 1]);
+    expect(inkPoints({ points: packInkPoints(points) })).toEqual([
+      { x: 12.3, y: 56.8 },
+      { x: 90, y: 1 },
+    ]);
   });
 
   it('drops sampling noise but keeps the ends of the stroke', () => {
@@ -119,20 +139,21 @@ describe('ink geometry', () => {
       { x: 30, y: 0.1 },
       { x: 40, y: 0 },
     ];
-    const simplified = simplifyInkPoints(noisy);
+    const simplified = simplifyStrokePoints(noisy);
     expect(simplified.length).toBeLessThan(noisy.length);
     expect(simplified.at(0)).toEqual({ x: 0, y: 0 });
     expect(simplified.at(-1)).toEqual({ x: 40, y: 0 });
   });
 
   it('erases a whole stroke the eraser touches and leaves the rest', () => {
-    const near = stroke('ink-near');
-    const far = stroke('ink-far', {
-      points: [
-        { x: 500, y: 500 },
-        { x: 510, y: 510 },
-      ],
-    });
+    const near = editorStroke('ink-near', [
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+    ]);
+    const far = editorStroke('ink-far', [
+      { x: 500, y: 500 },
+      { x: 510, y: 510 },
+    ]);
     expect(eraseInkAtPoint([near, far], { x: 5, y: 5 }, 4)).toEqual([far]);
   });
 

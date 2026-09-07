@@ -213,10 +213,9 @@ export const diagramEdgeSchema = z.object({
 // wider palette still loads with the default appearance, exactly as nodes do.
 export const inkElementSchema = z.object({
   id: z.string().min(1),
-  points: z
-    .array(z.object({ x: z.number(), y: z.number() }))
-    .min(1)
-    .max(DIAGRAM_INK_POINT_LIMIT),
+  // Packed `[x0, y0, x1, y1, …]`, like the drawing artifact's strokes: half the
+  // characters for the same path, out of one shared artifact budget.
+  points: z.array(z.number()).min(2).max(DIAGRAM_INK_POINT_LIMIT),
   strokeColor: diagramStrokeKeySchema.optional(),
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
 });

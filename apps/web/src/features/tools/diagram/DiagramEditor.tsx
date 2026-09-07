@@ -58,7 +58,6 @@ import type {
   DiagramStrokeKey,
   DiagramStrokeStyle,
   DiagramStrokeWidthPreset,
-  InkElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_FILL_COLORS,
@@ -83,10 +82,9 @@ import {
   diagramCanParent,
   diagramDescendantIds,
   effectiveDiagramNodeSize,
-  eraseInkAtPoint,
-  inkPathData,
   inkStrokeColor,
   inkStrokeWidth,
+  strokePathData,
   reorderStudioElements,
   studioPaintOrder,
 } from '@roundtable/shared';
@@ -156,7 +154,13 @@ import {
 } from './diagramView';
 import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
-import { createInkId, eraserRadiusForView } from '../studio/studioInk';
+import {
+  createInkId,
+  dataToInk,
+  eraseInkAtPoint,
+  eraserRadiusForView,
+  type StudioInkStroke,
+} from '../studio/studioInk';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 
 /**
@@ -432,6 +436,10 @@ export function DiagramEditor() {
     initialSnapshotRef.current = {
       nodes: (sourceArtifact?.nodes ?? []).map((node) => ({ ...node })),
       edges: (sourceArtifact?.edges ?? []).map((edge) => ({ ...edge })),
+      // Extending a studio canvas has to bring its sketch and its ordering with
+      // it: prefilling only the shapes would quietly drop half the artifact.
+      ...(sourceArtifact?.ink?.length ? { ink: dataToInk(sourceArtifact.ink) } : {}),
+      ...(sourceArtifact?.z?.length ? { z: [...sourceArtifact.z] } : {}),
     };
   }
   const history = useDiagramHistory(initialSnapshotRef.current);
@@ -461,8 +469,8 @@ export function DiagramEditor() {
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
   const [inkColor, setInkColor] = useState<DiagramStrokeKey>('ink');
   const [inkWidth, setInkWidth] = useState<DiagramStrokeWidthPreset>('regular');
-  const [activeStroke, setActiveStroke] = useState<InkElement | null>(null);
-  const activeStrokeRef = useRef<InkElement | null>(null);
+  const [activeStroke, setActiveStroke] = useState<StudioInkStroke | null>(null);
+  const activeStrokeRef = useRef<StudioInkStroke | null>(null);
   const inkPointerRef = useRef<number | null>(null);
   const eraseStartRef = useRef<DiagramSnapshot | null>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
@@ -1046,7 +1054,7 @@ export function DiagramEditor() {
   }
 
   /** Ink and paint order travel with the nodes and edges in one history entry. */
-  function commitInk(nextInk: InkElement[], nextOrder?: string[]) {
+  function commitInk(nextInk: StudioInkStroke[], nextOrder?: string[]) {
     const graph = history.snapshotRef.current;
     history.commit({
       nodes: graph.nodes,
@@ -1057,7 +1065,7 @@ export function DiagramEditor() {
   }
 
   function beginStroke(event: PointerEvent<SVGSVGElement>) {
-    const stroke: InkElement = {
+    const stroke: StudioInkStroke = {
       id: createInkId(),
       points: [surfacePoint(event)],
       strokeColor: inkColor,
@@ -1603,12 +1611,12 @@ export function DiagramEditor() {
     );
   }
 
-  function renderInk(stroke: InkElement) {
+  function renderInk(stroke: StudioInkStroke) {
     return (
       <path
         key={stroke.id}
         data-testid="ink-stroke"
-        d={inkPathData(stroke.points)}
+        d={strokePathData(stroke.points)}
         fill="none"
         stroke={inkStrokeColor(stroke)}
         strokeWidth={inkStrokeWidth(stroke)}

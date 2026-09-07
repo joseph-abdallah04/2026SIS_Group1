@@ -1,5 +1,8 @@
 import {
   DRAWING_PEN_WIDTHS,
+  simplifyStrokePoints,
+  strokePathData,
+  strokePointsTouch,
   DRAWING_VIEWBOX_HEIGHT,
   DRAWING_VIEWBOX_WIDTH,
   packDrawingPoints,
@@ -49,119 +52,14 @@ export interface DrawingSurfaceBounds {
 export type PreparedDrawing =
   { ok: true; svg: string; strokes: DrawingStrokeData[] } | { ok: false; error: string };
 
-// Sub-two-unit tolerance removes pointer noise without flattening intentional corners.
-const SIMPLIFICATION_TOLERANCE = 1.5;
 // A twelve-pixel screen target stays precise on desktop while remaining usable on touch screens.
 const ERASER_RADIUS_CSS_PX = 12;
 
-function squaredDistance(first: DrawingPoint, second: DrawingPoint): number {
-  const deltaX = first.x - second.x;
-  const deltaY = first.y - second.y;
-  return deltaX * deltaX + deltaY * deltaY;
-}
-
-function squaredSegmentDistance(
-  point: DrawingPoint,
-  start: DrawingPoint,
-  end: DrawingPoint,
-): number {
-  let x = start.x;
-  let y = start.y;
-  let deltaX = end.x - x;
-  let deltaY = end.y - y;
-
-  if (deltaX !== 0 || deltaY !== 0) {
-    const ratio =
-      ((point.x - x) * deltaX + (point.y - y) * deltaY) / (deltaX * deltaX + deltaY * deltaY);
-
-    if (ratio > 1) {
-      x = end.x;
-      y = end.y;
-    } else if (ratio > 0) {
-      x += deltaX * ratio;
-      y += deltaY * ratio;
-    }
-  }
-
-  deltaX = point.x - x;
-  deltaY = point.y - y;
-  return deltaX * deltaX + deltaY * deltaY;
-}
-
-function simplifyRadialDistance(
-  points: readonly DrawingPoint[],
-  squaredTolerance: number,
-): DrawingPoint[] {
-  const first = points[0];
-  if (!first) return [];
-
-  const simplified = [first];
-  let previous = first;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const point = points[index];
-    if (point && squaredDistance(point, previous) > squaredTolerance) {
-      simplified.push(point);
-      previous = point;
-    }
-  }
-
-  const last = points.at(-1);
-  if (last && previous !== last) simplified.push(last);
-  return simplified;
-}
-
-function simplifyDouglasPeucker(
-  points: readonly DrawingPoint[],
-  squaredTolerance: number,
-): DrawingPoint[] {
-  const first = points[0];
-  const last = points.at(-1);
-  if (!first || !last || points.length <= 2) return [...points];
-
-  const markers = new Uint8Array(points.length);
-  const pendingRanges: Array<[number, number]> = [[0, points.length - 1]];
-  markers[0] = 1;
-  markers[points.length - 1] = 1;
-
-  while (pendingRanges.length > 0) {
-    const range = pendingRanges.pop();
-    if (!range) break;
-    const [startIndex, endIndex] = range;
-    const rangeStart = points[startIndex];
-    const rangeEnd = points[endIndex];
-    if (!rangeStart || !rangeEnd) continue;
-
-    let furthestIndex = -1;
-    let furthestDistance = squaredTolerance;
-
-    for (let index = startIndex + 1; index < endIndex; index += 1) {
-      const point = points[index];
-      if (!point) continue;
-      const distance = squaredSegmentDistance(point, rangeStart, rangeEnd);
-      if (distance > furthestDistance) {
-        furthestDistance = distance;
-        furthestIndex = index;
-      }
-    }
-
-    if (furthestIndex > startIndex && furthestIndex < endIndex) {
-      markers[furthestIndex] = 1;
-      pendingRanges.push([startIndex, furthestIndex], [furthestIndex, endIndex]);
-    }
-  }
-
-  return points.filter((_, index) => markers[index] === 1);
-}
-
-export function simplifyStroke(
-  points: readonly DrawingPoint[],
-  tolerance = SIMPLIFICATION_TOLERANCE,
-): DrawingPoint[] {
-  if (points.length <= 2) return [...points];
-  const squaredTolerance = tolerance * tolerance;
-  return simplifyDouglasPeucker(simplifyRadialDistance(points, squaredTolerance), squaredTolerance);
-}
+// The stroke maths is shared with the studio canvas (`drawingContract.ts`), so
+// both surfaces and the board card simplify and draw a stroke identically.
+// Re-exported under this module's existing names so its callers are unchanged.
+export const simplifyStroke = simplifyStrokePoints;
+export { strokePathData };
 
 export function clampDrawingPoint(point: DrawingPoint): DrawingPoint {
   return {
@@ -189,60 +87,12 @@ export function eraserRadiusForSurface(bounds: DrawingSurfaceBounds): number {
   );
 }
 
-function strokeTouchesPoint(stroke: DrawingStroke, point: DrawingPoint, radius: number): boolean {
-  const hitRadius = radius + stroke.width / 2;
-  const squaredHitRadius = hitRadius * hitRadius;
-
-  if (stroke.points.length === 1) {
-    const onlyPoint = stroke.points[0];
-    return onlyPoint ? squaredDistance(onlyPoint, point) <= squaredHitRadius : false;
-  }
-
-  for (let index = 1; index < stroke.points.length; index += 1) {
-    const start = stroke.points[index - 1];
-    const end = stroke.points[index];
-    if (start && end && squaredSegmentDistance(point, start, end) <= squaredHitRadius) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export function eraseStrokesAtPoint(
   strokes: readonly DrawingStroke[],
   point: DrawingPoint,
   radius = ERASER_RADIUS_CSS_PX,
 ): DrawingStroke[] {
-  return strokes.filter((stroke) => !strokeTouchesPoint(stroke, point, radius));
-}
-
-function roundCoordinate(value: number): string {
-  return String(Math.round(value * 10) / 10);
-}
-
-export function strokePathData(points: readonly DrawingPoint[]): string {
-  const first = points[0];
-  if (!first) return '';
-  if (points.length === 1) {
-    return `M ${roundCoordinate(first.x)} ${roundCoordinate(first.y)} l 0.1 0`;
-  }
-
-  let path = `M ${roundCoordinate(first.x)} ${roundCoordinate(first.y)}`;
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const point = points[index];
-    const next = points[index + 1];
-    if (!point || !next) continue;
-    const midpoint = {
-      x: (point.x + next.x) / 2,
-      y: (point.y + next.y) / 2,
-    };
-    path += ` Q ${roundCoordinate(point.x)} ${roundCoordinate(point.y)} ${roundCoordinate(midpoint.x)} ${roundCoordinate(midpoint.y)}`;
-  }
-
-  const last = points.at(-1);
-  return last ? `${path} L ${roundCoordinate(last.x)} ${roundCoordinate(last.y)}` : path;
+  return strokes.filter((stroke) => !strokePointsTouch(stroke.points, stroke.width, point, radius));
 }
 
 export function serializeDrawingSvg(strokes: readonly DrawingStroke[]): string {

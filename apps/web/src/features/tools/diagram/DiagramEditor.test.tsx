@@ -1966,4 +1966,51 @@ describe('studio canvas', () => {
     await user.click(screen.getByRole('button', { name: 'Add box' }));
     expect(screen.queryByRole('button', { name: 'Timeline' })).toBeNull();
   });
+
+  it('carries ink and paint order into an extended studio canvas', async () => {
+    // Prefilling only the shapes would silently drop half of a studio artifact,
+    // and the author of the extension would never see what went missing.
+    const user = userEvent.setup();
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    const parent: BoardItem = {
+      id: 'parent-studio',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [{ id: 'n1', label: 'Idea', x: 24, y: 24 }],
+        edges: [],
+        ink: [{ id: 'ink-1', points: [40, 40, 120, 90], strokeColor: 'ink' }],
+        z: ['ink-1', 'n1'],
+      },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+      extendsProposalId: null,
+      reactions: [],
+    };
+
+    render(
+      <Harness propose={propose}>
+        <ExtendButton proposal={parent} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    // The inherited stroke is on the canvas, not just in the payload.
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.ink).toHaveLength(1);
+    expect(artifact.ink![0]!.strokeColor).toBe('ink');
+    // The order the parent was arranged in survives the copy.
+    expect(artifact.z!.indexOf('ink-1')).toBeLessThan(artifact.z!.indexOf('n1'));
+  });
 });

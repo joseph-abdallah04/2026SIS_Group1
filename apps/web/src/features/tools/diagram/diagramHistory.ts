@@ -1,4 +1,6 @@
-import type { DiagramEdge, DiagramNode, InkElement } from '@roundtable/shared';
+import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
+
+import type { StudioInkStroke } from '../studio/studioInk';
 
 export interface DiagramSnapshot {
   nodes: DiagramNode[];
@@ -8,7 +10,7 @@ export interface DiagramSnapshot {
    * means no ink and the derived paint order, so a diagram with neither is the
    * same object it has always been.
    */
-  ink?: InkElement[];
+  ink?: StudioInkStroke[];
   z?: string[];
 }
 

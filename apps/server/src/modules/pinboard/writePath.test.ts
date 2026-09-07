@@ -508,12 +508,10 @@ describe('proposalCreate handler', () => {
       } as Parameters<typeof createProposal>[0]['input'];
     }
 
+    // Packed `[x0, y0, x1, y1]`, matching how the editor serialises a stroke.
     const stroke = (id: string) => ({
       id,
-      points: [
-        { x: 0, y: 0 },
-        { x: 10, y: 10 },
-      ],
+      points: [0, 0, 10, 10],
       strokeColor: 'ink',
       strokeWidthPreset: 'regular',
     });

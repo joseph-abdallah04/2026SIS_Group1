@@ -10,7 +10,8 @@ import {
   diagramNodeStroke,
   diagramNodeStrokeWidth,
   effectiveDiagramNodeSize,
-  inkPathData,
+  inkPoints,
+  strokePathData,
   inkStrokeColor,
   inkStrokeWidth,
   studioPaintOrder,
@@ -101,22 +102,25 @@ function DiagramBody({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
   const { nodes, edges } = item.artifactJson;
   const ink = item.artifactJson.ink ?? [];
+  // Unpacked once per render: the extent needs every point, and so does each
+  // stroke's path data.
+  const unpackedInk = ink.map((stroke) => ({ ...stroke, points: inkPoints(stroke) }));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
-  const inkById = new Map(ink.map((stroke) => [stroke.id, stroke]));
+  const inkById = new Map(unpackedInk.map((stroke) => [stroke.id, stroke]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
   // The card frames whatever the artifact contains, so ink counts towards the
   // extent exactly as a node does — otherwise a sketch would be cropped.
-  const inkPoints = ink.flatMap((stroke) => stroke.points);
+  const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
   const svgWidth =
     Math.max(
       ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
-      ...inkPoints.map((point) => point.x),
+      ...allInkPoints.map((point) => point.x),
       72,
     ) + 28;
   const svgHeight =
     Math.max(
       ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
-      ...inkPoints.map((point) => point.y),
+      ...allInkPoints.map((point) => point.y),
       32,
     ) + 24;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
@@ -162,11 +166,11 @@ function DiagramBody({ item }: { item: BoardItem }) {
     );
   }
 
-  function renderInk(stroke: (typeof ink)[number]) {
+  function renderInk(stroke: (typeof unpackedInk)[number]) {
     return (
       <path
         key={stroke.id}
-        d={inkPathData(stroke.points)}
+        d={strokePathData(stroke.points)}
         fill="none"
         stroke={inkStrokeColor(stroke)}
         strokeWidth={inkStrokeWidth(stroke)}

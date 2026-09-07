@@ -115,12 +115,10 @@ describe('diagram proposal card', () => {
 });
 
 describe('studio proposal card (v4)', () => {
+  // Packed `[x0, y0, x1, y1]`, the form a stroke is stored and broadcast in.
   const stroke = {
     id: 'ink-1',
-    points: [
-      { x: 10, y: 10 },
-      { x: 90, y: 60 },
-    ],
+    points: [10, 10, 90, 60],
     strokeColor: 'ink' as const,
     strokeWidthPreset: 'regular' as const,
   };
@@ -169,6 +167,9 @@ describe('studio proposal card (v4)', () => {
   it('still shows the empty placeholder for a diagram with nothing in it', () => {
     const { container } = render(<ProposalCard item={studioItem({})} />);
     expect(container.querySelector('.border-dashed')).not.toBeNull();
+  });
+});
+
 describe('card layout', () => {
   // The artifact opens the card and the attribution closes it. The byline sits
   // bottom-right, clear of both things the board draws over this card: the
