@@ -9,11 +9,13 @@ export {
   deleteProposal,
   getBoardForSession,
   listProposals,
+  toggleReaction,
   updateProposal,
 } from './service.js';
 export {
   registerPinboardSocketHandlers,
   emitProposalCreated,
   emitProposalDeleted,
+  emitProposalReactionsUpdated,
   emitProposalUpdated,
 } from './socket.js';

@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { BoardItem, DiagramNode } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
@@ -16,6 +16,7 @@ function diagramItem(nodes: DiagramNode[]): BoardItem {
     y: 0,
     createdAt: '2026-09-03T00:00:00.000Z',
     extendsProposalId: null,
+    reactions: [],
   };
 }
 
@@ -168,5 +169,47 @@ describe('studio proposal card (v4)', () => {
   it('still shows the empty placeholder for a diagram with nothing in it', () => {
     const { container } = render(<ProposalCard item={studioItem({})} />);
     expect(container.querySelector('.border-dashed')).not.toBeNull();
+describe('card layout', () => {
+  // The artifact opens the card and the attribution closes it. The byline sits
+  // bottom-right, clear of both things the board draws over this card: the
+  // edit and remove controls on the top-right corner, and the reaction chips
+  // along the bottom-left.
+  it('leads with the artifact and signs off underneath it', () => {
+    const { container } = render(
+      <ProposalCard item={diagramItem([{ id: 'n1', label: 'Idea', x: 0, y: 0, shape: 'box' }])} />,
+    );
+
+    const article = container.querySelector('article');
+    expect(article?.firstElementChild?.querySelector('svg')).not.toBeNull();
+    expect(article?.lastElementChild?.tagName).toBe('FOOTER');
+  });
+
+  it('carries the author and the time in that footer', () => {
+    render(<ProposalCard item={diagramItem([])} />);
+
+    const footer = screen.getByText('Alice').closest('footer');
+    expect(footer).not.toBeNull();
+    expect(footer?.querySelector('time')?.getAttribute('datetime')).toBe(
+      '2026-09-03T00:00:00.000Z',
+    );
+  });
+
+  // The board draws the reaction chips over this card's bottom-left corner,
+  // reaching up into it. The byline's inset has to clear them, and it has to
+  // do so at a fixed size: a card that resized as chips came and went drew the
+  // eye to its own edges rather than to what was written on it.
+  it('keeps the same bottom inset whether or not it has reactions', () => {
+    const bare = render(<ProposalCard item={diagramItem([])} />);
+    const bareFooter = bare.container.querySelector('footer')?.className;
+    bare.unmount();
+
+    const reacted = render(
+      <ProposalCard
+        item={{ ...diagramItem([]), reactions: [{ emoji: '👍', userIds: ['someone'] }] }}
+      />,
+    );
+
+    expect(reacted.container.querySelector('footer')?.className).toBe(bareFooter);
+    expect(bareFooter).toContain('pb-3');
   });
 });

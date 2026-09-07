@@ -49,6 +49,7 @@ function createdRow(overrides: Record<string, unknown> = {}) {
     x: 0,
     y: 0,
     extendsProposalId: null,
+    reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
     deletedAt: null,
     ...overrides,

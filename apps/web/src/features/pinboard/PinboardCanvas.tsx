@@ -5,6 +5,7 @@ import type { ProposalUpdateInput } from '@roundtable/shared/schemas';
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { EndSessionControl } from '../sessions/EndSessionControl';
 import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
+import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -56,6 +57,7 @@ interface PinboardCanvasProps {
   viewerId: string | null;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
   deleteProposal: (proposalId: string) => Promise<void>;
+  reactToProposal: (proposalId: string, emoji: string) => Promise<void>;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -195,6 +197,7 @@ export function PinboardCanvas({
   viewerId,
   editProposal,
   deleteProposal,
+  reactToProposal,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -206,6 +209,24 @@ export function PinboardCanvas({
   // null until the join snapshot lands, which would briefly offer the leader
   // the wrong exit. Either way it only decides what the UI offers — every
   // write is re-checked server-side.
+
+  const { openEditorForEdit } = useCreativeTools();
+
+  /**
+   * Whether a proposal can be reopened in the tool that made it.
+   *
+   * It depends on whether the artifact still holds what the editor works on. A
+   * diagram always does: its nodes and edges are the artifact. A drawing does
+   * only if its strokes were stored — ones proposed before that kept just the
+   * rendered SVG, and reopening those would mean starting from a blank canvas
+   * and replacing the artwork instead of changing it.
+   */
+  const canReopen = useCallback(
+    (item: BoardItem) =>
+      item.artifactJson.type === 'diagram' ||
+      (item.artifactJson.type === 'drawing' && (item.artifactJson.strokes?.length ?? 0) > 0),
+    [],
+  );
 
   // A rejected write is the one thing the board cannot show by itself: the card
   // simply stays where it was, which on its own looks like nothing happened.
@@ -344,6 +365,10 @@ export function PinboardCanvas({
 
   useEffect(() => clearBoardCentre, []);
 
+  // Both of these report the refusal *and* rethrow. The board shows why a
+  // write failed, but only the card knows it is holding an editor open or a
+  // confirmation waiting on that promise, and swallowing the rejection here
+  // would leave either of them stuck mid-action with nothing to release them.
   const onEditText = useCallback(
     async (item: BoardItem, text: string) => {
       if (item.artifactJson.type !== 'sticky') return;
@@ -351,6 +376,7 @@ export function PinboardCanvas({
         await editProposal({ id: item.id, artifactJson: { ...item.artifactJson, text } });
       } catch (err) {
         setWriteError(err instanceof Error ? err.message : 'Could not save that edit');
+        throw err;
       }
     },
     [editProposal],
@@ -362,9 +388,28 @@ export function PinboardCanvas({
         await deleteProposal(item.id);
       } catch (err) {
         setWriteError(err instanceof Error ? err.message : 'Could not remove that proposal');
+        throw err;
       }
     },
     [deleteProposal],
+  );
+
+  /**
+   * Toggle a reaction (F18).
+   *
+   * Unlike the two above this one settles rather than rethrows: the chip
+   * releases itself when the promise finishes either way, and a rejection
+   * nobody is waiting on would surface as an unhandled one.
+   */
+  const onReact = useCallback(
+    async (item: BoardItem, emoji: string) => {
+      try {
+        await reactToProposal(item.id, emoji);
+      } catch (err) {
+        setWriteError(err instanceof Error ? err.message : 'Could not save that reaction');
+      }
+    },
+    [reactToProposal],
   );
 
   const onZoomIn = useCallback(() => zoomFromCentre('in'), [zoomFromCentre]);
@@ -598,12 +643,15 @@ export function PinboardCanvas({
                     isNew={newItemIds.has(item.id)}
                     isOwn={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId === board.leaderId}
+                    onOpenEditor={canReopen(item) ? openEditorForEdit : undefined}
                     canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
                     canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
                     isDragging={draggingId === item.id}
                     dragHandlers={dragHandlers}
                     onEditText={onEditText}
                     onDelete={onDelete}
+                    viewerId={viewerId}
+                    onReact={onReact}
                   />
                 ))}
               </div>

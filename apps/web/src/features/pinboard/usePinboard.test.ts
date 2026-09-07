@@ -51,6 +51,7 @@ function sticky(id: string, overrides: Partial<BoardItem> = {}): BoardItem {
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
     extendsProposalId: null,
+    reactions: [],
     ...overrides,
   };
 }

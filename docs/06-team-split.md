@@ -208,24 +208,38 @@ Frontend: apps/web/src/features/pinboard/
 
 ```
 Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
-Reaction (id, proposalId, userId, emoji) — unique(proposalId, userId, emoji)
+ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId, emoji)
 ```
 
 ### Socket events
 
+Names are camelCase to match the rest of `ClientToServerEvents` /
+`ServerToClientEvents` in `packages/shared/src/events.ts`, which is the
+contract these implement.
+
 ```
 # Client → Server (validated: membership + phase + ownership)
-proposal:create            → { type, artifactJson, x, y, extendsProposalId? }
-proposal:update            → { id, artifactJson?, x?, y? }        (author-only)
-proposal:delete            → { id }                               (author or leader)
-reaction:toggle            → { proposalId, emoji }
+proposalCreate             → { type, artifactJson, x, y, extendsProposalId? }
+proposalUpdate             → { id, artifactJson?, x?, y? }        (author; leader may move)
+proposalDelete             → { id }                               (author or leader)
+proposalReact              → { id, emoji }                        (anyone in the session)
 
 # Server → Client (broadcast to session room)
-proposal:created           → { proposal: Proposal }
-proposal:updated           → { proposal: Proposal }
-proposal:deleted           → { proposalId }
-reaction:toggled           → { proposalId, emoji, counts, byUser }
+proposalCreated            → { proposal: BoardItem }
+proposalUpdated            → { proposal: BoardItem }
+proposalDeleted            → { proposalId, questionId }
+proposalReactionsUpdated   → { proposalId, questionId, reactions: ReactionGroup[] }
 ```
+
+`proposalReact` is a toggle: the server decides from what is stored whether a
+press adds or removes, so a client that has fallen behind cannot ask for the
+wrong direction. `proposalReactionsUpdated` carries that proposal's whole
+reaction state rather than a delta, so a missed event is corrected by the next
+one instead of leaving a count adrift. Each `ReactionGroup` is
+`{ emoji, userIds }` — the count is the list's length, and whether _you_
+reacted is a question only the viewer can answer from its own id. Groups arrive
+in the order each emoji first appeared on that proposal, so an unfamiliar
+reaction lands in the same place on every board.
 
 ### UI: Right-click context menu
 
@@ -252,7 +266,8 @@ reaction:toggled           → { proposalId, emoji, counts, byUser }
 
 - Proposal artifacts are **editable by their author only** (F16); other users build on them via the separate "Extend" flow (F23), which creates a new proposal owned by that user
 - `extendsProposalId` links child proposals to parents; never delete parent if child exists
-- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction
+- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
+- Reactions are held to the same phase lock as every other board write: they move only while the question is in `discussion`. They are not votes (F27–F31), and a tally moving beside a live ballot would be read as one
 
 ---
 
@@ -462,7 +477,7 @@ Frontend: apps/web/src/features/voice/
 ### API surface
 
 ```
-POST   /api/sessions/:id/voice-token     → { token: string, url: string }
+POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, expiresInSeconds }
 ```
 
 ### Frontend interactions
@@ -484,7 +499,9 @@ POST   /api/sessions/:id/voice-token     → { token: string, url: string }
 ### Notes
 
 - Room name: `session-{sessionId}`
-- Token expires after 24 hours (user can rejoin anytime)
+- Token expires after 15 minutes; the client re-fetches on every connect and
+  reconnect, so long sessions and refreshes are unaffected (F11 asks for a
+  short-lived token, which supersedes the 24h figure written here pre-build)
 - LiveKit SDK handles all participant state
 - Voice is **optional** — joining session doesn't require microphone permission
 
@@ -654,7 +671,7 @@ data: {"type":"done"}
 
 - Auth: `POST /api/auth/signup`, `POST /api/auth/login`, etc.
 - Sessions: `POST /api/sessions`, `GET /api/sessions/:id`, etc.
-- Voice: `POST /api/sessions/:id/voice-token`
+- Voice: `POST /api/sessions/:id/livekit-token`
 - Assistant: `POST /api/sessions/:id/assistant/chat`
 
 **Rule:** No two modules own the same REST prefix or the same socket event namespace (`proposal:*` = pinboard, `vote:*`/`voting:*` = voting, `session:*` = sessions)  
@@ -689,7 +706,7 @@ const proposals = await pinboard.getProposalsForQuestion(questionId);
 | Pinboard  | Proposal, Reaction               | socket `proposal:*`, `reaction:*`                         | Week 1 Day 1 | Session (reads session state)               |
 | Tools     | [none]                           | [none]                                                    | Week 1 Day 1 | Pinboard pipeline exists (already designed) |
 | Voting    | VotingRound, Vote, Answer        | socket `vote:*`/`voting:*`; GET /api/sessions/:id/summary | Week 1 Day 2 | Phase values defined                        |
-| Voice     | [none]                           | /api/voice-token                                          | Week 1 Day 1 | Auth, Session (imports types)               |
+| Voice     | [none]                           | /api/livekit-token                                        | Week 1 Day 1 | Auth, Session (imports types)               |
 | Assistant | [none]                           | /api/assistant/chat                                       | Week 1 Day 2 | Auth (LLM config), Pinboard pipeline        |
 
 **Outcome:** No hard blockers; soft dependencies on type definitions (all locked in setup week)

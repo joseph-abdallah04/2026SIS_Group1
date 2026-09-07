@@ -29,7 +29,7 @@ function Harness({
 }) {
   return (
     <MemoryRouter initialEntries={['/sessions/demo']}>
-      <CreativeToolsProvider isLive proposals={[]} propose={propose}>
+      <CreativeToolsProvider isLive proposals={[]} propose={propose} editProposal={async () => {}}>
         <CreativeToolbar />
         {children}
         <CreativeStudio />
@@ -86,6 +86,7 @@ function connectedFixture(): BoardItem {
     y: 0,
     createdAt: '2026-09-03T00:00:00.000Z',
     extendsProposalId: null,
+    reactions: [],
   };
 }
 
@@ -382,6 +383,7 @@ describe('diagram editor', () => {
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     };
     render(
       <Harness propose={propose}>
@@ -491,6 +493,7 @@ describe('diagram editor', () => {
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     };
 
     render(
@@ -642,6 +645,7 @@ describe('diagram editor', () => {
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     };
     render(
       <Harness propose={propose}>
@@ -1046,6 +1050,7 @@ describe('diagram resize and style', () => {
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     };
   }
 
@@ -1610,6 +1615,7 @@ describe('diagram routing and graph-aware arrange', () => {
       y: 0,
       createdAt: '2026-09-04T00:00:00.000Z',
       extendsProposalId: null,
+      reactions: [],
     };
   }
 

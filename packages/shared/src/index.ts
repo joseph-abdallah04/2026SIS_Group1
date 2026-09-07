@@ -98,7 +98,14 @@ export interface StickyArtifact {
 
 export interface DrawingArtifact {
   type: 'drawing';
+  /** Rendering of the strokes, so a card can be shown without the editor. */
   svg: string;
+  /**
+   * The editable source. Optional because drawings proposed before strokes
+   * were stored have none — those can still be shown, moved and removed, but
+   * not reopened, because there is nothing to reopen them from.
+   */
+  strokes?: DrawingStrokeData[];
 }
 
 // The diagram artifact contract (shapes, sizes, palettes, grouping, routing)
@@ -108,7 +115,11 @@ export * from './diagramContract.js';
 // v4 studio elements (ink today; paths, tables and charts later) live beside
 // the diagram contract for the same reason: one import for domain types.
 export * from './studioElements.js';
+export * from './drawingContract.js';
+export * from './reactionContract.js';
 import type { DiagramArtifact } from './diagramContract.js';
+import type { DrawingStrokeData } from './drawingContract.js';
+import type { ReactionGroup } from './reactionContract.js';
 
 export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
 
@@ -124,6 +135,13 @@ export interface BoardItem {
   y: number;
   createdAt: string;
   extendsProposalId: string | null;
+  /**
+   * Emoji reactions left on this proposal (F18), only for emoji somebody has
+   * actually used. The card offers the whole fixed set regardless, so an empty
+   * list is a card nobody has reacted to yet rather than a card without the
+   * row.
+   */
+  reactions: ReactionGroup[];
 }
 
 /**
@@ -162,5 +180,36 @@ export interface BoardResponse {
 // === summary module ===
 
 // === voice module ===
+
+/**
+ * The LiveKit room a session's audio lives in (docs/06 Voice §Notes).
+ *
+ * Derived from the session id rather than stored: there is exactly one room per
+ * session, and both sides compute the same name, so a room name never has to be
+ * passed around or kept in sync. The client is told the name by the token
+ * endpoint anyway (the token is only valid for that room), so this exists to
+ * keep the two derivations from drifting, not as something the client picks.
+ */
+export function voiceRoom(sessionId: string): string {
+  return `session-${sessionId}`;
+}
+
+/** Response body of `POST /api/sessions/:id/livekit-token` (F11). */
+export interface VoiceTokenResponse {
+  /** Short-lived LiveKit access token, scoped to `roomName` and `identity`. */
+  token: string;
+  /** LiveKit server URL to connect to (wss://…). Server config, not client config. */
+  url: string;
+  /** Participant identity the token was minted for — `LocalParticipant.identity`. */
+  identity: string;
+  /** The room this token is valid for. The client connects to this, never a name of its own. */
+  roomName: string;
+  /**
+   * Lifetime of `token` in seconds. The client refreshes ahead of this rather
+   * than parsing the JWT, so the TTL can change server-side without a client
+   * release (F11 — "short-lived access token").
+   */
+  expiresInSeconds: number;
+}
 
 // === assistant module ===
