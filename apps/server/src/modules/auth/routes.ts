@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { loginSchema, signupSchema } from '@roundtable/shared/schemas';
 
 import { requireAuth } from '../../middleware/auth.js';
+import { ApiError } from '../../middleware/error.js';
 import { validateBody } from '../../middleware/validate.js';
-import { login, signup } from './service.js';
+import { getUserById, login, signup } from './service.js';
 
 export const authRoutes = Router();
 
@@ -33,4 +34,17 @@ authRoutes.post('/login', validateBody(loginSchema), async (req, res, next) => {
 // deleting its token.
 authRoutes.post('/logout', requireAuth, (_req, res) => {
   res.status(200).json({ ok: true });
+});
+
+// docs/06 API surface: GET /api/auth/me -> { user: User }
+authRoutes.get('/me', requireAuth, async (req, res, next) => {
+  try {
+    const user = await getUserById(req.userId!);
+    if (!user) {
+      throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+    }
+    res.status(200).json({ user });
+  } catch (err) {
+    next(err);
+  }
 });
