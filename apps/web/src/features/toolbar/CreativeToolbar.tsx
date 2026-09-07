@@ -1,4 +1,4 @@
-import { Pencil, StickyNote, Workflow } from 'lucide-react';
+import { Palette, Pencil, StickyNote } from 'lucide-react';
 
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 
@@ -38,11 +38,15 @@ export function CreativeToolbar() {
         aria-pressed={activeTool === 'diagram'}
         disabled={disabled}
         onClick={() => openTool('diagram')}
-        title={isLive ? 'New diagram' : 'Reconnect to create a diagram'}
+        title={
+          isLive
+            ? 'New studio canvas — shapes, arrows and freehand drawing together'
+            : 'Reconnect to open the studio'
+        }
         className="flex h-9 items-center gap-2 rounded-full px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-cool-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-cool focus-visible:ring-offset-2 focus-visible:outline-none aria-pressed:bg-rt-cool-tint aria-pressed:text-rt-ink disabled:cursor-not-allowed disabled:opacity-45 sm:px-3.5"
       >
-        <Workflow aria-hidden="true" size={17} strokeWidth={1.8} />
-        <span className="hidden sm:inline">Diagram</span>
+        <Palette aria-hidden="true" size={17} strokeWidth={1.8} />
+        <span className="hidden sm:inline">Studio</span>
       </button>
     </nav>
   );

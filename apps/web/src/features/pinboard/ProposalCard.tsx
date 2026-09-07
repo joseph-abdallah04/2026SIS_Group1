@@ -6,10 +6,14 @@ import {
   diagramEdgeStrokeWidth,
   diagramNodeFill,
   diagramNodeLabelLayout,
+  diagramEdgeKey,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
-  diagramNodesInDrawOrder,
   effectiveDiagramNodeSize,
+  inkPathData,
+  inkStrokeColor,
+  inkStrokeWidth,
+  studioPaintOrder,
   type BoardItem,
 } from '@roundtable/shared';
 
@@ -86,11 +90,25 @@ function CardFoot({
 function DiagramBody({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
   const { nodes, edges } = item.artifactJson;
+  const ink = item.artifactJson.ink ?? [];
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const inkById = new Map(ink.map((stroke) => [stroke.id, stroke]));
+  const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
+  // The card frames whatever the artifact contains, so ink counts towards the
+  // extent exactly as a node does — otherwise a sketch would be cropped.
+  const inkPoints = ink.flatMap((stroke) => stroke.points);
   const svgWidth =
-    Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + 28;
+    Math.max(
+      ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
+      ...inkPoints.map((point) => point.x),
+      72,
+    ) + 28;
   const svgHeight =
-    Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) + 24;
+    Math.max(
+      ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
+      ...inkPoints.map((point) => point.y),
+      32,
+    ) + 24;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
   // colliding; one per resolved colour keeps each arrowhead matching its line.
   const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
@@ -98,12 +116,101 @@ function DiagramBody({ item }: { item: BoardItem }) {
   // Reciprocal pairs bow apart here exactly as they do in the editor.
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);
 
+  function renderEdge(edge: (typeof edges)[number], index: number) {
+    const from = nodeById.get(edge.from);
+    const to = nodeById.get(edge.to);
+    const route = edgeRoutes[index];
+    if (!from || !to || !route) return null;
+    const stroke = diagramEdgeStroke(edge);
+    // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
+    const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
+    return (
+      <g key={`${edge.from}-${edge.to}`}>
+        <path
+          d={route.path}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          markerEnd={`url(#${arrowId(stroke)})`}
+          {...diagramEdgeDash(edge, strokeWidth)}
+        />
+        {edge.label ? (
+          <text
+            x={route.labelX}
+            y={route.labelY}
+            textAnchor="middle"
+            fill="#5A5F68"
+            stroke="#F7F7F8"
+            strokeWidth={3}
+            paintOrder="stroke"
+            style={{ fontSize: '9px', fontFamily: 'Inter, system-ui, sans-serif' }}
+          >
+            {edge.label}
+          </text>
+        ) : null}
+      </g>
+    );
+  }
+
+  function renderInk(stroke: (typeof ink)[number]) {
+    return (
+      <path
+        key={stroke.id}
+        d={inkPathData(stroke.points)}
+        fill="none"
+        stroke={inkStrokeColor(stroke)}
+        strokeWidth={inkStrokeWidth(stroke)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    );
+  }
+
+  function renderNode(node: (typeof nodes)[number]) {
+    const shape = node.shape ?? 'box';
+    const size = effectiveDiagramNodeSize(node);
+    const label = diagramNodeLabelLayout(node);
+
+    return (
+      <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+        <DiagramShapeOutline
+          shape={shape}
+          size={size}
+          fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
+          // '#8CA4AC', 1 and '4 3' are this preview's own pre-v2 border.
+          stroke={diagramNodeStroke(node, '#8CA4AC')}
+          strokeWidth={diagramNodeStrokeWidth(node, 1)}
+          containerDashArray="4 3"
+        />
+        <text
+          textAnchor="middle"
+          fill={DIAGRAM_LABEL_INK}
+          style={{
+            fontSize: `${label.fontSize}px`,
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontWeight: shape === 'text' ? 600 : 400,
+          }}
+        >
+          {label.lines.map((line, lineIndex) => (
+            <tspan
+              key={line + String(lineIndex)}
+              x={size.width / 2}
+              y={label.firstBaselineY + lineIndex * label.lineHeight}
+            >
+              {line}
+            </tspan>
+          ))}
+        </text>
+      </g>
+    );
+  }
+
   return (
     <div
       className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg bg-rt-surface-alt"
       style={{ minHeight: 96 }}
     >
-      {nodes.length === 0 ? (
+      {nodes.length === 0 && ink.length === 0 ? (
         <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
       ) : (
         <svg
@@ -127,80 +234,20 @@ function DiagramBody({ item }: { item: BoardItem }) {
               </marker>
             ))}
           </defs>
-          {edges.map((edge, index) => {
-            const from = nodeById.get(edge.from);
-            const to = nodeById.get(edge.to);
-            const route = edgeRoutes[index];
-            if (!from || !to || !route) return null;
-            const stroke = diagramEdgeStroke(edge);
-            // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
-            const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
-            return (
-              <g key={`${edge.from}-${edge.to}`}>
-                <path
-                  d={route.path}
-                  fill="none"
-                  stroke={stroke}
-                  strokeWidth={strokeWidth}
-                  markerEnd={`url(#${arrowId(stroke)})`}
-                  {...diagramEdgeDash(edge, strokeWidth)}
-                />
-                {edge.label ? (
-                  <text
-                    x={route.labelX}
-                    y={route.labelY}
-                    textAnchor="middle"
-                    fill="#5A5F68"
-                    stroke="#F7F7F8"
-                    strokeWidth={3}
-                    paintOrder="stroke"
-                    style={{ fontSize: '9px', fontFamily: 'Inter, system-ui, sans-serif' }}
-                  >
-                    {edge.label}
-                  </text>
-                ) : null}
-              </g>
-            );
-          })}
-          {/* Containers are drawn before what they hold, so a group reads as a
-              backdrop rather than covering its own contents. */}
-          {diagramNodesInDrawOrder(nodes).map((node) => {
-            const shape = node.shape ?? 'box';
-            const size = effectiveDiagramNodeSize(node);
-            const label = diagramNodeLabelLayout(node);
-
-            return (
-              <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                <DiagramShapeOutline
-                  shape={shape}
-                  size={size}
-                  fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
-                  // '#8CA4AC', 1 and '4 3' are this preview's own pre-v2 border.
-                  stroke={diagramNodeStroke(node, '#8CA4AC')}
-                  strokeWidth={diagramNodeStrokeWidth(node, 1)}
-                  containerDashArray="4 3"
-                />
-                <text
-                  textAnchor="middle"
-                  fill={DIAGRAM_LABEL_INK}
-                  style={{
-                    fontSize: `${label.fontSize}px`,
-                    fontFamily: 'Inter, system-ui, sans-serif',
-                    fontWeight: shape === 'text' ? 600 : 400,
-                  }}
-                >
-                  {label.lines.map((line, lineIndex) => (
-                    <tspan
-                      key={line + String(lineIndex)}
-                      x={size.width / 2}
-                      y={label.firstBaselineY + lineIndex * label.lineHeight}
-                    >
-                      {line}
-                    </tspan>
-                  ))}
-                </text>
-              </g>
-            );
+          {/* The card paints in the artifact's own order, so a sketch sits
+              above or below a shape here exactly as it did in the editor. */}
+          {studioPaintOrder(item.artifactJson).map((ref) => {
+            if (ref.kind === 'edge') {
+              const index = edgeIndexByKey.get(ref.key);
+              const edge = index === undefined ? undefined : edges[index];
+              return edge && index !== undefined ? renderEdge(edge, index) : null;
+            }
+            if (ref.kind === 'ink') {
+              const stroke = inkById.get(ref.key);
+              return stroke ? renderInk(stroke) : null;
+            }
+            const node = nodeById.get(ref.key);
+            return node ? renderNode(node) : null;
           })}
         </svg>
       )}

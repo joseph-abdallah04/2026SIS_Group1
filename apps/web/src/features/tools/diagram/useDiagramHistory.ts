@@ -7,17 +7,34 @@ import {
   type DiagramSnapshot,
 } from './diagramHistory';
 
+/**
+ * A change to the graph, expressed as the parts that changed.
+ *
+ * `nodes` and `edges` stay required because every caller already supplies both,
+ * but the v4 fields are merged from the current snapshot when a caller does not
+ * mention them. Every existing edit — drag, align, style, paste — describes
+ * itself purely in nodes and edges, and none of them should have to know that
+ * ink exists in order to avoid deleting it.
+ */
+type DiagramSnapshotPatch = Pick<DiagramSnapshot, 'nodes' | 'edges'> & Partial<DiagramSnapshot>;
+
 export function useDiagramHistory(initial: DiagramSnapshot) {
   const [history, dispatch] = useReducer(diagramHistoryReducer, initial, createDiagramHistory);
   const snapshotRef = useRef(history.present);
   snapshotRef.current = history.present;
 
-  function commit(snapshot: DiagramSnapshot) {
+  function merge(patch: DiagramSnapshotPatch): DiagramSnapshot {
+    return { ...snapshotRef.current, ...patch };
+  }
+
+  function commit(patch: DiagramSnapshotPatch) {
+    const snapshot = merge(patch);
     snapshotRef.current = snapshot;
     dispatch({ type: 'commit', snapshot });
   }
 
-  function preview(snapshot: DiagramSnapshot) {
+  function preview(patch: DiagramSnapshotPatch) {
+    const snapshot = merge(patch);
     snapshotRef.current = snapshot;
     dispatch({ type: 'preview', snapshot });
   }

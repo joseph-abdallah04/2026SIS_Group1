@@ -61,8 +61,8 @@ async function openDiagram(
   surface = { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT },
 ) {
   const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: /^Diagram$/ }));
-  const canvas = screen.getByRole('application', { name: 'Diagram canvas' });
+  await user.click(screen.getByRole('button', { name: /^Studio$/ }));
+  const canvas = screen.getByRole('application', { name: 'Studio canvas' });
   mockSurface(canvas, surface);
   return { user, canvas };
 }
@@ -174,7 +174,9 @@ describe('diagram editor', () => {
       x: 32,
       y: 32,
     });
-    expect(await screen.findByRole('heading', { name: 'Diagram proposed' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Studio canvas proposed' }),
+    ).toBeInTheDocument();
   });
 
   it('blocks an empty diagram before the pinboard write path', async () => {
@@ -188,7 +190,7 @@ describe('diagram editor', () => {
 
     expect(propose).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Add at least one element before proposing this diagram.',
+      'Add an element or draw something before proposing.',
     );
   });
 
@@ -461,7 +463,7 @@ describe('diagram editor', () => {
     await first.user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
-    await first.user.click(screen.getByRole('button', { name: /^Diagram$/ }));
+    await first.user.click(screen.getByRole('button', { name: /^Studio$/ }));
 
     expect(screen.getByText('0/100 elements')).toBeInTheDocument();
   });
@@ -708,7 +710,7 @@ describe('diagram editor', () => {
     await openDiagram();
     await user.click(screen.getByRole('button', { name: 'Add box' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Diagram proposed' });
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
     const backButtons = screen.getAllByRole('button', { name: 'Back to pinboard' });
     await user.click(backButtons.at(-1)!);
 
@@ -920,7 +922,7 @@ describe('diagram viewport and productivity', () => {
       </Harness>,
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
-    const canvas = screen.getByRole('application', { name: 'Diagram canvas' });
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
 
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
     fireEvent.keyDown(canvas, { key: 'Delete' });
@@ -941,7 +943,7 @@ describe('diagram viewport and productivity', () => {
       </Harness>,
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
-    const canvas = screen.getByRole('application', { name: 'Diagram canvas' });
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
 
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
     fireEvent.keyDown(canvas, { key: 'd', ctrlKey: true });
@@ -969,7 +971,7 @@ describe('diagram viewport and productivity', () => {
       </Harness>,
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
-    const canvas = screen.getByRole('application', { name: 'Diagram canvas' });
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
 
     // The first node is selected on open; copy just that one.
     fireEvent.keyDown(canvas, { key: 'c', ctrlKey: true });
@@ -1748,5 +1750,214 @@ describe('diagram routing and graph-aware arrange', () => {
       { from: 'n2', to: 'n3' },
     ]);
     expect(artifact.nodes.map((entry) => entry.id)).toEqual(['n1', 'n2', 'n3']);
+  });
+});
+
+describe('studio canvas', () => {
+  function drawStroke(
+    canvas: Element,
+    pointerId: number,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ) {
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: from.x, clientY: from.y });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: (from.x + to.x) / 2, clientY: to.y });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: to.x, clientY: to.y });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: to.x, clientY: to.y });
+  }
+
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  it('draws freehand on the same canvas as the shapes and proposes both together', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStroke(canvas, 90, { x: 300, y: 200 }, { x: 400, y: 260 });
+
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    // One artifact carrying both, which is the whole point of the studio.
+    expect(artifact.nodes).toHaveLength(1);
+    expect(artifact.ink).toHaveLength(1);
+    // Whatever is proposed has to satisfy the real write contract.
+    expect(proposalCreateSchema.safeParse(propose.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('proposes a sketch that has no shapes at all', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStroke(canvas, 91, { x: 200, y: 200 }, { x: 320, y: 300 });
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.nodes).toHaveLength(0);
+    expect(artifact.ink).toHaveLength(1);
+  });
+
+  it('undoes a stroke without disturbing the shapes', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStroke(canvas, 92, { x: 300, y: 200 }, { x: 400, y: 260 });
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.queryAllByTestId('ink-stroke')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+  });
+
+  it('takes out every stroke an eraser sweep touches in one undo step', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStroke(canvas, 93, { x: 200, y: 200 }, { x: 260, y: 200 });
+    drawStroke(canvas, 94, { x: 500, y: 400 }, { x: 560, y: 400 });
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Erase' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 95, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 95, clientX: 500, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 95, clientX: 500, clientY: 400 });
+
+    expect(screen.queryAllByTestId('ink-stroke')).toHaveLength(0);
+
+    // The whole sweep is one intention, however many strokes it removed.
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(2);
+  });
+
+  it('keeps the ink when a node is dragged', async () => {
+    // Every pre-v4 edit describes itself purely in nodes and edges. If one of
+    // them replaced the snapshot rather than merging into it, a single drag
+    // would silently delete the sketch.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStroke(canvas, 96, { x: 300, y: 200 }, { x: 400, y: 260 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const node = screen.getByRole('button', { name: 'Box: Box' });
+    fireEvent.pointerDown(node, { button: 0, pointerId: 97, clientX: 30, clientY: 30 });
+    fireEvent.pointerMove(canvas, { pointerId: 97, clientX: 206, clientY: 134 });
+    fireEvent.pointerUp(canvas, { pointerId: 97, clientX: 206, clientY: 134 });
+
+    expect(node).toHaveAttribute('transform', 'translate(200, 128)');
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+  });
+
+  it('sends a shape behind the ink and proposes the order it was given', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStroke(canvas, 98, { x: 300, y: 200 }, { x: 400, y: 260 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Box: Box' }), {
+      button: 0,
+      pointerId: 100,
+      clientX: 30,
+      clientY: 30,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 100, clientX: 30, clientY: 30 });
+    await user.click(screen.getByRole('button', { name: 'Send selection to back' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    const order = artifact.z!;
+    // The node is named before the stroke, so it paints underneath it.
+    expect(order.indexOf(artifact.nodes[0]!.id)).toBeLessThan(order.indexOf(artifact.ink![0]!.id));
+  });
+
+  it('commits a stroke whose pointer capture was lost mid-gesture', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 99, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 99, clientX: 300, clientY: 260 });
+    fireEvent.lostPointerCapture(canvas, { pointerId: 99 });
+
+    // pointerup never arrives, and the stroke must not be lost with it.
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+  });
+
+  it('undoes a template with Ctrl+Z without needing the canvas clicked first', async () => {
+    // The picker only exists while the canvas is empty, so applying a template
+    // unmounts the focused button. If focus is not moved back onto the canvas it
+    // lands on document.body, outside the form, and the form's Ctrl+Z handler
+    // never sees the keystroke.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Retro' }));
+    expect(screen.getByRole('button', { name: 'Container: Went well' })).toBeInTheDocument();
+    expect(canvas).toHaveFocus();
+
+    await user.keyboard('{Control>}z{/Control}');
+
+    expect(screen.queryByRole('button', { name: 'Container: Went well' })).toBeNull();
+    // Back to a blank canvas, so the picker is offered again.
+    expect(screen.getByRole('button', { name: 'Retro' })).toBeInTheDocument();
+  });
+
+  it('offers the starter frames only while the canvas is empty', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+
+    expect(screen.getByRole('button', { name: 'Timeline' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    expect(screen.queryByRole('button', { name: 'Timeline' })).toBeNull();
   });
 });

@@ -12,7 +12,14 @@ import {
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
   diagramCanParent,
+  diagramIsAncestor,
 } from './diagramContract.js';
+import {
+  DIAGRAM_INK_LIMIT,
+  DIAGRAM_INK_POINT_LIMIT,
+  DIAGRAM_Z_LIMIT,
+  diagramEdgeKey,
+} from './studioElements.js';
 
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
 // Use on REST bodies (server) and forms (web). Add your module's schemas under its label.
@@ -139,6 +146,18 @@ export const diagramEdgeSchema = z.object({
   strokeStyle: diagramStrokeStyleSchema.optional(),
 });
 
+// v4 ink. Both style fields are optional so a stroke written by a build with a
+// wider palette still loads with the default appearance, exactly as nodes do.
+export const inkElementSchema = z.object({
+  id: z.string().min(1),
+  points: z
+    .array(z.object({ x: z.number(), y: z.number() }))
+    .min(1)
+    .max(DIAGRAM_INK_POINT_LIMIT),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+});
+
 /**
  * Reading is deliberately more forgiving than writing.
  *
@@ -171,11 +190,21 @@ const diagramReadEdgeSchema = diagramEdgeSchema.extend({
   strokeStyle: lenient(diagramStrokeStyleSchema),
 });
 
+const diagramReadInkSchema = inkElementSchema.extend({
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+});
+
 /** Read shape. Stays a plain object so it can join a discriminated union. */
 export const diagramArtifactSchema = z.object({
   type: z.literal('diagram'),
   nodes: z.array(diagramReadNodeSchema).max(100),
   edges: z.array(diagramReadEdgeSchema).max(200),
+  // v4, and tolerant like everything else on the read path: ink or an order
+  // this build cannot make sense of degrades to "no ink" / "legacy order"
+  // rather than failing the parse and taking the whole board down.
+  ink: z.array(diagramReadInkSchema).max(DIAGRAM_INK_LIMIT).optional().catch(undefined),
+  z: z.array(z.string()).max(DIAGRAM_Z_LIMIT).optional().catch(undefined),
 });
 
 /** Write shape: every field must be one this build actually understands. */
@@ -183,10 +212,14 @@ const diagramStrictArtifactSchema = z.object({
   type: z.literal('diagram'),
   nodes: z.array(diagramNodeSchema).max(100),
   edges: z.array(diagramEdgeSchema).max(200),
+  ink: z.array(inkElementSchema).max(DIAGRAM_INK_LIMIT).optional(),
+  z: z.array(z.string().min(1)).max(DIAGRAM_Z_LIMIT).optional(),
 });
 
 export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefine(
-  ({ nodes, edges }, context) => {
+  // `z` is destructured under another name: it would otherwise shadow the zod
+  // import for the whole refinement.
+  ({ nodes, edges, ink, z: paintOrder }, context) => {
     const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
 
     nodes.forEach((node, index) => {
@@ -294,7 +327,7 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
         });
       }
 
-      const key = JSON.stringify([edge.from, edge.to]);
+      const key = diagramEdgeKey(edge);
       if (edgeKeys.has(key)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -304,6 +337,65 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
       }
       edgeKeys.add(key);
     });
+
+    // --- v4 invariants ----------------------------------------------------
+    //
+    // `z` is one flat order over three kinds of element, so their keys have to
+    // be unique as a set, not just within each kind.
+
+    const inkIds = new Set<string>();
+    (ink ?? []).forEach((stroke, index) => {
+      if (inkIds.has(stroke.id) || nodeIds.has(stroke.id) || edgeKeys.has(stroke.id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across nodes, edges and ink',
+          path: ['ink', index, 'id'],
+        });
+      }
+      inkIds.add(stroke.id);
+    });
+
+    if (paintOrder !== undefined) {
+      const known = new Set<string>([...nodeIds, ...edgeKeys, ...inkIds]);
+      const seen = new Set<string>();
+
+      paintOrder.forEach((key, index) => {
+        if (!known.has(key)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Paint order must only name elements this diagram contains',
+            path: ['z', index],
+          });
+        }
+        if (seen.has(key)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'An element may appear in the paint order only once',
+            path: ['z', index],
+          });
+        }
+        seen.add(key);
+      });
+
+      // A container is a backdrop for what it holds. Painting one after its own
+      // descendant would cover the descendant up, which no editor gesture can
+      // produce but a crafted payload can. `studioPaintOrder` appends anything
+      // `z` omits, so only pairs `z` actually names can be checked here.
+      const rank = new Map(paintOrder.map((key, index) => [key, index]));
+      nodes.forEach((node, index) => {
+        const nodeRank = rank.get(node.id);
+        if (nodeRank === undefined || !node.parentId) return;
+        const parentRank = rank.get(node.parentId);
+        if (parentRank === undefined) return;
+        if (parentRank > nodeRank && diagramIsAncestor(nodes, node.parentId, node.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'A container must be painted before the nodes it holds',
+            path: ['nodes', index, 'parentId'],
+          });
+        }
+      });
+    }
   },
 );
 

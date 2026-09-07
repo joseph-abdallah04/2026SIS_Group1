@@ -112,3 +112,61 @@ describe('diagram proposal card', () => {
     expect(container.querySelectorAll('path[marker-end]')).toHaveLength(1);
   });
 });
+
+describe('studio proposal card (v4)', () => {
+  const stroke = {
+    id: 'ink-1',
+    points: [
+      { x: 10, y: 10 },
+      { x: 90, y: 60 },
+    ],
+    strokeColor: 'ink' as const,
+    strokeWidthPreset: 'regular' as const,
+  };
+
+  function studioItem(artifact: Partial<Extract<BoardItem['artifactJson'], { type: 'diagram' }>>) {
+    return {
+      ...diagramItem([]),
+      artifactJson: { type: 'diagram' as const, nodes: [], edges: [], ...artifact },
+    };
+  }
+
+  it('draws the ink a studio canvas was proposed with', () => {
+    const { container } = render(<ProposalCard item={studioItem({ ink: [stroke] })} />);
+    const paths = [...container.querySelectorAll('path')];
+    expect(paths.some((path) => path.getAttribute('stroke') === '#080C15')).toBe(true);
+  });
+
+  it('frames a sketch that has no shapes instead of showing the empty placeholder', () => {
+    const { container } = render(<ProposalCard item={studioItem({ ink: [stroke] })} />);
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.border-dashed')).toBeNull();
+  });
+
+  it('paints ink under a shape when the artifact says so', () => {
+    // The card has to honour the same order the editor did, or what the author
+    // arranged is not what the room sees.
+    const { container } = render(
+      <ProposalCard
+        item={studioItem({
+          nodes: [{ id: 'n1', label: 'API', x: 0, y: 0, shape: 'box' }],
+          ink: [stroke],
+          z: ['ink-1', 'n1'],
+        })}
+      />,
+    );
+
+    const svg = container.querySelector('svg')!;
+    const painted = [...svg.querySelectorAll('path, g')];
+    const inkIndex = painted.findIndex((el) => el.getAttribute('stroke') === '#080C15');
+    const nodeIndex = painted.findIndex((el) => el.getAttribute('transform') === 'translate(0, 0)');
+    expect(inkIndex).toBeGreaterThanOrEqual(0);
+    expect(nodeIndex).toBeGreaterThanOrEqual(0);
+    expect(inkIndex).toBeLessThan(nodeIndex);
+  });
+
+  it('still shows the empty placeholder for a diagram with nothing in it', () => {
+    const { container } = render(<ProposalCard item={studioItem({})} />);
+    expect(container.querySelector('.border-dashed')).not.toBeNull();
+  });
+});

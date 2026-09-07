@@ -494,4 +494,100 @@ describe('proposalCreate handler', () => {
     expect(await propose({ ...STICKY, authorId: 'someone-else' })).toMatchObject({ ok: true });
     expect(create.mock.calls[0]?.[0].data).toMatchObject({ authorId: 'u1' });
   });
+
+  // The editor cannot produce any of these, but the socket is not the only way
+  // a payload arrives, so each one has to die before persistence.
+  describe('studio ink and paint order (v4)', () => {
+    function studio(artifact: Record<string, unknown>) {
+      return {
+        type: 'diagram',
+        artifactJson: { type: 'diagram', nodes: [], edges: [], ...artifact },
+        x: 0,
+        y: 0,
+      } as Parameters<typeof createProposal>[0]['input'];
+    }
+
+    const stroke = (id: string) => ({
+      id,
+      points: [
+        { x: 0, y: 0 },
+        { x: 10, y: 10 },
+      ],
+      strokeColor: 'ink',
+      strokeWidthPreset: 'regular',
+    });
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('accepts a sketch drawn alongside shapes', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' }],
+            ink: [stroke('ink-1')],
+            z: ['ink-1', 'n1'],
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a raw colour smuggled into a stroke', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ ink: [{ ...stroke('ink-1'), strokeColor: '#ff0000' }] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects two strokes sharing an id', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(studio({ ink: [stroke('ink-1'), stroke('ink-1')] }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stroke that reuses a node id', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24 }],
+            ink: [stroke('n1')],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a paint order naming something the diagram does not contain', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({ nodes: [{ id: 'n1', label: 'Client', x: 0, y: 0 }], z: ['n1', 'ghost'] }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a container painted after the node it holds', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [
+              { id: 'outer', label: 'Group', x: 0, y: 0, shape: 'container' },
+              { id: 'inner', label: 'Child', x: 10, y: 10, parentId: 'outer' },
+            ],
+            z: ['inner', 'outer'],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
 });

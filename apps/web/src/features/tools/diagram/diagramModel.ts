@@ -4,6 +4,7 @@ import type {
   DiagramNode,
   DiagramNodeShape,
   DiagramNodeSize,
+  InkElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_NODE_SHAPE_KEYS,
@@ -13,9 +14,11 @@ import {
   DIAGRAM_MIN_NODE_WIDTH,
   diagramCanParent,
   diagramDescendantIds,
+  diagramEdgeKey,
   diagramIsAncestor,
   diagramNodeSize,
   effectiveDiagramNodeSize,
+  simplifyInkPoints,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
@@ -221,9 +224,12 @@ export function prepareEdgeLabel(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, DIAGRAM_EDGE_LABEL_LIMIT);
 }
 
-export function edgeKey(edge: Pick<DiagramEdge, 'from' | 'to'>): string {
-  return JSON.stringify([edge.from, edge.to]);
-}
+/**
+ * Re-exported from `@roundtable/shared`: `z` (v4 paint order) names edges by
+ * this key, so the schema that validates an order and the editor that writes
+ * one have to agree on the format. One definition, shared.
+ */
+export const edgeKey = diagramEdgeKey;
 
 function isFree(
   nodes: readonly DiagramNode[],
@@ -858,30 +864,72 @@ export function deleteEdge(
   return edges.filter((edge) => edge.from !== target.from || edge.to !== target.to);
 }
 
+/**
+ * How far the artwork has to move to sit inside the preview frame.
+ *
+ * Ink is measured alongside the nodes because both are shifted by the same
+ * amount: normalising the shapes on their own would slide them out from under
+ * a sketch that was drawn around them.
+ */
+function normalizationDelta(
+  nodes: readonly DiagramNode[],
+  ink: readonly InkElement[],
+): DiagramPoint {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const rights: number[] = [];
+  const bottoms: number[] = [];
+
+  for (const node of nodes) {
+    const size = effectiveDiagramNodeSize(node);
+    xs.push(node.x);
+    ys.push(node.y);
+    rights.push(node.x + size.width);
+    bottoms.push(node.y + size.height);
+  }
+  for (const stroke of ink) {
+    for (const point of stroke.points) {
+      xs.push(point.x);
+      ys.push(point.y);
+      rights.push(point.x);
+      bottoms.push(point.y);
+    }
+  }
+
+  if (xs.length === 0) return { x: 0, y: 0 };
+
+  return {
+    x: Math.min(
+      DIAGRAM_PREVIEW_PADDING - Math.min(...xs),
+      DIAGRAM_CANVAS_WIDTH - Math.max(...rights),
+    ),
+    y: Math.min(
+      DIAGRAM_PREVIEW_PADDING - Math.min(...ys),
+      DIAGRAM_CANVAS_HEIGHT - Math.max(...bottoms),
+    ),
+  };
+}
+
 export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): DiagramNode[] {
   if (nodes.length === 0) return [];
-  const minX = Math.min(...nodes.map((node) => node.x));
-  const minY = Math.min(...nodes.map((node) => node.y));
-  const maxRight = Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width));
-  const maxBottom = Math.max(
-    ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
-  );
-  const deltaX = Math.min(DIAGRAM_PREVIEW_PADDING - minX, DIAGRAM_CANVAS_WIDTH - maxRight);
-  const deltaY = Math.min(DIAGRAM_PREVIEW_PADDING - minY, DIAGRAM_CANVAS_HEIGHT - maxBottom);
-
+  const delta = normalizationDelta(nodes, []);
   return nodes.map((node) => ({
     ...node,
-    x: Math.round(node.x + deltaX),
-    y: Math.round(node.y + deltaY),
+    x: Math.round(node.x + delta.x),
+    y: Math.round(node.y + delta.y),
   }));
 }
 
 export function prepareDiagram(
   nodes: readonly DiagramNode[],
   edges: readonly DiagramEdge[],
+  ink: readonly InkElement[] = [],
+  z: readonly string[] = [],
 ): PreparedDiagram {
-  if (nodes.length === 0) {
-    return { ok: false, error: 'Add at least one element before proposing this diagram.' };
+  // v4: a sketch is a legitimate studio artifact on its own, so "something to
+  // propose" now means any element, not specifically a shape.
+  if (nodes.length === 0 && ink.length === 0) {
+    return { ok: false, error: 'Add an element or draw something before proposing.' };
   }
 
   const normalizedNodes = nodes.map((node) => ({
@@ -911,10 +959,44 @@ export function prepareDiagram(
     withEdgeLabel(edge, edge.label ? prepareEdgeLabel(edge.label) : ''),
   );
 
+  const inkIds = new Set(ink.map((stroke) => stroke.id));
+  if (inkIds.size !== ink.length || ink.some((stroke) => nodeIds.has(stroke.id))) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  // Shapes and ink shift together, so a sketch drawn around a diagram stays
+  // registered with it once the whole thing is framed for the board preview.
+  const delta = normalizationDelta(normalizedNodes, ink);
+  const shiftedNodes = normalizedNodes.map((node) => ({
+    ...node,
+    x: Math.round(node.x + delta.x),
+    y: Math.round(node.y + delta.y),
+  }));
+  const shiftedInk = ink.map((stroke) => ({
+    ...stroke,
+    // Simplified once, at the boundary: the editor keeps every sampled point
+    // for a faithful undo, and only what is proposed needs to be compact.
+    points: simplifyInkPoints(stroke.points).map((point) => ({
+      x: Math.round((point.x + delta.x) * 10) / 10,
+      y: Math.round((point.y + delta.y) * 10) / 10,
+    })),
+  }));
+
+  const known = new Set<string>([
+    ...shiftedNodes.map((node) => node.id),
+    ...normalizedEdges.map(edgeKey),
+    ...inkIds,
+  ]);
+  // Drop anything the order names that is no longer on the canvas — deleting an
+  // element must not make the whole artifact unproposable.
+  const prunedOrder = z.filter((key) => known.has(key));
+
   const parsed = diagramWriteArtifactSchema.safeParse({
     type: 'diagram',
-    nodes: normalizeDiagramCoordinates(normalizedNodes),
+    nodes: shiftedNodes,
     edges: normalizedEdges,
+    ...(shiftedInk.length > 0 ? { ink: shiftedInk } : {}),
+    ...(prunedOrder.length > 0 ? { z: prunedOrder } : {}),
   });
   if (!parsed.success) {
     return { ok: false, error: 'This diagram could not be prepared. Simplify it and try again.' };

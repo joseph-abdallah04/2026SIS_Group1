@@ -187,7 +187,9 @@ describe('prepareDiagram', () => {
   it('rejects an empty diagram before any write is attempted', () => {
     expect(prepareDiagram([], [])).toEqual({
       ok: false,
-      error: 'Add at least one element before proposing this diagram.',
+      // v4 widened the precondition: ink counts as content, so the canvas is
+      // only empty when it has neither a shape nor a stroke.
+      error: 'Add an element or draw something before proposing.',
     });
   });
 

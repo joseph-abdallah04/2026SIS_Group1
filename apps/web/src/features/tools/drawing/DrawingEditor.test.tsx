@@ -23,7 +23,7 @@ function Harness({ propose }: { propose: (input: ProposalCreateInput) => Promise
 async function openDrawing() {
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Draw' }));
-  const canvas = screen.getByRole('img', { name: 'Drawing canvas' });
+  const canvas = screen.getByRole('application', { name: 'Drawing canvas' });
   vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
     x: 0,
     y: 0,

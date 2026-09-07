@@ -27,14 +27,19 @@ import {
   CopyPlus,
   Database,
   Diamond,
+  Eraser,
   Grid3x3,
   Link2,
   LoaderCircle,
   Magnet,
   Maximize2,
+  MousePointer2,
+  Pencil,
   RotateCcw,
   RectangleHorizontal,
   Send,
+  BringToFront,
+  SendToBack,
   Trash2,
   Triangle,
   Type,
@@ -50,8 +55,10 @@ import type {
   DiagramFontSizePreset,
   DiagramNode,
   DiagramNodeShape,
+  DiagramStrokeKey,
   DiagramStrokeStyle,
   DiagramStrokeWidthPreset,
+  InkElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_FILL_COLORS,
@@ -75,8 +82,13 @@ import {
   diagramNodeStrokeWidth,
   diagramCanParent,
   diagramDescendantIds,
-  diagramNodesInDrawOrder,
   effectiveDiagramNodeSize,
+  eraseInkAtPoint,
+  inkPathData,
+  inkStrokeColor,
+  inkStrokeWidth,
+  reorderStudioElements,
+  studioPaintOrder,
 } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
@@ -144,6 +156,31 @@ import {
 } from './diagramView';
 import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
+import { createInkId, eraserRadiusForView } from '../studio/studioInk';
+import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
+
+/**
+ * What a press on empty canvas does. Shapes, arrows and selection are unchanged
+ * by `draw`/`erase`: the ink tools only take over the canvas background, so a
+ * node is still draggable while the pencil is held.
+ */
+type CanvasTool = 'select' | 'draw' | 'erase';
+
+const CANVAS_TOOLS: {
+  tool: CanvasTool;
+  label: string;
+  hint: string;
+  Icon: typeof MousePointer2;
+}[] = [
+  {
+    tool: 'select',
+    label: 'Select',
+    hint: 'Select, move and connect elements',
+    Icon: MousePointer2,
+  },
+  { tool: 'draw', label: 'Freehand', hint: 'Draw freehand on the canvas', Icon: Pencil },
+  { tool: 'erase', label: 'Erase', hint: 'Erase whole strokes', Icon: Eraser },
+];
 
 interface DragSession {
   pointerId: number;
@@ -396,6 +433,8 @@ export function DiagramEditor() {
   }
   const history = useDiagramHistory(initialSnapshotRef.current);
   const { nodes, edges } = history.snapshot;
+  const ink = history.snapshot.ink ?? [];
+  const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => (nodes[0] ? [nodes[0].id] : []));
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
   const [connectionMode, setConnectionMode] = useState(false);
@@ -414,6 +453,15 @@ export function DiagramEditor() {
   const [layoutDirection, setLayoutDirection] = useState<DiagramLayoutDirection>('TB');
   const [panReady, setPanReady] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  // v4: what a press on empty canvas does. `select` is the diagram's original
+  // behaviour (marquee); the other two are the studio's ink tools.
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
+  const [inkColor, setInkColor] = useState<DiagramStrokeKey>('ink');
+  const [inkWidth, setInkWidth] = useState<DiagramStrokeWidthPreset>('regular');
+  const [activeStroke, setActiveStroke] = useState<InkElement | null>(null);
+  const activeStrokeRef = useRef<InkElement | null>(null);
+  const inkPointerRef = useRef<number | null>(null);
+  const eraseStartRef = useRef<DiagramSnapshot | null>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const edgeLabelInputRef = useRef<HTMLInputElement>(null);
@@ -460,6 +508,11 @@ export function DiagramEditor() {
     : null;
   // The default marker keeps its id for the connection preview; every distinct
   // edge colour gets its own so an arrowhead always matches its line.
+  // Built once per render: the ordered paint pass looks every element up by key,
+  // and doing that with `find` would be quadratic on a busy canvas.
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const inkById = new Map(ink.map((stroke) => [stroke.id, stroke]));
+  const edgeIndexByKey = new Map(edges.map((edge, index) => [edgeKey(edge), index]));
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
   // Routing is derived from the edge set, never stored: a reciprocal pair bows
   // apart so both directions stay readable.
@@ -946,6 +999,116 @@ export function DiagramEditor() {
     return true;
   }
 
+  /**
+   * Raise or lower the selection through the ink.
+   *
+   * A container travels with everything it holds: the write path refuses an
+   * order that paints a container after its own contents, so raising a group
+   * without its children would produce an artifact that cannot be proposed.
+   */
+  function reorderSelection(move: 'front' | 'back') {
+    if (selectedIds.length === 0) return;
+    const graph = history.snapshotRef.current;
+    const moving = new Set<string>();
+    for (const id of selectedIds) {
+      moving.add(id);
+      for (const child of diagramDescendantIds(graph.nodes, id)) moving.add(child);
+    }
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      z: reorderStudioElements(studioPaintOrder(graph), moving, move),
+    });
+  }
+
+  /** One history entry, so a template dropped by mistake is one undo away. */
+  function applyTemplate(template: StudioTemplate) {
+    clearError();
+    const { nodes: templateNodes, edges: templateEdges } = template.build();
+    history.commit({ nodes: templateNodes, edges: templateEdges });
+    setSelectedIds([]);
+    setSelectedEdgeKey(null);
+    // The template picker only exists while the canvas is empty, so applying one
+    // unmounts the button that currently has focus. Without moving focus back
+    // onto the canvas it lands on document.body — outside the form — and the
+    // form's Ctrl+Z handler stops seeing keystrokes until something is clicked.
+    canvasRef.current?.focus({ preventScroll: true });
+  }
+
+  function surfaceBounds() {
+    const canvas = canvasRef.current;
+    if (!canvas) return { left: 0, top: 0, width: 0, height: 0 };
+    const bounds = canvas.getBoundingClientRect();
+    return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height };
+  }
+
+  /** Ink and paint order travel with the nodes and edges in one history entry. */
+  function commitInk(nextInk: InkElement[], nextOrder?: string[]) {
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      ink: nextInk,
+      ...(nextOrder ? { z: nextOrder } : {}),
+    });
+  }
+
+  function beginStroke(event: PointerEvent<SVGSVGElement>) {
+    const stroke: InkElement = {
+      id: createInkId(),
+      points: [surfacePoint(event)],
+      strokeColor: inkColor,
+      strokeWidthPreset: inkWidth,
+    };
+    activeStrokeRef.current = stroke;
+    setActiveStroke(stroke);
+  }
+
+  function extendStroke(event: PointerEvent<SVGSVGElement>) {
+    const current = activeStrokeRef.current;
+    if (!current) return;
+    const next = { ...current, points: [...current.points, surfacePoint(event)] };
+    activeStrokeRef.current = next;
+    setActiveStroke(next);
+  }
+
+  /**
+   * A finished stroke goes on top. When the diagram already carries an explicit
+   * order the new id has to be appended to it, because anything `z` does not
+   * name is painted underneath what it does.
+   */
+  function finishStroke() {
+    const stroke = activeStrokeRef.current;
+    activeStrokeRef.current = null;
+    setActiveStroke(null);
+    if (!stroke) return;
+
+    const existingOrder = history.snapshotRef.current.z;
+    commitInk(
+      [...(history.snapshotRef.current.ink ?? []), stroke],
+      existingOrder ? [...existingOrder, stroke.id] : undefined,
+    );
+  }
+
+  function eraseAt(event: PointerEvent<SVGSVGElement>) {
+    const graph = history.snapshotRef.current;
+    const current = graph.ink ?? [];
+    const radius = eraserRadiusForView(viewRef.current, surfaceBounds());
+    const remaining = eraseInkAtPoint(current, surfacePoint(event), radius);
+    if (remaining.length === current.length) return;
+
+    const kept = new Set(remaining.map((stroke) => stroke.id));
+    const removed = new Set(
+      current.filter((stroke) => !kept.has(stroke.id)).map((stroke) => stroke.id),
+    );
+    history.preview({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      ink: remaining,
+      ...(graph.z ? { z: graph.z.filter((key) => !removed.has(key)) } : {}),
+    });
+  }
+
   function onCanvasPointerDown(event: PointerEvent<SVGSVGElement>) {
     if (isSubmitting) return;
     lastNodePressRef.current = null;
@@ -971,6 +1134,27 @@ export function DiagramEditor() {
     if (connectionMode) {
       setSelectedIds([]);
       setSelectedEdgeKey(null);
+      return;
+    }
+
+    // The ink tools own a press on the canvas background; everything below this
+    // point (marquee, selection) is the original `select` behaviour.
+    if (canvasTool !== 'select') {
+      event.preventDefault();
+      clearError();
+      inkPointerRef.current = event.pointerId;
+      canvas.setPointerCapture(event.pointerId);
+      setSelectedIds([]);
+      setSelectedEdgeKey(null);
+
+      if (canvasTool === 'erase') {
+        // The whole erase gesture is one undo step, so the pre-gesture snapshot
+        // is held and recorded when the pointer lifts.
+        eraseStartRef.current = history.snapshotRef.current;
+        eraseAt(event);
+      } else {
+        beginStroke(event);
+      }
       return;
     }
 
@@ -1011,6 +1195,13 @@ export function DiagramEditor() {
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
     if (updatePan(event)) return;
     if (updateResize(event)) return;
+
+    if (inkPointerRef.current === event.pointerId) {
+      event.preventDefault();
+      if (canvasTool === 'erase') eraseAt(event);
+      else extendStroke(event);
+      return;
+    }
 
     const session = marqueeRef.current;
     if (session && session.pointerId === event.pointerId) {
@@ -1067,9 +1258,27 @@ export function DiagramEditor() {
     }
   }
 
+  function endInk(event: PointerEvent<SVGSVGElement>): boolean {
+    if (inkPointerRef.current !== event.pointerId) return false;
+    inkPointerRef.current = null;
+
+    if (canvasTool === 'erase') {
+      const previous = eraseStartRef.current;
+      eraseStartRef.current = null;
+      // One undo step for the whole sweep, however many strokes it took out.
+      if (previous) history.recordPreview(previous);
+    } else {
+      finishStroke();
+    }
+
+    releaseCapture(event);
+    return true;
+  }
+
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
     if (endPan(event)) return;
     if (endResize(event)) return;
+    if (endInk(event)) return;
     if (endMarquee(event)) return;
 
     const drag = dragRef.current;
@@ -1104,6 +1313,18 @@ export function DiagramEditor() {
     if (panRef.current?.pointerId === event.pointerId) {
       panRef.current = null;
       setIsPanning(false);
+    }
+    // Losing capture mid-gesture must still land the work, not discard it: a
+    // half-drawn stroke is committed exactly as `pointerup` would commit it.
+    if (inkPointerRef.current === event.pointerId) {
+      inkPointerRef.current = null;
+      if (canvasTool === 'erase') {
+        const previous = eraseStartRef.current;
+        eraseStartRef.current = null;
+        if (previous) history.recordPreview(previous);
+      } else {
+        finishStroke();
+      }
     }
     const resize = resizeRef.current;
     if (resize?.pointerId === event.pointerId) {
@@ -1282,7 +1503,7 @@ export function DiagramEditor() {
     normalizeSelectedLabel();
     normalizeSelectedEdgeLabel();
     const graph = history.snapshotRef.current;
-    const prepared = prepareDiagram(graph.nodes, graph.edges);
+    const prepared = prepareDiagram(graph.nodes, graph.edges, graph.ink ?? [], graph.z ?? []);
     if (!prepared.ok) {
       setValidationError(prepared.error);
       return;
@@ -1299,7 +1520,7 @@ export function DiagramEditor() {
           <CheckCircle2 aria-hidden="true" size={28} strokeWidth={1.7} />
         </span>
         <div>
-          <h2 className="text-[20px] font-semibold text-rt-ink">Diagram proposed</h2>
+          <h2 className="text-[20px] font-semibold text-rt-ink">Studio canvas proposed</h2>
           <p role="status" className="mt-1 text-[13px] text-rt-ink-muted">
             It is now on the shared pinboard.
           </p>
@@ -1312,7 +1533,309 @@ export function DiagramEditor() {
   const error = validationError ?? submissionError;
   const canAlign = selectedIds.length >= 2 && !isSubmitting;
   const canDistribute = selectedIds.length >= 3 && !isSubmitting;
-  const canvasCursor = isPanning ? 'cursor-grabbing' : panReady ? 'cursor-grab' : 'cursor-default';
+  const canvasCursor = isPanning
+    ? 'cursor-grabbing'
+    : panReady
+      ? 'cursor-grab'
+      : canvasTool === 'draw'
+        ? 'cursor-crosshair'
+        : canvasTool === 'erase'
+          ? 'cursor-cell'
+          : 'cursor-default';
+
+  function renderEdge(edge: DiagramEdge, index: number) {
+    const from = nodes.find((node) => node.id === edge.from);
+    const to = nodes.find((node) => node.id === edge.to);
+    const route = edgeRoutes[index];
+    if (!from || !to || !route) return null;
+    const selected = selectedEdgeKey === edgeKey(edge);
+    const strokeWidth = diagramEdgeStrokeWidth(edge, LEGACY_EDGE_STROKE_WIDTH);
+    const stroke = diagramEdgeStroke(edge);
+    const dash = diagramEdgeDash(edge, strokeWidth);
+    return (
+      <g
+        key={edgeKey(edge)}
+        role="button"
+        aria-label={`Arrow from ${from.label} to ${to.label}`}
+        tabIndex={-1}
+        className="cursor-pointer"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          canvasRef.current?.focus();
+          lastNodePressRef.current = null;
+          cancelConnection();
+          setSelectedIds([]);
+          setSelectedEdgeKey(edgeKey(edge));
+        }}
+      >
+        {/* The hit target follows the same path, so a bowed arrow is
+                    grabbable where it is actually drawn. */}
+        <path d={route.path} fill="none" stroke="transparent" strokeWidth={18} />
+        <path
+          d={route.path}
+          fill="none"
+          stroke={selected ? SELECTION_ACCENT : stroke}
+          strokeWidth={selected ? Math.max(3, strokeWidth + 1) : strokeWidth}
+          markerEnd={`url(#${selected ? 'diagram-editor-arrow-selected' : edgeArrowId(stroke)})`}
+          pointerEvents="none"
+          {...dash}
+        />
+        {edge.label ? (
+          <text
+            x={route.labelX}
+            y={route.labelY}
+            textAnchor="middle"
+            fill="#5A5F68"
+            stroke="#FFFFFF"
+            strokeWidth={4}
+            paintOrder="stroke"
+            style={{ fontSize: '11px', fontFamily: 'Inter, system-ui, sans-serif' }}
+            pointerEvents="none"
+          >
+            {edge.label}
+          </text>
+        ) : null}
+      </g>
+    );
+  }
+
+  function renderInk(stroke: InkElement) {
+    return (
+      <path
+        key={stroke.id}
+        data-testid="ink-stroke"
+        d={inkPathData(stroke.points)}
+        fill="none"
+        stroke={inkStrokeColor(stroke)}
+        strokeWidth={inkStrokeWidth(stroke)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        pointerEvents="none"
+      />
+    );
+  }
+
+  function renderNode(node: DiagramNode) {
+    const shape = displayShape(node);
+    const size = effectiveDiagramNodeSize(node);
+    const labelLayout = diagramNodeLabelLayout({
+      ...node,
+      label: node.label || 'Unlabelled',
+    });
+    const selected = selectedIds.includes(node.id);
+    const isOnlySelection = selectedId === node.id;
+    const isConnectionSource = connectionSourceId === node.id;
+    const isConnectionTarget =
+      connectionMode && hoveredTargetId === node.id && connectionSourceId !== node.id;
+    const isEditing = editingNodeId === node.id;
+    return (
+      <g
+        key={node.id}
+        role="button"
+        aria-label={`${DIAGRAM_SHAPE_LABELS[shape]}: ${node.label || 'Unlabelled'}`}
+        aria-pressed={selected}
+        tabIndex={-1}
+        transform={`translate(${node.x}, ${node.y})`}
+        className={connectionMode ? 'cursor-crosshair' : 'cursor-move'}
+        onPointerDown={(event) => onNodePointerDown(event, node)}
+        onPointerEnter={() => {
+          if (connectionMode && connectionSourceId !== node.id) setHoveredTargetId(node.id);
+        }}
+        onPointerLeave={() => {
+          if (hoveredTargetId === node.id) setHoveredTargetId(null);
+        }}
+        onDoubleClick={() => beginInlineNodeEdit(node)}
+      >
+        {selected ? (
+          <rect
+            x={-5}
+            y={-5}
+            width={size.width + 10}
+            height={size.height + 10}
+            rx={7}
+            fill="none"
+            stroke={isConnectionSource ? '#4D6A74' : '#E0A33C'}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+          />
+        ) : null}
+        {isConnectionSource && !selected ? (
+          <rect
+            x={-5}
+            y={-5}
+            width={size.width + 10}
+            height={size.height + 10}
+            rx={7}
+            fill="none"
+            stroke="#4D6A74"
+            strokeWidth={2}
+            strokeDasharray="4 3"
+          />
+        ) : null}
+        {dropTargetId === node.id ? (
+          <rect
+            data-testid="container-drop-target"
+            x={-3}
+            y={-3}
+            width={size.width + 6}
+            height={size.height + 6}
+            rx={5}
+            fill="none"
+            stroke="#4D6A74"
+            strokeWidth={2.5}
+          />
+        ) : null}
+        {isConnectionTarget ? (
+          <rect
+            x={-7}
+            y={-7}
+            width={size.width + 14}
+            height={size.height + 14}
+            rx={9}
+            fill="none"
+            stroke="#E0A33C"
+            strokeWidth={3}
+          />
+        ) : null}
+        <DiagramShapeOutline
+          shape={shape}
+          size={size}
+          fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
+          stroke={diagramNodeStroke(node, LEGACY_NODE_STROKES[shape])}
+          strokeWidth={diagramNodeStrokeWidth(node, LEGACY_NODE_STROKE_WIDTH)}
+          containerDashArray={LEGACY_CONTAINER_DASH}
+        />
+        {isEditing ? (
+          <foreignObject
+            x={4}
+            y={4}
+            width={Math.max(40, size.width - 8)}
+            height={Math.max(28, size.height - 8)}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex h-full w-full items-center justify-center px-1">
+              <input
+                ref={inlineLabelInputRef}
+                aria-label={`Edit ${shape} label`}
+                value={node.label}
+                maxLength={DIAGRAM_LABEL_LIMIT}
+                onChange={(event) => {
+                  clearError();
+                  const graph = history.snapshotRef.current;
+                  history.preview({
+                    nodes: renameNode(graph.nodes, node.id, event.target.value),
+                    edges: graph.edges,
+                  });
+                }}
+                onBlur={finishInlineNodeEdit}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelInlineNodeEdit();
+                  } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (event.ctrlKey || event.metaKey) {
+                      finishInlineNodeEdit();
+                      event.currentTarget.form?.requestSubmit();
+                    } else {
+                      event.currentTarget.blur();
+                    }
+                  }
+                }}
+                className="h-full w-full rounded border border-rt-primary-deep bg-white px-1 text-center text-[11px] font-medium text-rt-ink outline-none select-text ring-2 ring-rt-primary-tint"
+              />
+            </div>
+          </foreignObject>
+        ) : (
+          <text
+            textAnchor="middle"
+            fill={DIAGRAM_LABEL_INK}
+            style={{
+              fontSize: `${labelLayout.fontSize}px`,
+              fontFamily: 'Inter, system-ui, sans-serif',
+              fontWeight: shape === 'text' ? 600 : 500,
+            }}
+          >
+            {labelLayout.lines.map((line, index) => (
+              <tspan
+                key={line + String(index)}
+                x={size.width / 2}
+                y={labelLayout.firstBaselineY + index * labelLayout.lineHeight}
+              >
+                {line}
+              </tspan>
+            ))}
+          </text>
+        )}
+        {isOnlySelection && !connectionMode && !isEditing ? (
+          <g aria-hidden="true" className="cursor-crosshair">
+            {[
+              [size.width / 2, 0],
+              [size.width, size.height / 2],
+              [size.width / 2, size.height],
+              [0, size.height / 2],
+            ].map(([x, y]) => (
+              <g
+                key={`${x}-${y}`}
+                data-testid="connection-handle"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  canvasRef.current?.focus({ preventScroll: true });
+                  lastNodePressRef.current = null;
+                  startConnection(node.id);
+                }}
+              >
+                <circle cx={x} cy={y} r={14} fill="transparent" />
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={6}
+                  fill="#FFFFFF"
+                  stroke="#4D6A74"
+                  strokeWidth={2}
+                  pointerEvents="none"
+                />
+              </g>
+            ))}
+          </g>
+        ) : null}
+        {isOnlySelection && !connectionMode && !isEditing
+          ? RESIZE_CORNERS.map(({ corner, label, cursor }) => {
+              // Sit on the selection outline so the corners stay clear of
+              // the connection handles on the node's own edge midpoints.
+              const x = corner === 'nw' || corner === 'sw' ? -5 : size.width + 5;
+              const y = corner === 'nw' || corner === 'ne' ? -5 : size.height + 5;
+              return (
+                <g
+                  key={corner}
+                  role="button"
+                  aria-label={label}
+                  tabIndex={-1}
+                  data-testid={`resize-handle-${corner}`}
+                  style={{ cursor }}
+                  onPointerDown={(event) => onResizePointerDown(event, node, corner)}
+                >
+                  <circle cx={x} cy={y} r={10} fill="transparent" />
+                  <rect
+                    x={x - 3.5}
+                    y={y - 3.5}
+                    width={7}
+                    height={7}
+                    fill="#FFFFFF"
+                    stroke={SELECTION_ACCENT}
+                    strokeWidth={2}
+                    pointerEvents="none"
+                  />
+                </g>
+              );
+            })
+          : null}
+      </g>
+    );
+  }
 
   return (
     <form
@@ -1325,6 +1848,98 @@ export function DiagramEditor() {
           <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
             Extending {extensionSource.authorName}&apos;s diagram
           </div>
+        ) : null}
+
+        {/* Only on a blank canvas: a starter frame is an answer to "where do I
+            begin", and once there is anything here the question is answered. */}
+        {nodes.length === 0 && edges.length === 0 && ink.length === 0 ? (
+          <fieldset className="mb-4">
+            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Start from
+            </legend>
+            <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
+              {STUDIO_TEMPLATES.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  title={template.hint}
+                  disabled={isSubmitting}
+                  onClick={() => applyTemplate(template)}
+                  className="min-h-9 rounded-lg border border-dashed border-rt-tertiary bg-rt-surface px-2 text-[11px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {template.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
+
+        <fieldset className="mb-4">
+          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+            Tool
+          </legend>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            {CANVAS_TOOLS.map(({ tool, label, hint, Icon }) => (
+              <button
+                key={tool}
+                type="button"
+                aria-label={label}
+                aria-pressed={canvasTool === tool}
+                title={hint}
+                disabled={isSubmitting}
+                onClick={() => {
+                  setCanvasTool(tool);
+                  // Drawing over a selection would otherwise leave the previous
+                  // selection's handles under the pen.
+                  if (tool !== 'select') {
+                    setSelectedIds([]);
+                    setSelectedEdgeKey(null);
+                    cancelConnection();
+                  }
+                }}
+                className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1.5 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
+                  canvasTool === tool
+                    ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
+                    : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink'
+                }`}
+              >
+                <Icon aria-hidden="true" size={16} />
+                {label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        {canvasTool === 'draw' ? (
+          <fieldset className="mb-4">
+            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Ink
+            </legend>
+            <div className="mt-2 grid grid-cols-8 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`${key} ink`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={inkColor === key}
+                  disabled={isSubmitting}
+                  onSelect={() => setInkColor(key)}
+                />
+              ))}
+            </div>
+            <div className="mt-2 flex gap-1.5">
+              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={STROKE_WIDTH_LABELS[preset]}
+                  name={`${STROKE_WIDTH_LABELS[preset]} pen`}
+                  active={inkWidth === preset}
+                  disabled={isSubmitting}
+                  onSelect={() => setInkWidth(preset)}
+                />
+              ))}
+            </div>
+          </fieldset>
         ) : null}
 
         <fieldset>
@@ -1471,6 +2086,22 @@ export function DiagramEditor() {
               onClick={() => pasteFragment(clipboard)}
             >
               <ClipboardPaste aria-hidden="true" size={16} />
+            </IconButton>
+            <IconButton
+              label="Bring selection to front"
+              title="Bring in front of the ink"
+              disabled={selectedIds.length === 0 || isSubmitting}
+              onClick={() => reorderSelection('front')}
+            >
+              <BringToFront aria-hidden="true" size={16} />
+            </IconButton>
+            <IconButton
+              label="Send selection to back"
+              title="Send behind the ink"
+              disabled={selectedIds.length === 0 || isSubmitting}
+              onClick={() => reorderSelection('back')}
+            >
+              <SendToBack aria-hidden="true" size={16} />
             </IconButton>
           </div>
           <div className="mt-1.5 grid grid-cols-4 gap-1.5">
@@ -1906,7 +2537,7 @@ export function DiagramEditor() {
         <svg
           ref={canvasRef}
           role="application"
-          aria-label="Diagram canvas"
+          aria-label="Studio canvas"
           tabIndex={0}
           viewBox={diagramViewBoxAttribute(view)}
           className={`w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
@@ -1982,63 +2613,26 @@ export function DiagramEditor() {
             />
           ) : null}
 
-          {edges.map((edge, index) => {
-            const from = nodes.find((node) => node.id === edge.from);
-            const to = nodes.find((node) => node.id === edge.to);
-            const route = edgeRoutes[index];
-            if (!from || !to || !route) return null;
-            const selected = selectedEdgeKey === edgeKey(edge);
-            const strokeWidth = diagramEdgeStrokeWidth(edge, LEGACY_EDGE_STROKE_WIDTH);
-            const stroke = diagramEdgeStroke(edge);
-            const dash = diagramEdgeDash(edge, strokeWidth);
-            return (
-              <g
-                key={edgeKey(edge)}
-                role="button"
-                aria-label={`Arrow from ${from.label} to ${to.label}`}
-                tabIndex={-1}
-                className="cursor-pointer"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  canvasRef.current?.focus();
-                  lastNodePressRef.current = null;
-                  cancelConnection();
-                  setSelectedIds([]);
-                  setSelectedEdgeKey(edgeKey(edge));
-                }}
-              >
-                {/* The hit target follows the same path, so a bowed arrow is
-                    grabbable where it is actually drawn. */}
-                <path d={route.path} fill="none" stroke="transparent" strokeWidth={18} />
-                <path
-                  d={route.path}
-                  fill="none"
-                  stroke={selected ? SELECTION_ACCENT : stroke}
-                  strokeWidth={selected ? Math.max(3, strokeWidth + 1) : strokeWidth}
-                  markerEnd={`url(#${selected ? 'diagram-editor-arrow-selected' : edgeArrowId(stroke)})`}
-                  pointerEvents="none"
-                  {...dash}
-                />
-                {edge.label ? (
-                  <text
-                    x={route.labelX}
-                    y={route.labelY}
-                    textAnchor="middle"
-                    fill="#5A5F68"
-                    stroke="#FFFFFF"
-                    strokeWidth={4}
-                    paintOrder="stroke"
-                    style={{ fontSize: '11px', fontFamily: 'Inter, system-ui, sans-serif' }}
-                    pointerEvents="none"
-                  >
-                    {edge.label}
-                  </text>
-                ) : null}
-              </g>
-            );
+          {/* One ordered pass: `z` can put ink above or below any shape, so
+              edges, nodes and ink cannot be drawn in three fixed layers. */}
+          {paintOrder.map((ref) => {
+            if (ref.kind === 'edge') {
+              const index = edgeIndexByKey.get(ref.key);
+              const edge = index === undefined ? undefined : edges[index];
+              return edge && index !== undefined ? renderEdge(edge, index) : null;
+            }
+            if (ref.kind === 'ink') {
+              const stroke = inkById.get(ref.key);
+              return stroke ? renderInk(stroke) : null;
+            }
+            const node = nodeById.get(ref.key);
+            return node ? renderNode(node) : null;
           })}
 
+          {activeStroke ? renderInk(activeStroke) : null}
+
+          {/* Drawn last so the in-flight arrow stays visible over whatever it
+              is being dragged across. */}
           {connectionPreview ? (
             <line
               aria-hidden="true"
@@ -2054,227 +2648,6 @@ export function DiagramEditor() {
               pointerEvents="none"
             />
           ) : null}
-
-          {diagramNodesInDrawOrder(nodes).map((node) => {
-            const shape = displayShape(node);
-            const size = effectiveDiagramNodeSize(node);
-            const labelLayout = diagramNodeLabelLayout({
-              ...node,
-              label: node.label || 'Unlabelled',
-            });
-            const selected = selectedIds.includes(node.id);
-            const isOnlySelection = selectedId === node.id;
-            const isConnectionSource = connectionSourceId === node.id;
-            const isConnectionTarget =
-              connectionMode && hoveredTargetId === node.id && connectionSourceId !== node.id;
-            const isEditing = editingNodeId === node.id;
-            return (
-              <g
-                key={node.id}
-                role="button"
-                aria-label={`${DIAGRAM_SHAPE_LABELS[shape]}: ${node.label || 'Unlabelled'}`}
-                aria-pressed={selected}
-                tabIndex={-1}
-                transform={`translate(${node.x}, ${node.y})`}
-                className={connectionMode ? 'cursor-crosshair' : 'cursor-move'}
-                onPointerDown={(event) => onNodePointerDown(event, node)}
-                onPointerEnter={() => {
-                  if (connectionMode && connectionSourceId !== node.id) setHoveredTargetId(node.id);
-                }}
-                onPointerLeave={() => {
-                  if (hoveredTargetId === node.id) setHoveredTargetId(null);
-                }}
-                onDoubleClick={() => beginInlineNodeEdit(node)}
-              >
-                {selected ? (
-                  <rect
-                    x={-5}
-                    y={-5}
-                    width={size.width + 10}
-                    height={size.height + 10}
-                    rx={7}
-                    fill="none"
-                    stroke={isConnectionSource ? '#4D6A74' : '#E0A33C'}
-                    strokeWidth={2}
-                    strokeDasharray="4 3"
-                  />
-                ) : null}
-                {isConnectionSource && !selected ? (
-                  <rect
-                    x={-5}
-                    y={-5}
-                    width={size.width + 10}
-                    height={size.height + 10}
-                    rx={7}
-                    fill="none"
-                    stroke="#4D6A74"
-                    strokeWidth={2}
-                    strokeDasharray="4 3"
-                  />
-                ) : null}
-                {dropTargetId === node.id ? (
-                  <rect
-                    data-testid="container-drop-target"
-                    x={-3}
-                    y={-3}
-                    width={size.width + 6}
-                    height={size.height + 6}
-                    rx={5}
-                    fill="none"
-                    stroke="#4D6A74"
-                    strokeWidth={2.5}
-                  />
-                ) : null}
-                {isConnectionTarget ? (
-                  <rect
-                    x={-7}
-                    y={-7}
-                    width={size.width + 14}
-                    height={size.height + 14}
-                    rx={9}
-                    fill="none"
-                    stroke="#E0A33C"
-                    strokeWidth={3}
-                  />
-                ) : null}
-                <DiagramShapeOutline
-                  shape={shape}
-                  size={size}
-                  fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
-                  stroke={diagramNodeStroke(node, LEGACY_NODE_STROKES[shape])}
-                  strokeWidth={diagramNodeStrokeWidth(node, LEGACY_NODE_STROKE_WIDTH)}
-                  containerDashArray={LEGACY_CONTAINER_DASH}
-                />
-                {isEditing ? (
-                  <foreignObject
-                    x={4}
-                    y={4}
-                    width={Math.max(40, size.width - 8)}
-                    height={Math.max(28, size.height - 8)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    <div className="flex h-full w-full items-center justify-center px-1">
-                      <input
-                        ref={inlineLabelInputRef}
-                        aria-label={`Edit ${shape} label`}
-                        value={node.label}
-                        maxLength={DIAGRAM_LABEL_LIMIT}
-                        onChange={(event) => {
-                          clearError();
-                          const graph = history.snapshotRef.current;
-                          history.preview({
-                            nodes: renameNode(graph.nodes, node.id, event.target.value),
-                            edges: graph.edges,
-                          });
-                        }}
-                        onBlur={finishInlineNodeEdit}
-                        onKeyDown={(event) => {
-                          event.stopPropagation();
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            cancelInlineNodeEdit();
-                          } else if (event.key === 'Enter') {
-                            event.preventDefault();
-                            if (event.ctrlKey || event.metaKey) {
-                              finishInlineNodeEdit();
-                              event.currentTarget.form?.requestSubmit();
-                            } else {
-                              event.currentTarget.blur();
-                            }
-                          }
-                        }}
-                        className="h-full w-full rounded border border-rt-primary-deep bg-white px-1 text-center text-[11px] font-medium text-rt-ink outline-none select-text ring-2 ring-rt-primary-tint"
-                      />
-                    </div>
-                  </foreignObject>
-                ) : (
-                  <text
-                    textAnchor="middle"
-                    fill={DIAGRAM_LABEL_INK}
-                    style={{
-                      fontSize: `${labelLayout.fontSize}px`,
-                      fontFamily: 'Inter, system-ui, sans-serif',
-                      fontWeight: shape === 'text' ? 600 : 500,
-                    }}
-                  >
-                    {labelLayout.lines.map((line, index) => (
-                      <tspan
-                        key={line + String(index)}
-                        x={size.width / 2}
-                        y={labelLayout.firstBaselineY + index * labelLayout.lineHeight}
-                      >
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
-                )}
-                {isOnlySelection && !connectionMode && !isEditing ? (
-                  <g aria-hidden="true" className="cursor-crosshair">
-                    {[
-                      [size.width / 2, 0],
-                      [size.width, size.height / 2],
-                      [size.width / 2, size.height],
-                      [0, size.height / 2],
-                    ].map(([x, y]) => (
-                      <g
-                        key={`${x}-${y}`}
-                        data-testid="connection-handle"
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          canvasRef.current?.focus({ preventScroll: true });
-                          lastNodePressRef.current = null;
-                          startConnection(node.id);
-                        }}
-                      >
-                        <circle cx={x} cy={y} r={14} fill="transparent" />
-                        <circle
-                          cx={x}
-                          cy={y}
-                          r={6}
-                          fill="#FFFFFF"
-                          stroke="#4D6A74"
-                          strokeWidth={2}
-                          pointerEvents="none"
-                        />
-                      </g>
-                    ))}
-                  </g>
-                ) : null}
-                {isOnlySelection && !connectionMode && !isEditing
-                  ? RESIZE_CORNERS.map(({ corner, label, cursor }) => {
-                      // Sit on the selection outline so the corners stay clear of
-                      // the connection handles on the node's own edge midpoints.
-                      const x = corner === 'nw' || corner === 'sw' ? -5 : size.width + 5;
-                      const y = corner === 'nw' || corner === 'ne' ? -5 : size.height + 5;
-                      return (
-                        <g
-                          key={corner}
-                          role="button"
-                          aria-label={label}
-                          tabIndex={-1}
-                          data-testid={`resize-handle-${corner}`}
-                          style={{ cursor }}
-                          onPointerDown={(event) => onResizePointerDown(event, node, corner)}
-                        >
-                          <circle cx={x} cy={y} r={10} fill="transparent" />
-                          <rect
-                            x={x - 3.5}
-                            y={y - 3.5}
-                            width={7}
-                            height={7}
-                            fill="#FFFFFF"
-                            stroke={SELECTION_ACCENT}
-                            strokeWidth={2}
-                            pointerEvents="none"
-                          />
-                        </g>
-                      );
-                    })
-                  : null}
-              </g>
-            );
-          })}
 
           {marqueeRect ? (
             <rect
@@ -2304,6 +2677,7 @@ export function DiagramEditor() {
             <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
               {nodes.length} {nodes.length === 1 ? 'element' : 'elements'} · {edges.length}{' '}
               {edges.length === 1 ? 'arrow' : 'arrows'}
+              {ink.length > 0 ? ` · ${ink.length} ${ink.length === 1 ? 'stroke' : 'strokes'}` : ''}
             </p>
           )}
         </div>
