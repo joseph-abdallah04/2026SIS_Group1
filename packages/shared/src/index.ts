@@ -112,7 +112,7 @@ export interface DrawingArtifact {
 // lives in its own module; re-exported here so `@roundtable/shared` is still
 // the single import for domain types.
 export * from './diagramContract.js';
-// v4 studio elements (ink today; paths, tables and charts later) live beside
+// v4 studio elements (ink, paths and tables) live beside
 // the diagram contract for the same reason: one import for domain types.
 export * from './studioElements.js';
 export * from './drawingContract.js';

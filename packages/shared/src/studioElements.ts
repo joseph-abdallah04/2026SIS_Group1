@@ -2,7 +2,7 @@
 //
 // v4 lets one diagram hold free-form elements alongside its nodes and edges, so
 // a user can sketch *and* diagram in a single artifact instead of choosing a
-// tool up front. Ink lands here first; paths, tables and charts follow.
+// tool up front. Ink, decorative paths and tables all live here.
 //
 // Every v4 field is optional. A diagram authored before v4 carries none of them
 // and must keep rendering exactly as it did — the same additive rule that v2

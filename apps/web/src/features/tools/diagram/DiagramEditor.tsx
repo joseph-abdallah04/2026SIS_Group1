@@ -636,6 +636,10 @@ export function DiagramEditor() {
   // Closing the editor unmounts the input, which fires its own blur. Without
   // this flag that blur would commit the very text Escape just abandoned.
   const cellEditCancelledRef = useRef(false);
+  // Opening a cell to edit it selects what is there, so typing replaces it.
+  // Opening it *by* typing must not: the first character is already in the box
+  // and selecting it would make the second keystroke overwrite it.
+  const cellEditSelectAllRef = useRef(true);
   const tableResizeRef = useRef<{
     pointerId: number;
     tableId: string;
@@ -764,8 +768,11 @@ export function DiagramEditor() {
 
   useEffect(() => {
     if (!editingCell) return;
-    cellInputRef.current?.focus();
-    cellInputRef.current?.select();
+    const input = cellInputRef.current;
+    if (!input) return;
+    input.focus();
+    if (cellEditSelectAllRef.current) input.select();
+    else input.setSelectionRange(input.value.length, input.value.length);
   }, [editingCell]);
 
   function clearError() {
@@ -2250,6 +2257,7 @@ export function DiagramEditor() {
         // Enter on a cell opens it for editing rather than moving on; Tab and
         // the arrows move, which is how a spreadsheet behaves.
         if (event.key === 'Enter') {
+          cellEditSelectAllRef.current = true;
           setEditingCell(cell);
           return;
         }
@@ -2280,6 +2288,7 @@ export function DiagramEditor() {
           setCell(selectedTable, cell.row, cell.col, { text: event.key }),
           selectedTable.id,
         );
+        cellEditSelectAllRef.current = false;
         setEditingCell(cell);
         return;
       }
@@ -2896,8 +2905,10 @@ export function DiagramEditor() {
                           setSelectedTableIds([table.id]);
                           // First double-click goes inside the table; a second,
                           // already inside, opens the cell for typing.
-                          if (tableEditing) setEditingCell({ row, col });
-                          else setTableEditing(true);
+                          if (tableEditing) {
+                            cellEditSelectAllRef.current = true;
+                            setEditingCell({ row, col });
+                          } else setTableEditing(true);
                           setCellRange({ anchor: { row, col }, focus: { row, col } });
                           return;
                         }

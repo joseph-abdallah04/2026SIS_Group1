@@ -2503,6 +2503,44 @@ describe('studio tables', () => {
     expect(table.cells[4]!.text).toBe('Middle');
   });
 
+  it('keeps the first character when a cell is filled by typing', async () => {
+    // Typing put the character in the box and then selected it, so the next
+    // keystroke overwrote it: "Time" arrived as "ime".
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 960, '2 by 2 table');
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.keyboard('Time');
+
+    expect(screen.getByRole('textbox', { name: 'Cell row 1 column 1' })).toHaveValue('Time');
+  });
+
+  it('still replaces the contents when a cell is opened with Enter', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 965, '2 by 2 table');
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.keyboard('Old');
+    await user.keyboard('{Enter}');
+
+    // Enter commits and moves down. Steer back with the keyboard rather than a
+    // click, which would pair with the earlier press as a double press.
+    await user.keyboard('{ArrowUp}');
+    await user.keyboard('{Enter}');
+    await user.keyboard('New');
+
+    // Opening to edit selects what is there, so typing replaces it.
+    expect(screen.getByRole('textbox', { name: 'Cell row 1 column 1' })).toHaveValue('New');
+  });
+
   it('abandons an edit on Escape and keeps what was there', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
