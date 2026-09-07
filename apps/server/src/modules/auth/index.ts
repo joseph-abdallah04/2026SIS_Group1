@@ -3,3 +3,5 @@
 // inside. `requireAuth` itself lives in `../../middleware/auth.ts` (it's
 // cross-cutting Express glue, consumed the same way `error.ts` is).
 export { authRoutes } from './routes.js';
+export { usersRoutes } from './users.routes.js';
+export { getCurrentUser } from './service.js';

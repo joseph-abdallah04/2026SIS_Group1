@@ -7,14 +7,15 @@ import { getBoardForSession } from './service.js';
 export const pinboardRoutes = Router();
 
 // A session board is member-scoped data, so reading it must require an
-// authenticated member of that session (docs/02 §8.3). Neither half exists yet:
-// `requireAuth` is still the stub that 401s everything, and membership lives in
-// the sessions module. Until both land the endpoint is open in local dev only —
-// in production it stays behind the (closed) auth stub rather than serving
-// session contents to anyone with a session id.
+// authenticated member of that session (docs/02 §8.3). `requireAuth` now does
+// real JWT verification (F01/F02), but membership lives in the sessions
+// module and doesn't exist yet — so this only checks "some logged-in user",
+// not "a member of this session". Until membership lands the endpoint is
+// open in local dev only; in production it's behind real auth, but without
+// a membership check yet.
 //
-// TODO(F15/auth): replace with `requireAuth` + a membership check via the
-// sessions module's public surface, and delete the dev branch.
+// TODO(F15/sessions): add a membership check via the sessions module's
+// public surface once it exists, and delete the dev branch.
 const DEV_OPEN_BOARD = env.NODE_ENV !== 'production';
 
 const requireBoardAccess: RequestHandler = DEV_OPEN_BOARD

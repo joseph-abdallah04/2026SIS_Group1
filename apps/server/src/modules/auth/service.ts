@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
-import type { AuthResult } from '@roundtable/shared';
-import type { LoginInput, SignupInput } from '@roundtable/shared/schemas';
+import type { Request } from 'express';
+import type { AuthResult, User } from '@roundtable/shared';
+import type { LoginInput, SignupInput, UpdateProfileInput } from '@roundtable/shared/schemas';
 
 import { Prisma, type User as UserRow } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
@@ -23,6 +24,13 @@ function isEmailUniqueViolation(err: unknown): boolean {
 
 const EMAIL_TAKEN_MESSAGE = 'An account with this email already exists';
 const INVALID_CREDENTIALS_MESSAGE = 'Incorrect email or password';
+
+// Precomputed hash of an arbitrary password, compared against when no user
+// exists for the given email — otherwise a missing user returns instantly
+// while a wrong password pays bcrypt's ~100ms, a timing side-channel that
+// reveals which emails are registered even though the response body/status
+// are identical. Never matches any real password.
+const DUMMY_PASSWORD_HASH = '$2b$10$LmAfFun7kzbvZiaZ217NjOzKuW/saRKnnoa7DJ0.W84KqLPbKnPh.';
 
 export interface SignupResult {
   token: string;
@@ -85,6 +93,10 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
+    // Still pays bcrypt's cost against a dummy hash so this path takes the
+    // same time as a real wrong-password rejection below — see
+    // DUMMY_PASSWORD_HASH.
+    await bcrypt.compare(input.password, DUMMY_PASSWORD_HASH);
     throw new ApiError(401, INVALID_CREDENTIALS_MESSAGE, 'INVALID_CREDENTIALS');
   }
 
@@ -94,4 +106,34 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   }
 
   return { token: signToken({ userId: user.id }), user: toPublicUser(user) };
+}
+
+/**
+ * Both of these take `userId` — resolved by `requireAuth` from the verified
+ * JWT — and never a client-supplied id. That's what makes "can't read or
+ * write someone else's profile" true by construction: there is no code path
+ * that lets a request name a different user (F03).
+ */
+export async function getUserById(userId: string): Promise<User | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  return user ? toPublicUser(user) : null;
+}
+
+/**
+ * docs/02 §2's documented auth module public surface (`requireAuth`,
+ * `getCurrentUser(req)`) — a thin wrapper over `getUserById` for other
+ * modules that already have the request object in hand (e.g. a route
+ * handler) rather than a bare userId.
+ */
+export function getCurrentUser(req: Request): Promise<User | null> {
+  if (!req.userId) return Promise.resolve(null);
+  return getUserById(req.userId);
+}
+
+export async function updateDisplayName(
+  userId: string,
+  displayName: UpdateProfileInput['displayName'],
+): Promise<User> {
+  const user = await prisma.user.update({ where: { id: userId }, data: { displayName } });
+  return toPublicUser(user);
 }
