@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
 import {
+  DRAWING_ARTIFACT_LIMIT,
+  DRAWING_INK_KEYS,
+  DRAWING_PEN_WIDTHS,
+  DRAWING_VIEWBOX_HEIGHT,
+  DRAWING_VIEWBOX_WIDTH,
+} from './drawingContract.js';
+import { isEmoji, MAX_REACTION_LENGTH } from './reactionContract.js';
+import {
   DIAGRAM_FILL_KEYS,
   DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
@@ -99,10 +107,65 @@ export const stickyArtifactSchema = z.object({
   color: stickyColorSchema,
 });
 
+/**
+ * A stroke as stored: which pen, and a flat list of coordinates.
+ *
+ * Coordinates are bounded by the drawing's own viewBox with a little tolerance
+ * either side, since the editor clamps to the surface but a stroke may sit
+ * exactly on an edge.
+ */
+const drawingStrokeSchema = z.object({
+  ink: z.enum(DRAWING_INK_KEYS),
+  width: z.union([
+    z.literal(DRAWING_PEN_WIDTHS[0]),
+    z.literal(DRAWING_PEN_WIDTHS[1]),
+    z.literal(DRAWING_PEN_WIDTHS[2]),
+  ]),
+  points: z
+    .array(
+      z
+        .number()
+        .min(-1)
+        .max(Math.max(DRAWING_VIEWBOX_WIDTH, DRAWING_VIEWBOX_HEIGHT) + 1),
+    )
+    .max(4000),
+});
+
+/**
+ * Read shape, deliberately forgiving about the strokes.
+ *
+ * A stored row may carry strokes written by a build that knew inks or widths
+ * this one does not. The SVG renders regardless, so an unreadable stroke list
+ * costs the ability to edit that drawing, not the ability to see it — the same
+ * bargain the diagram's lenient read makes.
+ */
 export const drawingArtifactSchema = z.object({
   type: z.literal('drawing'),
-  svg: z.string().max(100_000),
+  svg: z.string().max(DRAWING_ARTIFACT_LIMIT),
+  strokes: z.array(drawingStrokeSchema).max(600).optional().catch(undefined),
 });
+
+/** Write shape: strokes must be ones this build understands, or absent. */
+const drawingStrictArtifactSchema = z.object({
+  type: z.literal('drawing'),
+  svg: z.string().max(DRAWING_ARTIFACT_LIMIT),
+  strokes: z.array(drawingStrokeSchema).max(600).optional(),
+});
+
+export const drawingWriteArtifactSchema = drawingStrictArtifactSchema.superRefine(
+  (value, context) => {
+    // The budget covers the whole artifact. Checking the parts separately would
+    // let a drawing through that is under the cap twice over but not once.
+    const size = value.svg.length + (value.strokes ? JSON.stringify(value.strokes).length : 0);
+    if (size > DRAWING_ARTIFACT_LIMIT) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'This sketch is too detailed to store',
+        path: ['svg'],
+      });
+    }
+  },
+);
 
 const diagramFillKeySchema = z.enum(DIAGRAM_FILL_KEYS);
 const diagramStrokeKeySchema = z.enum(DIAGRAM_STROKE_KEYS);
@@ -322,7 +385,7 @@ export const artifactJsonSchema = z.discriminatedUnion('type', [
  */
 export const artifactWriteJsonSchema = z.discriminatedUnion('type', [
   stickyArtifactSchema,
-  drawingArtifactSchema,
+  drawingStrictArtifactSchema,
   diagramStrictArtifactSchema,
 ]);
 
@@ -347,8 +410,17 @@ export const proposalCreateSchema = z
       });
     }
 
-    if (value.artifactJson.type === 'diagram') {
-      const parsed = diagramWriteArtifactSchema.safeParse(value.artifactJson);
+    // Per-kind write rules, stricter than the read union: reading tolerates
+    // values it does not recognise, writing decides what may exist.
+    const writeSchema =
+      value.artifactJson.type === 'diagram'
+        ? diagramWriteArtifactSchema
+        : value.artifactJson.type === 'drawing'
+          ? drawingWriteArtifactSchema
+          : null;
+
+    if (writeSchema) {
+      const parsed = writeSchema.safeParse(value.artifactJson);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           context.addIssue({ ...issue, path: ['artifactJson', ...issue.path] });
@@ -390,10 +462,17 @@ export const proposalUpdateSchema = z
       });
     }
 
-    // Diagram graph, size and grouping invariants apply to every write path,
-    // not just creation.
-    if (value.artifactJson?.type === 'diagram') {
-      const parsed = diagramWriteArtifactSchema.safeParse(value.artifactJson);
+    // Per-kind write rules — diagram graph and grouping invariants, drawing
+    // stroke and size limits — apply to every write path, not just creation.
+    const writeSchema =
+      value.artifactJson?.type === 'diagram'
+        ? diagramWriteArtifactSchema
+        : value.artifactJson?.type === 'drawing'
+          ? drawingWriteArtifactSchema
+          : null;
+
+    if (writeSchema && value.artifactJson) {
+      const parsed = writeSchema.safeParse(value.artifactJson);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           context.addIssue({ ...issue, path: ['artifactJson', ...issue.path] });
@@ -407,3 +486,29 @@ export type ProposalUpdateInput = z.infer<typeof proposalUpdateSchema>;
 export const proposalDeleteSchema = z.object({ id: z.string().min(1) });
 
 export type ProposalDeleteInput = z.infer<typeof proposalDeleteSchema>;
+
+/**
+ * Toggle contract for F18.
+ *
+ * One intent for both directions: the client says which reaction it means, and
+ * the server decides whether that adds or removes one by looking at what is
+ * already stored. A separate "unreact" would let a client that had lost track
+ * of its own state ask for a removal that never happened, and two intents
+ * racing each other could leave the reaction on or off depending on arrival
+ * order rather than on how many times it was pressed.
+ *
+ * Any single emoji may be left, not only the three a card offers as chips: the
+ * quick set is a shortcut, and a room that wants to react with a party popper
+ * should not be told which feelings are available. What is checked is that the
+ * value really is one emoji, because this column is otherwise a free-text
+ * field of fixed width sitting in the middle of every card.
+ */
+export const proposalReactSchema = z.object({
+  id: z.string().min(1),
+  emoji: z
+    .string()
+    .max(MAX_REACTION_LENGTH)
+    .refine(isEmoji, { message: 'A reaction must be a single emoji' }),
+});
+
+export type ProposalReactInput = z.infer<typeof proposalReactSchema>;

@@ -3,8 +3,19 @@
 // Client: `io<ServerToClientEvents, ClientToServerEvents>(...)`
 // Module owners extend these maps in their PRs. See docs/02-architecture.md §4.
 
-import type { BoardItem, BoardResponse, QuestionStatus, SessionStatus } from './index.js';
-import type { ProposalCreateInput, ProposalDeleteInput, ProposalUpdateInput } from './schemas.js';
+import type {
+  BoardItem,
+  BoardResponse,
+  QuestionStatus,
+  ReactionGroup,
+  SessionStatus,
+} from './index.js';
+import type {
+  ProposalCreateInput,
+  ProposalDeleteInput,
+  ProposalReactInput,
+  ProposalUpdateInput,
+} from './schemas.js';
 
 export interface SessionUserPayload {
   id: string;
@@ -93,11 +104,18 @@ export interface ClientToServerEvents {
    */
   proposalUpdate(payload: ProposalUpdateInput, ack?: (res: WriteAck) => void): void;
   /**
-   * Remove a proposal you authored (F16). Soft-deleted server-side, so a
-   * proposal that others extended (F23) keeps its lineage intact.
-   * Leader moderation over anyone's proposal is F17.
+   * Remove a proposal you authored (F16), or — if you lead the session — any
+   * proposal on the board (F17). Soft-deleted server-side, so a proposal that
+   * others extended (F23) keeps its lineage intact.
    */
   proposalDelete(payload: ProposalDeleteInput, ack?: (res: WriteAck) => void): void;
+  /**
+   * Add or take back one emoji reaction on any proposal (F18) — anyone's, your
+   * own included. A toggle: the server decides the direction from what is
+   * already stored, so pressing twice leaves nothing behind and pressing ten
+   * times cannot count ten.
+   */
+  proposalReact(payload: ProposalReactInput, ack?: (res: WriteAck) => void): void;
   // === voting module ===
   // === summary module ===
   // === voice module ===
@@ -159,6 +177,23 @@ export interface ServerToClientEvents {
   proposalCreated(payload: { proposal: BoardItem }): void;
   proposalUpdated(payload: { proposal: BoardItem }): void;
   proposalDeleted(payload: { proposalId: string; questionId: string }): void;
+  /**
+   * A proposal's reactions changed (F18).
+   *
+   * Its own event rather than a `proposalUpdated` carrying the whole row: a
+   * reaction is a few bytes, and a drawing's artifact is up to 100KB of SVG and
+   * strokes. Reposting all of that because somebody tapped an emoji would make
+   * the cheapest interaction on the board the most expensive one to broadcast.
+   *
+   * The payload is the proposal's entire reaction state, not a delta, so a
+   * client that missed an event is corrected by the next one instead of
+   * drifting a count further out with every miss.
+   */
+  proposalReactionsUpdated(payload: {
+    proposalId: string;
+    questionId: string;
+    reactions: ReactionGroup[];
+  }): void;
 
   // === voting module ===
   // === summary module ===

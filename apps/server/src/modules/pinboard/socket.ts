@@ -1,15 +1,17 @@
 // Realtime pinboard sync — F15 (create) and F16 (author edit/move/delete).
 //
 // The write path is server-authoritative (docs/02 §4): a client sends the
-// *intent* (`proposalCreate`, `proposalUpdate`, `proposalDelete`), this module
+// *intent* (`proposalCreate`, `proposalUpdate`, `proposalDelete`,
+// `proposalReact`), this module
 // validates and persists it, then broadcasts the resulting *fact* to
 // `session:{id}`. Nobody renders a change the server has not accepted, so
 // boards cannot diverge.
-import type { BoardItem } from '@roundtable/shared';
+import type { BoardItem, ReactionGroup } from '@roundtable/shared';
 import type { ClientToServerEvents, WriteAck } from '@roundtable/shared/events';
 import {
   proposalCreateSchema,
   proposalDeleteSchema,
+  proposalReactSchema,
   proposalUpdateSchema,
 } from '@roundtable/shared/schemas';
 import type { ZodType } from 'zod';
@@ -17,7 +19,7 @@ import type { ZodType } from 'zod';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket } from '../../realtime/types.js';
 import { ApiError } from '../../middleware/error.js';
 import type { Actor } from './permissions.js';
-import { createProposal, deleteProposal, updateProposal } from './service.js';
+import { createProposal, deleteProposal, toggleReaction, updateProposal } from './service.js';
 import { getActiveQuestion } from './sessionsAdapter.js';
 
 /**
@@ -52,6 +54,21 @@ export function emitProposalDeleted(
   removed: { proposalId: string; questionId: string },
 ): void {
   io.to(sessionRoom(sessionId)).emit('proposalDeleted', removed);
+}
+
+/**
+ * Announce a proposal's new reaction state (F18).
+ *
+ * Carries every reaction on that proposal rather than the one that changed, so
+ * a client that missed an event is put right by the next one. It is a small
+ * payload: a handful of emoji and the ids of a roomful of people.
+ */
+export function emitProposalReactionsUpdated(
+  io: RealtimeServer,
+  sessionId: string,
+  changed: { proposalId: string; questionId: string; reactions: ReactionGroup[] },
+): void {
+  io.to(sessionRoom(sessionId)).emit('proposalReactionsUpdated', changed);
 }
 
 /**
@@ -90,7 +107,10 @@ function ackFailure(
  */
 function onWriteIntent<TPayload>(
   socket: RealtimeSocket,
-  intent: keyof Pick<ClientToServerEvents, 'proposalCreate' | 'proposalUpdate' | 'proposalDelete'>,
+  intent: keyof Pick<
+    ClientToServerEvents,
+    'proposalCreate' | 'proposalUpdate' | 'proposalDelete' | 'proposalReact'
+  >,
   schema: ZodType<TPayload>,
   run: (input: TPayload, actor: Actor) => Promise<void>,
 ): void {
@@ -148,5 +168,10 @@ export function registerPinboardSocketHandlers(io: RealtimeServer, socket: Realt
   onWriteIntent(socket, 'proposalDelete', proposalDeleteSchema, async (input, actor) => {
     const removed = await deleteProposal({ proposalId: input.id, actor });
     emitProposalDeleted(io, actor.sessionId, removed);
+  });
+
+  onWriteIntent(socket, 'proposalReact', proposalReactSchema, async (input, actor) => {
+    const changed = await toggleReaction({ proposalId: input.id, actor, emoji: input.emoji });
+    emitProposalReactionsUpdated(io, actor.sessionId, changed);
   });
 }

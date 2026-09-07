@@ -23,10 +23,10 @@ export interface Actor {
 }
 
 /**
- * What is being attempted. The three differ in who may do them, so the rule
- * below cannot be stated without knowing which one this is.
+ * What is being attempted. They differ in who may do them, so the rule below
+ * cannot be stated without knowing which one this is.
  */
-export type ProposalMutation = 'move' | 'edit' | 'delete';
+export type ProposalMutation = 'move' | 'edit' | 'delete' | 'react';
 
 export interface MutationIntent {
   mutation: ProposalMutation;
@@ -46,6 +46,11 @@ export interface MutationIntent {
  * running the session (F17). The leader may still not *edit* other people's
  * content: moving or removing a proposal is facilitation, but rewriting one
  * puts different words under its author's name.
+ *
+ * Reacting is open to everyone in the room, including on your own proposal
+ * (F18). It changes nothing about the proposal itself, it is attributed to
+ * whoever left it, and it can be taken back — so there is nothing here for
+ * authorship to protect.
  *
  * Check order is deliberate. A proposal on a session the actor has not joined
  * is reported as missing rather than forbidden: answering "403" would confirm
@@ -69,8 +74,9 @@ export function requireMutableProposal<T extends MutableProposal>(
 
   const isAuthor = proposal.authorId === actor.id;
   const leaderMay = intent.isLeader && (intent.mutation === 'move' || intent.mutation === 'delete');
+  const anyoneMay = intent.mutation === 'react';
 
-  if (!isAuthor && !leaderMay) {
+  if (!anyoneMay && !isAuthor && !leaderMay) {
     throw new ApiError(
       403,
       intent.isLeader
@@ -83,6 +89,10 @@ export function requireMutableProposal<T extends MutableProposal>(
   // Same lock as creating: once a question leaves discussion the board is the
   // thing being voted on, so it must stop moving — including edits, moves and
   // deletions, which would change or remove a proposal mid-ballot.
+  //
+  // Reactions are held to it too. They are not votes (F27-F31 are), but a
+  // running tally of thumbs beside a live ballot is read as one, and letting
+  // it move while people vote would put a second, informal count on the screen.
   if (question.status !== 'discussion') {
     throw new ApiError(
       409,

@@ -47,8 +47,18 @@ function formatTime(iso: string): string {
 }
 
 /**
- * Who wrote this and when. Author on the left, time on the right — matches the
- * sticky editor's board preview so what you compose is what lands.
+ * Who wrote this and when, along the bottom of the card: author left, time
+ * pushed to the right edge.
+ *
+ * The bottom inset matches the sides at twelve pixels, so the byline sits in
+ * an evenly spaced corner. That also happens to be exactly what the reaction
+ * chips need: the board draws them straddling this card's bottom-left corner,
+ * reaching ten pixels up into it, so an even inset clears them and nothing has
+ * to move.
+ *
+ * One fixed value rather than one that grows with the reactions. A card that
+ * resized as chips came and went drew the eye to its own edges instead of to
+ * what somebody had written on it.
  */
 function CardFoot({
   item,
@@ -60,7 +70,7 @@ function CardFoot({
   isAuthorLeader: boolean;
 }) {
   return (
-    <footer className="flex items-center justify-between gap-2 px-3 pt-1 pb-2 text-[11px] text-rt-ink-faint">
+    <footer className="flex items-center justify-between gap-2 px-3 pt-0.5 pb-3 text-[11px] text-rt-ink-faint">
       <span className="min-w-0 truncate font-medium text-rt-ink-muted">
         {isOwnedByViewer ? 'You' : item.authorName}
         {/* Never beside "You": the mark is there to say whose cards belong to the
@@ -247,8 +257,8 @@ export function ProposalCard({
           <p
             className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
             style={{
-              minHeight: 128,
-              padding: '16px 14px 10px',
+              minHeight: 112,
+              padding: '14px 14px 6px',
               // Shared with the editor's preview, so a note that had to shrink
               // to fit while you were writing it looks the same on the board.
               ...stickyTypography(artifact.text),
@@ -277,7 +287,6 @@ export function ProposalCard({
             ) : null}
           </div>
         ) : null}
-
         <CardFoot item={item} isOwnedByViewer={isOwnedByViewer} isAuthorLeader={isAuthorLeader} />
       </article>
     </div>
