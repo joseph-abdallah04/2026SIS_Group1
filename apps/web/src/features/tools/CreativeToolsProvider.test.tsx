@@ -148,6 +148,7 @@ describe('creative sticky flow', () => {
       x: 32,
       y: 32,
       createdAt: '2026-09-02T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };

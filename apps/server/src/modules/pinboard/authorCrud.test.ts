@@ -164,9 +164,23 @@ describe('leader moderation', () => {
 describe('updateProposal', () => {
   it('rewords a proposal for its author', async () => {
     await updateProposal({ proposalId: 'p1', actor: AUTHOR, input: REWORD });
-    expect(update.mock.calls[0]?.[0].data).toEqual({
+    expect(update.mock.calls[0]?.[0].data).toMatchObject({
       artifactJson: { type: 'sticky', text: 'Reworded', color: 'blue' },
     });
+  });
+
+  // The board shows "edited" from this column, so it has to mean the words
+  // changed.
+  it('stamps editedAt when the content changes', async () => {
+    await updateProposal({ proposalId: 'p1', actor: AUTHOR, input: REWORD });
+    expect(update.mock.calls[0]?.[0].data.editedAt).toBeInstanceOf(Date);
+  });
+
+  // Dragging a card is not editing it. Marking a move as an edit would put
+  // "edited" on a card whose words nobody touched.
+  it('leaves editedAt alone when only the position changes', async () => {
+    await updateProposal({ proposalId: 'p1', actor: AUTHOR, input: { id: 'p1', x: 40, y: 60 } });
+    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty('editedAt');
   });
 
   it('leaves position alone when only content changes', async () => {

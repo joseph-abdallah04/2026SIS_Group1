@@ -50,7 +50,12 @@ function formatTime(iso: string): string {
 
 /**
  * Who wrote this and when, along the bottom of the card: author left, time
- * pushed to the right edge.
+ * pushed to the right edge, and "Edited" after it once the words have changed.
+ *
+ * The mark is about the content, not the row: dragging a card across the board
+ * leaves no trace on it, because nothing anyone reads has changed. Hovering
+ * gives the time of the edit, which is the question the mark prompts and the
+ * only reason to keep the timestamp of the original beside it.
  *
  * The bottom inset matches the sides at twelve pixels, so the byline sits in
  * an evenly spaced corner. That also happens to be exactly what the reaction
@@ -83,9 +88,18 @@ function CardFoot({
           </span>
         ) : null}
       </span>
-      <time dateTime={item.createdAt} className="shrink-0">
-        {formatTime(item.createdAt)}
-      </time>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <time dateTime={item.createdAt}>{formatTime(item.createdAt)}</time>
+        {item.editedAt ? (
+          // Set a little smaller than the time rather than run on after it
+          // with a separator: that difference is enough to keep the two apart,
+          // and the mark should sit quietly beside the byline rather than
+          // compete with it.
+          <span title={`Edited at ${formatTime(item.editedAt)}`} className="text-[10px]">
+            Edited
+          </span>
+        ) : null}
+      </span>
     </footer>
   );
 }

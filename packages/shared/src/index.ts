@@ -131,6 +131,12 @@ export interface BoardItem {
   x: number;
   y: number;
   createdAt: string;
+  /**
+   * When this proposal's content was last rewritten, or null if it never has
+   * been (F16). Moving a card does not set it: the board shows "edited" to say
+   * the words changed, not that somebody dragged it.
+   */
+  editedAt: string | null;
   extendsProposalId: string | null;
   /**
    * Emoji reactions left on this proposal (F18), only for emoji somebody has

@@ -85,6 +85,7 @@ export function toBoardItem(row: ProposalRow): BoardItem {
     x: row.x,
     y: row.y,
     createdAt: row.createdAt.toISOString(),
+    editedAt: row.editedAt?.toISOString() ?? null,
     extendsProposalId: row.extendsProposalId,
     reactions: toReactionGroups(row.reactions),
   };
@@ -248,8 +249,14 @@ export async function updateProposal({
   const updated = await prisma.proposal.update({
     where: { id: proposalId },
     data: {
+      // `editedAt` moves with the artifact and only with it. A payload that
+      // carries coordinates alone is a move, and a move leaves no trace on the
+      // card beyond its new position.
       ...(input.artifactJson
-        ? { artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue }
+        ? {
+            artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
+            editedAt: new Date(),
+          }
         : {}),
       ...(input.x === undefined ? {} : { x: input.x }),
       ...(input.y === undefined ? {} : { y: input.y }),

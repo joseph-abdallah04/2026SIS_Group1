@@ -26,6 +26,7 @@ export function CreativeToolsWorkbench() {
         x: input.x,
         y: input.y,
         createdAt: new Date().toISOString(),
+        editedAt: null,
         extendsProposalId: input.extendsProposalId ?? null,
         reactions: [],
       },

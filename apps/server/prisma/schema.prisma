@@ -156,6 +156,11 @@ model Proposal {
   extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
   extensions        Proposal[] @relation("ProposalExtends")
   createdAt         DateTime  @default(now())
+  // When the artifact was last rewritten, or null if it never has been.
+  // Deliberately set in service code rather than with `@updatedAt`, which
+  // fires on every write to the row: dragging a card across the board is not
+  // editing what it says, and marking it "edited" for a move would be a lie.
+  editedAt          DateTime?
   deletedAt         DateTime?
   reactions         ProposalReaction[]
 
