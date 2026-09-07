@@ -11,6 +11,10 @@ import {
   diagramNodeStrokeWidth,
   effectiveDiagramNodeSize,
   inkPoints,
+  pathFill,
+  pathStrokeColor,
+  pathStrokeWidth,
+  pathSvgData,
   strokePathData,
   inkStrokeColor,
   inkStrokeWidth,
@@ -102,25 +106,30 @@ function DiagramBody({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
   const { nodes, edges } = item.artifactJson;
   const ink = item.artifactJson.ink ?? [];
+  const paths = item.artifactJson.paths ?? [];
   // Unpacked once per render: the extent needs every point, and so does each
   // stroke's path data.
   const unpackedInk = ink.map((stroke) => ({ ...stroke, points: inkPoints(stroke) }));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const inkById = new Map(unpackedInk.map((stroke) => [stroke.id, stroke]));
+  const pathById = new Map(paths.map((path) => [path.id, path]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
   // The card frames whatever the artifact contains, so ink counts towards the
   // extent exactly as a node does — otherwise a sketch would be cropped.
   const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
+  const allAnchors = paths.flatMap((path) => path.anchors);
   const svgWidth =
     Math.max(
       ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
       ...allInkPoints.map((point) => point.x),
+      ...allAnchors.map((anchor) => anchor.x),
       72,
     ) + 28;
   const svgHeight =
     Math.max(
       ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
       ...allInkPoints.map((point) => point.y),
+      ...allAnchors.map((anchor) => anchor.y),
       32,
     ) + 24;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
@@ -163,6 +172,22 @@ function DiagramBody({ item }: { item: BoardItem }) {
           </text>
         ) : null}
       </g>
+    );
+  }
+
+  function renderPath(path: (typeof paths)[number]) {
+    const strokeWidth = pathStrokeWidth(path);
+    return (
+      <path
+        key={path.id}
+        d={pathSvgData(path)}
+        fill={pathFill(path)}
+        stroke={pathStrokeColor(path)}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        {...diagramEdgeDash(path, strokeWidth)}
+      />
     );
   }
 
@@ -224,7 +249,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
       className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg bg-rt-surface-alt"
       style={{ minHeight: 96 }}
     >
-      {nodes.length === 0 && ink.length === 0 ? (
+      {nodes.length === 0 && ink.length === 0 && paths.length === 0 ? (
         <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
       ) : (
         <svg
@@ -259,6 +284,10 @@ function DiagramBody({ item }: { item: BoardItem }) {
             if (ref.kind === 'ink') {
               const stroke = inkById.get(ref.key);
               return stroke ? renderInk(stroke) : null;
+            }
+            if (ref.kind === 'path') {
+              const path = pathById.get(ref.key);
+              return path ? renderPath(path) : null;
             }
             const node = nodeById.get(ref.key);
             return node ? renderNode(node) : null;

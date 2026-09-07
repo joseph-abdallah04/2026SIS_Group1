@@ -29,12 +29,14 @@ import {
   Diamond,
   Eraser,
   Grid3x3,
+  Minus,
   Link2,
   LoaderCircle,
   Magnet,
   Maximize2,
   MousePointer2,
   Pencil,
+  PenTool,
   RotateCcw,
   RectangleHorizontal,
   Send,
@@ -51,6 +53,8 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import type {
+  PathAnchor,
+  PathElement,
   DiagramEdge,
   DiagramFontSizePreset,
   DiagramNode,
@@ -84,6 +88,11 @@ import {
   effectiveDiagramNodeSize,
   inkStrokeColor,
   inkStrokeWidth,
+  pathFill,
+  pathStrokeColor,
+  pathHandlePoint,
+  pathStrokeWidth,
+  pathSvgData,
   strokePathData,
   reorderStudioElements,
   studioPaintOrder,
@@ -161,6 +170,21 @@ import {
   eraserRadiusForView,
   type StudioInkStroke,
 } from '../studio/studioInk';
+import {
+  anchorAtPoint,
+  moveAnchor,
+  moveHandle,
+  removeAnchor,
+  toggleAnchorSmooth,
+} from '../studio/studioPathEdit';
+import {
+  PATH_CLOSE_TOLERANCE,
+  anchorWithDraggedHandle,
+  draftAnchors,
+  finishPathDraft,
+  isNearFirstAnchor,
+  nextAnchorPoint,
+} from '../studio/studioPaths';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 
 /**
@@ -168,7 +192,7 @@ import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates
  * by `draw`/`erase`: the ink tools only take over the canvas background, so a
  * node is still draggable while the pencil is held.
  */
-type CanvasTool = 'select' | 'draw' | 'erase';
+type CanvasTool = 'select' | 'draw' | 'erase' | 'pen' | 'line';
 
 const CANVAS_TOOLS: {
   tool: CanvasTool;
@@ -184,6 +208,18 @@ const CANVAS_TOOLS: {
   },
   { tool: 'draw', label: 'Freehand', hint: 'Draw freehand on the canvas', Icon: Pencil },
   { tool: 'erase', label: 'Erase', hint: 'Erase whole strokes', Icon: Eraser },
+  {
+    tool: 'pen',
+    label: 'Pen',
+    hint: 'Click to place points, drag to curve. Esc or Enter finishes; hold Shift for 45°',
+    Icon: PenTool,
+  },
+  {
+    tool: 'line',
+    label: 'Line',
+    hint: 'Drag one straight line. Hold Shift for 45°',
+    Icon: Minus,
+  },
 ];
 
 interface DragSession {
@@ -445,6 +481,7 @@ export function DiagramEditor() {
   const history = useDiagramHistory(initialSnapshotRef.current);
   const { nodes, edges } = history.snapshot;
   const ink = history.snapshot.ink ?? [];
+  const paths = history.snapshot.paths ?? [];
   const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => (nodes[0] ? [nodes[0].id] : []));
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
@@ -470,6 +507,24 @@ export function DiagramEditor() {
   const [inkColor, setInkColor] = useState<DiagramStrokeKey>('ink');
   const [inkWidth, setInkWidth] = useState<DiagramStrokeWidthPreset>('regular');
   const [activeStroke, setActiveStroke] = useState<StudioInkStroke | null>(null);
+  // The pen's in-progress path. `pathCursor` is where the next segment is being
+  // aimed, so the run to the pointer can be previewed before it is committed.
+  const [pathAnchors, setPathAnchors] = useState<PathAnchor[]>([]);
+  const [pathCursor, setPathCursor] = useState<DiagramPoint | null>(null);
+  const pathAnchorsRef = useRef<PathAnchor[]>([]);
+  pathAnchorsRef.current = pathAnchors;
+  const pathPointerRef = useRef<number | null>(null);
+  // An existing path being edited, and which of its anchors is in hand.
+  const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
+  const [selectedAnchor, setSelectedAnchor] = useState<number | null>(null);
+  const pathEditRef = useRef<{
+    pointerId: number;
+    pathId: string;
+    index: number;
+    side: 'in' | 'out' | null;
+    origin: DiagramPoint;
+    previous: DiagramSnapshot;
+  } | null>(null);
   const activeStrokeRef = useRef<StudioInkStroke | null>(null);
   const inkPointerRef = useRef<number | null>(null);
   const eraseStartRef = useRef<DiagramSnapshot | null>(null);
@@ -523,6 +578,8 @@ export function DiagramEditor() {
   // and doing that with `find` would be quadratic on a busy canvas.
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const inkById = new Map(ink.map((stroke) => [stroke.id, stroke]));
+  const pathById = new Map(paths.map((path) => [path.id, path]));
+  const selectedPath = selectedPathId ? (pathById.get(selectedPathId) ?? null) : null;
   const edgeIndexByKey = new Map(edges.map((edge, index) => [edgeKey(edge), index]));
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
   // Routing is derived from the edge set, never stored: a reciprocal pair bows
@@ -1046,6 +1103,143 @@ export function DiagramEditor() {
     canvasRef.current?.focus({ preventScroll: true });
   }
 
+  /** Paths travel with the nodes and edges in one history entry, like ink. */
+  function commitPaths(nextPaths: PathElement[], nextOrder?: string[]) {
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      paths: nextPaths,
+      ...(nextOrder ? { z: nextOrder } : {}),
+    });
+  }
+
+  /** Scene-unit close target, scaled so it stays a constant size on screen. */
+  function closeTolerance() {
+    return PATH_CLOSE_TOLERANCE / diagramViewZoom(viewRef.current);
+  }
+
+  function clearPathDraft() {
+    setPathAnchors([]);
+    setPathCursor(null);
+    pathPointerRef.current = null;
+  }
+
+  /**
+   * Land the path in hand. A finished path goes on top, so when the diagram
+   * already carries an explicit order the new id has to join it.
+   */
+  function commitPathDraft(anchors: readonly PathAnchor[], closed: boolean) {
+    const path = finishPathDraft(anchors, closed, {
+      strokeColor: inkColor,
+      strokeWidthPreset: inkWidth,
+    });
+    clearPathDraft();
+    if (!path) return;
+
+    const graph = history.snapshotRef.current;
+    const existingOrder = graph.z;
+    commitPaths(
+      [...(graph.paths ?? []), path],
+      existingOrder ? [...existingOrder, path.id] : undefined,
+    );
+  }
+
+  function finishPenDraft() {
+    const anchors = pathAnchorsRef.current;
+    if (anchors.length === 0) {
+      clearPathDraft();
+      return;
+    }
+    commitPathDraft(anchors, false);
+  }
+
+  function replacePath(next: PathElement | null, id: string) {
+    const graph = history.snapshotRef.current;
+    const current = graph.paths ?? [];
+    const kept = next
+      ? current.map((path) => (path.id === id ? next : path))
+      : current.filter((path) => path.id !== id);
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      paths: kept,
+      ...(next ? {} : graph.z ? { z: graph.z.filter((key) => key !== id) } : {}),
+    });
+  }
+
+  function selectPath(id: string) {
+    setSelectedPathId(id);
+    setSelectedAnchor(null);
+    setSelectedIds([]);
+    setSelectedEdgeKey(null);
+  }
+
+  function clearPathSelection() {
+    setSelectedPathId(null);
+    setSelectedAnchor(null);
+  }
+
+  /** Anchor and handle drags are one history entry each, recorded on release. */
+  function beginPathEdit(
+    event: PointerEvent<SVGElement>,
+    path: PathElement,
+    index: number,
+    side: 'in' | 'out' | null,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.focus({ preventScroll: true });
+    canvas.setPointerCapture(event.pointerId);
+    const anchor = path.anchors[index];
+    if (!anchor) return;
+
+    setSelectedPathId(path.id);
+    setSelectedAnchor(index);
+    pathEditRef.current = {
+      pointerId: event.pointerId,
+      pathId: path.id,
+      index,
+      side,
+      origin: { x: anchor.x, y: anchor.y },
+      previous: history.snapshotRef.current,
+    };
+  }
+
+  function updatePathEdit(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = pathEditRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+
+    const graph = history.snapshotRef.current;
+    const path = (graph.paths ?? []).find((current) => current.id === session.pathId);
+    if (!path) return true;
+
+    const point = surfacePoint(event);
+    const next = session.side
+      ? // Alt breaks the tangent, so the two sides bend independently.
+        moveHandle(path, session.index, session.side, point, event.altKey)
+      : moveAnchor(path, session.index, point, session.origin, event.shiftKey);
+
+    history.preview({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      paths: (graph.paths ?? []).map((current) => (current.id === session.pathId ? next : current)),
+    });
+    return true;
+  }
+
+  function endPathEdit(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = pathEditRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    pathEditRef.current = null;
+    history.recordPreview(session.previous);
+    releaseCapture(event);
+    return true;
+  }
+
   function surfaceBounds() {
     const canvas = canvasRef.current;
     if (!canvas) return { left: 0, top: 0, width: 0, height: 0 };
@@ -1148,6 +1342,32 @@ export function DiagramEditor() {
       return;
     }
 
+    // The pen and line tools own a press on the canvas background.
+    if (canvasTool === 'pen' || canvasTool === 'line') {
+      event.preventDefault();
+      clearError();
+      canvas.setPointerCapture(event.pointerId);
+      pathPointerRef.current = event.pointerId;
+      setSelectedIds([]);
+      setSelectedEdgeKey(null);
+
+      const raw = surfacePoint(event);
+      const anchors = pathAnchorsRef.current;
+
+      // Landing back on the first anchor closes the shape and finishes it.
+      if (canvasTool === 'pen' && isNearFirstAnchor(anchors, raw, closeTolerance())) {
+        commitPathDraft(anchors, true);
+        return;
+      }
+
+      const placed = nextAnchorPoint(anchors, raw, event.shiftKey);
+      const next = canvasTool === 'line' ? [{ x: placed.x, y: placed.y }] : [...anchors, placed];
+      setPathAnchors(next);
+      pathAnchorsRef.current = next;
+      setPathCursor(placed);
+      return;
+    }
+
     // The ink tools own a press on the canvas background; everything below this
     // point (marquee, selection) is the original `select` behaviour.
     if (canvasTool !== 'select') {
@@ -1169,6 +1389,7 @@ export function DiagramEditor() {
       return;
     }
 
+    clearPathSelection();
     const origin = surfacePoint(event);
     const base = event.shiftKey ? selectedIds : [];
     const session: MarqueeSession = {
@@ -1206,11 +1427,37 @@ export function DiagramEditor() {
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
     if (updatePan(event)) return;
     if (updateResize(event)) return;
+    if (updatePathEdit(event)) return;
 
     if (inkPointerRef.current === event.pointerId) {
       event.preventDefault();
       if (canvasTool === 'erase') eraseAt(event);
       else extendStroke(event);
+      return;
+    }
+
+    if (canvasTool === 'pen' || canvasTool === 'line') {
+      const raw = surfacePoint(event);
+      const anchors = pathAnchorsRef.current;
+
+      // While the button is down the drag pulls the last anchor's handles out,
+      // turning the corner just placed into a curve. The line tool aims its far
+      // end instead: it only ever has the one segment.
+      if (pathPointerRef.current === event.pointerId && anchors.length > 0) {
+        event.preventDefault();
+        if (canvasTool === 'line') {
+          setPathCursor(nextAnchorPoint(anchors, raw, event.shiftKey));
+          return;
+        }
+        const last = anchors.at(-1)!;
+        const next = [...anchors.slice(0, -1), anchorWithDraggedHandle(last, raw)];
+        setPathAnchors(next);
+        pathAnchorsRef.current = next;
+        return;
+      }
+
+      // Button up: just aim the next segment.
+      setPathCursor(nextAnchorPoint(anchors, raw, event.shiftKey));
       return;
     }
 
@@ -1286,8 +1533,29 @@ export function DiagramEditor() {
     return true;
   }
 
+  function endPath(event: PointerEvent<SVGSVGElement>): boolean {
+    if (pathPointerRef.current !== event.pointerId) return false;
+    pathPointerRef.current = null;
+    releaseCapture(event);
+
+    // One drag is the whole line tool: it finishes where the pointer lifts.
+    if (canvasTool === 'line') {
+      const anchors = pathAnchorsRef.current;
+      const start = anchors[0];
+      const end = pathCursor;
+      if (start && end && (start.x !== end.x || start.y !== end.y)) {
+        commitPathDraft([start, { x: end.x, y: end.y }], false);
+      } else {
+        clearPathDraft();
+      }
+    }
+    return true;
+  }
+
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
     if (endPan(event)) return;
+    if (endPathEdit(event)) return;
+    if (endPath(event)) return;
     if (endResize(event)) return;
     if (endInk(event)) return;
     if (endMarquee(event)) return;
@@ -1324,6 +1592,18 @@ export function DiagramEditor() {
     if (panRef.current?.pointerId === event.pointerId) {
       panRef.current = null;
       setIsPanning(false);
+    }
+    // A pen draft survives losing capture: the path is still being built and
+    // the next click continues it. Only the line tool, which is one gesture
+    // start to finish, is resolved here.
+    if (pathPointerRef.current === event.pointerId) {
+      pathPointerRef.current = null;
+      if (canvasTool === 'line') clearPathDraft();
+    }
+    const pathEdit = pathEditRef.current;
+    if (pathEdit?.pointerId === event.pointerId) {
+      history.recordPreview(pathEdit.previous);
+      pathEditRef.current = null;
     }
     // Losing capture mid-gesture must still land the work, not discard it: a
     // half-drawn stroke is committed exactly as `pointerup` would commit it.
@@ -1408,8 +1688,26 @@ export function DiagramEditor() {
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
+      // With a path selected, Delete takes the anchor in hand if there is one
+      // and the whole path otherwise — and a path too short to lose an anchor
+      // goes entirely rather than being left as a stub.
+      if (selectedPath) {
+        const next = selectedAnchor === null ? null : removeAnchor(selectedPath, selectedAnchor);
+        replacePath(next, selectedPath.id);
+        if (!next) clearPathSelection();
+        else setSelectedAnchor(null);
+        return;
+      }
       if (selectedEdge) removeSelectedEdge();
       else removeSelectedNodes();
+      return;
+    }
+
+    // Enter toggles the selected anchor between a corner and a curve, the same
+    // thing double-clicking it does.
+    if (event.key === 'Enter' && selectedPath && selectedAnchor !== null) {
+      event.preventDefault();
+      replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id);
       return;
     }
 
@@ -1434,6 +1732,15 @@ export function DiagramEditor() {
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    // A path in hand takes Escape and Enter before anything else does: while the
+    // pen is mid-path they mean "finish this", not "close the editor".
+    if ((event.key === 'Escape' || event.key === 'Enter') && pathAnchorsRef.current.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      finishPenDraft();
+      return;
+    }
+
     if (event.key === 'Escape' && pendingContainerDelete) {
       event.preventDefault();
       event.stopPropagation();
@@ -1510,11 +1817,23 @@ export function DiagramEditor() {
       setValidationError('Finish or cancel the arrow before proposing.');
       return;
     }
+    // A path in hand is uncommitted work. Proposing over it would drop it
+    // without saying so, which is the one thing a submit must never do.
+    if (pathAnchorsRef.current.length > 0) {
+      setValidationError('Finish the path with Enter or Esc before proposing.');
+      return;
+    }
     if (editingNodeId) finishInlineNodeEdit();
     normalizeSelectedLabel();
     normalizeSelectedEdgeLabel();
     const graph = history.snapshotRef.current;
-    const prepared = prepareDiagram(graph.nodes, graph.edges, graph.ink ?? [], graph.z ?? []);
+    const prepared = prepareDiagram(
+      graph.nodes,
+      graph.edges,
+      graph.ink ?? [],
+      graph.z ?? [],
+      graph.paths ?? [],
+    );
     if (!prepared.ok) {
       setValidationError(prepared.error);
       return;
@@ -1607,6 +1926,116 @@ export function DiagramEditor() {
             {edge.label}
           </text>
         ) : null}
+      </g>
+    );
+  }
+
+  function renderPath(path: PathElement, key?: string, isDraft = false) {
+    const strokeWidth = pathStrokeWidth(path);
+    const selected = !isDraft && selectedPathId === path.id;
+
+    return (
+      <g key={key ?? path.id}>
+        <path
+          data-testid="studio-path"
+          d={pathSvgData(path)}
+          fill={pathFill(path)}
+          stroke={pathStrokeColor(path)}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pointerEvents="none"
+          {...diagramEdgeDash(path, strokeWidth)}
+        />
+        {/* A hairline is impossible to hit, so selection uses a wide invisible
+            stroke over the same outline. */}
+        {!isDraft && canvasTool === 'select' ? (
+          <path
+            role="button"
+            aria-label={`Path with ${path.anchors.length} points`}
+            d={pathSvgData(path)}
+            fill="none"
+            stroke="transparent"
+            strokeWidth={Math.max(strokeWidth, 14)}
+            className="cursor-pointer"
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.stopPropagation();
+              canvasRef.current?.focus({ preventScroll: true });
+              const point = surfacePoint(event);
+              const hit = anchorAtPoint(path, point, closeTolerance());
+              if (hit !== null) {
+                beginPathEdit(event, path, hit, null);
+                return;
+              }
+              selectPath(path.id);
+            }}
+          />
+        ) : null}
+        {selected
+          ? path.anchors.map((anchor, index) => (
+              <g key={`${path.id}-anchor-${index}`}>
+                {(['in', 'out'] as const).map((side) => {
+                  if (!anchor[side]) return null;
+                  const handle = pathHandlePoint(anchor, side);
+                  return (
+                    <g key={side}>
+                      <line
+                        x1={anchor.x}
+                        y1={anchor.y}
+                        x2={handle.x}
+                        y2={handle.y}
+                        stroke={SELECTION_ACCENT}
+                        strokeWidth={1}
+                        pointerEvents="none"
+                      />
+                      <circle
+                        role="button"
+                        aria-label={`Curve handle ${side} of point ${index + 1}`}
+                        cx={handle.x}
+                        cy={handle.y}
+                        r={9}
+                        fill="transparent"
+                        className="cursor-grab"
+                        onPointerDown={(event) => beginPathEdit(event, path, index, side)}
+                      />
+                      <circle
+                        cx={handle.x}
+                        cy={handle.y}
+                        r={3}
+                        fill={SELECTION_ACCENT}
+                        pointerEvents="none"
+                      />
+                    </g>
+                  );
+                })}
+                <circle
+                  role="button"
+                  aria-label={`Point ${index + 1} of ${path.anchors.length}`}
+                  cx={anchor.x}
+                  cy={anchor.y}
+                  r={9}
+                  fill="transparent"
+                  className="cursor-move"
+                  onPointerDown={(event) => beginPathEdit(event, path, index, null)}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    replacePath(toggleAnchorSmooth(path, index), path.id);
+                  }}
+                />
+                <circle
+                  cx={anchor.x}
+                  cy={anchor.y}
+                  r={4}
+                  fill={selectedAnchor === index ? SELECTION_ACCENT : '#FFFFFF'}
+                  stroke={SELECTION_ACCENT}
+                  strokeWidth={1.5}
+                  pointerEvents="none"
+                />
+              </g>
+            ))
+          : null}
       </g>
     );
   }
@@ -2636,11 +3065,47 @@ export function DiagramEditor() {
               const stroke = inkById.get(ref.key);
               return stroke ? renderInk(stroke) : null;
             }
+            if (ref.kind === 'path') {
+              const path = pathById.get(ref.key);
+              return path ? renderPath(path) : null;
+            }
             const node = nodeById.get(ref.key);
             return node ? renderNode(node) : null;
           })}
 
           {activeStroke ? renderInk(activeStroke) : null}
+
+          {pathAnchors.length > 0
+            ? (() => {
+                const preview = draftAnchors(pathAnchors, pathCursor);
+                return (
+                  <g data-testid="path-draft">
+                    {renderPath(
+                      {
+                        id: 'draft',
+                        anchors: preview,
+                        strokeColor: inkColor,
+                        strokeWidthPreset: inkWidth,
+                      },
+                      'draft-path',
+                      true,
+                    )}
+                    {pathAnchors.map((anchor, index) => (
+                      <circle
+                        key={`${anchor.x}-${anchor.y}-${index}`}
+                        cx={anchor.x}
+                        cy={anchor.y}
+                        r={3.5}
+                        fill={index === 0 ? SELECTION_ACCENT : '#FFFFFF'}
+                        stroke={SELECTION_ACCENT}
+                        strokeWidth={1.5}
+                        pointerEvents="none"
+                      />
+                    ))}
+                  </g>
+                );
+              })()
+            : null}
 
           {/* Drawn last so the in-flight arrow stays visible over whatever it
               is being dragged across. */}
@@ -2689,6 +3154,9 @@ export function DiagramEditor() {
               {nodes.length} {nodes.length === 1 ? 'element' : 'elements'} · {edges.length}{' '}
               {edges.length === 1 ? 'arrow' : 'arrows'}
               {ink.length > 0 ? ` · ${ink.length} ${ink.length === 1 ? 'stroke' : 'strokes'}` : ''}
+              {paths.length > 0
+                ? ` · ${paths.length} ${paths.length === 1 ? 'path' : 'paths'}`
+                : ''}
             </p>
           )}
         </div>

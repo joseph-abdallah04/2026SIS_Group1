@@ -589,4 +589,111 @@ describe('proposalCreate handler', () => {
       expect(create).not.toHaveBeenCalled();
     });
   });
+
+  // Paths are decoration, but they are still user-authored payload: the editor
+  // is not the only way one can arrive.
+  describe('studio paths (v4)', () => {
+    function studio(artifact: Record<string, unknown>) {
+      return {
+        type: 'diagram',
+        artifactJson: { type: 'diagram', nodes: [], edges: [], ...artifact },
+        x: 0,
+        y: 0,
+      } as Parameters<typeof createProposal>[0]['input'];
+    }
+
+    const line = (id: string) => ({
+      id,
+      anchors: [
+        { x: 0, y: 0 },
+        { x: 40, y: 40 },
+      ],
+      strokeColor: 'ink',
+      strokeWidthPreset: 'regular',
+    });
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('accepts a line drawn alongside shapes', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' }],
+            paths: [line('path-1')],
+            z: ['path-1', 'n1'],
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('accepts a closed path carrying a fill', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            paths: [
+              {
+                ...line('path-1'),
+                anchors: [
+                  { x: 0, y: 0 },
+                  { x: 40, y: 0 },
+                  { x: 40, y: 40 },
+                ],
+                closed: true,
+                fillColor: 'blue',
+              },
+            ],
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a fill on an open path', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ paths: [{ ...line('path-1'), fillColor: 'blue' }] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a path with a single anchor, which draws nothing', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ paths: [{ ...line('path-1'), anchors: [{ x: 0, y: 0 }] }] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a raw colour smuggled into a path', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ paths: [{ ...line('path-1'), strokeColor: '#ff0000' }] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a path that reuses a node id', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24 }],
+            paths: [line('n1')],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a paint order naming a path the diagram does not contain', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ paths: [line('path-1')], z: ['path-1', 'path-ghost'] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
 });

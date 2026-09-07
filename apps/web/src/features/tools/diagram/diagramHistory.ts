@@ -1,4 +1,4 @@
-import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
+import type { DiagramEdge, DiagramNode, PathElement } from '@roundtable/shared';
 
 import type { StudioInkStroke } from '../studio/studioInk';
 
@@ -11,6 +11,7 @@ export interface DiagramSnapshot {
    * same object it has always been.
    */
   ink?: StudioInkStroke[];
+  paths?: PathElement[];
   z?: string[];
 }
 
@@ -36,6 +37,14 @@ function cloneSnapshot(snapshot: DiagramSnapshot): DiagramSnapshot {
     ...(snapshot.ink
       ? { ink: snapshot.ink.map((stroke) => ({ ...stroke, points: [...stroke.points] })) }
       : {}),
+    ...(snapshot.paths
+      ? {
+          paths: snapshot.paths.map((path) => ({
+            ...path,
+            anchors: path.anchors.map((anchor) => ({ ...anchor })),
+          })),
+        }
+      : {}),
     ...(snapshot.z ? { z: [...snapshot.z] } : {}),
   };
 }
@@ -53,6 +62,7 @@ export function diagramSnapshotKey(snapshot: DiagramSnapshot): string {
     nodes: snapshot.nodes,
     edges: snapshot.edges,
     ink: snapshot.ink ?? [],
+    paths: snapshot.paths ?? [],
     z: snapshot.z ?? [],
   });
 }

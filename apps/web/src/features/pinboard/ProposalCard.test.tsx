@@ -170,6 +170,74 @@ describe('studio proposal card (v4)', () => {
   });
 });
 
+describe('studio path proposal card (v4)', () => {
+  const line = {
+    id: 'path-1',
+    anchors: [
+      { x: 10, y: 10 },
+      { x: 90, y: 60 },
+    ],
+    strokeColor: 'ink' as const,
+  };
+
+  function pathItem(artifact: Partial<Extract<BoardItem['artifactJson'], { type: 'diagram' }>>) {
+    return {
+      ...diagramItem([]),
+      artifactJson: { type: 'diagram' as const, nodes: [], edges: [], ...artifact },
+    };
+  }
+
+  it('draws a path the studio proposed', () => {
+    const { container } = render(<ProposalCard item={pathItem({ paths: [line] })} />);
+    const drawn = [...container.querySelectorAll('path')].filter(
+      (path) => path.getAttribute('stroke') === '#080C15',
+    );
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]?.getAttribute('d')).toBe('M 10 10 L 90 60');
+  });
+
+  it('frames a canvas that holds only paths', () => {
+    const { container } = render(<ProposalCard item={pathItem({ paths: [line] })} />);
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.border-dashed')).toBeNull();
+  });
+
+  it('fills a closed path and leaves an open one unfilled', () => {
+    const closed = {
+      ...line,
+      id: 'path-2',
+      anchors: [
+        { x: 0, y: 0 },
+        { x: 40, y: 0 },
+        { x: 40, y: 40 },
+      ],
+      closed: true,
+      fillColor: 'blue' as const,
+    };
+    const { container } = render(<ProposalCard item={pathItem({ paths: [closed, line] })} />);
+    const fills = [...container.querySelectorAll('path')].map((path) => path.getAttribute('fill'));
+    expect(fills).toContain('#DCE9F7');
+    expect(fills).toContain('none');
+  });
+
+  it('paints a path under a shape when the artifact says so', () => {
+    const { container } = render(
+      <ProposalCard
+        item={pathItem({
+          nodes: [{ id: 'n1', label: 'API', x: 0, y: 0, shape: 'box' }],
+          paths: [line],
+          z: ['path-1', 'n1'],
+        })}
+      />,
+    );
+    const painted = [...container.querySelectorAll('svg path, svg g')];
+    const pathIndex = painted.findIndex((el) => el.getAttribute('d') === 'M 10 10 L 90 60');
+    const nodeIndex = painted.findIndex((el) => el.getAttribute('transform') === 'translate(0, 0)');
+    expect(pathIndex).toBeGreaterThanOrEqual(0);
+    expect(pathIndex).toBeLessThan(nodeIndex);
+  });
+});
+
 describe('card layout', () => {
   // The artifact opens the card and the attribution closes it. The byline sits
   // bottom-right, clear of both things the board draws over this card: the

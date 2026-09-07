@@ -10,7 +10,7 @@
 
 // Type-only, so the runtime import graph stays one-directional:
 // `studioElements` imports this module's palettes, and nothing comes back.
-import type { InkElement } from './studioElements.js';
+import type { InkElement, PathElement } from './studioElements.js';
 
 export type DiagramNodeShape =
   'box' | 'container' | 'text' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'cylinder';
@@ -721,7 +721,13 @@ export interface DiagramArtifact {
    */
   ink?: InkElement[];
   /**
-   * v4 paint order, as element keys — node and ink ids, and `edgeKey` strings
+   * v4 decorative paths — the pen and line tools. Unlike an `edge` a path is not
+   * semantic: it takes no part in routing, layout or grouping.
+   */
+  paths?: PathElement[];
+  /**
+   * v4 paint order, as element keys — node, ink and path ids, and `edgeKey`
+   * strings
    * for edges. Absent means the derived pre-v4 order (edges, then nodes with
    * containers behind their contents). See `studioPaintOrder`.
    */

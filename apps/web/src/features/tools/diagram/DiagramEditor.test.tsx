@@ -2014,3 +2014,365 @@ describe('studio canvas', () => {
     expect(artifact.z!.indexOf('ink-1')).toBeLessThan(artifact.z!.indexOf('n1'));
   });
 });
+
+describe('studio pen and line', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  function clickAt(canvas: Element, pointerId: number, x: number, y: number, shiftKey = false) {
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: x, clientY: y, shiftKey });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: x, clientY: y, shiftKey });
+  }
+
+  it('places anchors with the pen and proposes the path on Enter', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 200, 100, 100);
+    clickAt(canvas, 201, 300, 100);
+    clickAt(canvas, 202, 300, 300);
+
+    // The draft is on the canvas before it is committed.
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.keyboard('{Enter}');
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.paths).toHaveLength(1);
+    expect(artifact.paths![0]!.anchors).toHaveLength(3);
+    expect(artifact.paths![0]!.closed).toBeUndefined();
+    expect(proposalCreateSchema.safeParse(propose.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('finishes the path on Escape without closing the editor', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 210, 100, 100);
+    clickAt(canvas, 211, 260, 180);
+    await user.keyboard('{Escape}');
+
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    // Escape ended the path, not the studio.
+    expect(canvas).toBeInTheDocument();
+  });
+
+  it('closes the path when the pen returns to its first anchor', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 220, 100, 100);
+    clickAt(canvas, 221, 300, 100);
+    clickAt(canvas, 222, 300, 300);
+    clickAt(canvas, 223, 100, 100);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.paths![0]!.closed).toBe(true);
+    expect(artifact.paths![0]!.anchors).toHaveLength(3);
+  });
+
+  it('draws one straight line per drag with the line tool', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 230, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 230, clientX: 400, clientY: 260 });
+    fireEvent.pointerUp(canvas, { pointerId: 230, clientX: 400, clientY: 260 });
+
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.paths![0]!.anchors).toHaveLength(2);
+  });
+
+  it('holds a line to true horizontal while shift is down', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 240, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 240, clientX: 400, clientY: 216, shiftKey: true });
+    fireEvent.pointerUp(canvas, { pointerId: 240, clientX: 400, clientY: 216, shiftKey: true });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const [start, end] = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
+    // The 16px of vertical drift is snapped away entirely.
+    expect(end!.y).toBe(start!.y);
+    expect(end!.x).toBeGreaterThan(start!.x);
+  });
+
+  it('curves an anchor when the pen is dragged rather than clicked', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 250, 100, 200);
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 251, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 251, clientX: 340, clientY: 140 });
+    fireEvent.pointerUp(canvas, { pointerId: 251, clientX: 340, clientY: 140 });
+    await user.keyboard('{Enter}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const anchors = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
+    const dragged = anchors.at(-1)!;
+    expect(dragged.out).toBeDefined();
+    // Smooth, so the incoming handle mirrors the outgoing one.
+    expect(dragged.in).toEqual({ x: -dragged.out!.x, y: -dragged.out!.y });
+  });
+
+  it('refuses to propose over a path still being drawn', async () => {
+    // Uncommitted work must never be dropped silently by a submit.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 260, 100, 100);
+    clickAt(canvas, 261, 260, 180);
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Finish the path with Enter or Esc before proposing.',
+    );
+  });
+
+  it('undoes a finished path in one step, leaving the shapes alone', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 270, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 270, clientX: 500, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 270, clientX: 500, clientY: 400 });
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+  });
+});
+
+describe('studio path editing', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  /** Draw one line, then come back to the select tool with it selected. */
+  async function drawAndSelectLine(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+  ) {
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 400, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 400, clientY: 200 });
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: pointerId + 1,
+      clientX: 250,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: pointerId + 1, clientX: 250, clientY: 200 });
+  }
+
+  it('selects a path and shows a handle for every point on it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 300);
+
+    expect(screen.getByRole('button', { name: 'Point 1 of 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Point 2 of 2' })).toBeInTheDocument();
+  });
+
+  it('moves a point and proposes it where it was dropped', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 310);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Point 2 of 2' }), {
+      button: 0,
+      pointerId: 315,
+      clientX: 400,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 315, clientX: 500, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 315, clientX: 500, clientY: 400 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const anchors = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
+    expect(anchors[1]!.y).toBeGreaterThan(anchors[0]!.y);
+  });
+
+  it('undoes a point move in one step', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 320);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Point 2 of 2' }), {
+      button: 0,
+      pointerId: 325,
+      clientX: 400,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 325, clientX: 500, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 325, clientX: 500, clientY: 400 });
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    // The whole drag is one intention, and the line survives it.
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+  });
+
+  it('turns a corner into a curve and back with a double-click', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 330);
+    const point = screen.getByRole('button', { name: 'Point 1 of 2' });
+
+    fireEvent.doubleClick(point);
+    expect(screen.getByRole('button', { name: 'Curve handle out of point 1' })).toBeInTheDocument();
+
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Point 1 of 2' }));
+    expect(screen.queryByRole('button', { name: 'Curve handle out of point 1' })).toBeNull();
+  });
+
+  it('drags a curve handle and mirrors it through the point', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 340);
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Point 1 of 2' }));
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Curve handle out of point 1' }), {
+      button: 0,
+      pointerId: 345,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 345, clientX: 220, clientY: 120 });
+    fireEvent.pointerUp(canvas, { pointerId: 345, clientX: 220, clientY: 120 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const anchor = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors[0]!;
+    expect(anchor.out).toBeDefined();
+    expect(anchor.in).toEqual({ x: -anchor.out!.x, y: -anchor.out!.y });
+  });
+
+  it('breaks the tangent when the handle is dragged with Alt held', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 350);
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Point 1 of 2' }));
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Curve handle out of point 1' }), {
+      button: 0,
+      pointerId: 355,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 355, clientX: 220, clientY: 120, altKey: true });
+    fireEvent.pointerUp(canvas, { pointerId: 355, clientX: 220, clientY: 120, altKey: true });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const anchor = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors[0]!;
+    // A cusp: the two sides no longer mirror each other.
+    expect(anchor.in).not.toEqual({ x: -anchor.out!.x, y: -anchor.out!.y });
+  });
+
+  it('deletes a whole line that is too short to lose a point', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawAndSelectLine(user, canvas, 360);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Point 1 of 2' }), {
+      button: 0,
+      pointerId: 365,
+      clientX: 100,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 365, clientX: 100, clientY: 200 });
+    await user.keyboard('{Delete}');
+
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+  });
+});

@@ -4,6 +4,7 @@ import type {
   DiagramNode,
   DiagramNodeShape,
   DiagramNodeSize,
+  PathElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_NODE_SHAPE_KEYS,
@@ -873,6 +874,7 @@ export function deleteEdge(
 function normalizationDelta(
   nodes: readonly DiagramNode[],
   ink: readonly StudioInkStroke[],
+  paths: readonly PathElement[] = [],
 ): DiagramPoint {
   const xs: number[] = [];
   const ys: number[] = [];
@@ -892,6 +894,14 @@ function normalizationDelta(
       ys.push(point.y);
       rights.push(point.x);
       bottoms.push(point.y);
+    }
+  }
+  for (const path of paths) {
+    for (const anchor of path.anchors) {
+      xs.push(anchor.x);
+      ys.push(anchor.y);
+      rights.push(anchor.x);
+      bottoms.push(anchor.y);
     }
   }
 
@@ -924,10 +934,11 @@ export function prepareDiagram(
   edges: readonly DiagramEdge[],
   ink: readonly StudioInkStroke[] = [],
   z: readonly string[] = [],
+  paths: readonly PathElement[] = [],
 ): PreparedDiagram {
   // v4: a sketch is a legitimate studio artifact on its own, so "something to
   // propose" now means any element, not specifically a shape.
-  if (nodes.length === 0 && ink.length === 0) {
+  if (nodes.length === 0 && ink.length === 0 && paths.length === 0) {
     return { ok: false, error: 'Add an element or draw something before proposing.' };
   }
 
@@ -965,7 +976,7 @@ export function prepareDiagram(
 
   // Shapes and ink shift together, so a sketch drawn around a diagram stays
   // registered with it once the whole thing is framed for the board preview.
-  const delta = normalizationDelta(normalizedNodes, ink);
+  const delta = normalizationDelta(normalizedNodes, ink, paths);
   const shiftedNodes = normalizedNodes.map((node) => ({
     ...node,
     x: Math.round(node.x + delta.x),
@@ -980,10 +991,30 @@ export function prepareDiagram(
     })),
   );
 
+  const pathIds = new Set(paths.map((path) => path.id));
+  if (
+    pathIds.size !== paths.length ||
+    paths.some((path) => nodeIds.has(path.id) || inkIds.has(path.id))
+  ) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  // Paths move with the shapes and the ink, so a line drawn against a diagram
+  // stays where its author put it once the whole canvas is framed.
+  const shiftedPaths = paths.map((path) => ({
+    ...path,
+    anchors: path.anchors.map((point) => ({
+      ...point,
+      x: Math.round((point.x + delta.x) * 10) / 10,
+      y: Math.round((point.y + delta.y) * 10) / 10,
+    })),
+  }));
+
   const known = new Set<string>([
     ...shiftedNodes.map((node) => node.id),
     ...normalizedEdges.map(edgeKey),
     ...inkIds,
+    ...pathIds,
   ]);
   // Drop anything the order names that is no longer on the canvas — deleting an
   // element must not make the whole artifact unproposable.
@@ -994,6 +1025,7 @@ export function prepareDiagram(
     nodes: shiftedNodes,
     edges: normalizedEdges,
     ...(shiftedInk.length > 0 ? { ink: shiftedInk } : {}),
+    ...(shiftedPaths.length > 0 ? { paths: shiftedPaths } : {}),
     ...(prunedOrder.length > 0 ? { z: prunedOrder } : {}),
   });
   if (!parsed.success) {

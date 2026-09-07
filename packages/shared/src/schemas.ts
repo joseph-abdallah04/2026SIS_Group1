@@ -25,6 +25,8 @@ import {
 import {
   DIAGRAM_INK_LIMIT,
   DIAGRAM_INK_POINT_LIMIT,
+  DIAGRAM_PATH_ANCHOR_LIMIT,
+  DIAGRAM_PATH_LIMIT,
   DIAGRAM_Z_LIMIT,
   diagramEdgeKey,
 } from './studioElements.js';
@@ -220,6 +222,28 @@ export const inkElementSchema = z.object({
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
 });
 
+const pathHandleSchema = z.object({ x: z.number(), y: z.number() });
+
+// v4 paths: the pen and line tools. Decoration only — a path never takes part
+// in routing, layout or grouping the way a semantic `edge` does.
+export const pathAnchorSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  in: pathHandleSchema.optional(),
+  out: pathHandleSchema.optional(),
+});
+
+export const pathElementSchema = z.object({
+  id: z.string().min(1),
+  // Two anchors is the minimum that draws anything: that is the line tool.
+  anchors: z.array(pathAnchorSchema).min(2).max(DIAGRAM_PATH_ANCHOR_LIMIT),
+  closed: z.boolean().optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  strokeStyle: diagramStrokeStyleSchema.optional(),
+  fillColor: diagramFillKeySchema.optional(),
+});
+
 /**
  * Reading is deliberately more forgiving than writing.
  *
@@ -252,6 +276,14 @@ const diagramReadEdgeSchema = diagramEdgeSchema.extend({
   strokeStyle: lenient(diagramStrokeStyleSchema),
 });
 
+const diagramReadPathSchema = pathElementSchema.extend({
+  closed: lenient(z.boolean()),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  strokeStyle: lenient(diagramStrokeStyleSchema),
+  fillColor: lenient(diagramFillKeySchema),
+});
+
 const diagramReadInkSchema = inkElementSchema.extend({
   strokeColor: lenient(diagramStrokeKeySchema),
   strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
@@ -266,6 +298,7 @@ export const diagramArtifactSchema = z.object({
   // this build cannot make sense of degrades to "no ink" / "legacy order"
   // rather than failing the parse and taking the whole board down.
   ink: z.array(diagramReadInkSchema).max(DIAGRAM_INK_LIMIT).optional().catch(undefined),
+  paths: z.array(diagramReadPathSchema).max(DIAGRAM_PATH_LIMIT).optional().catch(undefined),
   z: z.array(z.string()).max(DIAGRAM_Z_LIMIT).optional().catch(undefined),
 });
 
@@ -275,13 +308,14 @@ const diagramStrictArtifactSchema = z.object({
   nodes: z.array(diagramNodeSchema).max(100),
   edges: z.array(diagramEdgeSchema).max(200),
   ink: z.array(inkElementSchema).max(DIAGRAM_INK_LIMIT).optional(),
+  paths: z.array(pathElementSchema).max(DIAGRAM_PATH_LIMIT).optional(),
   z: z.array(z.string().min(1)).max(DIAGRAM_Z_LIMIT).optional(),
 });
 
 export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefine(
   // `z` is destructured under another name: it would otherwise shadow the zod
   // import for the whole refinement.
-  ({ nodes, edges, ink, z: paintOrder }, context) => {
+  ({ nodes, edges, ink, paths, z: paintOrder }, context) => {
     const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
 
     nodes.forEach((node, index) => {
@@ -417,8 +451,35 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
       inkIds.add(stroke.id);
     });
 
+    const pathIds = new Set<string>();
+    (paths ?? []).forEach((path, index) => {
+      if (
+        pathIds.has(path.id) ||
+        nodeIds.has(path.id) ||
+        edgeKeys.has(path.id) ||
+        inkIds.has(path.id)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across nodes, edges, ink and paths',
+          path: ['paths', index, 'id'],
+        });
+      }
+      pathIds.add(path.id);
+
+      // An open path has nothing to fill, so a fill on one is a payload that
+      // could not have come from the editor.
+      if (path.fillColor !== undefined && path.closed !== true) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Only a closed path can carry a fill',
+          path: ['paths', index, 'fillColor'],
+        });
+      }
+    });
+
     if (paintOrder !== undefined) {
-      const known = new Set<string>([...nodeIds, ...edgeKeys, ...inkIds]);
+      const known = new Set<string>([...nodeIds, ...edgeKeys, ...inkIds, ...pathIds]);
       const seen = new Set<string>();
 
       paintOrder.forEach((key, index) => {

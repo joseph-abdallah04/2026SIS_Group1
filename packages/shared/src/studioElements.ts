@@ -15,11 +15,15 @@
 
 import { packDrawingPoints, unpackDrawingPoints, type StrokePoint } from './drawingContract.js';
 import {
+  DIAGRAM_EDGE_STROKE_WIDTHS,
+  DIAGRAM_FILL_COLORS,
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
   type DiagramEdge,
+  type DiagramFillKey,
   type DiagramNode,
   type DiagramStrokeKey,
+  type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
 } from './diagramContract.js';
 
@@ -94,9 +98,163 @@ export const DIAGRAM_INK_POINT_LIMIT = 800;
 /** One `z` entry per element: nodes + edges + ink, with headroom. */
 export const DIAGRAM_Z_LIMIT = 600;
 
+// --- Paths (pen and line) -------------------------------------------------
+//
+// A path is decoration, not structure. Connected arrows stay semantic `edges`
+// and keep taking part in routing, layout and grouping; a path never does. That
+// separation is why the "free decorative lines" collection was parked in
+// docs/02 §2.7 rather than folded into edges, and it holds here.
+//
+// The pen and the line tool produce the same element: a line is a path with two
+// anchors. That is how vector software models it, and it halves the code.
+
+export interface PathHandle {
+  /** Offset from the anchor, not an absolute point, so moving an anchor carries its curve. */
+  x: number;
+  y: number;
+}
+
+/**
+ * One point on a path, with optional bezier handles either side of it.
+ *
+ * A corner has neither handle. A smooth anchor has both, normally mirrored;
+ * breaking the tangent (Alt-drag) leaves them independent, which is exactly the
+ * distinction between a corner and a cusp in any vector editor.
+ *
+ * Unlike ink these are structured rather than packed: a path carries tens of
+ * anchors, not hundreds of points, and each handle is optional — a flat list
+ * would need sentinel values to say "no handle" and would be harder to validate
+ * than it would be small. The size argument that justifies packing ink does not
+ * apply here.
+ */
+export interface PathAnchor {
+  x: number;
+  y: number;
+  in?: PathHandle;
+  out?: PathHandle;
+}
+
+export interface PathElement {
+  id: string;
+  anchors: PathAnchor[];
+  /** A closed path joins its last anchor back to its first and may be filled. */
+  closed?: boolean;
+  strokeColor?: DiagramStrokeKey;
+  strokeWidthPreset?: DiagramStrokeWidthPreset;
+  strokeStyle?: DiagramStrokeStyle;
+  /** Only meaningful on a closed path; an open one is never filled. */
+  fillColor?: DiagramFillKey;
+}
+
+export const PATH_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
+export const PATH_DEFAULT_STROKE_WIDTH: DiagramStrokeWidthPreset = 'regular';
+
+/** Paths use the arrow width scale: they are drawn lines, not pen strokes. */
+export function pathStrokeColor(path: Pick<PathElement, 'strokeColor'>): string {
+  return DIAGRAM_STROKE_COLORS[path.strokeColor ?? PATH_DEFAULT_STROKE_COLOR];
+}
+
+export function pathStrokeWidth(path: Pick<PathElement, 'strokeWidthPreset'>): number {
+  return DIAGRAM_EDGE_STROKE_WIDTHS[path.strokeWidthPreset ?? PATH_DEFAULT_STROKE_WIDTH];
+}
+
+export function pathFill(path: Pick<PathElement, 'closed' | 'fillColor'>): string {
+  if (!path.closed || !path.fillColor) return 'none';
+  return DIAGRAM_FILL_COLORS[path.fillColor];
+}
+
+/** The absolute position of an anchor's handle, or the anchor itself when it has none. */
+export function pathHandlePoint(anchor: PathAnchor, side: 'in' | 'out'): StrokePoint {
+  const handle = side === 'in' ? anchor.in : anchor.out;
+  return handle ? { x: anchor.x + handle.x, y: anchor.y + handle.y } : { x: anchor.x, y: anchor.y };
+}
+
+function segmentIsStraight(from: PathAnchor, to: PathAnchor): boolean {
+  const out = from.out;
+  const into = to.in;
+  return (!out || (out.x === 0 && out.y === 0)) && (!into || (into.x === 0 && into.y === 0));
+}
+
+function roundPathCoordinate(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
+function segmentData(from: PathAnchor, to: PathAnchor): string {
+  const end = `${roundPathCoordinate(to.x)} ${roundPathCoordinate(to.y)}`;
+  // A cubic whose controls sit on its endpoints draws the same line an `L`
+  // does, so the simpler command is emitted instead — smaller, and far easier
+  // to read when someone inspects a stored artifact.
+  if (segmentIsStraight(from, to)) return `L ${end}`;
+
+  const c1 = pathHandlePoint(from, 'out');
+  const c2 = pathHandlePoint(to, 'in');
+  return `C ${roundPathCoordinate(c1.x)} ${roundPathCoordinate(c1.y)} ${roundPathCoordinate(c2.x)} ${roundPathCoordinate(c2.y)} ${end}`;
+}
+
+/** Path data for the whole element. Shared, so editor and board card agree. */
+export function pathSvgData(path: Pick<PathElement, 'anchors' | 'closed'>): string {
+  const first = path.anchors[0];
+  if (!first) return '';
+  if (path.anchors.length === 1) {
+    // A lone anchor is a dot: a zero-length path paints nothing at all.
+    return `M ${roundPathCoordinate(first.x)} ${roundPathCoordinate(first.y)} l 0.1 0`;
+  }
+
+  let data = `M ${roundPathCoordinate(first.x)} ${roundPathCoordinate(first.y)}`;
+  for (let index = 1; index < path.anchors.length; index += 1) {
+    data += ` ${segmentData(path.anchors[index - 1]!, path.anchors[index]!)}`;
+  }
+
+  if (path.closed && path.anchors.length > 2) {
+    data += ` ${segmentData(path.anchors.at(-1)!, first)} Z`;
+  }
+  return data;
+}
+
+// --- Angle constraint -----------------------------------------------------
+
+/** Holding shift snaps to eighths of a turn, which includes true horizontal and vertical. */
+export const CONSTRAIN_ANGLE_STEP_DEGREES = 45;
+
+/**
+ * `to`, rotated onto the nearest multiple of `step` degrees around `from`.
+ *
+ * The distance from `from` is kept rather than projected, so a constrained drag
+ * tracks how far the pointer moved instead of collapsing as the pointer swings
+ * away from the axis.
+ */
+export function constrainAngle(
+  from: StrokePoint,
+  to: StrokePoint,
+  step: number = CONSTRAIN_ANGLE_STEP_DEGREES,
+): StrokePoint {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  const distance = Math.hypot(deltaX, deltaY);
+  if (distance === 0) return { x: to.x, y: to.y };
+
+  const stepRadians = (step * Math.PI) / 180;
+  const snapped = Math.round(Math.atan2(deltaY, deltaX) / stepRadians) * stepRadians;
+  // Rounded so a constrained point lands on the same grid the rest of the
+  // canvas uses, rather than a hair off it from the trigonometry.
+  return {
+    x: Math.round((from.x + Math.cos(snapped) * distance) * 10) / 10,
+    y: Math.round((from.y + Math.sin(snapped) * distance) * 10) / 10,
+  };
+}
+
+/** A smooth anchor's handles mirror each other; this builds that pair. */
+export function mirroredAnchorHandles(handle: PathHandle): Pick<PathAnchor, 'in' | 'out'> {
+  return { in: { x: -handle.x, y: -handle.y }, out: { x: handle.x, y: handle.y } };
+}
+
+/** Bounds on paths, alongside the existing node, edge and ink caps. */
+export const DIAGRAM_PATH_LIMIT = 100;
+export const DIAGRAM_PATH_ANCHOR_LIMIT = 100;
+
 // --- Paint order ----------------------------------------------------------
 
-export type StudioElementKind = 'node' | 'edge' | 'ink';
+export type StudioElementKind = 'node' | 'edge' | 'ink' | 'path';
 
 export interface StudioElementRef {
   kind: StudioElementKind;
@@ -120,6 +278,7 @@ interface PaintableArtifact {
   edges: readonly DiagramEdge[];
   /** Only the ids are needed, so the editor's unpacked strokes fit too. */
   ink?: readonly { id: string }[];
+  paths?: readonly { id: string }[];
   z?: readonly string[];
 }
 
@@ -143,6 +302,7 @@ export function studioPaintOrder(artifact: PaintableArtifact): StudioElementRef[
       key: node.id,
     })),
     ...(artifact.ink ?? []).map((stroke) => ({ kind: 'ink' as const, key: stroke.id })),
+    ...(artifact.paths ?? []).map((path) => ({ kind: 'path' as const, key: path.id })),
   ];
 
   const order = artifact.z;
