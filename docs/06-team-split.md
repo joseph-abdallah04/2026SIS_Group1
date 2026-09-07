@@ -504,6 +504,10 @@ POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, e
   short-lived token, which supersedes the 24h figure written here pre-build)
 - LiveKit SDK handles all participant state
 - Voice is **optional** — joining session doesn't require microphone permission
+- Mute is remembered per session _and_ per user in `localStorage` (F12), not on
+  the server: voice still owns no tables, and the only thing lost across a
+  refresh is the participant's own intent. Someone who rejoins muted never
+  opens the microphone at all — no prompt, no recording indicator
 
 ---
 
