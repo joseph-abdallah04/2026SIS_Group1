@@ -57,6 +57,7 @@ import type {
   PathAnchor,
   PathElement,
   TableElement,
+  DiagramFillKey,
   DiagramEdge,
   DiagramFontSizePreset,
   DiagramNode,
@@ -96,16 +97,20 @@ import {
   TABLE_CELL_PADDING,
   TABLE_CELL_TEXT_LIMIT,
   tableCellAt,
+  tableCellBold,
+  tableCellColor,
   tableCellFill,
+  tableCellFontSize,
   tableCellLines,
   tableColCount,
   tableColumnOffsets,
-  tableFontSize,
   tableRowOffsets,
   tableSize,
   tableStrokeColor,
   tableStrokeWidth,
   TABLE_CELL_ALIGNS,
+  TABLE_DEFAULT_COL_WIDTH,
+  TABLE_DEFAULT_ROW_HEIGHT,
   TABLE_MAX_COLS,
   TABLE_MAX_ROWS,
   pathStrokeWidth,
@@ -139,16 +144,14 @@ import {
   clientPointToDiagramPoint,
   containerAtPoint,
   deleteContainerWithContents,
-  copyDiagramFragment,
   deleteEdge,
   deleteNodesWithEdges,
   distributeNodes,
   edgeKey,
   draggedSelectionRoots,
   moveNodesBy,
-  nodeIdsInRect,
+  nodeBounds,
   normalizeRect,
-  pasteDiagramFragment,
   prepareDiagram,
   prepareEdgeLabel,
   prepareNodeLabel,
@@ -164,7 +167,6 @@ import {
   type DiagramPoint,
   type DiagramRect,
   type DiagramResizeCorner,
-  type PasteFragment,
 } from './diagramModel';
 import { type DiagramSnapshot } from './diagramHistory';
 import {
@@ -188,6 +190,24 @@ import {
   type StudioInkStroke,
 } from '../studio/studioInk';
 import {
+  copyStudioFragment,
+  isFragmentEmpty,
+  pasteStudioFragment,
+  type StudioFragment,
+} from '../studio/studioClipboard';
+import { offsetRect, snapDragToGrid, unionBounds } from '../studio/studioSnapping';
+import {
+  inkBounds,
+  pathBounds,
+  tableBounds,
+  EMPTY_STUDIO_SELECTION,
+  isSelectionEmpty,
+  mergeSelections,
+  selectionSize,
+  studioElementsInRect,
+  type StudioSelection,
+} from '../studio/studioSelection';
+import {
   clampCellRef,
   createTable,
   deleteColumn,
@@ -198,18 +218,22 @@ import {
   alignCellRange,
   clearCellRange,
   isCellInRange,
+  moveTableBy,
   moveTableSelection,
   resizeColumn,
   resizeRow,
   setCell,
+  styleCellRange,
   type CellRange,
   type CellRef,
   type TableNavKey,
 } from '../studio/studioTables';
 import {
   anchorAtPoint,
+  isSmoothAnchor,
   moveAnchor,
   moveHandle,
+  movePathBy,
   removeAnchor,
   toggleAnchorSmooth,
 } from '../studio/studioPathEdit';
@@ -300,11 +324,19 @@ interface MarqueeSession {
   pointerId: number;
   origin: DiagramPoint;
   current: DiagramPoint;
-  base: string[];
+  base: StudioSelection | null;
 }
 
+/**
+ * A press, for detecting a double one by hand.
+ *
+ * The DOM's `dblclick` never arrives for anything on this canvas: taking
+ * pointer capture on the canvas retargets the follow-up events, so the second
+ * click is not delivered to the element that was pressed. Nodes have always
+ * worked around it this way; paths and tables need the same.
+ */
 interface NodePress {
-  nodeId: string;
+  key: string;
   time: number;
   clientX: number;
   clientY: number;
@@ -477,10 +509,10 @@ function selectedEdgeByKey(edges: readonly DiagramEdge[], key: string | null) {
   return key ? (edges.find((edge) => edgeKey(edge) === key) ?? null) : null;
 }
 
-function isNodeDoublePress(last: NodePress | null, nodeId: string, press: NodePress): boolean {
+function isDoublePress(last: NodePress | null, key: string, press: NodePress): boolean {
   return (
     last !== null &&
-    last.nodeId === nodeId &&
+    last.key === key &&
     press.time - last.time <= NODE_DOUBLE_PRESS_MS &&
     Math.abs(press.clientX - last.clientX) <= NODE_DOUBLE_PRESS_SLOP_PX &&
     Math.abs(press.clientY - last.clientY) <= NODE_DOUBLE_PRESS_SLOP_PX
@@ -541,7 +573,7 @@ export function DiagramEditor() {
   const [view, setView] = useState<DiagramView>(DIAGRAM_DEFAULT_VIEW);
   const [showGrid, setShowGrid] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [clipboard, setClipboard] = useState<PasteFragment | null>(null);
+  const [clipboard, setClipboard] = useState<StudioFragment | null>(null);
   const [marquee, setMarquee] = useState<MarqueeSession | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [pendingContainerDelete, setPendingContainerDelete] = useState<string | null>(null);
@@ -561,13 +593,43 @@ export function DiagramEditor() {
   const pathAnchorsRef = useRef<PathAnchor[]>([]);
   pathAnchorsRef.current = pathAnchors;
   const pathPointerRef = useRef<number | null>(null);
+  // True between pressing the first anchor and letting go: the shape is about
+  // to close, and the drag in between shapes the closing curve.
+  const pathClosingRef = useRef(false);
   // An existing path being edited, and which of its anchors is in hand.
-  const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
+  // Ink, paths and tables are selected as sets, so a marquee can sweep them up
+  // alongside nodes. The single-element ids below are views onto these, for the
+  // inspector, which only ever edits one thing at a time.
+  const [selectedInkIds, setSelectedInkIds] = useState<string[]>([]);
+  const [selectedPathIds, setSelectedPathIds] = useState<string[]>([]);
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
   const [selectedAnchor, setSelectedAnchor] = useState<number | null>(null);
+  // Click selects an element whole; double-click goes inside it. Until then a
+  // drag moves the thing rather than reshaping it.
+  const [pathEditing, setPathEditing] = useState(false);
+  const [tableEditing, setTableEditing] = useState(false);
+  // True while the pen's next click would close the shape, so the first anchor
+  // can say so before it is clicked.
+  const [closeHover, setCloseHover] = useState(false);
+  const elementMoveRef = useRef<{
+    pointerId: number;
+    selection: StudioSelection;
+    /** Pointer and artwork as they were when the drag began. */
+    start: DiagramPoint;
+    startBounds: DiagramRect | null;
+    previous: DiagramSnapshot;
+    moved: boolean;
+  } | null>(null);
   // Table creation size, and which cell of which table is in hand.
   const [tableRows, setTableRows] = useState(3);
   const [tableCols, setTableCols] = useState(3);
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // Pen and line styling, kept apart from the freehand ink's own pen.
+  const [pathColor, setPathColor] = useState<DiagramStrokeKey>('ink');
+  const [pathWidth, setPathWidth] = useState<DiagramStrokeWidthPreset>('regular');
+  const [pathStyle, setPathStyle] = useState<DiagramStrokeStyle>('solid');
+  const [pathFillColor, setPathFillColor] = useState<DiagramFillKey | null>(null);
+  const selectedPathId = selectedPathIds.length === 1 ? (selectedPathIds[0] ?? null) : null;
+  const selectedTableId = selectedTableIds.length === 1 ? (selectedTableIds[0] ?? null) : null;
   const [cellRange, setCellRange] = useState<CellRange | null>(null);
   const [editingCell, setEditingCell] = useState<CellRef | null>(null);
   const cellInputRef = useRef<HTMLInputElement>(null);
@@ -722,8 +784,19 @@ export function DiagramEditor() {
     );
   }
 
+  /**
+   * Select one node and nothing else.
+   *
+   * The studio kinds are cleared too. Before this, picking up a shape left a
+   * previously selected stroke or table still highlighted, and the next Delete
+   * would take both — selection has to mean one thing across every kind.
+   */
   function selectOnly(id: string | null) {
     setSelectedIds(id ? [id] : []);
+    setSelectedEdgeKey(null);
+    setSelectedInkIds([]);
+    clearPathSelection();
+    clearTableSelection();
   }
 
   function addElement(shape: DiagramNodeShape, at?: DiagramPoint, parentId: string | null = null) {
@@ -843,36 +916,36 @@ export function DiagramEditor() {
     });
   }
 
-  function copySelection(): PasteFragment | null {
-    if (selectedIds.length === 0) return null;
-    const graph = history.snapshotRef.current;
-    const fragment = copyDiagramFragment(graph.nodes, graph.edges, selectedIds);
+  function copySelection(): StudioFragment | null {
+    const selection = currentSelection();
+    if (isSelectionEmpty(selection)) return null;
+    const fragment = copyStudioFragment(history.snapshotRef.current, selection);
     setClipboard(fragment);
     return fragment;
   }
 
-  function pasteFragment(fragment: PasteFragment | null) {
-    if (!fragment) {
+  function pasteFragment(fragment: StudioFragment | null) {
+    if (isFragmentEmpty(fragment)) {
       setValidationError('Copy at least one element first.');
       return;
     }
     clearError();
     const graph = history.snapshotRef.current;
-    const result = pasteDiagramFragment(
-      graph.nodes,
-      graph.edges,
-      fragment,
-      DIAGRAM_PASTE_OFFSET,
-      snapEnabled,
-    );
+    const result = pasteStudioFragment(graph, fragment, DIAGRAM_PASTE_OFFSET, snapEnabled);
     if (!result.ok) {
       setValidationError(result.error);
       return;
     }
 
-    history.commit({ nodes: result.nodes, edges: result.edges });
-    setSelectedIds(result.addedIds);
-    setSelectedEdgeKey(null);
+    history.commit({
+      nodes: result.nodes,
+      edges: result.edges,
+      ink: result.ink,
+      paths: result.paths,
+      tables: result.tables,
+    });
+    // What just landed is what you want to move, so it is what is selected.
+    applySelection(result.selection);
   }
 
   function duplicateSelection() {
@@ -1020,12 +1093,12 @@ export function DiagramEditor() {
     }
 
     const press: NodePress = {
-      nodeId: node.id,
+      key: node.id,
       time: event.timeStamp,
       clientX: event.clientX,
       clientY: event.clientY,
     };
-    if (isNodeDoublePress(lastNodePressRef.current, node.id, press)) {
+    if (isDoublePress(lastNodePressRef.current, node.id, press)) {
       lastNodePressRef.current = null;
       beginInlineNodeEdit(node);
       return;
@@ -1065,6 +1138,11 @@ export function DiagramEditor() {
     canvas.setPointerCapture(event.pointerId);
     setSelectedIds(selection);
     setSelectedEdgeKey(null);
+    // Picking up a shape ends any studio element's selection, so what is
+    // highlighted is always what a Delete or a drag would act on.
+    setSelectedInkIds([]);
+    clearPathSelection();
+    clearTableSelection();
     clearError();
   }
 
@@ -1148,10 +1226,15 @@ export function DiagramEditor() {
    * without its children would produce an artifact that cannot be proposed.
    */
   function reorderSelection(move: 'front' | 'back') {
-    if (selectedIds.length === 0) return;
+    const selection = currentSelection();
+    if (isSelectionEmpty(selection)) return;
     const graph = history.snapshotRef.current;
-    const moving = new Set<string>();
-    for (const id of selectedIds) {
+    const moving = new Set<string>([
+      ...selection.inkIds,
+      ...selection.pathIds,
+      ...selection.tableIds,
+    ]);
+    for (const id of selection.nodeIds) {
       moving.add(id);
       for (const child of diagramDescendantIds(graph.nodes, id)) moving.add(child);
     }
@@ -1193,6 +1276,8 @@ export function DiagramEditor() {
   }
 
   function clearPathDraft() {
+    pathClosingRef.current = false;
+    setCloseHover(false);
     setPathAnchors([]);
     setPathCursor(null);
     pathPointerRef.current = null;
@@ -1204,8 +1289,10 @@ export function DiagramEditor() {
    */
   function commitPathDraft(anchors: readonly PathAnchor[], closed: boolean) {
     const path = finishPathDraft(anchors, closed, {
-      strokeColor: inkColor,
-      strokeWidthPreset: inkWidth,
+      strokeColor: pathColor,
+      strokeWidthPreset: pathWidth,
+      strokeStyle: pathStyle,
+      ...(pathFillColor ? { fillColor: pathFillColor } : {}),
     });
     clearPathDraft();
     if (!path) return;
@@ -1216,6 +1303,12 @@ export function DiagramEditor() {
       [...(graph.paths ?? []), path],
       existingOrder ? [...existingOrder, path.id] : undefined,
     );
+
+    // Finishing hands the shape straight back, selected and on the select tool,
+    // so the next thing you can do is move it. The table tool already behaves
+    // this way; drawing another line is one click on Pen.
+    setCanvasTool('select');
+    applySelection({ ...EMPTY_STUDIO_SELECTION, pathIds: [path.id] });
   }
 
   function finishPenDraft() {
@@ -1242,15 +1335,100 @@ export function DiagramEditor() {
   }
 
   function selectPath(id: string) {
-    setSelectedPathId(id);
+    setSelectedPathIds([id]);
+    setSelectedInkIds([]);
+    setSelectedTableIds([]);
     setSelectedAnchor(null);
     setSelectedIds([]);
     setSelectedEdgeKey(null);
   }
 
   function clearPathSelection() {
-    setSelectedPathId(null);
+    setSelectedPathIds([]);
     setSelectedAnchor(null);
+    setPathEditing(false);
+  }
+
+  /**
+   * Shift-click on a studio element toggles its membership, exactly as it does
+   * on a shape. Returns true when it handled the press, so the caller knows not
+   * to start a drag — building a selection and moving it are separate acts.
+   */
+  function toggleStudioSelection(kind: 'ink' | 'path' | 'table', id: string): void {
+    const setter =
+      kind === 'ink'
+        ? setSelectedInkIds
+        : kind === 'path'
+          ? setSelectedPathIds
+          : setSelectedTableIds;
+    setter((current) =>
+      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
+    );
+    setSelectedEdgeKey(null);
+    clearError();
+  }
+
+  function selectTable(id: string) {
+    setSelectedTableIds([id]);
+    setSelectedIds([]);
+    setSelectedEdgeKey(null);
+    setSelectedInkIds([]);
+    clearPathSelection();
+    setCellRange(null);
+    setTableEditing(false);
+  }
+
+  /** Everything selected, in the shape the sweep and the group edits use. */
+  function currentSelection(): StudioSelection {
+    return {
+      nodeIds: selectedIds,
+      inkIds: selectedInkIds,
+      pathIds: selectedPathIds,
+      tableIds: selectedTableIds,
+    };
+  }
+
+  function applySelection(next: StudioSelection) {
+    setSelectedIds(next.nodeIds);
+    setSelectedInkIds(next.inkIds);
+    setSelectedPathIds(next.pathIds);
+    setSelectedTableIds(next.tableIds);
+    setSelectedEdgeKey(null);
+    setSelectedAnchor(null);
+    setPathEditing(false);
+    setTableEditing(false);
+    setCellRange(null);
+    setEditingCell(null);
+  }
+
+  function clearAllSelection() {
+    applySelection(EMPTY_STUDIO_SELECTION);
+  }
+
+  /** Delete every selected element, whatever kind, in one history entry. */
+  function deleteSelection() {
+    const selection = currentSelection();
+    if (isSelectionEmpty(selection)) return;
+    const graph = history.snapshotRef.current;
+    const inkGone = new Set(selection.inkIds);
+    const pathGone = new Set(selection.pathIds);
+    const tableGone = new Set(selection.tableIds);
+    const gone = new Set([...inkGone, ...pathGone, ...tableGone]);
+
+    const remaining =
+      selection.nodeIds.length > 0
+        ? deleteNodesWithEdges(graph.nodes, graph.edges, selection.nodeIds)
+        : { nodes: graph.nodes, edges: graph.edges };
+
+    history.commit({
+      nodes: remaining.nodes,
+      edges: remaining.edges,
+      ink: (graph.ink ?? []).filter((stroke) => !inkGone.has(stroke.id)),
+      paths: (graph.paths ?? []).filter((path) => !pathGone.has(path.id)),
+      tables: (graph.tables ?? []).filter((table) => !tableGone.has(table.id)),
+      ...(graph.z ? { z: graph.z.filter((key) => !gone.has(key)) } : {}),
+    });
+    clearAllSelection();
   }
 
   /** Anchor and handle drags are one history entry each, recorded on release. */
@@ -1269,7 +1447,7 @@ export function DiagramEditor() {
     const anchor = path.anchors[index];
     if (!anchor) return;
 
-    setSelectedPathId(path.id);
+    setSelectedPathIds([path.id]);
     setSelectedAnchor(index);
     pathEditRef.current = {
       pointerId: event.pointerId,
@@ -1327,14 +1505,15 @@ export function DiagramEditor() {
   }
 
   function clearTableSelection() {
-    setSelectedTableId(null);
+    setSelectedTableIds([]);
     setCellRange(null);
     setEditingCell(null);
+    setTableEditing(false);
   }
 
-  function placeTable(at: DiagramPoint) {
+  function placeTable(at: DiagramPoint, rows = tableRows, cols = tableCols) {
     clearError();
-    const table = createTable(tableRows, tableCols, at);
+    const table = createTable(rows, cols, at);
     const graph = history.snapshotRef.current;
     history.commit({
       nodes: graph.nodes,
@@ -1343,8 +1522,10 @@ export function DiagramEditor() {
       ...(graph.z ? { z: [...graph.z, table.id] } : {}),
     });
     setCanvasTool('select');
-    setSelectedTableId(table.id);
-    setCellRange({ anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } });
+    // Deliberately unselected. A press on it both selects and starts a drag, so
+    // the first thing anyone can do with a new table is put it where they want
+    // it; opening it for typing straight away made that impossible.
+    clearAllSelection();
     canvasRef.current?.focus({ preventScroll: true });
   }
 
@@ -1354,7 +1535,7 @@ export function DiagramEditor() {
   }
 
   function selectCell(table: TableElement, row: number, col: number, extend: boolean) {
-    setSelectedTableId(table.id);
+    setSelectedTableIds([table.id]);
     setSelectedIds([]);
     setSelectedEdgeKey(null);
     clearPathSelection();
@@ -1384,7 +1565,7 @@ export function DiagramEditor() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.setPointerCapture(event.pointerId);
-    setSelectedTableId(table.id);
+    setSelectedTableIds([table.id]);
     tableResizeRef.current = {
       pointerId: event.pointerId,
       tableId: table.id,
@@ -1436,6 +1617,129 @@ export function DiagramEditor() {
     history.recordPreview(session.previous);
     releaseCapture(event);
     return true;
+  }
+
+  /**
+   * Drag a whole element. One history entry per drag, recorded on release, so
+   * moving a shape is a single undo like moving a node already is.
+   */
+  function beginElementMove(
+    event: PointerEvent<SVGElement>,
+    kind: 'path' | 'table' | 'ink',
+    id: string,
+  ) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(event.pointerId);
+
+    // Grabbing something already in the selection drags the whole selection;
+    // grabbing anything else drags only that, which is how every canvas editor
+    // behaves and stops a stray click hauling the rest of the board along.
+    const current = currentSelection();
+    const key = kind === 'path' ? 'pathIds' : kind === 'table' ? 'tableIds' : 'inkIds';
+    const selection: StudioSelection = current[key].includes(id)
+      ? current
+      : { ...EMPTY_STUDIO_SELECTION, [key]: [id] };
+
+    const previous = history.snapshotRef.current;
+    elementMoveRef.current = {
+      pointerId: event.pointerId,
+      selection,
+      start: surfacePoint(event),
+      startBounds: unionBounds(boundsOfSelection(previous, selection)),
+      previous,
+      moved: false,
+    };
+  }
+
+  /**
+   * Move the selection to where the pointer has taken it.
+   *
+   * Everything is computed from the state the drag began in, never from the
+   * previous frame. An incremental version drifts: it applies a snapped delta
+   * each frame but advances its reference by the raw pointer delta, so the grid
+   * rounding accumulates and the artwork walks away from the cursor. This is
+   * the same origin-plus-total-delta model `moveNodesBy` already uses, which is
+   * why dragging a shape has never had the problem.
+   */
+  function updateElementMove(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = elementMoveRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+
+    const point = surfacePoint(event);
+    const rawTotal = { x: point.x - session.start.x, y: point.y - session.start.y };
+    // Snapped by the group's outer box, so a multi-element drag keeps its
+    // internal spacing rather than each member rounding independently.
+    const total = session.startBounds
+      ? snapDragToGrid(offsetRect(session.startBounds, rawTotal), rawTotal, snapEnabled)
+      : rawTotal;
+
+    if (total.x === 0 && total.y === 0 && !session.moved) return true;
+    session.moved = true;
+
+    const origin = session.previous;
+    const moving = session.selection;
+    const nodeGoing = new Set(moving.nodeIds);
+    const inkGoing = new Set(moving.inkIds);
+    const pathGoing = new Set(moving.pathIds);
+    const tableGoing = new Set(moving.tableIds);
+
+    history.preview({
+      nodes: origin.nodes.map((node) =>
+        nodeGoing.has(node.id)
+          ? { ...node, x: Math.round(node.x + total.x), y: Math.round(node.y + total.y) }
+          : node,
+      ),
+      edges: origin.edges,
+      ink: (origin.ink ?? []).map((stroke) =>
+        inkGoing.has(stroke.id)
+          ? {
+              ...stroke,
+              points: stroke.points.map((p) => ({ x: p.x + total.x, y: p.y + total.y })),
+            }
+          : stroke,
+      ),
+      paths: (origin.paths ?? []).map((path) =>
+        pathGoing.has(path.id) ? movePathBy(path, total.x, total.y) : path,
+      ),
+      tables: (origin.tables ?? []).map((table) =>
+        tableGoing.has(table.id) ? moveTableBy(table, total.x, total.y) : table,
+      ),
+    });
+    return true;
+  }
+
+  function endElementMove(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = elementMoveRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    elementMoveRef.current = null;
+    // A click that never moved is a selection, not an edit worth undoing.
+    if (session.moved) history.recordPreview(session.previous);
+    releaseCapture(event);
+    return true;
+  }
+
+  /** Bounds of one element of each kind, for snapping and group extents. */
+  function boundsOfSelection(scene: DiagramSnapshot, selection: StudioSelection) {
+    const rects: DiagramRect[] = [];
+    for (const node of scene.nodes) {
+      if (selection.nodeIds.includes(node.id)) rects.push(nodeBounds(node));
+    }
+    for (const stroke of scene.ink ?? []) {
+      if (!selection.inkIds.includes(stroke.id)) continue;
+      const bounds = inkBounds(stroke);
+      if (bounds) rects.push(bounds);
+    }
+    for (const path of scene.paths ?? []) {
+      if (!selection.pathIds.includes(path.id)) continue;
+      const bounds = pathBounds(path);
+      if (bounds) rects.push(bounds);
+    }
+    for (const table of scene.tables ?? []) {
+      if (selection.tableIds.includes(table.id)) rects.push(tableBounds(table));
+    }
+    return rects;
   }
 
   function surfaceBounds() {
@@ -1541,6 +1845,7 @@ export function DiagramEditor() {
     }
 
     if (canvasTool === 'table') {
+      clearTableSelection();
       event.preventDefault();
       placeTable(surfacePoint(event));
       return;
@@ -1552,15 +1857,17 @@ export function DiagramEditor() {
       clearError();
       canvas.setPointerCapture(event.pointerId);
       pathPointerRef.current = event.pointerId;
-      setSelectedIds([]);
-      setSelectedEdgeKey(null);
+      clearAllSelection();
 
       const raw = surfacePoint(event);
       const anchors = pathAnchorsRef.current;
 
       // Landing back on the first anchor closes the shape and finishes it.
+      // Pressing the first anchor arms the close but does not finish it: the
+      // drag that follows shapes the closing curve, exactly as a drag on any
+      // other anchor does. It lands on pointer-up.
       if (canvasTool === 'pen' && isNearFirstAnchor(anchors, raw, closeTolerance())) {
-        commitPathDraft(anchors, true);
+        pathClosingRef.current = true;
         return;
       }
 
@@ -1579,8 +1886,7 @@ export function DiagramEditor() {
       clearError();
       inkPointerRef.current = event.pointerId;
       canvas.setPointerCapture(event.pointerId);
-      setSelectedIds([]);
-      setSelectedEdgeKey(null);
+      clearAllSelection();
 
       if (canvasTool === 'erase') {
         // The whole erase gesture is one undo step, so the pre-gesture snapshot
@@ -1593,10 +1899,8 @@ export function DiagramEditor() {
       return;
     }
 
-    clearPathSelection();
-    clearTableSelection();
     const origin = surfacePoint(event);
-    const base = event.shiftKey ? selectedIds : [];
+    const base = event.shiftKey ? currentSelection() : null;
     const session: MarqueeSession = {
       pointerId: event.pointerId,
       origin,
@@ -1606,10 +1910,7 @@ export function DiagramEditor() {
     marqueeRef.current = session;
     setMarquee(session);
     canvas.setPointerCapture(event.pointerId);
-    if (!event.shiftKey) {
-      setSelectedIds([]);
-      setSelectedEdgeKey(null);
-    }
+    if (!event.shiftKey) clearAllSelection();
   }
 
   function updatePan(event: PointerEvent<SVGSVGElement>): boolean {
@@ -1632,6 +1933,7 @@ export function DiagramEditor() {
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
     if (updatePan(event)) return;
     if (updateResize(event)) return;
+    if (updateElementMove(event)) return;
     if (updatePathEdit(event)) return;
     if (updateTableResize(event)) return;
 
@@ -1655,14 +1957,18 @@ export function DiagramEditor() {
           setPathCursor(nextAnchorPoint(anchors, raw, event.shiftKey));
           return;
         }
-        const last = anchors.at(-1)!;
-        const next = [...anchors.slice(0, -1), anchorWithDraggedHandle(last, raw)];
+        // While closing, the drag shapes the *first* anchor's handles, which is
+        // what the closing segment arrives along.
+        const index = pathClosingRef.current ? 0 : anchors.length - 1;
+        const next = [...anchors];
+        next[index] = anchorWithDraggedHandle(anchors[index]!, raw);
         setPathAnchors(next);
         pathAnchorsRef.current = next;
         return;
       }
 
-      // Button up: just aim the next segment.
+      // Button up: aim the next segment, and say when it would close the shape.
+      setCloseHover(canvasTool === 'pen' && isNearFirstAnchor(anchors, raw, closeTolerance()));
       setPathCursor(nextAnchorPoint(anchors, raw, event.shiftKey));
       return;
     }
@@ -1710,9 +2016,8 @@ export function DiagramEditor() {
 
     // A plain click sweeps nothing; the selection was already cleared on press.
     if (rect.width < 1 && rect.height < 1) return true;
-    const swept = nodeIdsInRect(history.snapshotRef.current.nodes, rect);
-    setSelectedIds([...new Set([...session.base, ...swept])]);
-    setSelectedEdgeKey(null);
+    const swept = studioElementsInRect(history.snapshotRef.current, rect);
+    applySelection(session.base ? mergeSelections(session.base, swept) : swept);
     return true;
   }
 
@@ -1744,6 +2049,14 @@ export function DiagramEditor() {
     pathPointerRef.current = null;
     releaseCapture(event);
 
+    // The close lands here, so a press-and-drag on the first anchor curves the
+    // closing segment before the shape is sealed.
+    if (pathClosingRef.current) {
+      pathClosingRef.current = false;
+      commitPathDraft(pathAnchorsRef.current, true);
+      return true;
+    }
+
     // One drag is the whole line tool: it finishes where the pointer lifts.
     if (canvasTool === 'line') {
       const anchors = pathAnchorsRef.current;
@@ -1760,6 +2073,7 @@ export function DiagramEditor() {
 
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
     if (endPan(event)) return;
+    if (endElementMove(event)) return;
     if (endPathEdit(event)) return;
     if (endTableResize(event)) return;
     if (endPath(event)) return;
@@ -1806,6 +2120,11 @@ export function DiagramEditor() {
     if (pathPointerRef.current === event.pointerId) {
       pathPointerRef.current = null;
       if (canvasTool === 'line') clearPathDraft();
+    }
+    const move = elementMoveRef.current;
+    if (move?.pointerId === event.pointerId) {
+      if (move.moved) history.recordPreview(move.previous);
+      elementMoveRef.current = null;
     }
     const tableResize = tableResizeRef.current;
     if (tableResize?.pointerId === event.pointerId) {
@@ -1869,15 +2188,37 @@ export function DiagramEditor() {
 
   function nudgeSelection(offset: DiagramPoint) {
     const graph = history.snapshotRef.current;
+    const inkGoing = new Set(selectedInkIds);
+    const pathGoing = new Set(selectedPathIds);
+    const tableGoing = new Set(selectedTableIds);
+
     history.commit({
-      nodes: moveNodesBy(
-        graph.nodes,
-        nodeOrigins(graph.nodes, selectedIds),
-        offset,
-        selectedIds[0]!,
-        snapEnabled,
-      ),
+      // Nodes keep their own mover: it understands snapping and containers.
+      nodes:
+        selectedIds.length > 0
+          ? moveNodesBy(
+              graph.nodes,
+              nodeOrigins(graph.nodes, selectedIds),
+              offset,
+              selectedIds[0]!,
+              snapEnabled,
+            )
+          : graph.nodes,
       edges: graph.edges,
+      ink: (graph.ink ?? []).map((stroke) =>
+        inkGoing.has(stroke.id)
+          ? {
+              ...stroke,
+              points: stroke.points.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })),
+            }
+          : stroke,
+      ),
+      paths: (graph.paths ?? []).map((path) =>
+        pathGoing.has(path.id) ? movePathBy(path, offset.x, offset.y) : path,
+      ),
+      tables: (graph.tables ?? []).map((table) =>
+        tableGoing.has(table.id) ? moveTableBy(table, offset.x, offset.y) : table,
+      ),
     });
   }
 
@@ -1944,8 +2285,34 @@ export function DiagramEditor() {
       }
     }
 
+    if (event.key === 'Escape') {
+      // One step out at a time: leave the element first, drop it second.
+      if (pathEditing || tableEditing) {
+        event.preventDefault();
+        setPathEditing(false);
+        setTableEditing(false);
+        setCellRange(null);
+        return;
+      }
+      if (!isSelectionEmpty(currentSelection())) {
+        event.preventDefault();
+        clearAllSelection();
+        return;
+      }
+    }
+
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
+      // A mixed selection goes as one, before any single-element handling.
+      const selection = currentSelection();
+      if (selectionSize(selection) > 1 || selection.inkIds.length > 0) {
+        deleteSelection();
+        return;
+      }
+      if (selection.tableIds.length === 1 && !tableEditing) {
+        deleteSelection();
+        return;
+      }
       // With a path selected, Delete takes the anchor in hand if there is one
       // and the whole path otherwise — and a path too short to lose an anchor
       // goes entirely rather than being left as a stub.
@@ -1969,7 +2336,7 @@ export function DiagramEditor() {
       return;
     }
 
-    if (selectedIds.length === 0) return;
+    if (isSelectionEmpty(currentSelection())) return;
 
     const delta = event.shiftKey ? DIAGRAM_GRID * 2 : DIAGRAM_GRID;
     const offsetByKey: Partial<Record<string, DiagramPoint>> = {
@@ -2034,8 +2401,13 @@ export function DiagramEditor() {
       const key = event.key.toLowerCase();
       if (key === 'a') {
         event.preventDefault();
-        setSelectedIds(history.snapshotRef.current.nodes.map((node) => node.id));
-        setSelectedEdgeKey(null);
+        const graph = history.snapshotRef.current;
+        applySelection({
+          nodeIds: graph.nodes.map((node) => node.id),
+          inkIds: (graph.ink ?? []).map((stroke) => stroke.id),
+          pathIds: (graph.paths ?? []).map((path) => path.id),
+          tableIds: (graph.tables ?? []).map((table) => table.id),
+        });
         return;
       }
       if (key === 'c') {
@@ -2191,7 +2563,7 @@ export function DiagramEditor() {
 
   function renderPath(path: PathElement, key?: string, isDraft = false) {
     const strokeWidth = pathStrokeWidth(path);
-    const selected = !isDraft && selectedPathId === path.id;
+    const selected = !isDraft && selectedPathIds.includes(path.id);
 
     return (
       <g key={key ?? path.id}>
@@ -2213,7 +2585,11 @@ export function DiagramEditor() {
             role="button"
             aria-label={`Path with ${path.anchors.length} points`}
             d={pathSvgData(path)}
-            fill="none"
+            // A filled shape is grabbable anywhere inside it, which is where
+            // anyone would reach for it. An unfilled outline stays outline-only,
+            // so a click inside an empty shape still reaches whatever is behind.
+            fill={path.closed && path.fillColor ? 'transparent' : 'none'}
+            pointerEvents={path.closed && path.fillColor ? 'all' : 'stroke'}
             stroke="transparent"
             strokeWidth={Math.max(strokeWidth, 14)}
             className="cursor-pointer"
@@ -2221,17 +2597,53 @@ export function DiagramEditor() {
               if (event.button !== 0) return;
               event.stopPropagation();
               canvasRef.current?.focus({ preventScroll: true });
-              const point = surfacePoint(event);
-              const hit = anchorAtPoint(path, point, closeTolerance());
-              if (hit !== null) {
-                beginPathEdit(event, path, hit, null);
+
+              // Inside the path, an anchor under the pointer is what is grabbed.
+              if (pathEditing && selectedPathId === path.id) {
+                const hit = anchorAtPoint(path, surfacePoint(event), closeTolerance());
+                if (hit !== null) {
+                  beginPathEdit(event, path, hit, null);
+                  return;
+                }
+              }
+
+              if (event.shiftKey) {
+                toggleStudioSelection('path', path.id);
                 return;
               }
+
+              const press: NodePress = {
+                key: path.id,
+                time: event.timeStamp,
+                clientX: event.clientX,
+                clientY: event.clientY,
+              };
+              if (isDoublePress(lastNodePressRef.current, path.id, press)) {
+                lastNodePressRef.current = null;
+                selectPath(path.id);
+                setPathEditing(true);
+                return;
+              }
+              lastNodePressRef.current = press;
+
               selectPath(path.id);
+              beginElementMove(event, 'path', path.id);
             }}
           />
         ) : null}
-        {selected
+        {selected && !pathEditing ? (
+          <path
+            d={pathSvgData(path)}
+            fill="none"
+            stroke={SELECTION_ACCENT}
+            strokeWidth={Math.max(strokeWidth + 3, 5)}
+            strokeOpacity={0.28}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            pointerEvents="none"
+          />
+        ) : null}
+        {selected && pathEditing
           ? path.anchors.map((anchor, index) => (
               <g key={`${path.id}-anchor-${index}`}>
                 {(['in', 'out'] as const).map((side) => {
@@ -2276,11 +2688,25 @@ export function DiagramEditor() {
                   r={9}
                   fill="transparent"
                   className="cursor-move"
-                  onPointerDown={(event) => beginPathEdit(event, path, index, null)}
-                  onDoubleClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    replacePath(toggleAnchorSmooth(path, index), path.id);
+                  onPointerDown={(event) => {
+                    const key = `${path.id}:anchor:${index}`;
+                    const press: NodePress = {
+                      key,
+                      time: event.timeStamp,
+                      clientX: event.clientX,
+                      clientY: event.clientY,
+                    };
+                    // Same reason as everywhere else on this canvas: pointer
+                    // capture means `dblclick` never reaches the element.
+                    if (isDoublePress(lastNodePressRef.current, key, press)) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      lastNodePressRef.current = null;
+                      replacePath(toggleAnchorSmooth(path, index), path.id);
+                      return;
+                    }
+                    lastNodePressRef.current = press;
+                    beginPathEdit(event, path, index, null);
                   }}
                 />
                 <circle
@@ -2304,11 +2730,9 @@ export function DiagramEditor() {
     const colOffsets = tableColumnOffsets(table);
     const rowOffsets = tableRowOffsets(table);
     const size = tableSize(table);
-    const fontSize = tableFontSize(table);
-    const lineHeight = fontSize * 1.25;
     const stroke = tableStrokeColor(table);
     const strokeWidth = tableStrokeWidth(table);
-    const selected = selectedTableId === table.id;
+    const selected = selectedTableIds.includes(table.id);
 
     return (
       <g key={table.id} transform={`translate(${table.x}, ${table.y})`}>
@@ -2321,6 +2745,8 @@ export function DiagramEditor() {
           const width = table.colWidths[col] ?? 0;
           const height = table.rowHeights[row] ?? 0;
           const lines = tableCellLines(table, cell, col, row);
+          const fontSize = tableCellFontSize(table, cell);
+          const lineHeight = fontSize * 1.25;
           const align = cell?.align ?? 'left';
           const textX =
             align === 'center'
@@ -2343,7 +2769,7 @@ export function DiagramEditor() {
                 stroke={stroke}
                 strokeWidth={strokeWidth}
               />
-              {selected && inRange ? (
+              {selected && tableEditing && inRange ? (
                 <rect
                   x={x}
                   y={y}
@@ -2406,12 +2832,12 @@ export function DiagramEditor() {
               ) : (
                 <>
                   <text
-                    fill={DIAGRAM_LABEL_INK}
+                    fill={tableCellColor(cell)}
                     textAnchor={align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start'}
                     style={{
                       fontSize: `${fontSize}px`,
                       fontFamily: 'Inter, system-ui, sans-serif',
-                      fontWeight: table.headerRow && row === 0 ? 600 : 400,
+                      fontWeight: tableCellBold(table, cell, row) ? 600 : 400,
                     }}
                     pointerEvents="none"
                   >
@@ -2445,14 +2871,44 @@ export function DiagramEditor() {
                         if (event.button !== 0) return;
                         event.stopPropagation();
                         canvasRef.current?.focus({ preventScroll: true });
+
+                        // Outside cell mode, shift builds a selection of
+                        // whole tables rather than a range of cells.
+                        if (event.shiftKey && (!tableEditing || selectedTableId !== table.id)) {
+                          toggleStudioSelection('table', table.id);
+                          return;
+                        }
+
+                        const press: NodePress = {
+                          key: `${table.id}:${row}:${col}`,
+                          time: event.timeStamp,
+                          clientX: event.clientX,
+                          clientY: event.clientY,
+                        };
+                        const isSecond = isDoublePress(
+                          lastNodePressRef.current,
+                          `${table.id}:${row}:${col}`,
+                          press,
+                        );
+                        lastNodePressRef.current = isSecond ? null : press;
+
+                        if (isSecond) {
+                          setSelectedTableIds([table.id]);
+                          // First double-click goes inside the table; a second,
+                          // already inside, opens the cell for typing.
+                          if (tableEditing) setEditingCell({ row, col });
+                          else setTableEditing(true);
+                          setCellRange({ anchor: { row, col }, focus: { row, col } });
+                          return;
+                        }
+
+                        // Outside cell mode a press grabs the whole table.
+                        if (!tableEditing || selectedTableId !== table.id) {
+                          selectTable(table.id);
+                          beginElementMove(event, 'table', table.id);
+                          return;
+                        }
                         selectCell(table, row, col, event.shiftKey);
-                      }}
-                      onDoubleClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setSelectedTableId(table.id);
-                        setCellRange({ anchor: { row, col }, focus: { row, col } });
-                        setEditingCell({ row, col });
                       }}
                     />
                   ) : null}
@@ -2474,36 +2930,39 @@ export function DiagramEditor() {
               strokeWidth={1.5}
               pointerEvents="none"
             />
-            {/* Drag a boundary to resize the track before it. The grab strip is
-                wider than the line so it can actually be hit. */}
-            {table.colWidths.map((_, col) => (
-              <rect
-                key={`col-grip-${col}`}
-                role="button"
-                aria-label={`Resize column ${col + 1}`}
-                x={(colOffsets[col + 1] ?? 0) - 3}
-                y={0}
-                width={6}
-                height={size.height}
-                fill="transparent"
-                className="cursor-col-resize"
-                onPointerDown={(event) => beginTableResize(event, table, 'col', col)}
-              />
-            ))}
-            {table.rowHeights.map((_, row) => (
-              <rect
-                key={`row-grip-${row}`}
-                role="button"
-                aria-label={`Resize row ${row + 1}`}
-                x={0}
-                y={(rowOffsets[row + 1] ?? 0) - 3}
-                width={size.width}
-                height={6}
-                fill="transparent"
-                className="cursor-row-resize"
-                onPointerDown={(event) => beginTableResize(event, table, 'row', row)}
-              />
-            ))}
+            {/* Resizing is an inside-the-table gesture, like editing a cell. */}
+            {tableEditing
+              ? table.colWidths.map((_, col) => (
+                  <rect
+                    key={`col-grip-${col}`}
+                    role="button"
+                    aria-label={`Resize column ${col + 1}`}
+                    x={(colOffsets[col + 1] ?? 0) - 3}
+                    y={0}
+                    width={6}
+                    height={size.height}
+                    fill="transparent"
+                    className="cursor-col-resize"
+                    onPointerDown={(event) => beginTableResize(event, table, 'col', col)}
+                  />
+                ))
+              : null}
+            {tableEditing
+              ? table.rowHeights.map((_, row) => (
+                  <rect
+                    key={`row-grip-${row}`}
+                    role="button"
+                    aria-label={`Resize row ${row + 1}`}
+                    x={0}
+                    y={(rowOffsets[row + 1] ?? 0) - 3}
+                    width={size.width}
+                    height={6}
+                    fill="transparent"
+                    className="cursor-row-resize"
+                    onPointerDown={(event) => beginTableResize(event, table, 'row', row)}
+                  />
+                ))
+              : null}
           </>
         ) : null}
       </g>
@@ -2511,18 +2970,58 @@ export function DiagramEditor() {
   }
 
   function renderInk(stroke: StudioInkStroke) {
+    const selected = selectedInkIds.includes(stroke.id);
     return (
-      <path
-        key={stroke.id}
-        data-testid="ink-stroke"
-        d={strokePathData(stroke.points)}
-        fill="none"
-        stroke={inkStrokeColor(stroke)}
-        strokeWidth={inkStrokeWidth(stroke)}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        pointerEvents="none"
-      />
+      <g key={stroke.id}>
+        {selected ? (
+          <path
+            d={strokePathData(stroke.points)}
+            fill="none"
+            stroke={SELECTION_ACCENT}
+            strokeWidth={inkStrokeWidth(stroke) + 5}
+            strokeOpacity={0.3}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            pointerEvents="none"
+          />
+        ) : null}
+        <path
+          data-testid="ink-stroke"
+          d={strokePathData(stroke.points)}
+          fill="none"
+          stroke={inkStrokeColor(stroke)}
+          strokeWidth={inkStrokeWidth(stroke)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pointerEvents="none"
+        />
+        {/* Ink used to be reachable only with the eraser. It is an element like
+            any other, so it can be picked up, moved and deleted like one. */}
+        {canvasTool === 'select' ? (
+          <path
+            role="button"
+            aria-label="Freehand stroke"
+            d={strokePathData(stroke.points)}
+            fill="none"
+            stroke="transparent"
+            strokeWidth={Math.max(inkStrokeWidth(stroke), 14)}
+            className="cursor-pointer"
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.stopPropagation();
+              canvasRef.current?.focus({ preventScroll: true });
+              if (event.shiftKey) {
+                toggleStudioSelection('ink', stroke.id);
+                return;
+              }
+              if (!selectedInkIds.includes(stroke.id)) {
+                applySelection({ ...EMPTY_STUDIO_SELECTION, inkIds: [stroke.id] });
+              }
+              beginElementMove(event, 'ink', stroke.id);
+            }}
+          />
+        ) : null}
+      </g>
     );
   }
 
@@ -2852,6 +3351,138 @@ export function DiagramEditor() {
           </fieldset>
         ) : null}
 
+        {canvasTool === 'pen' || canvasTool === 'line' || selectedPath ? (
+          <fieldset className="mb-4">
+            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              {selectedPath ? 'Selected line' : 'Line style'}
+            </legend>
+            <div className="mt-2 grid grid-cols-8 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`${key} line`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={selectedPath ? selectedPath.strokeColor === key : pathColor === key}
+                  disabled={isSubmitting}
+                  onSelect={() => {
+                    setPathColor(key);
+                    if (selectedPath) {
+                      replacePath({ ...selectedPath, strokeColor: key }, selectedPath.id);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+            <div className="mt-2 flex gap-1.5">
+              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={STROKE_WIDTH_LABELS[preset]}
+                  name={`${STROKE_WIDTH_LABELS[preset]} line`}
+                  active={
+                    selectedPath ? selectedPath.strokeWidthPreset === preset : pathWidth === preset
+                  }
+                  disabled={isSubmitting}
+                  onSelect={() => {
+                    setPathWidth(preset);
+                    if (selectedPath) {
+                      replacePath({ ...selectedPath, strokeWidthPreset: preset }, selectedPath.id);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_STROKE_STYLES.map((style) => (
+                <PresetButton
+                  key={style}
+                  label={STROKE_STYLE_LABELS[style]}
+                  name={`${STROKE_STYLE_LABELS[style]} line`}
+                  active={
+                    selectedPath
+                      ? (selectedPath.strokeStyle ?? 'solid') === style
+                      : pathStyle === style
+                  }
+                  disabled={isSubmitting}
+                  onSelect={() => {
+                    setPathStyle(style);
+                    if (selectedPath) {
+                      replacePath({ ...selectedPath, strokeStyle: style }, selectedPath.id);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* A fill only means anything once the shape encloses an area, so it
+                is offered for a closed path and for the pen that can close one. */}
+            {canvasTool === 'pen' || selectedPath?.closed ? (
+              <>
+                <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+                  Fill when closed
+                </p>
+                <div className="mt-2 grid grid-cols-8 gap-1.5">
+                  {DIAGRAM_FILL_KEYS.map((key) => (
+                    <SwatchButton
+                      key={key}
+                      label={`${key} shape fill`}
+                      color={DIAGRAM_FILL_COLORS[key]}
+                      active={selectedPath ? selectedPath.fillColor === key : pathFillColor === key}
+                      disabled={isSubmitting}
+                      onSelect={() => {
+                        setPathFillColor(key);
+                        if (selectedPath?.closed) {
+                          replacePath({ ...selectedPath, fillColor: key }, selectedPath.id);
+                        }
+                      }}
+                    />
+                  ))}
+                  <IconButton
+                    label="No shape fill"
+                    className="h-full w-full"
+                    onClick={() => {
+                      setPathFillColor(null);
+                      if (selectedPath) {
+                        // Rebuilt without the key: an explicit `undefined` would
+                        // still be a property, and the write path rejects one.
+                        const rest = { ...selectedPath };
+                        delete rest.fillColor;
+                        replacePath(rest, selectedPath.id);
+                      }
+                    }}
+                  >
+                    <X aria-hidden="true" size={13} />
+                  </IconButton>
+                </div>
+              </>
+            ) : null}
+
+            {selectedPath ? (
+              <div className="mt-2 flex gap-1.5">
+                <Button variant="secondary" onClick={() => setPathEditing((current) => !current)}>
+                  {pathEditing ? 'Done editing points' : 'Edit points'}
+                </Button>
+                {pathEditing && selectedAnchor !== null ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
+                    }
+                  >
+                    {isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
+                      ? 'Make corner'
+                      : 'Make curve'}
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-2 text-[10px] text-rt-ink-faint">
+                Click a line to move it · double-click to edit its points
+              </p>
+            )}
+          </fieldset>
+        ) : null}
+
         {canvasTool === 'table' ? (
           <fieldset className="mb-4">
             <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
@@ -2879,6 +3510,17 @@ export function DiagramEditor() {
                     onClick={() => {
                       setTableRows(row);
                       setTableCols(col);
+                      // Clicking a size is the whole gesture: the table lands in
+                      // the middle of what is on screen rather than asking for a
+                      // second click to say where.
+                      placeTable(
+                        {
+                          x: view.x + view.width / 2 - (col * TABLE_DEFAULT_COL_WIDTH) / 2,
+                          y: view.y + view.height / 2 - (row * TABLE_DEFAULT_ROW_HEIGHT) / 2,
+                        },
+                        row,
+                        col,
+                      );
                     }}
                     className={`aspect-square rounded-[2px] border ${
                       covered
@@ -2918,7 +3560,7 @@ export function DiagramEditor() {
               </label>
             </div>
             <p className="mt-1.5 text-[10px] text-rt-ink-faint">
-              {tableRows} × {tableCols} — click the canvas to place it
+              {tableRows} × {tableCols} — click a size to place it, or the canvas
             </p>
           </fieldset>
         ) : null}
@@ -2996,6 +3638,71 @@ export function DiagramEditor() {
               >
                 <X aria-hidden="true" size={13} />
               </IconButton>
+            </div>
+
+            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Cell text
+            </p>
+            <div className="mt-2 grid grid-cols-8 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`${key} cell text`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(
+                      styleCellRange(selectedTable, cellRange, { color: key }),
+                      selectedTable.id,
+                    )
+                  }
+                />
+              ))}
+              <IconButton
+                label="Default cell text colour"
+                className="h-full w-full"
+                onClick={() =>
+                  replaceTable(
+                    styleCellRange(selectedTable, cellRange, { color: null }),
+                    selectedTable.id,
+                  )
+                }
+              >
+                <X aria-hidden="true" size={13} />
+              </IconButton>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={FONT_SIZE_LABELS[preset]}
+                  // The letter alone does not identify the control; the word does.
+                  name={`${preset} cell text`}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(
+                      styleCellRange(selectedTable, cellRange, { fontSizePreset: preset }),
+                      selectedTable.id,
+                    )
+                  }
+                />
+              ))}
+              <PresetButton
+                label="B"
+                name="Bold cell text"
+                active={Boolean(
+                  tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)?.bold,
+                )}
+                onSelect={() =>
+                  replaceTable(
+                    styleCellRange(selectedTable, cellRange, {
+                      bold: !tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)
+                        ?.bold,
+                    }),
+                    selectedTable.id,
+                  )
+                }
+              />
             </div>
 
             <div className="mt-2 flex gap-1.5">
@@ -3142,14 +3849,14 @@ export function DiagramEditor() {
               Selection
             </p>
             <p className="text-[10px] text-rt-ink-faint" aria-live="polite">
-              {selectedIds.length} selected
+              {selectionSize(currentSelection())} selected
             </p>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
             <IconButton
               label="Duplicate selection"
               title="Duplicate (Ctrl+D)"
-              disabled={selectedIds.length === 0 || isSubmitting}
+              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
               onClick={duplicateSelection}
             >
               <CopyPlus aria-hidden="true" size={16} />
@@ -3157,7 +3864,7 @@ export function DiagramEditor() {
             <IconButton
               label="Copy selection"
               title="Copy (Ctrl+C)"
-              disabled={selectedIds.length === 0 || isSubmitting}
+              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
               onClick={() => copySelection()}
             >
               <Copy aria-hidden="true" size={16} />
@@ -3165,7 +3872,7 @@ export function DiagramEditor() {
             <IconButton
               label="Paste copied elements"
               title="Paste (Ctrl+V)"
-              disabled={!clipboard || isSubmitting}
+              disabled={isFragmentEmpty(clipboard) || isSubmitting}
               onClick={() => pasteFragment(clipboard)}
             >
               <ClipboardPaste aria-hidden="true" size={16} />
@@ -3173,7 +3880,7 @@ export function DiagramEditor() {
             <IconButton
               label="Bring selection to front"
               title="Bring in front of the ink"
-              disabled={selectedIds.length === 0 || isSubmitting}
+              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
               onClick={() => reorderSelection('front')}
             >
               <BringToFront aria-hidden="true" size={16} />
@@ -3181,7 +3888,7 @@ export function DiagramEditor() {
             <IconButton
               label="Send selection to back"
               title="Send behind the ink"
-              disabled={selectedIds.length === 0 || isSubmitting}
+              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
               onClick={() => reorderSelection('back')}
             >
               <SendToBack aria-hidden="true" size={16} />
@@ -3731,24 +4438,44 @@ export function DiagramEditor() {
                       {
                         id: 'draft',
                         anchors: preview,
-                        strokeColor: inkColor,
-                        strokeWidthPreset: inkWidth,
+                        strokeColor: pathColor,
+                        strokeWidthPreset: pathWidth,
+                        strokeStyle: pathStyle,
+                        ...(closeHover && pathFillColor
+                          ? { closed: true, fillColor: pathFillColor }
+                          : {}),
                       },
                       'draft-path',
                       true,
                     )}
-                    {pathAnchors.map((anchor, index) => (
-                      <circle
-                        key={`${anchor.x}-${anchor.y}-${index}`}
-                        cx={anchor.x}
-                        cy={anchor.y}
-                        r={3.5}
-                        fill={index === 0 ? SELECTION_ACCENT : '#FFFFFF'}
-                        stroke={SELECTION_ACCENT}
-                        strokeWidth={1.5}
-                        pointerEvents="none"
-                      />
-                    ))}
+                    {pathAnchors.map((anchor, index) => {
+                      const closing = index === 0 && closeHover;
+                      return (
+                        <g key={`${anchor.x}-${anchor.y}-${index}`}>
+                          {closing ? (
+                            <circle
+                              data-testid="path-close-target"
+                              cx={anchor.x}
+                              cy={anchor.y}
+                              r={9}
+                              fill="none"
+                              stroke={SELECTION_ACCENT}
+                              strokeWidth={2}
+                              pointerEvents="none"
+                            />
+                          ) : null}
+                          <circle
+                            cx={anchor.x}
+                            cy={anchor.y}
+                            r={closing ? 5 : 3.5}
+                            fill={index === 0 ? SELECTION_ACCENT : '#FFFFFF'}
+                            stroke={SELECTION_ACCENT}
+                            strokeWidth={1.5}
+                            pointerEvents="none"
+                          />
+                        </g>
+                      );
+                    })}
                   </g>
                 );
               })()

@@ -6,6 +6,7 @@ import {
   isSmoothAnchor,
   moveAnchor,
   moveHandle,
+  movePathBy,
   removeAnchor,
   toggleAnchorSmooth,
 } from './studioPathEdit';
@@ -120,6 +121,22 @@ describe('removing an anchor', () => {
         0,
       ),
     ).toBeNull();
+  });
+});
+
+describe('moving a whole path', () => {
+  it('shifts every anchor by the same amount', () => {
+    const moved = movePathBy(line(), 25, -10);
+    expect(moved.anchors[0]).toEqual({ x: 25, y: -10 });
+    expect(moved.anchors[2]).toEqual({ x: 125, y: 90 });
+  });
+
+  it('carries the curve without reshaping it', () => {
+    // Handles are offsets, so a translation leaves them untouched.
+    const curved = moveHandle(line(), 1, 'out', { x: 130, y: 20 });
+    const moved = movePathBy(curved, 10, 10);
+    expect(moved.anchors[1]!.out).toEqual(curved.anchors[1]!.out);
+    expect(moved.anchors[1]!.in).toEqual(curved.anchors[1]!.in);
   });
 });
 

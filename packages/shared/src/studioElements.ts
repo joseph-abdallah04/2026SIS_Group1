@@ -18,6 +18,7 @@ import {
   DIAGRAM_EDGE_STROKE_WIDTHS,
   DIAGRAM_FILL_COLORS,
   DIAGRAM_FONT_SIZES,
+  DIAGRAM_LABEL_INK,
   DIAGRAM_LEGACY_FONT_SIZE,
   DIAGRAM_NODE_STROKE_WIDTHS,
   DIAGRAM_STROKE_COLORS,
@@ -278,6 +279,10 @@ export interface TableCell {
   text?: string;
   fill?: DiagramFillKey;
   align?: TableCellAlign;
+  /** Text styling, per cell: a heading row is rarely the only thing emphasised. */
+  bold?: boolean;
+  color?: DiagramStrokeKey;
+  fontSizePreset?: DiagramFontSizePreset;
 }
 
 export interface TableElement {
@@ -379,6 +384,27 @@ export function tableFontSize(table: Pick<TableElement, 'fontSizePreset'>): numb
   return table.fontSizePreset ? DIAGRAM_FONT_SIZES[table.fontSizePreset] : DIAGRAM_LEGACY_FONT_SIZE;
 }
 
+/** A cell's own size when it has one, otherwise the table's. */
+export function tableCellFontSize(
+  table: Pick<TableElement, 'fontSizePreset'>,
+  cell: TableCell | null,
+): number {
+  return cell?.fontSizePreset ? DIAGRAM_FONT_SIZES[cell.fontSizePreset] : tableFontSize(table);
+}
+
+export function tableCellColor(cell: TableCell | null): string {
+  return cell?.color ? DIAGRAM_STROKE_COLORS[cell.color] : DIAGRAM_LABEL_INK;
+}
+
+/** Header cells are bold unless the cell says otherwise. */
+export function tableCellBold(
+  table: Pick<TableElement, 'headerRow'>,
+  cell: TableCell | null,
+  row: number,
+): boolean {
+  return cell?.bold ?? (Boolean(table.headerRow) && row === 0);
+}
+
 /** Header cells sit on a tint so the first row reads as a heading. */
 export const TABLE_HEADER_FILL: DiagramFillKey = 'neutral';
 
@@ -411,7 +437,7 @@ export function tableCellLines(
   if (!text) return [];
   const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
   const height = table.rowHeights[row] ?? TABLE_DEFAULT_ROW_HEIGHT;
-  const fontSize = tableFontSize(table);
+  const fontSize = tableCellFontSize(table, cell);
   const lineHeight = fontSize * 1.25;
   const maxLines = Math.max(1, Math.floor((height - 2) / lineHeight));
   return wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, maxLines);
@@ -422,24 +448,26 @@ export function tableAutoRowHeight(
   table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset'>,
   row: number,
 ): number {
-  const fontSize = tableFontSize(table);
-  const lineHeight = fontSize * 1.25;
-  let lines = 1;
+  let tallest = tableFontSize(table);
+  let needed = 1;
   for (let col = 0; col < tableColCount(table); col += 1) {
     const cell = tableCellAt(table, row, col);
     const text = cell?.text?.trim();
     if (!text) continue;
+    // Each cell is measured at its own size, so one large cell sets the row.
+    const fontSize = tableCellFontSize(table, cell);
+    tallest = Math.max(tallest, fontSize);
     const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
     // Wrapped against a tall row so the count is what the text needs, not what
     // the row currently allows.
-    lines = Math.max(
-      lines,
+    needed = Math.max(
+      needed,
       wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, TABLE_MAX_ROWS).length,
     );
   }
   return Math.min(
     TABLE_MAX_ROW_HEIGHT,
-    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(lines * lineHeight + 10)),
+    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(needed * tallest * 1.25 + 10)),
   );
 }
 

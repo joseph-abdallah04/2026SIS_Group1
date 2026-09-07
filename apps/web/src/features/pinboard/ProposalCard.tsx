@@ -18,11 +18,13 @@ import {
   strokePathData,
   TABLE_CELL_PADDING,
   tableCellAt,
+  tableCellBold,
+  tableCellColor,
   tableCellFill,
+  tableCellFontSize,
   tableCellLines,
   tableColCount,
   tableColumnOffsets,
-  tableFontSize,
   tableRowOffsets,
   tableSize,
   tableStrokeColor,
@@ -211,8 +213,6 @@ function DiagramBody({ item }: { item: BoardItem }) {
     const cols = tableColCount(table);
     const colOffsets = tableColumnOffsets(table);
     const rowOffsets = tableRowOffsets(table);
-    const fontSize = tableFontSize(table);
-    const lineHeight = fontSize * 1.25;
     const stroke = tableStrokeColor(table);
     const strokeWidth = tableStrokeWidth(table);
 
@@ -227,6 +227,8 @@ function DiagramBody({ item }: { item: BoardItem }) {
           const width = table.colWidths[col] ?? 0;
           const height = table.rowHeights[row] ?? 0;
           const lines = tableCellLines(table, cell, col, row);
+          const fontSize = tableCellFontSize(table, cell);
+          const lineHeight = fontSize * 1.25;
           const align = cell?.align ?? 'left';
           const textX =
             align === 'center'
@@ -247,12 +249,12 @@ function DiagramBody({ item }: { item: BoardItem }) {
                 strokeWidth={strokeWidth}
               />
               <text
-                fill={DIAGRAM_LABEL_INK}
+                fill={tableCellColor(cell)}
                 textAnchor={align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start'}
                 style={{
                   fontSize: `${fontSize}px`,
                   fontFamily: 'Inter, system-ui, sans-serif',
-                  fontWeight: table.headerRow && row === 0 ? 600 : 400,
+                  fontWeight: tableCellBold(table, cell, row) ? 600 : 400,
                 }}
               >
                 {lines.map((line, lineIndex) => (

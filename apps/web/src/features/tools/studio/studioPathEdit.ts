@@ -138,6 +138,24 @@ export function removeAnchor(path: PathElement, index: number): PathElement | nu
   return { ...path, anchors: path.anchors.filter((_, current) => current !== index) };
 }
 
+/**
+ * Shift the whole path.
+ *
+ * Handles are offsets, so only the anchors move — the curve comes along
+ * unchanged, which is what makes dragging a shape feel rigid rather than
+ * elastic.
+ */
+export function movePathBy(path: PathElement, dx: number, dy: number): PathElement {
+  return {
+    ...path,
+    anchors: path.anchors.map((anchor) => ({
+      ...anchor,
+      x: round(anchor.x + dx),
+      y: round(anchor.y + dy),
+    })),
+  };
+}
+
 /** Index of the anchor within `tolerance` of a point, nearest first. */
 export function anchorAtPoint(
   path: PathElement,

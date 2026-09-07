@@ -5,6 +5,8 @@ import {
   TABLE_MIN_COL_WIDTH,
   tableAutoRowHeight,
   tableCellAt,
+  tableCellBold,
+  tableCellColor,
   tableCellFill,
   tableCellLines,
   tableColumnOffsets,
@@ -24,10 +26,13 @@ import {
   insertColumn,
   insertRow,
   isCellInRange,
+  moveTableBy,
   moveTableSelection,
   resizeColumn,
   resizeRow,
   setCell,
+  styleCellRange,
+  wholeTableRange,
 } from './studioTables';
 
 const grid = (rows = 3, cols = 3) => createTable(rows, cols, { x: 0, y: 0 });
@@ -275,6 +280,63 @@ describe('presentation', () => {
       text: 'a much longer heading than fits in one line',
     });
     expect(tableAutoRowHeight(table, 0)).toBeGreaterThan(tableAutoRowHeight(table, 1));
+  });
+});
+
+describe('moving and styling a whole table', () => {
+  it('shifts only the origin, since cells are laid out from it', () => {
+    const moved = moveTableBy(grid(2, 2), 40, -15);
+    expect(moved.x).toBe(40);
+    expect(moved.y).toBe(-15);
+    expect(moved.cells).toHaveLength(4);
+  });
+
+  it('covers every cell of the grid', () => {
+    expect(cellsInRange(wholeTableRange(grid(2, 3)))).toHaveLength(6);
+  });
+
+  it('applies size, weight and colour across a block', () => {
+    const range = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 1 } };
+    const styled = styleCellRange(grid(2, 2), range, {
+      bold: true,
+      color: 'rose',
+      fontSizePreset: 'large',
+    });
+    expect(tableCellAt(styled, 0, 1)).toMatchObject({
+      bold: true,
+      color: 'rose',
+      fontSizePreset: 'large',
+    });
+    expect(tableCellAt(styled, 1, 0)?.bold).toBeUndefined();
+  });
+
+  it('drops weight and colour again rather than storing a falsy value', () => {
+    const range = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } };
+    const styled = styleCellRange(grid(2, 2), range, { bold: true, color: 'rose' });
+    const cleared = styleCellRange(styled, range, { bold: false, color: null });
+    expect(tableCellAt(cleared, 0, 0)?.bold).toBeUndefined();
+    expect(tableCellAt(cleared, 0, 0)?.color).toBeUndefined();
+  });
+
+  it('lets one large cell set the height its row needs', () => {
+    const base = setCell(grid(2, 2), 0, 0, { text: 'a heading that has to wrap somewhere' });
+    const larger = styleCellRange(
+      base,
+      { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 0 } },
+      { fontSizePreset: 'large' },
+    );
+    expect(tableAutoRowHeight(larger, 0)).toBeGreaterThan(tableAutoRowHeight(base, 0));
+  });
+
+  it('bolds a header cell by default and lets a cell override it', () => {
+    expect(tableCellBold({ headerRow: true }, null, 0)).toBe(true);
+    expect(tableCellBold({ headerRow: true }, null, 1)).toBe(false);
+    expect(tableCellBold({ headerRow: true }, { bold: false }, 0)).toBe(false);
+  });
+
+  it('falls back to the label ink when a cell has no colour of its own', () => {
+    expect(tableCellColor(null)).toBe('#080C15');
+    expect(tableCellColor({ color: 'rose' })).toBe('#A03040');
   });
 });
 

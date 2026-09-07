@@ -19,6 +19,8 @@ import {
   tableColCount,
   tableRowCount,
   type DiagramFillKey,
+  type DiagramFontSizePreset,
+  type DiagramStrokeKey,
   type TableCell,
   type TableCellAlign,
   type TableElement,
@@ -185,6 +187,35 @@ export function alignCellRange(
   return withCells(table, next);
 }
 
+/** Apply text styling across a block — size, weight or colour. */
+export function styleCellRange(
+  table: TableElement,
+  range: CellRange,
+  style: {
+    bold?: boolean;
+    color?: DiagramStrokeKey | null;
+    fontSizePreset?: DiagramFontSizePreset;
+  },
+): TableElement {
+  const next = [...table.cells];
+  for (const { row, col } of cellsInRange(range)) {
+    const index = tableCellIndex(table, row, col);
+    if (index === -1) continue;
+    const cell: TableCell = { ...next[index] };
+    if (style.bold !== undefined) {
+      if (style.bold) cell.bold = true;
+      else delete cell.bold;
+    }
+    if (style.color !== undefined) {
+      if (style.color) cell.color = style.color;
+      else delete cell.color;
+    }
+    if (style.fontSizePreset !== undefined) cell.fontSizePreset = style.fontSizePreset;
+    next[index] = cell;
+  }
+  return withCells(table, next);
+}
+
 export function clearCellRange(table: TableElement, range: CellRange): TableElement {
   const next = [...table.cells];
   for (const { row, col } of cellsInRange(range)) {
@@ -285,6 +316,19 @@ export function resizeRow(table: TableElement, at: number, height: number): Tabl
         ? Math.round(clamp(height, TABLE_MIN_ROW_HEIGHT, TABLE_MAX_ROW_HEIGHT))
         : current,
     ),
+  };
+}
+
+/** Shift the whole table. Cells are laid out from x/y, so only the origin moves. */
+export function moveTableBy(table: TableElement, dx: number, dy: number): TableElement {
+  return { ...table, x: Math.round(table.x + dx), y: Math.round(table.y + dy) };
+}
+
+/** Every cell of the grid, for styling a whole table at once. */
+export function wholeTableRange(table: Pick<TableElement, 'colWidths' | 'rowHeights'>): CellRange {
+  return {
+    anchor: { row: 0, col: 0 },
+    focus: { row: tableRowCount(table) - 1, col: tableColCount(table) - 1 },
   };
 }
 

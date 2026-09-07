@@ -257,6 +257,9 @@ export const tableCellSchema = z.object({
   text: z.string().max(TABLE_CELL_TEXT_LIMIT).optional(),
   fill: diagramFillKeySchema.optional(),
   align: z.enum(TABLE_CELL_ALIGNS).optional(),
+  bold: z.boolean().optional(),
+  color: diagramStrokeKeySchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
 });
 
 // v4 tables. The cell array's length against the grid's dimensions is a write
@@ -317,6 +320,9 @@ const diagramReadTableSchema = tableElementSchema.extend({
     tableCellSchema.extend({
       fill: lenient(diagramFillKeySchema),
       align: lenient(z.enum(TABLE_CELL_ALIGNS)),
+      bold: lenient(z.boolean()),
+      color: lenient(diagramStrokeKeySchema),
+      fontSizePreset: lenient(diagramFontSizePresetSchema),
     }),
   ),
   headerRow: lenient(z.boolean()),

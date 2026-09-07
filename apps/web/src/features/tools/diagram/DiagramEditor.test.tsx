@@ -57,6 +57,20 @@ function mockSurface(canvas: Element, surface: { width: number; height: number }
   });
 }
 
+/**
+ * Two quick presses on the same spot.
+ *
+ * The DOM's `dblclick` never arrives on this canvas — taking pointer capture
+ * retargets the follow-up events — so the editor detects a double press itself
+ * and a test has to produce one the same way a user does.
+ */
+function doublePress(target: Element, canvas: Element, pointerId: number, x: number, y: number) {
+  for (const id of [pointerId, pointerId + 1]) {
+    fireEvent.pointerDown(target, { button: 0, pointerId: id, clientX: x, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId: id, clientX: x, clientY: y });
+  }
+}
+
 async function openDiagram(
   surface = { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT },
 ) {
@@ -2217,13 +2231,17 @@ describe('studio path editing', () => {
     fireEvent.pointerMove(canvas, { pointerId, clientX: 400, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId, clientX: 400, clientY: 200 });
     await user.click(screen.getByRole('button', { name: 'Select' }));
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+    const outline = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(outline, {
       button: 0,
       pointerId: pointerId + 1,
       clientX: 250,
       clientY: 200,
     });
     fireEvent.pointerUp(canvas, { pointerId: pointerId + 1, clientX: 250, clientY: 200 });
+    // A click selects the line whole; going inside it to reach the points is a
+    // second, deliberate gesture.
+    doublePress(outline, canvas, pointerId + 2, 250, 200);
   }
 
   it('selects a path and shows a handle for every point on it', async () => {
@@ -2293,12 +2311,10 @@ describe('studio path editing', () => {
     const { user, canvas } = await openDiagram();
 
     await drawAndSelectLine(user, canvas, 330);
-    const point = screen.getByRole('button', { name: 'Point 1 of 2' });
-
-    fireEvent.doubleClick(point);
+    doublePress(screen.getByRole('button', { name: 'Point 1 of 2' }), canvas, 335, 100, 200);
     expect(screen.getByRole('button', { name: 'Curve handle out of point 1' })).toBeInTheDocument();
 
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'Point 1 of 2' }));
+    doublePress(screen.getByRole('button', { name: 'Point 1 of 2' }), canvas, 337, 100, 200);
     expect(screen.queryByRole('button', { name: 'Curve handle out of point 1' })).toBeNull();
   });
 
@@ -2310,7 +2326,7 @@ describe('studio path editing', () => {
     const { user, canvas } = await openDiagram();
 
     await drawAndSelectLine(user, canvas, 340);
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'Point 1 of 2' }));
+    doublePress(screen.getByRole('button', { name: 'Point 1 of 2' }), canvas, 342, 100, 200);
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Curve handle out of point 1' }), {
       button: 0,
@@ -2337,7 +2353,7 @@ describe('studio path editing', () => {
     const { user, canvas } = await openDiagram();
 
     await drawAndSelectLine(user, canvas, 350);
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'Point 1 of 2' }));
+    doublePress(screen.getByRole('button', { name: 'Point 1 of 2' }), canvas, 342, 100, 200);
 
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Curve handle out of point 1' }), {
       button: 0,
@@ -2385,6 +2401,11 @@ describe('studio tables', () => {
   }
 
   /** Pick a size, drop a table on the canvas, and land back on the select tool. */
+  /**
+   * Choosing a size in the picker places the table at once — unselected, so the
+   * first thing you can do is move it. Working *in* it takes a double press,
+   * which most of these tests want, so the helper does it.
+   */
   async function placeTable(
     user: ReturnType<typeof userEvent.setup>,
     canvas: Element,
@@ -2393,8 +2414,13 @@ describe('studio tables', () => {
   ) {
     await user.click(screen.getByRole('button', { name: 'Table' }));
     await user.click(screen.getByRole('button', { name: size }));
-    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 200, clientY: 200 });
-    fireEvent.pointerUp(canvas, { pointerId, clientX: 200, clientY: 200 });
+    doublePress(
+      screen.getByRole('button', { name: 'Cell row 1 column 1' }),
+      canvas,
+      pointerId,
+      400,
+      290,
+    );
   }
 
   it('places a table of the chosen size and proposes its grid', async () => {
@@ -2567,14 +2593,16 @@ describe('studio tables', () => {
     await placeTable(user, canvas, 440);
     await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
 
+    // A 3x3 table of 96-wide columns lands centred on the 960x600 sheet, so it
+    // starts at x=336 and the first column's boundary sits at x=432.
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize column 1' }), {
       button: 0,
       pointerId: 445,
-      clientX: 296,
-      clientY: 220,
+      clientX: 432,
+      clientY: 300,
     });
-    fireEvent.pointerMove(canvas, { pointerId: 445, clientX: 360, clientY: 220 });
-    fireEvent.pointerUp(canvas, { pointerId: 445, clientX: 360, clientY: 220 });
+    fireEvent.pointerMove(canvas, { pointerId: 445, clientX: 520, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 445, clientX: 520, clientY: 300 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await screen.findByRole('heading', { name: 'Studio canvas proposed' });
@@ -2598,5 +2626,990 @@ describe('studio tables', () => {
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(screen.queryByRole('button', { name: 'Cell row 1 column 1' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
+  });
+});
+
+describe('studio element moving', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  it('drags a whole line by its body without reshaping it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 500, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 500, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 500, clientX: 300, clientY: 200 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const outline = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(outline, { button: 0, pointerId: 505, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 505, clientX: 260, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 505, clientX: 260, clientY: 300 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const anchors = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
+    // Both ends moved by the same amount: the shape is rigid, not stretched.
+    expect(anchors[1]!.x - anchors[0]!.x).toBe(200);
+    expect(anchors[0]!.y).toBe(anchors[1]!.y);
+  });
+
+  it('keeps a single click on a line as a selection, not an edit', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 510, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 510, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 510, clientX: 300, clientY: 200 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const outline = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(outline, { button: 0, pointerId: 515, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 515, clientX: 200, clientY: 200 });
+
+    // Selected whole: no points on show until the line is entered.
+    expect(screen.queryByRole('button', { name: 'Point 1 of 2' })).toBeNull();
+    doublePress(outline, canvas, 517, 200, 200);
+    expect(screen.getByRole('button', { name: 'Point 1 of 2' })).toBeInTheDocument();
+  });
+
+  it('drags a whole table from any cell before it is entered', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    // Click away so the freshly-placed table is no longer in cell mode.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 520, clientX: 40, clientY: 40 });
+    fireEvent.pointerUp(canvas, { pointerId: 520, clientX: 40, clientY: 40 });
+
+    const cell = screen.getByRole('button', { name: 'Cell row 1 column 1' });
+    fireEvent.pointerDown(cell, { button: 0, pointerId: 525, clientX: 400, clientY: 290 });
+    fireEvent.pointerMove(canvas, { pointerId: 525, clientX: 440, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 525, clientX: 440, clientY: 340 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    // The grid is intact and nothing was typed into it — it only moved.
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells).toHaveLength(4);
+    expect(table.cells.every((entry) => entry.text === undefined)).toBe(true);
+  });
+
+  it('places a table as soon as a size is picked', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 3 table' }));
+
+    // No second click needed to place it: the grid is already on the canvas.
+    expect(screen.getByRole('button', { name: 'Cell row 2 column 3' })).toBeInTheDocument();
+    // It lands unselected, so the cell inspector is not open until it is entered.
+    expect(screen.queryByRole('button', { name: 'Row below' })).toBeNull();
+  });
+});
+
+describe('studio pen feedback and styling', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  function clickAt(canvas: Element, pointerId: number, x: number, y: number) {
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: x, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: x, clientY: y });
+  }
+
+  it('marks the first point once the pen is close enough to close the shape', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 530, 100, 100);
+    clickAt(canvas, 531, 300, 100);
+    clickAt(canvas, 532, 300, 300);
+
+    // Hovering elsewhere says nothing.
+    fireEvent.pointerMove(canvas, { pointerId: 533, clientX: 200, clientY: 200 });
+    expect(screen.queryByTestId('path-close-target')).toBeNull();
+
+    fireEvent.pointerMove(canvas, { pointerId: 533, clientX: 102, clientY: 102 });
+    expect(screen.getByTestId('path-close-target')).toBeInTheDocument();
+  });
+
+  it('draws with the line colour and thickness the pen was set to', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    await user.click(screen.getByRole('button', { name: 'rose line' }));
+    await user.click(screen.getByRole('button', { name: 'Thick line' }));
+    clickAt(canvas, 540, 100, 100);
+    clickAt(canvas, 541, 300, 200);
+    await user.keyboard('{Enter}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
+    expect(path.strokeColor).toBe('rose');
+    expect(path.strokeWidthPreset).toBe('thick');
+  });
+
+  it('fills a shape the pen closed', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    await user.click(screen.getByRole('button', { name: 'green shape fill' }));
+    clickAt(canvas, 550, 100, 100);
+    clickAt(canvas, 551, 300, 100);
+    clickAt(canvas, 552, 300, 300);
+    clickAt(canvas, 553, 100, 100);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
+    expect(path.closed).toBe(true);
+    expect(path.fillColor).toBe('green');
+  });
+
+  it('restyles a line that is already on the canvas', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 560, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 560, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 560, clientX: 300, clientY: 200 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const outline = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(outline, { button: 0, pointerId: 565, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 565, clientX: 200, clientY: 200 });
+    await user.click(screen.getByRole('button', { name: 'amber line' }));
+    await user.click(screen.getByRole('button', { name: 'Dashed line' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
+    expect(path.strokeColor).toBe('amber');
+    expect(path.strokeStyle).toBe('dashed');
+  });
+
+  it('turns a point into a curve from the inspector', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 570, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 570, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 570, clientX: 300, clientY: 200 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const outline = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(outline, { button: 0, pointerId: 575, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 575, clientX: 200, clientY: 200 });
+    doublePress(outline, canvas, 577, 200, 200);
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Point 1 of 2' }), {
+      button: 0,
+      pointerId: 576,
+      clientX: 100,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 576, clientX: 100, clientY: 200 });
+
+    await user.click(screen.getByRole('button', { name: 'Make curve' }));
+    expect(screen.getByRole('button', { name: 'Curve handle out of point 1' })).toBeInTheDocument();
+    // And back again, from the same control.
+    await user.click(screen.getByRole('button', { name: 'Make corner' }));
+    expect(screen.queryByRole('button', { name: 'Curve handle out of point 1' })).toBeNull();
+  });
+});
+
+describe('studio table cell text', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  it('styles the selected cells with a size, a weight and a colour', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    doublePress(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 770, 400, 290);
+
+    await user.click(screen.getByRole('button', { name: 'large cell text' }));
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+    await user.click(screen.getByRole('button', { name: 'rose cell text' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const cell = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[0]!;
+    expect(cell.fontSizePreset).toBe('large');
+    expect(cell.bold).toBe(true);
+    expect(cell.color).toBe('rose');
+  });
+});
+
+describe('studio multi-selection', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  /** A box, a stroke, a line and a table, spread across the sheet. */
+  async function drawEverything(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    base: number,
+  ) {
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: base, clientX: 300, clientY: 380 });
+    fireEvent.pointerMove(canvas, { pointerId: base, clientX: 360, clientY: 420 });
+    fireEvent.pointerUp(canvas, { pointerId: base, clientX: 360, clientY: 420 });
+
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: base + 1, clientX: 500, clientY: 380 });
+    fireEvent.pointerMove(canvas, { pointerId: base + 1, clientX: 600, clientY: 440 });
+    fireEvent.pointerUp(canvas, { pointerId: base + 1, clientX: 600, clientY: 440 });
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    // Leave the freshly placed table's cell mode.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: base + 2, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(canvas, { pointerId: base + 2, clientX: 20, clientY: 20 });
+  }
+
+  it('sweeps up ink, a line and a table along with the shapes', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await drawEverything(user, canvas, 600);
+
+    // Sweep the whole sheet, then delete everything it caught.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 610, clientX: 2, clientY: 2 });
+    fireEvent.pointerMove(canvas, { pointerId: 610, clientX: 950, clientY: 590 });
+    fireEvent.pointerUp(canvas, { pointerId: 610, clientX: 950, clientY: 590 });
+    await user.keyboard('{Delete}');
+
+    expect(screen.queryAllByTestId('ink-stroke')).toHaveLength(0);
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Cell row 1 column 1' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Box: Box' })).toBeNull();
+  });
+
+  it('moves a swept selection of every kind as one group', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await drawEverything(user, canvas, 620);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 630, clientX: 2, clientY: 2 });
+    fireEvent.pointerMove(canvas, { pointerId: 630, clientX: 950, clientY: 590 });
+    fireEvent.pointerUp(canvas, { pointerId: 630, clientX: 950, clientY: 590 });
+
+    // Grab the line, which is in the selection, and drag the lot.
+    const outline = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(outline, { button: 0, pointerId: 635, clientX: 550, clientY: 410 });
+    fireEvent.pointerMove(canvas, { pointerId: 635, clientX: 570, clientY: 440 });
+    fireEvent.pointerUp(canvas, { pointerId: 635, clientX: 570, clientY: 440 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    // Everything is still there: a group move moves, it does not destroy.
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.nodes).toHaveLength(1);
+    expect(artifact.ink).toHaveLength(1);
+    expect(artifact.paths).toHaveLength(1);
+    expect(artifact.tables).toHaveLength(1);
+  });
+
+  it('takes everything with Ctrl+A, including the studio elements', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await drawEverything(user, canvas, 640);
+
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('{Delete}');
+
+    expect(screen.queryAllByTestId('ink-stroke')).toHaveLength(0);
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Cell row 1 column 1' })).toBeNull();
+  });
+
+  it('clears the selection on Escape', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await drawEverything(user, canvas, 650);
+
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Delete}');
+
+    // Escape dropped the selection, so Delete had nothing to take.
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+  });
+
+  it('selects and moves a single stroke of ink directly', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 660, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 660, clientX: 400, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 660, clientX: 400, clientY: 340 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const hit = screen.getByRole('button', { name: 'Freehand stroke' });
+    fireEvent.pointerDown(hit, { button: 0, pointerId: 665, clientX: 350, clientY: 320 });
+    fireEvent.pointerMove(canvas, { pointerId: 665, clientX: 380, clientY: 360 });
+    fireEvent.pointerUp(canvas, { pointerId: 665, clientX: 380, clientY: 360 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    // Still one stroke, and it kept its shape while being carried.
+    const ink = diagramArtifactOf(propose.mock.calls[0]![0]).ink!;
+    expect(ink).toHaveLength(1);
+    expect(ink[0]!.points.length).toBeGreaterThan(2);
+  });
+
+  it('deletes a single stroke without reaching for the eraser', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 670, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 670, clientX: 400, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 670, clientX: 400, clientY: 340 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Freehand stroke' }), {
+      button: 0,
+      pointerId: 675,
+      clientX: 350,
+      clientY: 320,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 675, clientX: 350, clientY: 320 });
+    await user.keyboard('{Delete}');
+
+    expect(screen.queryAllByTestId('ink-stroke')).toHaveLength(0);
+  });
+
+  it('enters a table on a double press, not a single one', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 680, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(canvas, { pointerId: 680, clientX: 20, clientY: 20 });
+
+    const cell = screen.getByRole('button', { name: 'Cell row 1 column 1' });
+    fireEvent.pointerDown(cell, { button: 0, pointerId: 685, clientX: 400, clientY: 290 });
+    fireEvent.pointerUp(canvas, { pointerId: 685, clientX: 400, clientY: 290 });
+    // Selected whole: the cell inspector is not open yet.
+    expect(screen.queryByRole('button', { name: 'Row below' })).toBeNull();
+
+    doublePress(cell, canvas, 690, 400, 290);
+    expect(screen.getByRole('button', { name: 'Row below' })).toBeInTheDocument();
+  });
+});
+
+describe('studio clipboard and snapping', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  async function drawLine(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+    y = 200,
+  ) {
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 100, clientY: y });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 300, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 300, clientY: y });
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+  }
+
+  /** Select without dragging. Coordinates differ per caller so two presses on
+   *  the same spot are never mistaken for a double press. */
+  function selectPath(canvas: Element, pointerId: number, y = 200) {
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId,
+      clientX: 200,
+      clientY: y,
+    });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 200, clientY: y });
+  }
+
+  it('duplicates a selected line', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 700);
+    selectPath(canvas, 705);
+    await user.click(screen.getByRole('button', { name: 'Duplicate selection' }));
+
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const paths = diagramArtifactOf(propose.mock.calls[0]![0]).paths!;
+    expect(paths).toHaveLength(2);
+    // Two independent elements, not one referenced twice.
+    expect(paths[0]!.id).not.toBe(paths[1]!.id);
+    expect(paths[1]!.anchors[0]!.x).not.toBe(paths[0]!.anchors[0]!.x);
+  });
+
+  it('copies and pastes a table with its contents', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    doublePress(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 705, 400, 290);
+    await user.keyboard('{Enter}');
+    // Enter commits; Escape would abandon it, which is a different test.
+    await user.type(screen.getByRole('textbox', { name: 'Cell row 1 column 1' }), 'Idea{Enter}');
+
+    // Leave cell mode, then take the table whole.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 710, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(canvas, { pointerId: 710, clientX: 20, clientY: 20 });
+    const cell = screen.getByRole('button', { name: 'Cell row 1 column 1' });
+    fireEvent.pointerDown(cell, { button: 0, pointerId: 715, clientX: 400, clientY: 290 });
+    fireEvent.pointerUp(canvas, { pointerId: 715, clientX: 400, clientY: 290 });
+
+    await user.click(screen.getByRole('button', { name: 'Copy selection' }));
+    await user.click(screen.getByRole('button', { name: 'Paste copied elements' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const tables = diagramArtifactOf(propose.mock.calls[0]![0]).tables!;
+    expect(tables).toHaveLength(2);
+    // The copy carries what was typed into the original.
+    expect(tables[1]!.cells[0]!.text).toBe('Idea');
+    expect(tables[1]!.id).not.toBe(tables[0]!.id);
+  });
+
+  it('duplicates a stroke of ink', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 720, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 720, clientX: 380, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 720, clientX: 380, clientY: 340 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Freehand stroke' }), {
+      button: 0,
+      pointerId: 725,
+      clientX: 340,
+      clientY: 320,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 725, clientX: 340, clientY: 320 });
+    await user.click(screen.getByRole('button', { name: 'Duplicate selection' }));
+
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(2);
+  });
+
+  it('refuses to paste when nothing has been copied', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    // The paste control stays disabled until the clipboard holds something.
+    expect(screen.getByRole('button', { name: 'Paste copied elements' })).toBeDisabled();
+  });
+
+  /**
+   * Read the line straight off the canvas.
+   *
+   * Proposing normalises the whole artifact into the preview frame, which would
+   * mask a three-unit difference entirely — so snapping has to be judged on what
+   * is drawn, not on what is proposed.
+   */
+  function drawnPath() {
+    return screen.getAllByTestId('studio-path')[0]!.getAttribute('d');
+  }
+
+  it('lands a dragged line on the grid', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 730, 200);
+    expect(drawnPath()).toBe('M 100 200 L 300 200');
+
+    // One press selects and begins the drag, so there is no earlier press on the
+    // same spot for the double-press detector to pair this one with.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 740,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 740, clientX: 203, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 740, clientX: 203, clientY: 200 });
+
+    // The three-unit nudge is pulled on to the next 8-unit grid line.
+    expect(drawnPath()).toBe('M 104 200 L 304 200');
+  });
+
+  it('leaves a drag exactly where the pointer put it once snapping is off', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 750, 200);
+    await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 760,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 760, clientX: 203, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 760, clientX: 203, clientY: 200 });
+
+    // Exactly the three units dragged, left off the grid.
+    expect(drawnPath()).toBe('M 103 200 L 303 200');
+  });
+});
+
+describe('studio drag fidelity and selection', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  function drawnPath() {
+    return screen.getAllByTestId('studio-path')[0]!.getAttribute('d');
+  }
+
+  async function drawLine(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+  ) {
+    // Drawn on grid lines (104 and 304 are both multiples of 8) so these tests
+    // measure how a drag tracks, not the one-off pull onto the grid that any
+    // off-grid element gets on its first move.
+    await user.click(screen.getByRole('button', { name: 'Line' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 104, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 304, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 304, clientY: 200 });
+    // The hit target only exists for the select tool.
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+  }
+
+  it('keeps a dragged line under the pointer over many small moves', async () => {
+    // The drag used to be incremental: it applied a snapped delta each frame but
+    // advanced its reference by the raw pointer delta, so the grid rounding
+    // accumulated and the artwork walked away from the cursor. Sixteen one-unit
+    // moves is where that drift became obvious.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 800);
+    expect(drawnPath()).toBe('M 104 200 L 304 200');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 805,
+      clientX: 200,
+      clientY: 200,
+    });
+    for (let step = 1; step <= 16; step += 1) {
+      fireEvent.pointerMove(canvas, { pointerId: 805, clientX: 200 + step, clientY: 200 });
+    }
+    fireEvent.pointerUp(canvas, { pointerId: 805, clientX: 216, clientY: 200 });
+
+    // Sixteen units of travel is exactly two grid steps, not more.
+    expect(drawnPath()).toBe('M 120 200 L 320 200');
+  });
+
+  it('tracks the pointer back again when a drag reverses', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 810);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 815,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 815, clientX: 260, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 815, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 815, clientX: 200, clientY: 200 });
+
+    // Back where it started, because the move is measured from the drag's origin.
+    expect(drawnPath()).toBe('M 104 200 L 304 200');
+  });
+
+  it('drops a selected stroke when a shape is picked up', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 820, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 820, clientX: 380, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 820, clientX: 380, clientY: 340 });
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Freehand stroke' }), {
+      button: 0,
+      pointerId: 825,
+      clientX: 340,
+      clientY: 320,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 825, clientX: 340, clientY: 320 });
+
+    // Now pick up a shape. The stroke must stop being selected, or the next
+    // Delete would take both.
+    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Box: Box' }), {
+      button: 0,
+      pointerId: 830,
+      clientX: 30,
+      clientY: 30,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 830, clientX: 30, clientY: 30 });
+    await user.keyboard('{Delete}');
+
+    expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Box: Box' })).toBeNull();
+  });
+
+  it('drops the selection when a new element is drawn', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 835);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 840,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 840, clientX: 200, clientY: 200 });
+
+    // Drawing a second line clears the first one's selection.
+    await drawLine(user, canvas, 845);
+    await user.keyboard('{Delete}');
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(2);
+  });
+
+  it('places a table unselected, so the first press moves it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+
+    // One press-and-drag both selects the new table and moves it.
+    const cell = screen.getByRole('button', { name: 'Cell row 1 column 1' });
+    fireEvent.pointerDown(cell, { button: 0, pointerId: 850, clientX: 400, clientY: 290 });
+    fireEvent.pointerMove(canvas, { pointerId: 850, clientX: 432, clientY: 322 });
+    fireEvent.pointerUp(canvas, { pointerId: 850, clientX: 432, clientY: 322 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    // Moved, and nothing was typed into it on the way.
+    expect(table.cells.every((cellData) => cellData.text === undefined)).toBe(true);
+  });
+
+  it('shift-clicks a second stroke into the selection', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    for (const [id, x] of [
+      [860, 200],
+      [861, 500],
+    ] as const) {
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: id, clientX: x, clientY: 300 });
+      fireEvent.pointerMove(canvas, { pointerId: id, clientX: x + 60, clientY: 340 });
+      fireEvent.pointerUp(canvas, { pointerId: id, clientX: x + 60, clientY: 340 });
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    const strokes = screen.getAllByRole('button', { name: 'Freehand stroke' });
+    fireEvent.pointerDown(strokes[0]!, { button: 0, pointerId: 865, clientX: 230, clientY: 320 });
+    fireEvent.pointerUp(canvas, { pointerId: 865, clientX: 230, clientY: 320 });
+    fireEvent.pointerDown(strokes[1]!, {
+      button: 0,
+      pointerId: 866,
+      clientX: 530,
+      clientY: 320,
+      shiftKey: true,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 866, clientX: 530, clientY: 320 });
+
+    await user.keyboard('{Delete}');
+    // Both went, so shift added the second rather than replacing the first.
+    expect(screen.queryAllByTestId('ink-stroke')).toHaveLength(0);
+  });
+});
+
+describe('studio pen finishing', () => {
+  function diagramArtifactOf(input: ProposalCreateInput) {
+    const artifact = input.artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    return artifact;
+  }
+
+  function clickAt(canvas: Element, pointerId: number, x: number, y: number) {
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: x, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: x, clientY: y });
+  }
+
+  async function drawTriangle(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    base: number,
+  ) {
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, base, 104, 104);
+    clickAt(canvas, base + 1, 304, 104);
+    clickAt(canvas, base + 2, 304, 304);
+  }
+
+  it('hands the finished shape back selected and on the select tool', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawTriangle(user, canvas, 900);
+    clickAt(canvas, 903, 104, 104);
+
+    // Back on the select tool with the shape in hand, so it can be moved at once.
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Path with 3 points' })).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 3 points' }), {
+      button: 0,
+      pointerId: 905,
+      clientX: 200,
+      clientY: 150,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 905, clientX: 232, clientY: 182 });
+    fireEvent.pointerUp(canvas, { pointerId: 905, clientX: 232, clientY: 182 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
+    expect(path.closed).toBe(true);
+    expect(path.anchors).toHaveLength(3);
+  });
+
+  it('curves the closing segment when the first point is pressed and dragged', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawTriangle(user, canvas, 910);
+
+    // Press the first point and drag before letting go: the shape should close
+    // along a curve rather than sealing the moment it is touched.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 915, clientX: 104, clientY: 104 });
+    fireEvent.pointerMove(canvas, { pointerId: 915, clientX: 64, clientY: 164 });
+    // Still open while the pointer is down.
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+    fireEvent.pointerUp(canvas, { pointerId: 915, clientX: 64, clientY: 164 });
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
+    expect(path.closed).toBe(true);
+    // The first anchor now carries handles, so the closing run is a curve.
+    expect(path.anchors[0]!.out).toBeDefined();
+    expect(path.anchors[0]!.in).toEqual({
+      x: -path.anchors[0]!.out!.x,
+      y: -path.anchors[0]!.out!.y,
+    });
+  });
+
+  it('still closes on a plain click, with no curve', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawTriangle(user, canvas, 920);
+    clickAt(canvas, 923, 104, 104);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
+    expect(path.closed).toBe(true);
+    expect(path.anchors[0]!.out).toBeUndefined();
+  });
+
+  it('makes a filled shape grabbable anywhere inside it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    await user.click(screen.getByRole('button', { name: 'green shape fill' }));
+    clickAt(canvas, 930, 104, 104);
+    clickAt(canvas, 931, 304, 104);
+    clickAt(canvas, 932, 304, 304);
+    clickAt(canvas, 933, 104, 104);
+
+    // The hit target covers the interior, not only the outline.
+    const target = screen.getByRole('button', { name: 'Path with 3 points' });
+    expect(target).toHaveAttribute('fill', 'transparent');
+    expect(target).toHaveAttribute('pointer-events', 'all');
+  });
+
+  it('leaves an unfilled outline clickable only along its line', async () => {
+    // Otherwise a click inside an empty shape would be swallowed by it instead
+    // of reaching whatever sits behind.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawTriangle(user, canvas, 940);
+    clickAt(canvas, 943, 104, 104);
+
+    const target = screen.getByRole('button', { name: 'Path with 3 points' });
+    expect(target).toHaveAttribute('fill', 'none');
+    expect(target).toHaveAttribute('pointer-events', 'stroke');
   });
 });
