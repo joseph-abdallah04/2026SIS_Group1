@@ -20,6 +20,21 @@ import {
   DIAGRAM_SHAPE_MEDIA_TYPE,
 } from './diagramModel';
 
+/**
+ * Clicks something that lives in one of the tool rail's sub-toolbars — the shape
+ * palette, the eraser, a starter frame. Opens the menu first if it is shut; the
+ * menu stays open between picks, and a press on the canvas closes it again.
+ */
+async function clickInRailMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  menu: string,
+  name: string,
+) {
+  const trigger = screen.getByRole('button', { name: menu });
+  if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+  await user.click(screen.getByRole('button', { name }));
+}
+
 function Harness({
   children,
   propose,
@@ -164,11 +179,11 @@ describe('diagram editor', () => {
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.clear(screen.getByLabelText('Label'));
     await user.type(screen.getByLabelText('Label'), 'API');
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
-    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    await clickInRailMenu(user, 'Shapes', 'Add container');
+    await user.click(screen.getByRole('button', { name: 'Text' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     const payload = propose.mock.calls[0]?.[0];
@@ -215,7 +230,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
     fireEvent.pointerDown(node, { button: 0, pointerId: 3, clientX: 30, clientY: 30 });
@@ -237,7 +252,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     const node = screen.getByRole('button', { name: 'Box: Box' });
     fireEvent.pointerDown(node, { button: 0, pointerId: 5, clientX: 30, clientY: 30 });
     fireEvent.pointerUp(canvas, { pointerId: 5, clientX: 30, clientY: 30 });
@@ -254,8 +269,8 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await user.click(screen.getByRole('button', { name: 'Text' }));
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
     pressNode(node, canvas, { pointerId: 41, time: 1000 });
@@ -270,7 +285,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
     pressNode(node, canvas, { pointerId: 43, time: 1000 });
@@ -285,7 +300,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
     pressNode(node, canvas, { pointerId: 47, time: 1000, clientX: 30, clientY: 30 });
@@ -300,8 +315,8 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
 
     pressNode(screen.getByRole('button', { name: 'Box: Box' }), canvas, {
       pointerId: 45,
@@ -322,7 +337,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
     const inlineInput = screen.getByLabelText('Edit box label');
 
@@ -341,7 +356,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
     const inlineInput = screen.getByLabelText('Edit box label');
 
@@ -357,9 +372,9 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram({ width: 480, height: 300 });
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     expect(screen.getAllByTestId('connection-handle')).toHaveLength(4);
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     fireEvent.pointerDown(screen.getAllByTestId('connection-handle')[1]!, {
       button: 0,
       pointerId: 21,
@@ -422,7 +437,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -441,7 +456,7 @@ describe('diagram editor', () => {
     window.dispatchEvent(cleanEvent);
     expect(cleanEvent.defaultPrevented).toBe(false);
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     const dirtyEvent = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(dirtyEvent);
     expect(dirtyEvent.defaultPrevented).toBe(true);
@@ -453,7 +468,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Box: Box' }), {
       button: 0,
       pointerId: 31,
@@ -475,7 +490,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const first = await openDiagram();
-    await first.user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(first.user, 'Shapes', 'Add box');
     await first.user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
@@ -519,7 +534,7 @@ describe('diagram editor', () => {
 
     expect(screen.getByText("Extending Alice's diagram")).toBeInTheDocument();
     expect(screen.getByText('2/100 elements')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    await user.click(screen.getByRole('button', { name: 'Text' }));
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Box: Idea' }));
     await user.type(screen.getByLabelText('Label (optional)'), 'references');
@@ -554,10 +569,10 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.clear(screen.getByLabelText('Label'));
     await user.type(screen.getByLabelText('Label'), 'Client');
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     await user.clear(screen.getByLabelText('Label'));
     await user.type(screen.getByLabelText('Label'), 'Server');
 
@@ -586,8 +601,8 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Box: Box' }));
     const edgeLabel = screen.getByLabelText('Label (optional)');
@@ -607,8 +622,8 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     const box = screen.getByRole('button', { name: 'Box: Box' });
     const before = box.getAttribute('transform');
     await user.click(screen.getByRole('button', { name: 'Arrange' }));
@@ -624,8 +639,8 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Box: Box' }));
 
@@ -682,8 +697,8 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await user.click(screen.getByRole('button', { name: 'Text' }));
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
@@ -704,7 +719,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
     const inline = screen.getByLabelText('Edit box label');
     await user.clear(inline);
@@ -726,7 +741,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await screen.findByRole('heading', { name: 'Studio canvas proposed' });
     const backButtons = screen.getAllByRole('button', { name: 'Back to pinboard' });
@@ -743,7 +758,7 @@ describe('diagram editor', () => {
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
     fireEvent.pointerDown(node, { button: 0, pointerId: 8, clientX: 30, clientY: 30 });
@@ -767,7 +782,7 @@ describe('diagram viewport and productivity', () => {
   it('zooms about the canvas centre and resets back to the whole sheet', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
 
@@ -783,7 +798,7 @@ describe('diagram viewport and productivity', () => {
   it('fits the diagram to its content and stops at the zoom ceiling', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     await user.click(screen.getByRole('button', { name: 'Fit diagram to view' }));
 
@@ -795,7 +810,7 @@ describe('diagram viewport and productivity', () => {
   it('pans with Space and drag without touching the diagram', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     const node = screen.getByRole('button', { name: 'Box: Box' });
     const before = node.getAttribute('transform');
@@ -847,8 +862,8 @@ describe('diagram viewport and productivity', () => {
   it('sweeps a marquee across the canvas and aligns what it caught', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
 
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 61, clientX: 0, clientY: 0 });
     fireEvent.pointerMove(canvas, { pointerId: 61, clientX: 400, clientY: 200 });
@@ -874,8 +889,8 @@ describe('diagram viewport and productivity', () => {
   it('toggles a node in and out of the selection with shift-click', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     const box = screen.getByRole('button', { name: 'Box: Box' });
 
     expect(screen.getByText('1 selected')).toBeInTheDocument();
@@ -892,8 +907,8 @@ describe('diagram viewport and productivity', () => {
   it('drags a multi-selection as one rigid group', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -915,8 +930,8 @@ describe('diagram viewport and productivity', () => {
   it('collapses a multi-selection to the node that was clicked without dragging', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -1002,7 +1017,7 @@ describe('diagram viewport and productivity', () => {
   it('drops a node exactly where it was released once snapping is off', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
     const node = screen.getByRole('button', { name: 'Box: Box' });
 
@@ -1077,7 +1092,7 @@ describe('diagram resize and style', () => {
   it('resizes a node from its corner as one undoable step', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
       button: 0,
@@ -1100,7 +1115,7 @@ describe('diagram resize and style', () => {
     const send = propose();
     render(<Harness propose={send} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
       button: 0,
@@ -1123,7 +1138,7 @@ describe('diagram resize and style', () => {
   it('resets a resized node back to its shape default', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     expect(screen.getByRole('button', { name: 'Reset size' })).toBeDisabled();
 
     fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
@@ -1144,7 +1159,7 @@ describe('diagram resize and style', () => {
   it('blocks a proposal while a resize is still in flight', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
       button: 0,
@@ -1164,8 +1179,8 @@ describe('diagram resize and style', () => {
     const send = propose();
     render(<Harness propose={send} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
 
     await user.click(screen.getByRole('button', { name: 'Fill blue' }));
@@ -1186,7 +1201,7 @@ describe('diagram resize and style', () => {
   it('marks a swatch active only when the whole selection shares it', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Fill green' }));
     expect(screen.getByRole('button', { name: 'Fill green' })).toHaveAttribute(
       'aria-pressed',
@@ -1194,7 +1209,7 @@ describe('diagram resize and style', () => {
     );
 
     // The second node is unstyled, so the shared value disappears.
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
 
     expect(screen.getByRole('button', { name: 'Fill green' })).toHaveAttribute(
@@ -1206,7 +1221,7 @@ describe('diagram resize and style', () => {
   it('resets a styled node back to the pre-v2 appearance', async () => {
     render(<Harness propose={propose()} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Fill amber' }));
     await user.click(screen.getByRole('button', { name: 'Text size large' }));
 
@@ -1291,7 +1306,7 @@ describe('diagram resize and style', () => {
   it('wraps a long label into bounded lines instead of overflowing the node', async () => {
     render(<Harness propose={propose()} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Box: Box' }));
     const inlineInput = screen.getByLabelText('Edit box label');
     await user.clear(inlineInput);
@@ -1315,8 +1330,8 @@ describe('diagram shapes and container groups', () => {
   /** Container at (24, 24) 184x112 as `n1`, box at (312, 24) as `n2`. */
   async function containerAndBox() {
     const opened = await openDiagram();
-    await opened.user.click(screen.getByRole('button', { name: 'Add container' }));
-    await opened.user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(opened.user, 'Shapes', 'Add container');
+    await clickInRailMenu(opened.user, 'Shapes', 'Add box');
     return opened;
   }
 
@@ -1336,8 +1351,14 @@ describe('diagram shapes and container groups', () => {
     const { user } = await openDiagram();
 
     for (const shape of DIAGRAM_NODE_SHAPE_KEYS) {
+      // Text is reached often enough to have earned its own rail button, so it
+      // is not repeated in the shape palette.
+      if (shape === 'text') {
+        await user.click(screen.getByRole('button', { name: 'Text' }));
+        continue;
+      }
       const label = shape === 'diamond' ? 'decision' : shape === 'cylinder' ? 'database' : shape;
-      await user.click(screen.getByRole('button', { name: `Add ${label}` }));
+      await clickInRailMenu(user, 'Shapes', `Add ${label}`);
     }
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
@@ -1352,10 +1373,10 @@ describe('diagram shapes and container groups', () => {
   it('renders each primitive with its own outline', async () => {
     render(<Harness propose={propose()} />);
     const { user } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add ellipse' }));
-    await user.click(screen.getByRole('button', { name: 'Add decision' }));
-    await user.click(screen.getByRole('button', { name: 'Add triangle' }));
-    await user.click(screen.getByRole('button', { name: 'Add database' }));
+    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    await clickInRailMenu(user, 'Shapes', 'Add decision');
+    await clickInRailMenu(user, 'Shapes', 'Add triangle');
+    await clickInRailMenu(user, 'Shapes', 'Add database');
 
     expect(
       screen.getByRole('button', { name: 'Ellipse: Ellipse' }).querySelector('ellipse'),
@@ -1447,8 +1468,8 @@ describe('diagram shapes and container groups', () => {
     const send = propose();
     render(<Harness propose={send} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add container');
+    await clickInRailMenu(user, 'Shapes', 'Add container');
     // Containers land at (24, 24) and (312, 24).
     const [outer, inner] = screen.getAllByRole('button', { name: 'Container: Container' });
 
@@ -1485,7 +1506,7 @@ describe('diagram shapes and container groups', () => {
   it('groups a palette shape dropped straight into a container', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
-    await user.click(screen.getByRole('button', { name: 'Add container' }));
+    await clickInRailMenu(user, 'Shapes', 'Add container');
 
     dropOnCanvas(canvas, {
       clientX: 100,
@@ -1591,7 +1612,7 @@ describe('diagram shapes and container groups', () => {
     it('deletes an empty container without asking', async () => {
       render(<Harness propose={propose()} />);
       const { user } = await openDiagram();
-      await user.click(screen.getByRole('button', { name: 'Add container' }));
+      await clickInRailMenu(user, 'Shapes', 'Add container');
 
       await user.click(screen.getByRole('button', { name: 'Delete selected element' }));
 
@@ -1799,7 +1820,7 @@ describe('studio canvas', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Freehand' }));
     drawStroke(canvas, 90, { x: 300, y: 200 }, { x: 400, y: 260 });
 
@@ -1840,7 +1861,7 @@ describe('studio canvas', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Freehand' }));
     drawStroke(canvas, 92, { x: 300, y: 200 }, { x: 400, y: 260 });
     expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
@@ -1865,7 +1886,7 @@ describe('studio canvas', () => {
     drawStroke(canvas, 94, { x: 500, y: 400 }, { x: 560, y: 400 });
     expect(screen.getAllByTestId('ink-stroke')).toHaveLength(2);
 
-    await user.click(screen.getByRole('button', { name: 'Erase' }));
+    await clickInRailMenu(user, 'Freehand', 'Erase');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 95, clientX: 200, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId: 95, clientX: 500, clientY: 400 });
     fireEvent.pointerUp(canvas, { pointerId: 95, clientX: 500, clientY: 400 });
@@ -1887,7 +1908,7 @@ describe('studio canvas', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Freehand' }));
     drawStroke(canvas, 96, { x: 300, y: 200 }, { x: 400, y: 260 });
 
@@ -1908,7 +1929,7 @@ describe('studio canvas', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await user.click(screen.getByRole('button', { name: 'Freehand' }));
     drawStroke(canvas, 98, { x: 300, y: 200 }, { x: 400, y: 260 });
 
@@ -1948,37 +1969,39 @@ describe('studio canvas', () => {
   });
 
   it('undoes a template with Ctrl+Z without needing the canvas clicked first', async () => {
-    // The picker only exists while the canvas is empty, so applying a template
-    // unmounts the focused button. If focus is not moved back onto the canvas it
-    // lands on document.body, outside the form, and the form's Ctrl+Z handler
-    // never sees the keystroke.
+    // Applying a template moves focus onto the canvas deliberately. Without
+    // that, focus is left on a button inside the rail's popover — outside the
+    // form — and the form's Ctrl+Z handler never sees the keystroke.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Retro' }));
+    await clickInRailMenu(user, 'Templates', 'Retro');
     expect(screen.getByRole('button', { name: 'Container: Went well' })).toBeInTheDocument();
     expect(canvas).toHaveFocus();
 
     await user.keyboard('{Control>}z{/Control}');
 
     expect(screen.queryByRole('button', { name: 'Container: Went well' })).toBeNull();
-    // Back to a blank canvas, so the picker is offered again.
-    expect(screen.getByRole('button', { name: 'Retro' })).toBeInTheDocument();
   });
 
-  it('offers the starter frames only while the canvas is empty', async () => {
+  it('adds a starter frame to the canvas rather than replacing what is there', async () => {
+    // The frames used to be offered only on an empty canvas, which made
+    // replacing the board safe. They now sit on the rail, always reachable, so
+    // applying one has to be additive — otherwise a stray click wipes the work.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
 
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Templates', 'Timeline');
+
+    expect(screen.getByRole('button', { name: 'Box: Box' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Timeline' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    expect(screen.queryByRole('button', { name: 'Timeline' })).toBeNull();
   });
 
   it('carries ink and paint order into an extended studio canvas', async () => {
@@ -2115,7 +2138,7 @@ describe('studio pen and line', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 230, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(canvas, { pointerId: 230, clientX: 400, clientY: 260 });
     fireEvent.pointerUp(canvas, { pointerId: 230, clientX: 400, clientY: 260 });
@@ -2136,7 +2159,7 @@ describe('studio pen and line', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 240, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId: 240, clientX: 400, clientY: 216, shiftKey: true });
     fireEvent.pointerUp(canvas, { pointerId: 240, clientX: 400, clientY: 216, shiftKey: true });
@@ -2200,8 +2223,8 @@ describe('studio pen and line', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 270, clientX: 300, clientY: 300 });
     fireEvent.pointerMove(canvas, { pointerId: 270, clientX: 500, clientY: 400 });
     fireEvent.pointerUp(canvas, { pointerId: 270, clientX: 500, clientY: 400 });
@@ -2226,7 +2249,7 @@ describe('studio path editing', () => {
     canvas: Element,
     pointerId: number,
   ) {
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId, clientX: 400, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId, clientX: 400, clientY: 200 });
@@ -2657,7 +2680,7 @@ describe('studio tables', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     await placeTable(user, canvas, 450);
     expect(screen.getByRole('button', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
 
@@ -2681,7 +2704,7 @@ describe('studio element moving', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 500, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId: 500, clientX: 300, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 500, clientX: 300, clientY: 200 });
@@ -2708,7 +2731,7 @@ describe('studio element moving', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 510, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId: 510, clientX: 300, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 510, clientX: 300, clientY: 200 });
@@ -2851,7 +2874,7 @@ describe('studio pen feedback and styling', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 560, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId: 560, clientX: 300, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 560, clientX: 300, clientY: 200 });
@@ -2878,7 +2901,7 @@ describe('studio pen feedback and styling', () => {
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 570, clientX: 100, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId: 570, clientX: 300, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 570, clientX: 300, clientY: 200 });
@@ -2950,14 +2973,14 @@ describe('studio multi-selection', () => {
     canvas: Element,
     base: number,
   ) {
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
 
     await user.click(screen.getByRole('button', { name: 'Freehand' }));
     fireEvent.pointerDown(canvas, { button: 0, pointerId: base, clientX: 300, clientY: 380 });
     fireEvent.pointerMove(canvas, { pointerId: base, clientX: 360, clientY: 420 });
     fireEvent.pointerUp(canvas, { pointerId: base, clientX: 360, clientY: 420 });
 
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: base + 1, clientX: 500, clientY: 380 });
     fireEvent.pointerMove(canvas, { pointerId: base + 1, clientX: 600, clientY: 440 });
     fireEvent.pointerUp(canvas, { pointerId: base + 1, clientX: 600, clientY: 440 });
@@ -3140,7 +3163,7 @@ describe('studio clipboard and snapping', () => {
     pointerId: number,
     y = 200,
   ) {
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 100, clientY: y });
     fireEvent.pointerMove(canvas, { pointerId, clientX: 300, clientY: y });
     fireEvent.pointerUp(canvas, { pointerId, clientX: 300, clientY: y });
@@ -3248,7 +3271,7 @@ describe('studio clipboard and snapping', () => {
     render(<Harness propose={propose} />);
     const { user } = await openDiagram();
 
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     // The paste control stays disabled until the clipboard holds something.
     expect(screen.getByRole('button', { name: 'Paste copied elements' })).toBeDisabled();
   });
@@ -3332,7 +3355,7 @@ describe('studio drag fidelity and selection', () => {
     // Drawn on grid lines (104 and 304 are both multiples of 8) so these tests
     // measure how a drag tracks, not the one-off pull onto the grid that any
     // off-grid element gets on its first move.
-    await user.click(screen.getByRole('button', { name: 'Line' }));
+    await clickInRailMenu(user, 'Shapes', 'Line');
     fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 104, clientY: 200 });
     fireEvent.pointerMove(canvas, { pointerId, clientX: 304, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId, clientX: 304, clientY: 200 });
@@ -3414,7 +3437,7 @@ describe('studio drag fidelity and selection', () => {
 
     // Now pick up a shape. The stroke must stop being selected, or the next
     // Delete would take both.
-    await user.click(screen.getByRole('button', { name: 'Add box' }));
+    await clickInRailMenu(user, 'Shapes', 'Add box');
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Box: Box' }), {
       button: 0,
       pointerId: 830,

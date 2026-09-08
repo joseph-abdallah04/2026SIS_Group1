@@ -27,28 +27,19 @@ import {
   CopyPlus,
   Database,
   Diamond,
-  Eraser,
-  Grid3x3,
-  Minus,
   Link2,
   LoaderCircle,
-  Magnet,
   Maximize2,
-  MousePointer2,
-  Pencil,
-  PenTool,
+  Minus,
   RotateCcw,
   RectangleHorizontal,
   Send,
-  Table,
   BringToFront,
   SendToBack,
   Trash2,
   Triangle,
   Type,
   Ungroup,
-  Undo2,
-  Redo2,
   X,
   ZoomIn,
   ZoomOut,
@@ -152,6 +143,7 @@ import {
   moveNodesBy,
   nodeBounds,
   normalizeRect,
+  pasteDiagramFragment,
   prepareDiagram,
   prepareEdgeLabel,
   prepareNodeLabel,
@@ -182,6 +174,7 @@ import {
 } from './diagramView';
 import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
+import { StudioToolRail } from '../studio/toolbar/StudioToolRail';
 import {
   createInkId,
   dataToInk,
@@ -258,40 +251,6 @@ type CanvasTool = 'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table';
 // number inputs beside it reach the rest.
 const TABLE_PICKER_ROWS = 6;
 const TABLE_PICKER_COLS = 8;
-
-const CANVAS_TOOLS: {
-  tool: CanvasTool;
-  label: string;
-  hint: string;
-  Icon: typeof MousePointer2;
-}[] = [
-  {
-    tool: 'select',
-    label: 'Select',
-    hint: 'Select, move and connect elements',
-    Icon: MousePointer2,
-  },
-  { tool: 'draw', label: 'Freehand', hint: 'Draw freehand on the canvas', Icon: Pencil },
-  { tool: 'erase', label: 'Erase', hint: 'Erase whole strokes', Icon: Eraser },
-  {
-    tool: 'pen',
-    label: 'Pen',
-    hint: 'Click to place points, drag to curve. Esc or Enter finishes; hold Shift for 45°',
-    Icon: PenTool,
-  },
-  {
-    tool: 'line',
-    label: 'Line',
-    hint: 'Drag one straight line. Hold Shift for 45°',
-    Icon: Minus,
-  },
-  {
-    tool: 'table',
-    label: 'Table',
-    hint: 'Choose a size, then click the canvas to place a table',
-    Icon: Table,
-  },
-];
 
 interface DragSession {
   pointerId: number;
@@ -1253,15 +1212,34 @@ export function DiagramEditor() {
   }
 
   /** One history entry, so a template dropped by mistake is one undo away. */
+  /**
+   * Drop a starter frame onto the canvas.
+   *
+   * Additive, not replacing. The picker used to be gated to an empty canvas, so
+   * overwriting was safe; from the rail a template can be reached at any time
+   * and replacing would destroy the board. It goes through the same paster the
+   * clipboard uses, which re-mints every id — so a template can be applied twice
+   * without its two copies sharing ids.
+   */
   function applyTemplate(template: StudioTemplate) {
     clearError();
-    const { nodes: templateNodes, edges: templateEdges } = template.build();
-    history.commit({ nodes: templateNodes, edges: templateEdges });
-    setSelectedIds([]);
-    setSelectedEdgeKey(null);
-    // The template picker only exists while the canvas is empty, so applying one
-    // unmounts the button that currently has focus. Without moving focus back
-    // onto the canvas it lands on document.body — outside the form — and the
+    const graph = history.snapshotRef.current;
+    const fragment = template.build();
+    // Laid out at absolute positions, so an empty canvas takes them as designed
+    // and a busy one gets them stepped clear of what is already there.
+    const offset =
+      graph.nodes.length === 0 && graph.edges.length === 0 ? { x: 0, y: 0 } : DIAGRAM_PASTE_OFFSET;
+
+    const pasted = pasteDiagramFragment(graph.nodes, graph.edges, fragment, offset, snapEnabled);
+    if (!pasted.ok) {
+      setValidationError(pasted.error);
+      return;
+    }
+
+    history.commit({ nodes: pasted.nodes, edges: pasted.edges });
+    applySelection({ ...EMPTY_STUDIO_SELECTION, nodeIds: pasted.addedIds });
+    // Applying from a popover unmounts the button that had focus; without moving
+    // it back to the canvas it lands on document.body, outside the form, and the
     // form's Ctrl+Z handler stops seeing keystrokes until something is clicked.
     canvasRef.current?.focus({ preventScroll: true });
   }
@@ -1747,6 +1725,382 @@ export function DiagramEditor() {
       if (selection.tableIds.includes(table.id)) rects.push(tableBounds(table));
     }
     return rects;
+  }
+
+  /**
+   * Arms a tool. Leaving the select tool drops the selection — its handles would
+   * otherwise sit under the pen — so every route to a tool goes through here,
+   * whether that is the rail or a button inside one of its sub-toolbars.
+   */
+  function selectCanvasTool(next: CanvasTool) {
+    setCanvasTool(next);
+    if (next !== 'select') {
+      clearAllSelection();
+      cancelConnection();
+    }
+  }
+
+  function renderFreehandOptions() {
+    return (
+      <div className="w-full">
+        <div className="mb-2 flex gap-1" role="group" aria-label="Freehand mode">
+          {(
+            [
+              ['draw', 'Freehand'],
+              ['erase', 'Erase'],
+            ] as const
+          ).map(([mode, modeLabel]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-label={modeLabel}
+              aria-pressed={canvasTool === mode}
+              disabled={isSubmitting}
+              onClick={() => selectCanvasTool(mode)}
+              className={`flex-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
+                canvasTool === mode
+                  ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
+                  : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:text-rt-ink'
+              }`}
+            >
+              {modeLabel}
+            </button>
+          ))}
+        </div>
+        <fieldset className="mb-4">
+          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+            Ink
+          </legend>
+          <div className="mt-2 grid grid-cols-8 gap-1.5">
+            {DIAGRAM_STROKE_KEYS.map((key) => (
+              <SwatchButton
+                key={key}
+                label={`${key} ink`}
+                color={DIAGRAM_STROKE_COLORS[key]}
+                active={inkColor === key}
+                disabled={isSubmitting}
+                onSelect={() => setInkColor(key)}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex gap-1.5">
+            {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+              <PresetButton
+                key={preset}
+                label={STROKE_WIDTH_LABELS[preset]}
+                name={`${STROKE_WIDTH_LABELS[preset]} pen`}
+                active={inkWidth === preset}
+                disabled={isSubmitting}
+                onSelect={() => setInkWidth(preset)}
+              />
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    );
+  }
+
+  function renderPenOptions() {
+    return (
+      <div className="w-full">
+        <fieldset className="mb-4">
+          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+            {selectedPath ? 'Selected line' : 'Line style'}
+          </legend>
+          <div className="mt-2 grid grid-cols-8 gap-1.5">
+            {DIAGRAM_STROKE_KEYS.map((key) => (
+              <SwatchButton
+                key={key}
+                label={`${key} line`}
+                color={DIAGRAM_STROKE_COLORS[key]}
+                active={selectedPath ? selectedPath.strokeColor === key : pathColor === key}
+                disabled={isSubmitting}
+                onSelect={() => {
+                  setPathColor(key);
+                  if (selectedPath) {
+                    replacePath({ ...selectedPath, strokeColor: key }, selectedPath.id);
+                  }
+                }}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex gap-1.5">
+            {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+              <PresetButton
+                key={preset}
+                label={STROKE_WIDTH_LABELS[preset]}
+                name={`${STROKE_WIDTH_LABELS[preset]} line`}
+                active={
+                  selectedPath ? selectedPath.strokeWidthPreset === preset : pathWidth === preset
+                }
+                disabled={isSubmitting}
+                onSelect={() => {
+                  setPathWidth(preset);
+                  if (selectedPath) {
+                    replacePath({ ...selectedPath, strokeWidthPreset: preset }, selectedPath.id);
+                  }
+                }}
+              />
+            ))}
+          </div>
+          <div className="mt-1.5 flex gap-1.5">
+            {DIAGRAM_STROKE_STYLES.map((style) => (
+              <PresetButton
+                key={style}
+                label={STROKE_STYLE_LABELS[style]}
+                name={`${STROKE_STYLE_LABELS[style]} line`}
+                active={
+                  selectedPath
+                    ? (selectedPath.strokeStyle ?? 'solid') === style
+                    : pathStyle === style
+                }
+                disabled={isSubmitting}
+                onSelect={() => {
+                  setPathStyle(style);
+                  if (selectedPath) {
+                    replacePath({ ...selectedPath, strokeStyle: style }, selectedPath.id);
+                  }
+                }}
+              />
+            ))}
+          </div>
+
+          {/* A fill only means anything once the shape encloses an area, so it
+                is offered for a closed path and for the pen that can close one. */}
+          {canvasTool === 'pen' || selectedPath?.closed ? (
+            <>
+              <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+                Fill when closed
+              </p>
+              <div className="mt-2 grid grid-cols-8 gap-1.5">
+                {DIAGRAM_FILL_KEYS.map((key) => (
+                  <SwatchButton
+                    key={key}
+                    label={`${key} shape fill`}
+                    color={DIAGRAM_FILL_COLORS[key]}
+                    active={selectedPath ? selectedPath.fillColor === key : pathFillColor === key}
+                    disabled={isSubmitting}
+                    onSelect={() => {
+                      setPathFillColor(key);
+                      if (selectedPath?.closed) {
+                        replacePath({ ...selectedPath, fillColor: key }, selectedPath.id);
+                      }
+                    }}
+                  />
+                ))}
+                <IconButton
+                  label="No shape fill"
+                  className="h-full w-full"
+                  onClick={() => {
+                    setPathFillColor(null);
+                    if (selectedPath) {
+                      // Rebuilt without the key: an explicit `undefined` would
+                      // still be a property, and the write path rejects one.
+                      const rest = { ...selectedPath };
+                      delete rest.fillColor;
+                      replacePath(rest, selectedPath.id);
+                    }
+                  }}
+                >
+                  <X aria-hidden="true" size={13} />
+                </IconButton>
+              </div>
+            </>
+          ) : null}
+
+          {selectedPath ? (
+            <div className="mt-2 flex gap-1.5">
+              <Button variant="secondary" onClick={() => setPathEditing((current) => !current)}>
+                {pathEditing ? 'Done editing points' : 'Edit points'}
+              </Button>
+              {pathEditing && selectedAnchor !== null ? (
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
+                  }
+                >
+                  {isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
+                    ? 'Make corner'
+                    : 'Make curve'}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-2 text-[10px] text-rt-ink-faint">
+              Click a line to move it · double-click to edit its points
+            </p>
+          )}
+        </fieldset>
+      </div>
+    );
+  }
+
+  function renderShapeOptions() {
+    return (
+      <div className="w-full">
+        <fieldset>
+          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+            Elements
+          </legend>
+          <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
+            {DIAGRAM_NODE_SHAPES.filter((shape) => shape !== 'text').map((shape) => {
+              const ShapeIcon = SHAPE_ICONS[shape];
+              const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
+              return (
+                <button
+                  key={shape}
+                  type="button"
+                  draggable={!disabled}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  onClick={() => addElement(shape)}
+                  disabled={disabled}
+                  aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
+                  title={`Click to place a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}, or drag it onto the canvas`}
+                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <ShapeIcon aria-hidden="true" size={16} />
+                  {DIAGRAM_SHAPE_LABELS[shape]}
+                </button>
+              );
+            })}
+            {/* A line makes a form, so it belongs with the shapes — but unlike
+                them it is a tool you draw with, not a node you place. */}
+            <button
+              type="button"
+              aria-label="Line"
+              aria-pressed={canvasTool === 'line'}
+              disabled={isSubmitting}
+              onClick={() => selectCanvasTool('line')}
+              title="Draw a straight line; hold Shift to constrain the angle"
+              className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1.5 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
+                canvasTool === 'line'
+                  ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
+                  : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink'
+              }`}
+            >
+              <Minus aria-hidden="true" size={16} />
+              Line
+            </button>
+          </div>
+        </fieldset>
+      </div>
+    );
+  }
+
+  function renderTableOptions() {
+    return (
+      <div className="w-full">
+        <fieldset className="mb-4">
+          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+            New table
+          </legend>
+          {/* The grid is the quick way to pick a size; the two number inputs
+                beside it are the same choice for anyone not using a pointer. */}
+          <div
+            className="mt-2 grid gap-0.5"
+            style={{ gridTemplateColumns: `repeat(${TABLE_PICKER_COLS}, minmax(0, 1fr))` }}
+          >
+            {Array.from({ length: TABLE_PICKER_ROWS * TABLE_PICKER_COLS }, (_, index) => {
+              const row = Math.floor(index / TABLE_PICKER_COLS) + 1;
+              const col = (index % TABLE_PICKER_COLS) + 1;
+              const covered = row <= tableRows && col <= tableCols;
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  aria-label={`${row} by ${col} table`}
+                  onPointerEnter={() => {
+                    setTableRows(row);
+                    setTableCols(col);
+                  }}
+                  onClick={() => {
+                    setTableRows(row);
+                    setTableCols(col);
+                    // Clicking a size is the whole gesture: the table lands in
+                    // the middle of what is on screen rather than asking for a
+                    // second click to say where.
+                    placeTable(
+                      {
+                        x: view.x + view.width / 2 - (col * TABLE_DEFAULT_COL_WIDTH) / 2,
+                        y: view.y + view.height / 2 - (row * TABLE_DEFAULT_ROW_HEIGHT) / 2,
+                      },
+                      row,
+                      col,
+                    );
+                  }}
+                  className={`aspect-square rounded-[2px] border ${
+                    covered
+                      ? 'border-rt-primary bg-rt-primary-tint'
+                      : 'border-rt-tertiary bg-rt-surface'
+                  }`}
+                />
+              );
+            })}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
+              Rows
+              <input
+                type="number"
+                min={1}
+                max={TABLE_MAX_ROWS}
+                value={tableRows}
+                onChange={(event) =>
+                  setTableRows(Math.max(1, Math.min(TABLE_MAX_ROWS, Number(event.target.value))))
+                }
+                className="w-full rounded border border-rt-tertiary px-1 py-0.5 text-[11px]"
+              />
+            </label>
+            <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
+              Cols
+              <input
+                type="number"
+                min={1}
+                max={TABLE_MAX_COLS}
+                value={tableCols}
+                onChange={(event) =>
+                  setTableCols(Math.max(1, Math.min(TABLE_MAX_COLS, Number(event.target.value))))
+                }
+                className="w-full rounded border border-rt-tertiary px-1 py-0.5 text-[11px]"
+              />
+            </label>
+          </div>
+          <p className="mt-1.5 text-[10px] text-rt-ink-faint">
+            {tableRows} × {tableCols} — click a size to place it, or the canvas
+          </p>
+        </fieldset>
+      </div>
+    );
+  }
+
+  function renderTemplateOptions() {
+    return (
+      <div className="w-full">
+        <fieldset className="mb-4">
+          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+            Start from
+          </legend>
+          <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
+            {STUDIO_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                title={template.hint}
+                disabled={isSubmitting}
+                onClick={() => applyTemplate(template)}
+                className="min-h-9 rounded-lg border border-dashed border-rt-tertiary bg-rt-surface px-2 text-[11px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {template.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    );
   }
 
   function surfaceBounds() {
@@ -3259,7 +3613,7 @@ export function DiagramEditor() {
 
   return (
     <form
-      className="grid min-h-0 flex-1 grid-rows-[auto_minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-cols-[260px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden"
+      className="grid min-h-0 flex-1 grid-rows-[auto_minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-cols-[212px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden"
       onKeyDown={onFormKeyDown}
       onSubmit={(event) => void onSubmit(event)}
     >
@@ -3270,311 +3624,7 @@ export function DiagramEditor() {
           </div>
         ) : null}
 
-        {/* Only on a blank canvas: a starter frame is an answer to "where do I
-            begin", and once there is anything here the question is answered. */}
-        {nodes.length === 0 && edges.length === 0 && ink.length === 0 ? (
-          <fieldset className="mb-4">
-            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Start from
-            </legend>
-            <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
-              {STUDIO_TEMPLATES.map((template) => (
-                <button
-                  key={template.id}
-                  type="button"
-                  title={template.hint}
-                  disabled={isSubmitting}
-                  onClick={() => applyTemplate(template)}
-                  className="min-h-9 rounded-lg border border-dashed border-rt-tertiary bg-rt-surface px-2 text-[11px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  {template.label}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-        ) : null}
-
-        <fieldset className="mb-4">
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            Tool
-          </legend>
-          <div className="mt-2 grid grid-cols-3 gap-1.5">
-            {CANVAS_TOOLS.map(({ tool, label, hint, Icon }) => (
-              <button
-                key={tool}
-                type="button"
-                aria-label={label}
-                aria-pressed={canvasTool === tool}
-                title={hint}
-                disabled={isSubmitting}
-                onClick={() => {
-                  setCanvasTool(tool);
-                  // Drawing over a selection would otherwise leave the previous
-                  // selection's handles under the pen.
-                  if (tool !== 'select') {
-                    setSelectedIds([]);
-                    setSelectedEdgeKey(null);
-                    cancelConnection();
-                  }
-                }}
-                className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1.5 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
-                  canvasTool === tool
-                    ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
-                    : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink'
-                }`}
-              >
-                <Icon aria-hidden="true" size={16} />
-                {label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        {canvasTool === 'draw' ? (
-          <fieldset className="mb-4">
-            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Ink
-            </legend>
-            <div className="mt-2 grid grid-cols-8 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`${key} ink`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={inkColor === key}
-                  disabled={isSubmitting}
-                  onSelect={() => setInkColor(key)}
-                />
-              ))}
-            </div>
-            <div className="mt-2 flex gap-1.5">
-              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={STROKE_WIDTH_LABELS[preset]}
-                  name={`${STROKE_WIDTH_LABELS[preset]} pen`}
-                  active={inkWidth === preset}
-                  disabled={isSubmitting}
-                  onSelect={() => setInkWidth(preset)}
-                />
-              ))}
-            </div>
-          </fieldset>
-        ) : null}
-
-        {canvasTool === 'pen' || canvasTool === 'line' || selectedPath ? (
-          <fieldset className="mb-4">
-            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              {selectedPath ? 'Selected line' : 'Line style'}
-            </legend>
-            <div className="mt-2 grid grid-cols-8 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`${key} line`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={selectedPath ? selectedPath.strokeColor === key : pathColor === key}
-                  disabled={isSubmitting}
-                  onSelect={() => {
-                    setPathColor(key);
-                    if (selectedPath) {
-                      replacePath({ ...selectedPath, strokeColor: key }, selectedPath.id);
-                    }
-                  }}
-                />
-              ))}
-            </div>
-            <div className="mt-2 flex gap-1.5">
-              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={STROKE_WIDTH_LABELS[preset]}
-                  name={`${STROKE_WIDTH_LABELS[preset]} line`}
-                  active={
-                    selectedPath ? selectedPath.strokeWidthPreset === preset : pathWidth === preset
-                  }
-                  disabled={isSubmitting}
-                  onSelect={() => {
-                    setPathWidth(preset);
-                    if (selectedPath) {
-                      replacePath({ ...selectedPath, strokeWidthPreset: preset }, selectedPath.id);
-                    }
-                  }}
-                />
-              ))}
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_STROKE_STYLES.map((style) => (
-                <PresetButton
-                  key={style}
-                  label={STROKE_STYLE_LABELS[style]}
-                  name={`${STROKE_STYLE_LABELS[style]} line`}
-                  active={
-                    selectedPath
-                      ? (selectedPath.strokeStyle ?? 'solid') === style
-                      : pathStyle === style
-                  }
-                  disabled={isSubmitting}
-                  onSelect={() => {
-                    setPathStyle(style);
-                    if (selectedPath) {
-                      replacePath({ ...selectedPath, strokeStyle: style }, selectedPath.id);
-                    }
-                  }}
-                />
-              ))}
-            </div>
-
-            {/* A fill only means anything once the shape encloses an area, so it
-                is offered for a closed path and for the pen that can close one. */}
-            {canvasTool === 'pen' || selectedPath?.closed ? (
-              <>
-                <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                  Fill when closed
-                </p>
-                <div className="mt-2 grid grid-cols-8 gap-1.5">
-                  {DIAGRAM_FILL_KEYS.map((key) => (
-                    <SwatchButton
-                      key={key}
-                      label={`${key} shape fill`}
-                      color={DIAGRAM_FILL_COLORS[key]}
-                      active={selectedPath ? selectedPath.fillColor === key : pathFillColor === key}
-                      disabled={isSubmitting}
-                      onSelect={() => {
-                        setPathFillColor(key);
-                        if (selectedPath?.closed) {
-                          replacePath({ ...selectedPath, fillColor: key }, selectedPath.id);
-                        }
-                      }}
-                    />
-                  ))}
-                  <IconButton
-                    label="No shape fill"
-                    className="h-full w-full"
-                    onClick={() => {
-                      setPathFillColor(null);
-                      if (selectedPath) {
-                        // Rebuilt without the key: an explicit `undefined` would
-                        // still be a property, and the write path rejects one.
-                        const rest = { ...selectedPath };
-                        delete rest.fillColor;
-                        replacePath(rest, selectedPath.id);
-                      }
-                    }}
-                  >
-                    <X aria-hidden="true" size={13} />
-                  </IconButton>
-                </div>
-              </>
-            ) : null}
-
-            {selectedPath ? (
-              <div className="mt-2 flex gap-1.5">
-                <Button variant="secondary" onClick={() => setPathEditing((current) => !current)}>
-                  {pathEditing ? 'Done editing points' : 'Edit points'}
-                </Button>
-                {pathEditing && selectedAnchor !== null ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
-                    }
-                  >
-                    {isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
-                      ? 'Make corner'
-                      : 'Make curve'}
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
-              <p className="mt-2 text-[10px] text-rt-ink-faint">
-                Click a line to move it · double-click to edit its points
-              </p>
-            )}
-          </fieldset>
-        ) : null}
-
-        {canvasTool === 'table' ? (
-          <fieldset className="mb-4">
-            <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              New table
-            </legend>
-            {/* The grid is the quick way to pick a size; the two number inputs
-                beside it are the same choice for anyone not using a pointer. */}
-            <div
-              className="mt-2 grid gap-0.5"
-              style={{ gridTemplateColumns: `repeat(${TABLE_PICKER_COLS}, minmax(0, 1fr))` }}
-            >
-              {Array.from({ length: TABLE_PICKER_ROWS * TABLE_PICKER_COLS }, (_, index) => {
-                const row = Math.floor(index / TABLE_PICKER_COLS) + 1;
-                const col = (index % TABLE_PICKER_COLS) + 1;
-                const covered = row <= tableRows && col <= tableCols;
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    aria-label={`${row} by ${col} table`}
-                    onPointerEnter={() => {
-                      setTableRows(row);
-                      setTableCols(col);
-                    }}
-                    onClick={() => {
-                      setTableRows(row);
-                      setTableCols(col);
-                      // Clicking a size is the whole gesture: the table lands in
-                      // the middle of what is on screen rather than asking for a
-                      // second click to say where.
-                      placeTable(
-                        {
-                          x: view.x + view.width / 2 - (col * TABLE_DEFAULT_COL_WIDTH) / 2,
-                          y: view.y + view.height / 2 - (row * TABLE_DEFAULT_ROW_HEIGHT) / 2,
-                        },
-                        row,
-                        col,
-                      );
-                    }}
-                    className={`aspect-square rounded-[2px] border ${
-                      covered
-                        ? 'border-rt-primary bg-rt-primary-tint'
-                        : 'border-rt-tertiary bg-rt-surface'
-                    }`}
-                  />
-                );
-              })}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
-                Rows
-                <input
-                  type="number"
-                  min={1}
-                  max={TABLE_MAX_ROWS}
-                  value={tableRows}
-                  onChange={(event) =>
-                    setTableRows(Math.max(1, Math.min(TABLE_MAX_ROWS, Number(event.target.value))))
-                  }
-                  className="w-full rounded border border-rt-tertiary px-1 py-0.5 text-[11px]"
-                />
-              </label>
-              <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
-                Cols
-                <input
-                  type="number"
-                  min={1}
-                  max={TABLE_MAX_COLS}
-                  value={tableCols}
-                  onChange={(event) =>
-                    setTableCols(Math.max(1, Math.min(TABLE_MAX_COLS, Number(event.target.value))))
-                  }
-                  className="w-full rounded border border-rt-tertiary px-1 py-0.5 text-[11px]"
-                />
-              </label>
-            </div>
-            <p className="mt-1.5 text-[10px] text-rt-ink-faint">
-              {tableRows} × {tableCols} — click a size to place it, or the canvas
-            </p>
-          </fieldset>
-        ) : null}
+        {selectedPath ? renderPenOptions() : null}
 
         {selectedTable && cellRange ? (
           <section className="mt-4" aria-label="Table">
@@ -3743,37 +3793,6 @@ export function DiagramEditor() {
           </section>
         ) : null}
 
-        <fieldset>
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            Elements
-          </legend>
-          <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
-            {DIAGRAM_NODE_SHAPES.map((shape) => {
-              const ShapeIcon = SHAPE_ICONS[shape];
-              const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
-              return (
-                <button
-                  key={shape}
-                  type="button"
-                  draggable={!disabled}
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onClick={() => addElement(shape)}
-                  disabled={disabled}
-                  aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
-                  title={`Click to place a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}, or drag it onto the canvas`}
-                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  <ShapeIcon aria-hidden="true" size={16} />
-                  {DIAGRAM_SHAPE_LABELS[shape]}
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
-
         <div className="mt-4 flex items-center justify-between border-y border-rt-tertiary py-3">
           <span className="text-[11px] text-rt-ink-faint">
             {nodes.length}/{DIAGRAM_NODE_LIMIT} elements
@@ -3815,43 +3834,6 @@ export function DiagramEditor() {
               <Icon aria-hidden="true" size={15} />
             </IconButton>
           ))}
-        </div>
-
-        <div className="mt-3 flex items-center gap-1.5">
-          <IconButton
-            label="Undo diagram change"
-            title="Undo (Ctrl+Z)"
-            disabled={!history.canUndo || isSubmitting}
-            onClick={undoDiagram}
-          >
-            <Undo2 aria-hidden="true" size={16} />
-          </IconButton>
-          <IconButton
-            label="Redo diagram change"
-            title="Redo (Ctrl+Shift+Z)"
-            disabled={!history.canRedo || isSubmitting}
-            onClick={redoDiagram}
-          >
-            <Redo2 aria-hidden="true" size={16} />
-          </IconButton>
-          <IconButton
-            label="Show grid"
-            title={showGrid ? 'Hide the grid' : 'Show the grid'}
-            aria-pressed={showGrid}
-            className={showGrid ? 'border-rt-primary bg-rt-primary-tint text-rt-ink' : ''}
-            onClick={() => setShowGrid((current) => !current)}
-          >
-            <Grid3x3 aria-hidden="true" size={16} />
-          </IconButton>
-          <IconButton
-            label="Snap to grid"
-            title={snapEnabled ? 'Turn snapping off' : 'Turn snapping on'}
-            aria-pressed={snapEnabled}
-            className={snapEnabled ? 'border-rt-primary bg-rt-primary-tint text-rt-ink' : ''}
-            onClick={() => setSnapEnabled((current) => !current)}
-          >
-            <Magnet aria-hidden="true" size={16} />
-          </IconButton>
         </div>
 
         <section className="mt-4" aria-label="Selection">
@@ -4290,6 +4272,26 @@ export function DiagramEditor() {
       </aside>
 
       <section className="relative flex min-h-0 items-center justify-center overflow-auto p-3 sm:p-6">
+        <StudioToolRail
+          tool={canvasTool}
+          onToolChange={selectCanvasTool}
+          disabled={isSubmitting}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
+          onUndo={undoDiagram}
+          onRedo={redoDiagram}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid((current) => !current)}
+          snapEnabled={snapEnabled}
+          onToggleSnap={() => setSnapEnabled((current) => !current)}
+          freehandOptions={renderFreehandOptions()}
+          shapeOptions={renderShapeOptions()}
+          penOptions={renderPenOptions()}
+          tableOptions={renderTableOptions()}
+          templateOptions={renderTemplateOptions()}
+          onAddText={() => addElement('text')}
+        />
+
         <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">
           <IconButton
             label="Zoom out"
