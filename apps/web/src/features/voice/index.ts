@@ -1,7 +1,8 @@
-// Public surface of the voice feature (F11, F12). The session view renders
-// `VoiceNotice` and `MicToggle`; F13's participant list builds on
-// `useVoiceRoom`'s `participants` rather than reaching into this folder.
+// Public surface of the voice feature (F11, F12, F13). The session view
+// renders `VoiceNotice`, `MicToggle` and `ParticipantPanel`; everything else
+// in this folder is internal to them.
 export { MicToggle } from './MicToggle';
+export { ParticipantPanel } from './ParticipantPanel';
 export {
   useVoiceRoom,
   type MicStatus,

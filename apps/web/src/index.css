@@ -281,3 +281,91 @@ body {
     transform: none;
   }
 }
+
+/*
+ * F13 participant rail. The bubble is the waiting room's head at rail size —
+ * same initials, same hashed swatch — with two states added on top: a ring
+ * while someone is talking, and F12's red-slash mic while they are muted.
+ *
+ * The ring is a pseudo-element on a wrapper rather than a border or an outline
+ * on the bubble itself, so lighting it up neither reflows the row nor eats
+ * into the space the initials are centred in.
+ */
+.rt-voice-seat {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.rt-voice-bubble {
+  display: flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 2px rgba(8, 12, 21, 0.12);
+}
+
+.rt-voice-seat[data-size='strip'] .rt-voice-bubble {
+  height: 2rem;
+  width: 2rem;
+  font-size: 11px;
+}
+
+.rt-voice-seat[data-speaking='true']::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  /* Green is the one hue this palette does not otherwise spend, so it reads as
+     "live" rather than as another piece of brand furniture. */
+  border: 2px solid #2f8f5b;
+  animation: rt-voice-speaking 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes rt-voice-speaking {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.09);
+  }
+}
+
+.rt-voice-bubble-muted {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: flex;
+  height: 0.8rem;
+  width: 0.8rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  /* Ringed in the rail's own background so the badge stays legible where it
+     overlaps the bubble's fill. */
+  border: 1.5px solid var(--color-rt-surface-alt);
+  background: #b42318;
+  color: #ffffff;
+}
+
+.rt-voice-seat[data-size='strip'] .rt-voice-bubble-muted {
+  height: 0.9rem;
+  width: 0.9rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The ring still appears and disappears — it is information, not decoration.
+     Only the pulse stops. */
+  .rt-voice-seat[data-speaking='true']::after {
+    animation: none;
+  }
+}

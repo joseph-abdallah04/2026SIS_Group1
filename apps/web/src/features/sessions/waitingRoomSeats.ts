@@ -49,6 +49,23 @@ function hashId(id: string): number {
 }
 
 /**
+ * The swatch for one person, independent of who else is in the room.
+ *
+ * `colorsForParticipants` below walks collisions so no two heads around the
+ * table share a fill — which means a person's colour there depends on the rest
+ * of the set. That trade is right for the waiting room, where names are only a
+ * hover tooltip and the fill is doing the distinguishing. It is wrong anywhere
+ * the roster changes underneath a live view: in F13's voice rail it would
+ * recolour people as others joined or dropped. Names are always visible there,
+ * so a shared fill costs nothing and stability is worth more.
+ */
+export function swatchForId(id: string): SeatSwatch {
+  const swatch = SEAT_PALETTE[hashId(id) % SEAT_PALETTE.length];
+  // The modulo cannot leave the array; this only satisfies the checker.
+  return swatch ?? { background: '#4d6a74', color: '#ffffff' };
+}
+
+/**
  * Preferred swatch is `hash(id)` so a person looks the same across clients.
  * Collisions in this room walk to the next unused swatch; walk order is
  * sorted by id so every client resolves the same way.
@@ -76,7 +93,10 @@ export function colorsForParticipants(ids: readonly string[]): Record<string, Se
 }
 
 /** Leader at index 0 (12 o'clock). Everyone else keeps arrival order. */
-export function orderSeats<T extends { id: string }>(participants: readonly T[], leaderId: string): T[] {
+export function orderSeats<T extends { id: string }>(
+  participants: readonly T[],
+  leaderId: string,
+): T[] {
   const leader = participants.find((person) => person.id === leaderId);
   const others = participants.filter((person) => person.id !== leaderId);
   return leader ? [leader, ...others] : [...others];
