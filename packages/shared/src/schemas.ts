@@ -28,7 +28,7 @@ import {
 export const signupSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  displayName: z.string().min(1).max(50),
+  displayName: z.string().trim().min(1).max(50),
 });
 
 export const loginSchema = z.object({
@@ -36,8 +36,13 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+export const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(50),
+});
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 // === sessions module ===
 

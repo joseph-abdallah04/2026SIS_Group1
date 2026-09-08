@@ -197,13 +197,15 @@ export function DashboardPage() {
 
   // Clears the token even if the request fails: the token is stateless, so the
   // client dropping it *is* the logout (see auth's `/logout` route) — a network
-  // error must not leave someone stuck logged in.
+  // error must not leave someone stuck logged in. Also drops the socket
+  // singleton, otherwise a same-tab login as someone else would keep the
+  // previous identity's live connection around.
   async function onLogout() {
     try {
       await logout();
     } finally {
-      disconnectSocket();
       clearToken();
+      disconnectSocket();
       navigate('/login', { replace: true });
     }
   }
@@ -213,10 +215,16 @@ export function DashboardPage() {
       <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Dashboard</span>
+        <Link
+          to="/settings"
+          className="ml-auto text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
+        >
+          Profile
+        </Link>
         <button
           type="button"
           onClick={() => void onLogout()}
-          className="ml-auto text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
+          className="text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
         >
           Log out
         </button>
@@ -298,13 +306,7 @@ export function SessionPage() {
   );
 }
 
-export function SettingsPage() {
-  return (
-    <main className="flex h-screen items-center justify-center">
-      <h1 className="text-2xl font-bold">Settings</h1>
-    </main>
-  );
-}
+export { SettingsPage } from '../features/settings/SettingsPage';
 
 export function NotFoundPage() {
   return (
