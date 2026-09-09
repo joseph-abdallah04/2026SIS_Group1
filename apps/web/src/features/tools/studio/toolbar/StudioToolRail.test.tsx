@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -16,15 +17,35 @@ function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {
     onToggleGrid: vi.fn(),
     snapEnabled: true,
     onToggleSnap: vi.fn(),
-    freehandOptions: <button type="button">Erase</button>,
-    shapeOptions: <button type="button">Add box</button>,
-    penOptions: <button type="button">Pen width</button>,
-    tableOptions: <button type="button">3 x 3</button>,
-    templateOptions: <button type="button">Flow</button>,
-    onAddText: vi.fn(),
+    freehandOptions: () => <button type="button">Erase</button>,
+    shapeOptions: () => <button type="button">Add box</button>,
+    penOptions: () => <button type="button">Pen width</button>,
+    tableOptions: (close: () => void) => (
+      <button type="button" onClick={close}>
+        3 x 3
+      </button>
+    ),
+    templateOptions: () => <button type="button">Flow</button>,
     ...overrides,
   };
-  render(<StudioToolRail {...props} />);
+  // The rail is controlled: which tool is armed comes back in as a prop, and
+  // some of its behaviour keys off that. A fixture that never updated `tool`
+  // would test a state the app never reaches.
+  function Controlled() {
+    const [tool, setTool] = useState(props.tool);
+    return (
+      <StudioToolRail
+        {...props}
+        tool={tool}
+        onToolChange={(next) => {
+          props.onToolChange(next);
+          setTool(next);
+        }}
+      />
+    );
+  }
+
+  render(<Controlled />);
   return props;
 }
 
@@ -66,12 +87,18 @@ describe('the tool rail', () => {
     expect(props.onToolChange).toHaveBeenCalledWith('pen');
   });
 
-  it('places text straight away rather than arming a tool', async () => {
+  it('arms the text tool rather than placing one immediately', async () => {
+    // Text is placed by pressing the canvas, so it can be positioned as it is
+    // created rather than dropped in the middle and dragged afterwards.
     const user = userEvent.setup();
     const props = renderRail();
     await user.click(screen.getByRole('button', { name: 'Text' }));
-    expect(props.onAddText).toHaveBeenCalledTimes(1);
-    expect(props.onToolChange).not.toHaveBeenCalled();
+    expect(props.onToolChange).toHaveBeenCalledWith('text');
+  });
+
+  it('marks text as the active tool while it is armed', () => {
+    renderRail({ tool: 'text' });
+    expect(screen.getByRole('button', { name: 'Text' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('separates tools, history and canvas settings into their own groups', () => {
@@ -196,6 +223,55 @@ describe('the rail sub-toolbars', () => {
     await user.click(pen);
     await user.click(pen);
     expect(screen.queryByRole('button', { name: 'Pen width' })).toBeNull();
+  });
+
+  it('hangs a tall sub-toolbar from the rail rather than from its button', async () => {
+    // A tall panel anchored to its own button would run off the bottom of the
+    // canvas and its last options could not be reached.
+    const user = userEvent.setup();
+    renderRail();
+    await user.click(screen.getByRole('button', { name: 'Shapes' }));
+
+    const panel = screen.getByRole('group', { name: 'Shapes options' });
+    const rail = screen.getByRole('toolbar', { name: 'Studio tools' });
+    expect(rail.contains(panel)).toBe(false);
+    expect(panel.parentElement).toBe(rail.parentElement);
+  });
+
+  it('hangs a short sub-toolbar from the button that opened it', async () => {
+    // Held beside the control it belongs to, which is where the eye already is.
+    const user = userEvent.setup();
+    renderRail();
+    const templates = screen.getByRole('button', { name: 'Templates' });
+    await user.click(templates);
+
+    const panel = screen.getByRole('group', { name: 'Templates options' });
+    expect(panel.parentElement?.contains(templates)).toBe(true);
+  });
+
+  it('keeps a tool’s own settings open while the canvas is being used', async () => {
+    // Closing the ink panel the moment a stroke starts would mean reopening it
+    // between every stroke.
+    const user = userEvent.setup();
+    renderRail();
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    await user.click(document.body);
+    expect(screen.getByRole('button', { name: 'Erase' })).toBeInTheDocument();
+
+    // Escape still puts it away.
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'Erase' })).toBeNull();
+  });
+
+  it('lets a finished gesture close the sub-toolbar it came from', async () => {
+    // Placing a table is finished business, and a panel left open sits over the
+    // thing that just appeared.
+    const user = userEvent.setup();
+    renderRail();
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '3 x 3' }));
+    expect(screen.queryByRole('button', { name: '3 x 3' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Table' })).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('closes an open sub-toolbar when select is chosen', async () => {

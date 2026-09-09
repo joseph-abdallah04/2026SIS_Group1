@@ -15,7 +15,6 @@
 
 import { packDrawingPoints, unpackDrawingPoints, type StrokePoint } from './drawingContract.js';
 import {
-  DIAGRAM_EDGE_STROKE_WIDTHS,
   DIAGRAM_FILL_COLORS,
   DIAGRAM_FONT_SIZES,
   DIAGRAM_LABEL_INK,
@@ -156,13 +155,25 @@ export interface PathElement {
 export const PATH_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
 export const PATH_DEFAULT_STROKE_WIDTH: DiagramStrokeWidthPreset = 'regular';
 
-/** Paths use the arrow width scale: they are drawn lines, not pen strokes. */
+/**
+ * A drawn line's own width scale, wider apart than the arrow scale it used to
+ * borrow. An arrow's three presets sit close together because an arrow is
+ * connective tissue and a heavy one shouts; a pen line is the drawing, and its
+ * three weights have to be told apart at a glance. Arrows keep their own table,
+ * so no stored diagram's arrows change under this.
+ */
+export const DIAGRAM_PATH_STROKE_WIDTHS: Record<DiagramStrokeWidthPreset, number> = {
+  thin: 1,
+  regular: 3,
+  thick: 6,
+};
+
 export function pathStrokeColor(path: Pick<PathElement, 'strokeColor'>): string {
   return DIAGRAM_STROKE_COLORS[path.strokeColor ?? PATH_DEFAULT_STROKE_COLOR];
 }
 
 export function pathStrokeWidth(path: Pick<PathElement, 'strokeWidthPreset'>): number {
-  return DIAGRAM_EDGE_STROKE_WIDTHS[path.strokeWidthPreset ?? PATH_DEFAULT_STROKE_WIDTH];
+  return DIAGRAM_PATH_STROKE_WIDTHS[path.strokeWidthPreset ?? PATH_DEFAULT_STROKE_WIDTH];
 }
 
 export function pathFill(path: Pick<PathElement, 'closed' | 'fillColor'>): string {

@@ -193,11 +193,13 @@ describe('prepareDiagram', () => {
     });
   });
 
-  it('rejects a node whose label was cleared', () => {
-    expect(prepareDiagram([{ id: 'n1', label: '   ', x: 0, y: 0 }], [])).toEqual({
-      ok: false,
-      error: 'Give every element a label before proposing.',
-    });
+  it('accepts an element with no label, since a shape is a drawing too', () => {
+    // Elements are placed empty now. Refusing to propose one would mean a blank
+    // frame or a plain box could never be sent, which the ink beside it can.
+    const prepared = prepareDiagram([{ id: 'n1', label: '   ', x: 0, y: 0 }], []);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error(prepared.error);
+    expect(prepared.artifact.nodes[0]?.label).toBe('');
   });
 
   it('produces a valid artifact and preserves shapes', () => {

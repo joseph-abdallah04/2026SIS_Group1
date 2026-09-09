@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Grid3x3,
   LayoutTemplate,
@@ -22,7 +22,8 @@ import { Tooltip } from '../../../../components/ui/Tooltip';
  * kept structural rather than imported so the rail stays a dumb component that
  * can be rendered and tested on its own.
  */
-export type RailTool = 'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table';
+export type RailTool =
+  'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template';
 
 /** Which rail button a tool lights up. Erase lives inside Freehand. */
 type RailSlot = 'select' | 'freehand' | 'pen' | 'shapes' | 'text' | 'table' | 'templates';
@@ -35,7 +36,45 @@ const SLOT_FOR_TOOL: Record<RailTool, RailSlot> = {
   // The line tool is drawn from the shapes group: it makes a form, like they do.
   line: 'shapes',
   table: 'table',
+  text: 'text',
+  // A shape or frame picked up from a palette keeps that palette lit while it
+  // is being carried.
+  shape: 'shapes',
+  template: 'templates',
 };
+
+/** The slots that carry a sub-toolbar, and what each one is called. */
+const MENU_LABELS: Partial<Record<RailSlot, string>> = {
+  freehand: 'Freehand',
+  pen: 'Pen',
+  shapes: 'Shapes',
+  table: 'Table',
+  templates: 'Templates',
+};
+
+/**
+ * Where each panel hangs from.
+ *
+ * A tall one starts level with the top of the rail: hung from its own button it
+ * would run off the bottom of the canvas and its last options could not be
+ * reached. A short one is held level with the middle of the button that opened
+ * it, which is where the eye already is.
+ */
+const MENU_ANCHOR: Partial<Record<RailSlot, 'rail' | 'button'>> = {
+  freehand: 'rail',
+  pen: 'rail',
+  shapes: 'rail',
+  table: 'button',
+  templates: 'button',
+};
+
+/**
+ * Panels that stay open while their tool is in use. Closing the ink settings the
+ * moment a stroke starts would mean reopening them between every stroke. They
+ * close when the tool itself is put down — the pen hands the canvas back to
+ * Select once a shape is finished, and its settings go with it.
+ */
+const STICKY_MENUS: readonly RailSlot[] = ['freehand', 'pen'];
 
 interface StudioToolRailProps {
   tool: RailTool;
@@ -49,18 +88,20 @@ interface StudioToolRailProps {
   onToggleGrid: () => void;
   snapEnabled: boolean;
   onToggleSnap: () => void;
-  /** Contents of each sub-toolbar, supplied by the editor. */
-  freehandOptions: ReactNode;
-  shapeOptions: ReactNode;
-  penOptions: ReactNode;
-  tableOptions: ReactNode;
-  templateOptions: ReactNode;
-  /** Places a text element; text is reached often enough for its own button. */
-  onAddText: () => void;
+  /**
+   * Contents of each sub-toolbar, supplied by the editor. Each is handed a
+   * `close` so the gesture it offers can end by shutting the popover — placing
+   * a table or a starter frame is finished business, and leaving the panel open
+   * over the thing that just appeared hides it.
+   */
+  freehandOptions: (close: () => void) => ReactNode;
+  shapeOptions: (close: () => void) => ReactNode;
+  penOptions: (close: () => void) => ReactNode;
+  tableOptions: (close: () => void) => ReactNode;
+  templateOptions: (close: () => void) => ReactNode;
 }
 
-const RAIL_BUTTON =
-  'flex h-9 w-9 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
+const RAIL_BUTTON = `flex h-9 w-9 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
 const RAIL_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
 const RAIL_IDLE =
   'border-transparent bg-transparent text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink';
@@ -78,69 +119,16 @@ function RailGroup({ children, label }: { children: ReactNode; label: string }) 
   );
 }
 
-/** A rail button that opens a sub-toolbar as well as selecting its tool. */
-function RailMenuButton({
-  label,
-  shortcut,
-  Icon,
-  active,
-  disabled,
-  open,
-  onOpenChange,
-  onActivate,
-  children,
-}: {
-  label: string;
-  shortcut?: string;
-  Icon: LucideIcon;
-  active: boolean;
-  disabled?: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onActivate?: () => void;
-  children: ReactNode;
-}) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  return (
-    <span className="relative inline-flex">
-      <Tooltip label={label} shortcut={shortcut}>
-        <button
-          ref={triggerRef}
-          type="button"
-          aria-label={label}
-          aria-pressed={active}
-          aria-expanded={open}
-          disabled={disabled}
-          onClick={() => {
-            onActivate?.();
-            onOpenChange(!open);
-          }}
-          className={`${RAIL_BUTTON} ${active ? RAIL_ACTIVE : RAIL_IDLE}`}
-        >
-          <Icon aria-hidden="true" size={17} strokeWidth={1.8} />
-        </button>
-      </Tooltip>
-      <Popover
-        open={open}
-        onClose={() => onOpenChange(false)}
-        label={`${label} options`}
-        width="w-56"
-        triggerRef={triggerRef}
-      >
-        {children}
-      </Popover>
-    </span>
-  );
-}
-
-/** A rail button that only selects its tool. */
+/** A rail button. Some open a sub-toolbar as well as arming their tool. */
 function RailButton({
   label,
   shortcut,
   Icon,
   active,
   disabled,
+  expanded,
+  buttonRef,
+  menu,
   onClick,
 }: {
   label: string;
@@ -148,21 +136,30 @@ function RailButton({
   Icon: LucideIcon;
   active?: boolean;
   disabled?: boolean;
+  expanded?: boolean;
+  buttonRef?: (element: HTMLButtonElement | null) => void;
+  /** A sub-toolbar anchored to this button rather than to the rail. */
+  menu?: ReactNode;
   onClick: () => void;
 }) {
   return (
-    <Tooltip label={label} shortcut={shortcut}>
-      <button
-        type="button"
-        aria-label={label}
-        {...(active === undefined ? {} : { 'aria-pressed': active })}
-        disabled={disabled}
-        onClick={onClick}
-        className={`${RAIL_BUTTON} ${active ? RAIL_ACTIVE : RAIL_IDLE}`}
-      >
-        <Icon aria-hidden="true" size={17} strokeWidth={1.8} />
-      </button>
-    </Tooltip>
+    <span className="relative inline-flex">
+      <Tooltip label={label} shortcut={shortcut}>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label={label}
+          {...(active === undefined ? {} : { 'aria-pressed': active })}
+          {...(expanded === undefined ? {} : { 'aria-expanded': expanded })}
+          disabled={disabled}
+          onClick={onClick}
+          className={`${RAIL_BUTTON} ${active ? RAIL_ACTIVE : RAIL_IDLE}`}
+        >
+          <Icon aria-hidden="true" size={17} strokeWidth={1.8} />
+        </button>
+      </Tooltip>
+      {menu}
+    </span>
   );
 }
 
@@ -177,6 +174,10 @@ function RailButton({
  * line, pen defaults, table size, starter frames — put them in a sub-toolbar
  * rather than on the rail, so the rail stays one column of icons however many
  * options sit behind it.
+ *
+ * A sub-toolbar is anchored to the *group*, not to the button that opened it, so
+ * every panel starts level with the top of the rail. Anchored to the button, a
+ * tall panel opened from a low one would hang off the bottom of the canvas.
  */
 export function StudioToolRail({
   tool,
@@ -195,21 +196,78 @@ export function StudioToolRail({
   penOptions,
   tableOptions,
   templateOptions,
-  onAddText,
 }: StudioToolRailProps) {
   const [openMenu, setOpenMenu] = useState<RailSlot | null>(null);
+  // Which button to hand focus back to when the panel closes. A single mutable
+  // ref rather than one per button: only ever one panel is open.
+  const openTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const triggers = useRef<Partial<Record<RailSlot, HTMLButtonElement | null>>>({});
   const slot = SLOT_FOR_TOOL[tool];
 
-  function menu(which: RailSlot) {
+  function closeMenu() {
+    setOpenMenu(null);
+  }
+
+  // A tool's own settings belong to a tool that is armed. When the canvas hands
+  // itself back — a finished pen shape, a placed table — the panel goes too.
+  useEffect(() => {
+    if (openMenu && STICKY_MENUS.includes(openMenu) && slot !== openMenu) setOpenMenu(null);
+  }, [openMenu, slot]);
+
+  function toggleMenu(which: RailSlot) {
+    const next = openMenu === which ? null : which;
+    openTriggerRef.current = next ? (triggers.current[next] ?? null) : openTriggerRef.current;
+    setOpenMenu(next);
+  }
+
+  function menuButton(which: RailSlot) {
     return {
-      open: openMenu === which,
-      onOpenChange: (next: boolean) => setOpenMenu(next ? which : null),
+      expanded: openMenu === which,
+      buttonRef: (element: HTMLButtonElement | null) => {
+        triggers.current[which] = element;
+      },
+      // Rendered inside the button only when it is what the panel hangs from.
+      menu:
+        openMenu === which && MENU_ANCHOR[which] === 'button' ? renderMenu('right-center') : null,
     };
+  }
+
+  function renderMenu(placement: 'right' | 'right-center') {
+    if (!openMenu) return null;
+    return (
+      <Popover
+        open
+        onClose={closeMenu}
+        placement={placement}
+        label={`${MENU_LABELS[openMenu] ?? ''} options`}
+        triggerRef={openTriggerRef}
+        dismissOnOutsidePress={!STICKY_MENUS.includes(openMenu)}
+      >
+        {openMenuContent()}
+      </Popover>
+    );
+  }
+
+  function openMenuContent() {
+    switch (openMenu) {
+      case 'freehand':
+        return freehandOptions(closeMenu);
+      case 'pen':
+        return penOptions(closeMenu);
+      case 'shapes':
+        return shapeOptions(closeMenu);
+      case 'table':
+        return tableOptions(closeMenu);
+      case 'templates':
+        return templateOptions(closeMenu);
+      default:
+        return null;
+    }
   }
 
   return (
     <div className="pointer-events-none absolute top-3 left-3 z-20 flex flex-col gap-2 sm:top-4 sm:left-4">
-      <div className="pointer-events-auto">
+      <div className="pointer-events-auto relative">
         <RailGroup label="Studio tools">
           <RailButton
             label="Select"
@@ -218,73 +276,77 @@ export function StudioToolRail({
             active={slot === 'select'}
             disabled={disabled}
             onClick={() => {
-              setOpenMenu(null);
+              closeMenu();
               onToolChange('select');
             }}
           />
-          <RailMenuButton
+          <RailButton
             label="Freehand"
             shortcut="B"
             Icon={Pencil}
             active={slot === 'freehand'}
             disabled={disabled}
-            onActivate={() => onToolChange('draw')}
-            {...menu('freehand')}
-          >
-            {freehandOptions}
-          </RailMenuButton>
-          <RailMenuButton
+            {...menuButton('freehand')}
+            onClick={() => {
+              onToolChange('draw');
+              toggleMenu('freehand');
+            }}
+          />
+          <RailButton
             label="Pen"
             shortcut="P"
             Icon={PenTool}
             active={slot === 'pen'}
             disabled={disabled}
-            onActivate={() => onToolChange('pen')}
-            {...menu('pen')}
-          >
-            {penOptions}
-          </RailMenuButton>
-          <RailMenuButton
+            {...menuButton('pen')}
+            onClick={() => {
+              onToolChange('pen');
+              toggleMenu('pen');
+            }}
+          />
+          <RailButton
             label="Shapes"
             shortcut="R"
             Icon={Shapes}
             active={slot === 'shapes'}
             disabled={disabled}
-            {...menu('shapes')}
-          >
-            {shapeOptions}
-          </RailMenuButton>
+            {...menuButton('shapes')}
+            onClick={() => toggleMenu('shapes')}
+          />
           <RailButton
             label="Text"
             shortcut="T"
             Icon={Type}
+            active={slot === 'text'}
             disabled={disabled}
             onClick={() => {
-              setOpenMenu(null);
-              onAddText();
+              closeMenu();
+              onToolChange('text');
             }}
           />
-          <RailMenuButton
+          <RailButton
             label="Table"
             shortcut="G"
             Icon={Table}
             active={slot === 'table'}
             disabled={disabled}
-            onActivate={() => onToolChange('table')}
-            {...menu('table')}
-          >
-            {tableOptions}
-          </RailMenuButton>
-          <RailMenuButton
+            {...menuButton('table')}
+            onClick={() => {
+              onToolChange('table');
+              toggleMenu('table');
+            }}
+          />
+          <RailButton
             label="Templates"
             Icon={LayoutTemplate}
             active={openMenu === 'templates'}
             disabled={disabled}
-            {...menu('templates')}
-          >
-            {templateOptions}
-          </RailMenuButton>
+            {...menuButton('templates')}
+            onClick={() => toggleMenu('templates')}
+          />
         </RailGroup>
+
+        {openMenu && MENU_ANCHOR[openMenu] === 'rail' ? renderMenu('right') : null}
       </div>
 
       <div className="pointer-events-auto">

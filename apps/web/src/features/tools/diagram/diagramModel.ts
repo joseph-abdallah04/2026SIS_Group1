@@ -33,15 +33,30 @@ export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
 export const DIAGRAM_SHAPE_MEDIA_TYPE = 'application/x-roundtable-diagram-shape';
 
 export const DIAGRAM_SHAPE_LABELS: Record<DiagramNodeShape, string> = {
-  box: 'Box',
+  box: 'Rounded rectangle',
   rectangle: 'Rectangle',
   ellipse: 'Ellipse',
   diamond: 'Decision',
   triangle: 'Triangle',
   cylinder: 'Database',
-  container: 'Container',
+  container: 'Dotted rectangle',
   text: 'Text',
 };
+
+/**
+ * The order the shape palette offers them in, most-reached first. Separate from
+ * `DIAGRAM_NODE_SHAPE_KEYS`, which is the contract's order and must not shuffle
+ * under stored diagrams. Text is absent: it has its own button on the rail.
+ */
+export const DIAGRAM_SHAPE_PALETTE_ORDER = [
+  'rectangle',
+  'box',
+  'ellipse',
+  'diamond',
+  'triangle',
+  'cylinder',
+  'container',
+] as const satisfies readonly DiagramNodeShape[];
 
 export const DIAGRAM_NODE_WIDTH = diagramNodeSize('box').width;
 export const DIAGRAM_NODE_HEIGHT = diagramNodeSize('box').height;
@@ -290,7 +305,9 @@ export function addNode(
     : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
-    label: DIAGRAM_SHAPE_LABELS[shape],
+    // Empty, not named after its shape: the first thing anyone does with a new
+    // element is type into it, and pre-filling means selecting the text first.
+    label: '',
     x: position.x,
     y: position.y,
     shape,
@@ -958,9 +975,9 @@ export function prepareDiagram(
     label: prepareNodeLabel(node.label),
   }));
 
-  if (normalizedNodes.some((node) => !node.label)) {
-    return { ok: false, error: 'Give every element a label before proposing.' };
-  }
+  // Deliberately no "label everything" rule. Elements are created empty so they
+  // can be typed into straight away, and on a studio canvas an unlabelled shape
+  // is a drawing — no less legitimate than a stroke with no text beside it.
 
   const nodeIds = new Set(normalizedNodes.map((node) => node.id));
   if (nodeIds.size !== normalizedNodes.length) {

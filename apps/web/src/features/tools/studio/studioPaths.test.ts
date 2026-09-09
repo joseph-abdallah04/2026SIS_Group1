@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   constrainAngle,
+  DIAGRAM_EDGE_STROKE_WIDTHS,
   pathFill,
   pathHandlePoint,
   pathStrokeWidth,
@@ -173,9 +174,15 @@ describe('path rendering', () => {
     expect(draftAnchors([corner(0, 0)], null)).toHaveLength(1);
   });
 
-  it('fills only a closed path, and uses the arrow width scale', () => {
+  it('fills only a closed path, and spreads its widths wider than an arrow', () => {
     expect(pathFill({ closed: true, fillColor: 'blue' })).not.toBe('none');
     expect(pathFill({ closed: false, fillColor: 'blue' })).toBe('none');
-    expect(pathStrokeWidth({ strokeWidthPreset: 'thick' })).toBe(3.5);
+    // A drawn line is the drawing, so its three weights have to be told apart
+    // at a glance; an arrow's sit close together on purpose.
+    expect(pathStrokeWidth({ strokeWidthPreset: 'thin' })).toBe(1);
+    expect(pathStrokeWidth({ strokeWidthPreset: 'thick' })).toBe(6);
+    expect(pathStrokeWidth({ strokeWidthPreset: 'thick' })).toBeGreaterThan(
+      DIAGRAM_EDGE_STROKE_WIDTHS.thick,
+    );
   });
 });

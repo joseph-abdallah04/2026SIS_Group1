@@ -1,9 +1,11 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-type PopoverPlacement = 'right' | 'top' | 'bottom';
+type PopoverPlacement = 'right' | 'right-center' | 'top' | 'bottom';
 
 const PLACEMENT_CLASSES: Record<PopoverPlacement, string> = {
   right: 'left-full top-0 ml-2',
+  // Held level with the middle of its anchor rather than its top.
+  'right-center': 'left-full top-1/2 ml-2 -translate-y-1/2',
   top: 'bottom-full left-0 mb-2',
   bottom: 'top-full left-0 mt-2',
 };
@@ -14,10 +16,21 @@ interface PopoverProps {
   /** Named for the screen reader, since the trigger is an icon. */
   label: string;
   placement?: PopoverPlacement;
-  /** A width for the panel; without one it sizes to its contents. */
+  /**
+   * An explicit width. Without one the panel is `w-max`: content inside it must
+   * not size itself, since `fit-content` on a child of a shrink-to-fit absolute
+   * box resolves against a width that is not settled yet, and collapses.
+   */
   width?: string;
   /** The control that opened it; focus goes back here on close. */
   triggerRef: React.RefObject<HTMLElement | null>;
+  /**
+   * Whether a press outside closes it. A tool's own settings stay open while
+   * that tool is being used — closing the ink panel the moment a stroke starts
+   * would mean reopening it between every stroke — and are dismissed by Escape,
+   * by the trigger, or by choosing another tool instead.
+   */
+  dismissOnOutsidePress?: boolean;
   children: ReactNode;
 }
 
@@ -39,6 +52,7 @@ export function Popover({
   placement = 'right',
   width,
   triggerRef,
+  dismissOnOutsidePress = true,
   children,
 }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -47,6 +61,7 @@ export function Popover({
     if (!open) return;
 
     function onPointerDown(event: PointerEvent) {
+      if (!dismissOnOutsidePress) return;
       const target = event.target as Node;
       // A press on the trigger is the trigger's own business: letting this
       // close it too would make the second click reopen it immediately.
@@ -67,7 +82,7 @@ export function Popover({
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [open, onClose, triggerRef]);
+  }, [open, onClose, triggerRef, dismissOnOutsidePress]);
 
   if (!open) return null;
 
@@ -76,7 +91,7 @@ export function Popover({
       ref={panelRef}
       role="group"
       aria-label={label}
-      className={`absolute z-30 rounded-xl border border-rt-tertiary bg-rt-surface p-2 shadow-[0_8px_30px_rgba(8,12,21,0.16)] ${PLACEMENT_CLASSES[placement]} ${width ?? ''}`}
+      className={`absolute z-30 w-max rounded-xl border border-rt-tertiary bg-rt-surface p-1.5 shadow-[0_8px_30px_rgba(8,12,21,0.16)] ${PLACEMENT_CLASSES[placement]} ${width ?? ''}`}
     >
       {children}
     </div>

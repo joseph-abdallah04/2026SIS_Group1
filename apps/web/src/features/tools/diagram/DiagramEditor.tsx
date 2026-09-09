@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from 'react';
 import {
   AlignCenterHorizontal,
@@ -18,24 +19,35 @@ import {
   AlignVerticalDistributeCenter,
   ArrowDown,
   ArrowRight,
-  Box,
   CheckCircle2,
+  Columns3,
   Circle,
   ClipboardPaste,
-  Container,
   Copy,
   CopyPlus,
   Database,
   Diamond,
+  DropletOff,
+  Eraser,
+  Grid2x2,
   Link2,
   LoaderCircle,
+  LayoutTemplate,
   Maximize2,
   Minus,
+  MoveHorizontal,
+  PaintBucket,
+  Pencil,
+  PenTool,
   RotateCcw,
   RectangleHorizontal,
+  Rows3,
   Send,
   BringToFront,
   SendToBack,
+  SquareDashed,
+  Spline,
+  Squircle,
   Trash2,
   Triangle,
   Type,
@@ -43,6 +55,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  type LucideIcon,
 } from 'lucide-react';
 import type {
   PathAnchor,
@@ -53,6 +66,7 @@ import type {
   DiagramFontSizePreset,
   DiagramNode,
   DiagramNodeShape,
+  DiagramNodeSize,
   DiagramStrokeKey,
   DiagramStrokeStyle,
   DiagramStrokeWidthPreset,
@@ -109,6 +123,7 @@ import {
   strokePathData,
   reorderStudioElements,
   studioPaintOrder,
+  DIAGRAM_Z_LIMIT,
 } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
@@ -124,6 +139,8 @@ import {
   DIAGRAM_LABEL_LIMIT,
   DIAGRAM_NODE_SHAPES,
   DIAGRAM_SHAPE_LABELS,
+  placeNodePosition,
+  DIAGRAM_SHAPE_PALETTE_ORDER,
   DIAGRAM_SHAPE_MEDIA_TYPE,
   addEdge,
   addNode,
@@ -245,7 +262,8 @@ import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates
  * by `draw`/`erase`: the ink tools only take over the canvas background, so a
  * node is still draggable while the pencil is held.
  */
-type CanvasTool = 'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table';
+type CanvasTool =
+  'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template';
 
 // The size picker offers a sensible span, not the whole allowed range: the
 // number inputs beside it reach the rest.
@@ -301,16 +319,232 @@ interface NodePress {
   clientY: number;
 }
 
-const SHAPE_ICONS: Record<DiagramNodeShape, typeof Box> = {
-  box: Box,
+const SHAPE_ICONS: Record<DiagramNodeShape, LucideIcon> = {
+  box: Squircle,
   rectangle: RectangleHorizontal,
   ellipse: Circle,
   diamond: Diamond,
   triangle: Triangle,
   cylinder: Database,
-  container: Container,
+  container: SquareDashed,
   text: Type,
 };
+
+/**
+ * The colours a sub-toolbar offers. The contract's palette is unchanged and
+ * larger — this is the short list the popovers show, so a tool strip can be one
+ * narrow column. Each list leads with the neutral (black ink, and the fill that
+ * goes with it) because that is the one people reach for without thinking.
+ */
+const QUICK_STROKE_KEYS = ['ink', 'blue', 'green', 'amber', 'rose', 'violet'] as const;
+
+/**
+ * The fill that belongs to each line colour. A closed path is filled with its
+ * own stroke colour rather than a separately chosen one, so the fill control is
+ * a yes/no rather than a second palette.
+ */
+const FILL_FOR_STROKE: Record<DiagramStrokeKey, DiagramFillKey> = {
+  ink: 'neutral',
+  slate: 'neutral',
+  grey: 'neutral',
+  blue: 'blue',
+  green: 'green',
+  amber: 'amber',
+  rose: 'rose',
+  violet: 'violet',
+};
+
+// Far enough apart to tell at a glance: the old 1.5/3/5 read as one weight.
+const STROKE_WIDTH_SAMPLE: Record<DiagramStrokeWidthPreset, number> = {
+  thin: 1,
+  regular: 3.5,
+  thick: 7,
+};
+
+// Long dashes and round dots, so the three styles are three shapes.
+const STROKE_STYLE_DASH: Record<DiagramStrokeStyle, string | undefined> = {
+  solid: undefined,
+  dashed: '6 4',
+  dotted: '0.5 4.5',
+};
+
+const TEMPLATE_ICONS: Record<string, LucideIcon> = {
+  matrix: Grid2x2,
+  // Lanes run across the board and a retro's headings run down it.
+  lanes: Rows3,
+  retro: Columns3,
+  timeline: MoveHorizontal,
+};
+
+/**
+ * A sub-toolbar control, deliberately a size below the rail's 36px. The panel is
+ * a detail of the tool that opened it, and a column of full-size buttons reads
+ * as a second toolbar instead. Swatches are smaller again: a colour needs less
+ * room to be recognised than a glyph does.
+ */
+const SUBTOOL_SIZE = 'h-7 w-7';
+const SUBTOOL_SWATCH_SIZE = 'h-5 w-5';
+
+const TILE_BUTTON = `flex ${SUBTOOL_SIZE} items-center justify-center rounded-lg border border-rt-tertiary bg-rt-surface text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const TILE_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
+
+/**
+ * One run of related controls inside a tool strip. Named for the screen reader
+ * rather than titled on screen: a strip this narrow has no room for headings,
+ * and every control in it carries its own name.
+ */
+function ToolStripGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="flex flex-col items-center gap-1 border-b border-rt-tertiary pb-1.5 last:border-b-0 last:pb-0"
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A titled block; used where a popover is wide enough to carry a heading. */
+function PopoverSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <fieldset>
+      <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+        {label}
+      </legend>
+      <div className="mt-1.5">{children}</div>
+    </fieldset>
+  );
+}
+
+/** A sample of a stroke at one weight, so widths are compared by eye. */
+function StrokeWeightIcon({ weight }: { weight: number }) {
+  return (
+    <svg viewBox="0 0 20 20" width={15} height={15} aria-hidden="true">
+      <line
+        x1="2"
+        y1="10"
+        x2="18"
+        y2="10"
+        stroke="currentColor"
+        strokeWidth={weight}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** The same sample in one dash pattern; the icon is the thing it draws. */
+function StrokeStyleIcon({ dash }: { dash?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" width={15} height={15} aria-hidden="true">
+      <line
+        x1="2"
+        y1="10"
+        x2="18"
+        y2="10"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        {...(dash ? { strokeDasharray: dash } : {})}
+      />
+    </svg>
+  );
+}
+
+/**
+ * A column of colours. Six is what a narrow strip holds and about as many as
+ * anyone scans before picking; the rest of the contract's palette stays
+ * reachable through the properties bar rather than crowding the tool.
+ */
+function ColorChoices<K extends string>({
+  itemName,
+  keys,
+  colorFor,
+  activeKey,
+  disabled,
+  onSelect,
+}: {
+  /** Singular, for each swatch's own name ("rose ink"). */
+  itemName: string;
+  keys: readonly K[];
+  colorFor: (key: K) => string;
+  activeKey: K | null;
+  disabled?: boolean;
+  onSelect: (key: K) => void;
+}) {
+  return (
+    <ToolStripGroup label={`${itemName} colour`}>
+      {keys.map((key) => (
+        <SwatchButton
+          key={key}
+          label={`${key} ${itemName}`}
+          color={colorFor(key)}
+          active={activeKey === key}
+          disabled={disabled}
+          onSelect={() => onSelect(key)}
+        />
+      ))}
+    </ToolStripGroup>
+  );
+}
+
+/**
+ * The paint order with `id` on top.
+ *
+ * Without an explicit order the legacy one applies, and that paints every node
+ * beneath every stroke, path and table — which is why a text element dropped
+ * onto a pen shape disappeared behind it. Adding an element pins the order as it
+ * stands and puts the new one last.
+ *
+ * Returns undefined when there is nothing worth pinning: a canvas of nodes and
+ * arrows alone already paints in the right order, and an artifact that does not
+ * need a `z` should not carry one.
+ */
+function paintOrderWithNewestOnTop(graph: DiagramSnapshot, id: string): string[] | undefined {
+  const mixed =
+    (graph.ink?.length ?? 0) + (graph.paths?.length ?? 0) + (graph.tables?.length ?? 0) > 0;
+  if (!graph.z?.length && !mixed) return undefined;
+
+  const current = graph.z?.length ? graph.z : studioPaintOrder(graph).map((ref) => ref.key);
+  const next = [...current.filter((key) => key !== id), id];
+  // Past the limit the write path would reject the proposal outright, which is
+  // a worse outcome than one element painting in its legacy position.
+  return next.length > DIAGRAM_Z_LIMIT ? graph.z : next;
+}
+
+/** What the cursor is carrying while a tool waits for somewhere to put it. */
+type Ghost =
+  | { kind: 'node'; shape: DiagramNodeShape; size: DiagramNodeSize }
+  | { kind: 'table'; rows: number; cols: number; size: DiagramNodeSize }
+  | { kind: 'template'; size: DiagramNodeSize };
+
+function emptyTableSize({ rows, cols }: { rows: number; cols: number }): DiagramNodeSize {
+  return { width: cols * TABLE_DEFAULT_COL_WIDTH, height: rows * TABLE_DEFAULT_ROW_HEIGHT };
+}
+
+/** A starter frame's footprint, so its ghost is the shape it will occupy. */
+function templateSize(template: StudioTemplate): DiagramNodeSize {
+  const bounds = templateBounds(template);
+  return { width: bounds.width, height: bounds.height };
+}
+
+function templateBounds(template: StudioTemplate) {
+  const nodes = template.build().nodes;
+  const left = Math.min(...nodes.map((node) => node.x));
+  const top = Math.min(...nodes.map((node) => node.y));
+  const right = Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width));
+  const bottom = Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Shown faintly inside a selected element that has no label yet. */
+const NODE_LABEL_PLACEHOLDER = 'Add text';
+
+/** The ghost is held around the cursor, not hung below and right of it. */
+function centredOnCursor(point: DiagramPoint, size: DiagramNodeSize): DiagramPoint {
+  return { x: point.x - size.width / 2, y: point.y - size.height / 2 };
+}
 
 const DIAGRAM_VERTICAL_CHROME_REM = 14;
 
@@ -415,7 +649,7 @@ function SwatchButton({
       aria-pressed={active}
       disabled={disabled}
       onClick={onSelect}
-      className={`aspect-square w-full rounded-full border-2 transition-shadow disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
+      className={`${SUBTOOL_SWATCH_SIZE} shrink-0 rounded-full border-2 transition-shadow disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
         active ? 'border-rt-ink shadow-[0_0_0_2px_rgba(224,163,60,0.45)]' : 'border-rt-tertiary'
       }`}
       style={{ backgroundColor: color }}
@@ -430,8 +664,9 @@ function PresetButton({
   disabled,
   onSelect,
 }: {
-  label: string;
-  /** Accessible name; the visible label alone ("L", "Thick") does not identify the control. */
+  /** What the button shows — an icon wherever one can carry the meaning. */
+  label: ReactNode;
+  /** Accessible name; the icon alone does not identify the control. */
   name: string;
   active: boolean;
   disabled?: boolean;
@@ -445,7 +680,7 @@ function PresetButton({
       aria-pressed={active}
       disabled={disabled}
       onClick={onSelect}
-      className={`min-h-8 flex-1 rounded-lg border px-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
+      className={`flex ${SUBTOOL_SIZE} shrink-0 items-center justify-center rounded-lg border text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
         active
           ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
           : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:bg-rt-surface-alt'
@@ -528,6 +763,16 @@ export function DiagramEditor() {
   const [connectionPointer, setConnectionPointer] = useState<DiagramPoint | null>(null);
   const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  // Where the element being placed would land. Following the cursor lets it be
+  // positioned before it exists, rather than dropped somewhere and dragged.
+  const [ghostCursor, setGhostCursor] = useState<DiagramPoint | null>(null);
+  // Which shape the palette armed. Only meaningful under the `shape` tool.
+  const [pendingShape, setPendingShape] = useState<DiagramNodeShape>('box');
+  // A table or a starter frame that has been picked up but not put down. Both
+  // are null until a size or a frame is chosen: arming the tool alone must not
+  // make a stray press on the canvas produce something.
+  const [pendingTable, setPendingTable] = useState<{ rows: number; cols: number } | null>(null);
+  const [pendingTemplate, setPendingTemplate] = useState<StudioTemplate | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [view, setView] = useState<DiagramView>(DIAGRAM_DEFAULT_VIEW);
   const [showGrid, setShowGrid] = useState(true);
@@ -586,7 +831,10 @@ export function DiagramEditor() {
   const [pathColor, setPathColor] = useState<DiagramStrokeKey>('ink');
   const [pathWidth, setPathWidth] = useState<DiagramStrokeWidthPreset>('regular');
   const [pathStyle, setPathStyle] = useState<DiagramStrokeStyle>('solid');
-  const [pathFillColor, setPathFillColor] = useState<DiagramFillKey | null>(null);
+  // Whether a closed shape is filled. Which colour is not a separate choice:
+  // the fill takes the line's own, so the control is a yes/no.
+  const [pathFilled, setPathFilled] = useState(false);
+  const pathFillColor = pathFilled ? FILL_FOR_STROKE[pathColor] : null;
   const selectedPathId = selectedPathIds.length === 1 ? (selectedPathIds[0] ?? null) : null;
   const selectedTableId = selectedTableIds.length === 1 ? (selectedTableIds[0] ?? null) : null;
   const [cellRange, setCellRange] = useState<CellRange | null>(null);
@@ -681,6 +929,29 @@ export function DiagramEditor() {
   const marqueeRect: DiagramRect | null = marquee
     ? normalizeRect(marquee.origin, marquee.current)
     : null;
+  // The ghost sits exactly where the element will, so what is previewed is what
+  // gets placed rather than something near it.
+  // What is being carried, if anything. Everything placed by pressing the canvas
+  // is previewed the same way, so the answer to "where will this land" is always
+  // the thing under the cursor.
+  const ghost = ((): Ghost | null => {
+    if (canvasTool === 'text')
+      return { kind: 'node', shape: 'text', size: diagramNodeSize('text') };
+    if (canvasTool === 'shape') {
+      return { kind: 'node', shape: pendingShape, size: diagramNodeSize(pendingShape) };
+    }
+    if (canvasTool === 'table' && pendingTable) {
+      return { kind: 'table', ...pendingTable, size: emptyTableSize(pendingTable) };
+    }
+    if (canvasTool === 'template' && pendingTemplate) {
+      return { kind: 'template', size: templateSize(pendingTemplate) };
+    }
+    return null;
+  })();
+  const ghostAt =
+    ghost && ghostCursor
+      ? placeNodePosition(centredOnCursor(ghostCursor, ghost.size), ghost.size, snapEnabled)
+      : { x: 0, y: 0 };
 
   useEffect(() => {
     const shouldClose = () =>
@@ -774,9 +1045,46 @@ export function DiagramEditor() {
     }
 
     const nodes = parentId ? reparentNodes(result.nodes, [result.addedId], parentId) : result.nodes;
-    history.commit({ nodes, edges: history.snapshotRef.current.edges });
+    const graph = history.snapshotRef.current;
+    const order = paintOrderWithNewestOnTop(graph, result.addedId);
+    history.commit({ nodes, edges: graph.edges, ...(order ? { z: order } : {}) });
+    // Placing something is the end of that gesture: whatever tool was armed,
+    // the next thing anyone wants is to move or type into what they just made.
+    setCanvasTool('select');
     selectOnly(result.addedId);
     setSelectedEdgeKey(null);
+  }
+
+  /**
+   * Places a text element under the cursor and opens it for typing.
+   *
+   * Kept as a preview rather than a commit until the text is finished: placing
+   * it and typing into it is one gesture, so it is one undo step — and one that
+   * left no text behind is dropped entirely rather than leaving an empty box.
+   */
+  function placeTextElement(at: DiagramPoint) {
+    clearError();
+    const before = history.snapshotRef.current;
+    const result = addNode(
+      before.nodes,
+      'text',
+      centredOnCursor(at, diagramNodeSize('text')),
+      snapEnabled,
+    );
+    if (!result.ok) {
+      setValidationError(result.error);
+      return;
+    }
+
+    const order = paintOrderWithNewestOnTop(before, result.addedId);
+    history.preview({ nodes: result.nodes, edges: before.edges, ...(order ? { z: order } : {}) });
+    setCanvasTool('select');
+    setGhostCursor(null);
+    const placed = result.nodes.find((node) => node.id === result.addedId);
+    if (!placed) return;
+    // Set before opening the editor, which only fills this in if it is empty.
+    nodeLabelStartRef.current = before;
+    beginInlineNodeEdit(placed);
   }
 
   function cancelConnection() {
@@ -1016,6 +1324,34 @@ export function DiagramEditor() {
   }
 
   function finishInlineNodeEdit() {
+    const graph = history.snapshotRef.current;
+    const editing = editingNodeId
+      ? graph.nodes.find((node) => node.id === editingNodeId)
+      : undefined;
+    // A text element is nothing but its text. With none typed there is nothing
+    // to leave behind — an invisible box that can only be found by hunting for
+    // it is worse than no box at all.
+    if (editing?.shape === 'text' && !prepareNodeLabel(editing.label)) {
+      const start = nodeLabelStartRef.current;
+      nodeLabelStartRef.current = null;
+      setEditingNodeId(null);
+      const wasJustPlaced = Boolean(start) && !start!.nodes.some((node) => node.id === editing.id);
+      if (start && wasJustPlaced) {
+        // Placed and abandoned in the one gesture: it never happened.
+        history.restorePreview(start);
+      } else {
+        if (start) history.restorePreview(start);
+        const from = start ?? graph;
+        history.commit({
+          nodes: from.nodes.filter((node) => node.id !== editing.id),
+          edges: from.edges,
+        });
+      }
+      clearAllSelection();
+      canvasRef.current?.focus({ preventScroll: true });
+      return;
+    }
+
     if (!nodeLabelStartRef.current) {
       setEditingNodeId(null);
       return;
@@ -1221,14 +1557,19 @@ export function DiagramEditor() {
    * clipboard uses, which re-mints every id — so a template can be applied twice
    * without its two copies sharing ids.
    */
-  function applyTemplate(template: StudioTemplate) {
+  function applyTemplate(template: StudioTemplate, at?: DiagramPoint) {
     clearError();
     const graph = history.snapshotRef.current;
     const fragment = template.build();
-    // Laid out at absolute positions, so an empty canvas takes them as designed
-    // and a busy one gets them stepped clear of what is already there.
-    const offset =
-      graph.nodes.length === 0 && graph.edges.length === 0 ? { x: 0, y: 0 } : DIAGRAM_PASTE_OFFSET;
+    // Laid out at absolute positions. Dropped somewhere, the frame moves as a
+    // whole to land its top-left there; without a point it takes the canvas as
+    // designed, stepped clear of anything already on it.
+    const bounds = templateBounds(template);
+    const offset = at
+      ? { x: at.x - bounds.x, y: at.y - bounds.y }
+      : graph.nodes.length === 0 && graph.edges.length === 0
+        ? { x: 0, y: 0 }
+        : DIAGRAM_PASTE_OFFSET;
 
     const pasted = pasteDiagramFragment(graph.nodes, graph.edges, fragment, offset, snapEnabled);
     if (!pasted.ok) {
@@ -1237,6 +1578,9 @@ export function DiagramEditor() {
     }
 
     history.commit({ nodes: pasted.nodes, edges: pasted.edges });
+    setCanvasTool('select');
+    setPendingTemplate(null);
+    setGhostCursor(null);
     applySelection({ ...EMPTY_STUDIO_SELECTION, nodeIds: pasted.addedIds });
     // Applying from a popover unmounts the button that had focus; without moving
     // it back to the canvas it lands on document.body, outside the form, and the
@@ -1283,11 +1627,7 @@ export function DiagramEditor() {
     if (!path) return;
 
     const graph = history.snapshotRef.current;
-    const existingOrder = graph.z;
-    commitPaths(
-      [...(graph.paths ?? []), path],
-      existingOrder ? [...existingOrder, path.id] : undefined,
-    );
+    commitPaths([...(graph.paths ?? []), path], paintOrderWithNewestOnTop(graph, path.id));
 
     // Finishing hands the shape straight back, selected and on the select tool,
     // so the next thing you can do is move it. The table tool already behaves
@@ -1496,6 +1836,12 @@ export function DiagramEditor() {
     setTableEditing(false);
   }
 
+  /** Picks a table up; the press that follows says where it goes. */
+  function pickUpTable(rows: number, cols: number) {
+    setPendingTable({ rows, cols });
+    selectCanvasTool('table');
+  }
+
   function placeTable(at: DiagramPoint, rows = tableRows, cols = tableCols) {
     clearError();
     const table = createTable(rows, cols, at);
@@ -1504,9 +1850,11 @@ export function DiagramEditor() {
       nodes: graph.nodes,
       edges: graph.edges,
       tables: [...(graph.tables ?? []), table],
-      ...(graph.z ? { z: [...graph.z, table.id] } : {}),
+      ...((order) => (order ? { z: order } : {}))(paintOrderWithNewestOnTop(graph, table.id)),
     });
     setCanvasTool('select');
+    setPendingTable(null);
+    setGhostCursor(null);
     // Deliberately unselected. A press on it both selects and starts a drag, so
     // the first thing anyone can do with a new table is put it where they want
     // it; opening it for typing straight away made that impossible.
@@ -1742,266 +2090,243 @@ export function DiagramEditor() {
 
   function renderFreehandOptions() {
     return (
-      <div className="w-full">
-        <div className="mb-2 flex gap-1" role="group" aria-label="Freehand mode">
+      <div className="flex flex-col items-center gap-1.5">
+        <ToolStripGroup label="Freehand mode">
           {(
             [
-              ['draw', 'Freehand'],
-              ['erase', 'Erase'],
+              ['draw', 'Brush', Pencil],
+              ['erase', 'Erase', Eraser],
             ] as const
-          ).map(([mode, modeLabel]) => (
-            <button
+          ).map(([mode, modeLabel, ModeIcon]) => (
+            <PresetButton
               key={mode}
-              type="button"
-              aria-label={modeLabel}
-              aria-pressed={canvasTool === mode}
+              name={modeLabel}
+              active={canvasTool === mode}
               disabled={isSubmitting}
-              onClick={() => selectCanvasTool(mode)}
-              className={`flex-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
-                canvasTool === mode
-                  ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
-                  : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:text-rt-ink'
-              }`}
-            >
-              {modeLabel}
-            </button>
+              onSelect={() => selectCanvasTool(mode)}
+              label={<ModeIcon aria-hidden="true" size={14} />}
+            />
           ))}
-        </div>
-        <fieldset className="mb-4">
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            Ink
-          </legend>
-          <div className="mt-2 grid grid-cols-8 gap-1.5">
-            {DIAGRAM_STROKE_KEYS.map((key) => (
-              <SwatchButton
-                key={key}
-                label={`${key} ink`}
-                color={DIAGRAM_STROKE_COLORS[key]}
-                active={inkColor === key}
-                disabled={isSubmitting}
-                onSelect={() => setInkColor(key)}
-              />
-            ))}
-          </div>
-          <div className="mt-2 flex gap-1.5">
-            {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-              <PresetButton
-                key={preset}
-                label={STROKE_WIDTH_LABELS[preset]}
-                name={`${STROKE_WIDTH_LABELS[preset]} pen`}
-                active={inkWidth === preset}
-                disabled={isSubmitting}
-                onSelect={() => setInkWidth(preset)}
-              />
-            ))}
-          </div>
-        </fieldset>
+        </ToolStripGroup>
+
+        {/* The eraser takes neither a width nor a colour: it removes strokes
+            rather than laying them down, so both go quiet while it is on. */}
+        <ToolStripGroup label="Ink width">
+          {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+            <PresetButton
+              key={preset}
+              label={<StrokeWeightIcon weight={STROKE_WIDTH_SAMPLE[preset]} />}
+              name={`${STROKE_WIDTH_LABELS[preset]} pen`}
+              active={inkWidth === preset}
+              disabled={isSubmitting || canvasTool === 'erase'}
+              onSelect={() => setInkWidth(preset)}
+            />
+          ))}
+        </ToolStripGroup>
+
+        <ColorChoices
+          itemName="ink"
+          keys={QUICK_STROKE_KEYS}
+          colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
+          activeKey={inkColor}
+          disabled={isSubmitting || canvasTool === 'erase'}
+          onSelect={setInkColor}
+        />
       </div>
     );
   }
 
   function renderPenOptions() {
+    const filled = selectedPath ? Boolean(selectedPath.fillColor) : pathFilled;
+
+    function setFilled(next: boolean) {
+      setPathFilled(next);
+      if (!selectedPath) return;
+      if (next) {
+        replacePath(
+          { ...selectedPath, fillColor: FILL_FOR_STROKE[selectedPath.strokeColor ?? pathColor] },
+          selectedPath.id,
+        );
+        return;
+      }
+      // Rebuilt without the key: an explicit `undefined` would still be a
+      // property, and the write path rejects one.
+      const rest = { ...selectedPath };
+      delete rest.fillColor;
+      replacePath(rest, selectedPath.id);
+    }
+
     return (
-      <div className="w-full">
-        <fieldset className="mb-4">
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            {selectedPath ? 'Selected line' : 'Line style'}
-          </legend>
-          <div className="mt-2 grid grid-cols-8 gap-1.5">
-            {DIAGRAM_STROKE_KEYS.map((key) => (
-              <SwatchButton
-                key={key}
-                label={`${key} line`}
-                color={DIAGRAM_STROKE_COLORS[key]}
-                active={selectedPath ? selectedPath.strokeColor === key : pathColor === key}
-                disabled={isSubmitting}
-                onSelect={() => {
-                  setPathColor(key);
-                  if (selectedPath) {
-                    replacePath({ ...selectedPath, strokeColor: key }, selectedPath.id);
-                  }
-                }}
-              />
-            ))}
-          </div>
-          <div className="mt-2 flex gap-1.5">
-            {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-              <PresetButton
-                key={preset}
-                label={STROKE_WIDTH_LABELS[preset]}
-                name={`${STROKE_WIDTH_LABELS[preset]} line`}
-                active={
-                  selectedPath ? selectedPath.strokeWidthPreset === preset : pathWidth === preset
-                }
-                disabled={isSubmitting}
-                onSelect={() => {
-                  setPathWidth(preset);
-                  if (selectedPath) {
-                    replacePath({ ...selectedPath, strokeWidthPreset: preset }, selectedPath.id);
-                  }
-                }}
-              />
-            ))}
-          </div>
-          <div className="mt-1.5 flex gap-1.5">
-            {DIAGRAM_STROKE_STYLES.map((style) => (
-              <PresetButton
-                key={style}
-                label={STROKE_STYLE_LABELS[style]}
-                name={`${STROKE_STYLE_LABELS[style]} line`}
-                active={
-                  selectedPath
-                    ? (selectedPath.strokeStyle ?? 'solid') === style
-                    : pathStyle === style
-                }
-                disabled={isSubmitting}
-                onSelect={() => {
-                  setPathStyle(style);
-                  if (selectedPath) {
-                    replacePath({ ...selectedPath, strokeStyle: style }, selectedPath.id);
-                  }
-                }}
-              />
-            ))}
-          </div>
-
-          {/* A fill only means anything once the shape encloses an area, so it
-                is offered for a closed path and for the pen that can close one. */}
-          {canvasTool === 'pen' || selectedPath?.closed ? (
-            <>
-              <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                Fill when closed
-              </p>
-              <div className="mt-2 grid grid-cols-8 gap-1.5">
-                {DIAGRAM_FILL_KEYS.map((key) => (
-                  <SwatchButton
-                    key={key}
-                    label={`${key} shape fill`}
-                    color={DIAGRAM_FILL_COLORS[key]}
-                    active={selectedPath ? selectedPath.fillColor === key : pathFillColor === key}
-                    disabled={isSubmitting}
-                    onSelect={() => {
-                      setPathFillColor(key);
-                      if (selectedPath?.closed) {
-                        replacePath({ ...selectedPath, fillColor: key }, selectedPath.id);
-                      }
-                    }}
-                  />
-                ))}
-                <IconButton
-                  label="No shape fill"
-                  className="h-full w-full"
-                  onClick={() => {
-                    setPathFillColor(null);
-                    if (selectedPath) {
-                      // Rebuilt without the key: an explicit `undefined` would
-                      // still be a property, and the write path rejects one.
-                      const rest = { ...selectedPath };
-                      delete rest.fillColor;
-                      replacePath(rest, selectedPath.id);
-                    }
-                  }}
-                >
-                  <X aria-hidden="true" size={13} />
-                </IconButton>
-              </div>
-            </>
-          ) : null}
-
-          {selectedPath ? (
-            <div className="mt-2 flex gap-1.5">
-              <Button variant="secondary" onClick={() => setPathEditing((current) => !current)}>
-                {pathEditing ? 'Done editing points' : 'Edit points'}
-              </Button>
-              {pathEditing && selectedAnchor !== null ? (
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
-                  }
-                >
-                  {isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
-                    ? 'Make corner'
-                    : 'Make curve'}
-                </Button>
-              ) : null}
-            </div>
-          ) : (
-            <p className="mt-2 text-[10px] text-rt-ink-faint">
-              Click a line to move it · double-click to edit its points
-            </p>
-          )}
-        </fieldset>
-      </div>
-    );
-  }
-
-  function renderShapeOptions() {
-    return (
-      <div className="w-full">
-        <fieldset>
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            Elements
-          </legend>
-          <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
-            {DIAGRAM_NODE_SHAPES.filter((shape) => shape !== 'text').map((shape) => {
-              const ShapeIcon = SHAPE_ICONS[shape];
-              const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
-              return (
-                <button
-                  key={shape}
-                  type="button"
-                  draggable={!disabled}
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onClick={() => addElement(shape)}
-                  disabled={disabled}
-                  aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
-                  title={`Click to place a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}, or drag it onto the canvas`}
-                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  <ShapeIcon aria-hidden="true" size={16} />
-                  {DIAGRAM_SHAPE_LABELS[shape]}
-                </button>
-              );
-            })}
-            {/* A line makes a form, so it belongs with the shapes — but unlike
-                them it is a tool you draw with, not a node you place. */}
-            <button
-              type="button"
-              aria-label="Line"
-              aria-pressed={canvasTool === 'line'}
+      <div className="flex flex-col items-center gap-1.5">
+        <ToolStripGroup label="Line width">
+          {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+            <PresetButton
+              key={preset}
+              label={<StrokeWeightIcon weight={STROKE_WIDTH_SAMPLE[preset]} />}
+              name={`${STROKE_WIDTH_LABELS[preset]} line`}
+              active={
+                selectedPath ? selectedPath.strokeWidthPreset === preset : pathWidth === preset
+              }
               disabled={isSubmitting}
-              onClick={() => selectCanvasTool('line')}
-              title="Draw a straight line; hold Shift to constrain the angle"
-              className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1.5 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
-                canvasTool === 'line'
-                  ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
-                  : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink'
-              }`}
-            >
-              <Minus aria-hidden="true" size={16} />
-              Line
-            </button>
-          </div>
-        </fieldset>
+              onSelect={() => {
+                setPathWidth(preset);
+                if (selectedPath) {
+                  replacePath({ ...selectedPath, strokeWidthPreset: preset }, selectedPath.id);
+                }
+              }}
+            />
+          ))}
+        </ToolStripGroup>
+
+        <ToolStripGroup label="Line style">
+          {DIAGRAM_STROKE_STYLES.map((style) => (
+            <PresetButton
+              key={style}
+              label={<StrokeStyleIcon dash={STROKE_STYLE_DASH[style]} />}
+              name={`${STROKE_STYLE_LABELS[style]} line`}
+              active={
+                selectedPath ? (selectedPath.strokeStyle ?? 'solid') === style : pathStyle === style
+              }
+              disabled={isSubmitting}
+              onSelect={() => {
+                setPathStyle(style);
+                if (selectedPath) {
+                  replacePath({ ...selectedPath, strokeStyle: style }, selectedPath.id);
+                }
+              }}
+            />
+          ))}
+        </ToolStripGroup>
+
+        {/* A fill only means anything once the shape encloses an area, so it is
+            offered for a closed path and for the pen that can close one. It is
+            a yes/no: the fill takes the line's own colour. */}
+        {canvasTool === 'pen' || selectedPath?.closed ? (
+          <ToolStripGroup label="Fill">
+            <PresetButton
+              label={<PaintBucket aria-hidden="true" size={14} />}
+              name="Fill the shape"
+              active={filled}
+              disabled={isSubmitting}
+              onSelect={() => setFilled(true)}
+            />
+            <PresetButton
+              label={<DropletOff aria-hidden="true" size={14} />}
+              name="Leave the shape transparent"
+              active={!filled}
+              disabled={isSubmitting}
+              onSelect={() => setFilled(false)}
+            />
+          </ToolStripGroup>
+        ) : null}
+
+        <ColorChoices
+          itemName="line"
+          keys={QUICK_STROKE_KEYS}
+          colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
+          activeKey={selectedPath ? (selectedPath.strokeColor ?? null) : pathColor}
+          disabled={isSubmitting}
+          onSelect={(key) => {
+            setPathColor(key);
+            if (!selectedPath) return;
+            const next = { ...selectedPath, strokeColor: key };
+            // The fill follows the line, so recolouring recolours both.
+            if (selectedPath.fillColor) next.fillColor = FILL_FOR_STROKE[key];
+            replacePath(next, selectedPath.id);
+          }}
+        />
+
+        {selectedPath ? (
+          <ToolStripGroup label="Points">
+            <PresetButton
+              label={<Spline aria-hidden="true" size={14} />}
+              name={pathEditing ? 'Done editing points' : 'Edit points'}
+              active={pathEditing}
+              onSelect={() => setPathEditing((current) => !current)}
+            />
+            {pathEditing && selectedAnchor !== null ? (
+              <PresetButton
+                label={
+                  isSmoothAnchor(selectedPath.anchors[selectedAnchor]!) ? (
+                    <PenTool aria-hidden="true" size={14} />
+                  ) : (
+                    <Spline aria-hidden="true" size={14} />
+                  )
+                }
+                name={
+                  isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
+                    ? 'Make corner'
+                    : 'Make curve'
+                }
+                active={false}
+                onSelect={() =>
+                  replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
+                }
+              />
+            ) : null}
+          </ToolStripGroup>
+        ) : null}
       </div>
     );
   }
 
-  function renderTableOptions() {
+  function renderShapeOptions(close: () => void) {
+    const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
     return (
-      <div className="w-full">
-        <fieldset className="mb-4">
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            New table
-          </legend>
+      <div role="group" aria-label="Elements" className="flex flex-col items-center gap-1">
+        {DIAGRAM_SHAPE_PALETTE_ORDER.map((shape) => {
+          const ShapeIcon = SHAPE_ICONS[shape];
+          return (
+            <button
+              key={shape}
+              type="button"
+              draggable={!disabled}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
+              onClick={() => {
+                setPendingShape(shape);
+                selectCanvasTool('shape');
+                close();
+              }}
+              disabled={disabled}
+              aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
+              title={`Pick it up, then press the canvas to place it — or drag it there`}
+              className={TILE_BUTTON}
+            >
+              <ShapeIcon aria-hidden="true" size={14} />
+            </button>
+          );
+        })}
+        {/* A line makes a form, so it belongs with the shapes — but unlike them
+            it is a tool you draw with, not a node you place. */}
+        <button
+          type="button"
+          aria-label="Line"
+          aria-pressed={canvasTool === 'line'}
+          disabled={isSubmitting}
+          onClick={() => {
+            selectCanvasTool('line');
+            close();
+          }}
+          title="Draw a straight line; hold Shift to constrain the angle"
+          className={`${TILE_BUTTON} ${canvasTool === 'line' ? TILE_ACTIVE : ''}`}
+        >
+          <Minus aria-hidden="true" size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  function renderTableOptions(close: () => void) {
+    return (
+      <div className="w-44">
+        <PopoverSection label="New table">
           {/* The grid is the quick way to pick a size; the two number inputs
-                beside it are the same choice for anyone not using a pointer. */}
+              below it are the same choice for anyone not using a pointer. */}
           <div
-            className="mt-2 grid gap-0.5"
+            className="grid gap-0.5"
             style={{ gridTemplateColumns: `repeat(${TABLE_PICKER_COLS}, minmax(0, 1fr))` }}
           >
             {Array.from({ length: TABLE_PICKER_ROWS * TABLE_PICKER_COLS }, (_, index) => {
@@ -2020,17 +2345,8 @@ export function DiagramEditor() {
                   onClick={() => {
                     setTableRows(row);
                     setTableCols(col);
-                    // Clicking a size is the whole gesture: the table lands in
-                    // the middle of what is on screen rather than asking for a
-                    // second click to say where.
-                    placeTable(
-                      {
-                        x: view.x + view.width / 2 - (col * TABLE_DEFAULT_COL_WIDTH) / 2,
-                        y: view.y + view.height / 2 - (row * TABLE_DEFAULT_ROW_HEIGHT) / 2,
-                      },
-                      row,
-                      col,
-                    );
+                    pickUpTable(row, col);
+                    close();
                   }}
                   className={`aspect-square rounded-[2px] border ${
                     covered
@@ -2043,9 +2359,11 @@ export function DiagramEditor() {
           </div>
           <div className="mt-2 flex items-center gap-2">
             <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
-              Rows
+              <Rows3 aria-hidden="true" size={13} className="shrink-0" />
+              <span className="sr-only">Rows</span>
               <input
                 type="number"
+                aria-label="Rows"
                 min={1}
                 max={TABLE_MAX_ROWS}
                 value={tableRows}
@@ -2056,9 +2374,11 @@ export function DiagramEditor() {
               />
             </label>
             <label className="flex flex-1 items-center gap-1 text-[11px] text-rt-ink-muted">
-              Cols
+              <Columns3 aria-hidden="true" size={13} className="shrink-0" />
+              <span className="sr-only">Columns</span>
               <input
                 type="number"
+                aria-label="Cols"
                 min={1}
                 max={TABLE_MAX_COLS}
                 value={tableCols}
@@ -2069,36 +2389,50 @@ export function DiagramEditor() {
               />
             </label>
           </div>
+          {/* Past the grid the size is typed, and typing a number is not a
+              decision to place anything — Place is. */}
+          <Button
+            variant="secondary"
+            className="mt-2 w-full"
+            onClick={() => {
+              pickUpTable(tableRows, tableCols);
+              close();
+            }}
+          >
+            Place {tableRows} × {tableCols}
+          </Button>
           <p className="mt-1.5 text-[10px] text-rt-ink-faint">
-            {tableRows} × {tableCols} — click a size to place it, or the canvas
+            Pick a size, then press the canvas where it should go
           </p>
-        </fieldset>
+        </PopoverSection>
       </div>
     );
   }
 
-  function renderTemplateOptions() {
+  function renderTemplateOptions(close: () => void) {
     return (
-      <div className="w-full">
-        <fieldset className="mb-4">
-          <legend className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            Start from
-          </legend>
-          <div className="mt-2 grid grid-cols-4 gap-1.5 md:grid-cols-2">
-            {STUDIO_TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                title={template.hint}
-                disabled={isSubmitting}
-                onClick={() => applyTemplate(template)}
-                className="min-h-9 rounded-lg border border-dashed border-rt-tertiary bg-rt-surface px-2 text-[11px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                {template.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
+      <div role="group" aria-label="Start from" className="flex flex-col gap-1">
+        {STUDIO_TEMPLATES.map((template) => {
+          const TemplateIcon = TEMPLATE_ICONS[template.id] ?? LayoutTemplate;
+          return (
+            <button
+              key={template.id}
+              type="button"
+              title={template.hint}
+              disabled={isSubmitting}
+              onClick={() => {
+                setPendingTemplate(template);
+                selectCanvasTool('template');
+                close();
+              }}
+              aria-label={template.label}
+              className="flex w-16 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <TemplateIcon aria-hidden="true" size={14} className="shrink-0" />
+              {template.label}
+            </button>
+          );
+        })}
       </div>
     );
   }
@@ -2151,11 +2485,8 @@ export function DiagramEditor() {
     setActiveStroke(null);
     if (!stroke) return;
 
-    const existingOrder = history.snapshotRef.current.z;
-    commitInk(
-      [...(history.snapshotRef.current.ink ?? []), stroke],
-      existingOrder ? [...existingOrder, stroke.id] : undefined,
-    );
+    const graph = history.snapshotRef.current;
+    commitInk([...(graph.ink ?? []), stroke], paintOrderWithNewestOnTop(graph, stroke.id));
   }
 
   function eraseAt(event: PointerEvent<SVGSVGElement>) {
@@ -2205,10 +2536,39 @@ export function DiagramEditor() {
       return;
     }
 
+    if (canvasTool === 'text') {
+      event.preventDefault();
+      clearAllSelection();
+      placeTextElement(surfacePoint(event));
+      return;
+    }
+
+    if (canvasTool === 'shape') {
+      event.preventDefault();
+      clearAllSelection();
+      const size = diagramNodeSize(pendingShape);
+      addElement(pendingShape, centredOnCursor(surfacePoint(event), size));
+      setGhostCursor(null);
+      return;
+    }
+
     if (canvasTool === 'table') {
+      // Arming the tool is not enough — a press only lands a table once a size
+      // has been picked up, so a stray click on the canvas does nothing.
+      if (!pendingTable) return;
       clearTableSelection();
       event.preventDefault();
-      placeTable(surfacePoint(event));
+      const size = emptyTableSize(pendingTable);
+      placeTable(centredOnCursor(surfacePoint(event), size), pendingTable.rows, pendingTable.cols);
+      return;
+    }
+
+    if (canvasTool === 'template') {
+      if (!pendingTemplate) return;
+      event.preventDefault();
+      clearAllSelection();
+      const size = templateSize(pendingTemplate);
+      applyTemplate(pendingTemplate, centredOnCursor(surfacePoint(event), size));
       return;
     }
 
@@ -2292,6 +2652,14 @@ export function DiagramEditor() {
   }
 
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
+    if (canvasTool === 'text' || canvasTool === 'shape' || canvasTool === 'template') {
+      setGhostCursor(surfacePoint(event));
+      return;
+    }
+    if (canvasTool === 'table' && pendingTable) {
+      setGhostCursor(surfacePoint(event));
+      return;
+    }
     if (updatePan(event)) return;
     if (updateResize(event)) return;
     if (updateElementMove(event)) return;
@@ -2880,7 +3248,7 @@ export function DiagramEditor() {
       <g
         key={edgeKey(edge)}
         role="button"
-        aria-label={`Arrow from ${from.label} to ${to.label}`}
+        aria-label={`Arrow from ${from.label || 'Unlabelled'} to ${to.label || 'Unlabelled'}`}
         tabIndex={-1}
         className="cursor-pointer"
         onPointerDown={(event) => {
@@ -3393,9 +3761,13 @@ export function DiagramEditor() {
   function renderNode(node: DiagramNode) {
     const shape = displayShape(node);
     const size = effectiveDiagramNodeSize(node);
+    // New elements arrive empty so they can be typed into straight away. The
+    // layout still needs a string to measure, and the hint it measures is what
+    // a selected empty element shows in place of a label.
+    const hasLabel = node.label.trim().length > 0;
     const labelLayout = diagramNodeLabelLayout({
       ...node,
-      label: node.label || 'Unlabelled',
+      label: hasLabel ? node.label : NODE_LABEL_PLACEHOLDER,
     });
     const selected = selectedIds.includes(node.id);
     const isOnlySelection = selectedId === node.id;
@@ -3526,6 +3898,9 @@ export function DiagramEditor() {
           <text
             textAnchor="middle"
             fill={DIAGRAM_LABEL_INK}
+            // The hint is only offered to whoever has the element selected;
+            // showing it on every empty element would read as content.
+            opacity={hasLabel ? 1 : selected ? 0.35 : 0}
             style={{
               fontSize: `${labelLayout.fontSize}px`,
               fontFamily: 'Inter, system-ui, sans-serif',
@@ -4122,7 +4497,7 @@ export function DiagramEditor() {
             {selectedNode.parentId ? (
               <div className="mt-2 flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[11px] text-rt-ink-faint">
-                  Inside {selectedNodeById(nodes, selectedNode.parentId)?.label ?? 'a container'}
+                  Inside {selectedNodeById(nodes, selectedNode.parentId)?.label || 'a container'}
                 </span>
                 <Button
                   variant="quiet"
@@ -4284,12 +4659,11 @@ export function DiagramEditor() {
           onToggleGrid={() => setShowGrid((current) => !current)}
           snapEnabled={snapEnabled}
           onToggleSnap={() => setSnapEnabled((current) => !current)}
-          freehandOptions={renderFreehandOptions()}
-          shapeOptions={renderShapeOptions()}
-          penOptions={renderPenOptions()}
-          tableOptions={renderTableOptions()}
-          templateOptions={renderTemplateOptions()}
-          onAddText={() => addElement('text')}
+          freehandOptions={renderFreehandOptions}
+          shapeOptions={renderShapeOptions}
+          penOptions={renderPenOptions}
+          tableOptions={renderTableOptions}
+          templateOptions={renderTemplateOptions}
         />
 
         <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">
@@ -4352,6 +4726,7 @@ export function DiagramEditor() {
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
           onPointerCancel={onCanvasPointerUp}
+          onPointerLeave={() => setGhostCursor(null)}
           onLostPointerCapture={onLostPointerCapture}
           onKeyDown={onCanvasKeyDown}
           onKeyUp={onCanvasKeyUp}
@@ -4510,6 +4885,93 @@ export function DiagramEditor() {
               markerEnd="url(#diagram-editor-arrow)"
               pointerEvents="none"
             />
+          ) : null}
+
+          {ghost ? (
+            <>
+              {/* Over everything, so a press lands what is being carried
+                  wherever the ghost is — including on top of a shape or a
+                  table, which keep their own labels for their own double-press. */}
+              <rect
+                aria-hidden="true"
+                x={view.x}
+                y={view.y}
+                width={view.width}
+                height={view.height}
+                fill="transparent"
+              />
+              {ghostCursor ? (
+                <g
+                  aria-hidden="true"
+                  data-testid="placement-ghost"
+                  pointerEvents="none"
+                  transform={`translate(${ghostAt.x}, ${ghostAt.y})`}
+                  opacity={0.55}
+                >
+                  {ghost.kind === 'node' && ghost.shape !== 'text' ? (
+                    <DiagramShapeOutline
+                      shape={ghost.shape}
+                      size={ghost.size}
+                      fill="none"
+                      stroke="#4D6A74"
+                      strokeWidth={1.5}
+                      containerDashArray={LEGACY_CONTAINER_DASH}
+                    />
+                  ) : (
+                    // Text, a table and a starter frame have no single outline
+                    // of their own, so the ghost draws the footprint instead.
+                    <rect
+                      width={ghost.size.width}
+                      height={ghost.size.height}
+                      rx={4}
+                      fill="none"
+                      stroke="#4D6A74"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                    />
+                  )}
+                  {ghost.kind === 'table'
+                    ? [
+                        ...Array.from({ length: ghost.cols - 1 }, (_, index) => (
+                          <line
+                            key={`v${index}`}
+                            x1={(index + 1) * TABLE_DEFAULT_COL_WIDTH}
+                            y1={0}
+                            x2={(index + 1) * TABLE_DEFAULT_COL_WIDTH}
+                            y2={ghost.size.height}
+                            stroke="#4D6A74"
+                            strokeWidth={1}
+                            strokeDasharray="4 3"
+                          />
+                        )),
+                        ...Array.from({ length: ghost.rows - 1 }, (_, index) => (
+                          <line
+                            key={`h${index}`}
+                            x1={0}
+                            y1={(index + 1) * TABLE_DEFAULT_ROW_HEIGHT}
+                            x2={ghost.size.width}
+                            y2={(index + 1) * TABLE_DEFAULT_ROW_HEIGHT}
+                            stroke="#4D6A74"
+                            strokeWidth={1}
+                            strokeDasharray="4 3"
+                          />
+                        )),
+                      ]
+                    : null}
+                  {ghost.kind === 'node' && ghost.shape === 'text' ? (
+                    <text
+                      x={ghost.size.width / 2}
+                      y={ghost.size.height / 2 + 4}
+                      textAnchor="middle"
+                      fill={DIAGRAM_LABEL_INK}
+                      style={{ fontSize: '11px', fontFamily: 'Inter, system-ui, sans-serif' }}
+                    >
+                      {NODE_LABEL_PLACEHOLDER}
+                    </text>
+                  ) : null}
+                </g>
+              ) : null}
+            </>
           ) : null}
 
           {marqueeRect ? (
