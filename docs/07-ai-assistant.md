@@ -6,7 +6,9 @@
 ## What it does
 
 Every participant gets a private ideation buddy in a floating bubble at the bottom-right of a
-session. It knows what is happening in the session, can search the web, and can draft sticky
+session. Opening it swaps the bubble for the panel — the two are never on screen together, and
+the panel grows downward into the space the bubble held, so its top edge does not move. The
+panel's own X, or Escape, closes it and brings the bubble back with focus on it. It knows what is happening in the session, can search the web, and can draft sticky
 notes and diagrams that the user drops onto the shared pinboard with one click.
 
 Nobody else sees your chat. The assistant reads session state and never writes it — the only
@@ -113,6 +115,12 @@ keys, which is not valid JSON. The artifact is nested under `artifact` instead.
 
 ## Security
 
+- **The chat endpoint is member-only.** `POST /api/sessions/:id/assistant/chat` calls
+  `assertSessionMember` before it validates the body and before the stream opens, so a caller
+  who is not in the session gets a plain `403 NOT_SESSION_MEMBER` rather than an SSE stream
+  that opens and then apologises. It matters more here than on a read endpoint: the assistant
+  pulls the live board into its prompt, so without this a logged-in stranger could read a
+  board by guessing a session id.
 - API keys are AES-256-GCM encrypted before they touch the database, decrypted into a local
   variable for one call, and never returned by any endpoint. `GET /api/me/llm-config` answers
   with `hasKey: true`, nothing more.
@@ -171,10 +179,6 @@ integration test exercises `requireAuth` rather than going around it.
 
 ## Known gaps
 
-- **No membership check on the chat endpoint.** Now that auth is real this is the one gap that
-  matters: a logged-in user can open a chat scoped to any session id, and the assistant will
-  describe a board they never joined. `SessionMember` and the membership helpers exist, so it
-  is one call in `routes.ts`. **Do this before the assistant is demoed on real sessions.**
 - **`UserLLMConfig` has no `updatedAt`**, although docs/02 §3 lists one. Adding it needs a
   migration, which belongs to whoever owns that table; the code does not depend on it.
 - **Context is assembled client-side.** `SessionPinboard` builds it from the live board

@@ -69,9 +69,14 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
     );
   };
 
+  // Height note: 748px, not 680. The bubble is hidden while the panel is up, so it reclaims
+  // the 56px button and the 12px gap beneath it — growing downward, which keeps the top edge
+  // where it was so opening reads as the panel unfolding rather than jumping up the screen.
+  // The viewport cap subtracts the container's 6rem bottom offset plus 1.5rem of breathing
+  // room, so a short window cannot push the header off the top of the screen.
   return (
     <aside
-      className="rt-panel pointer-events-auto flex h-[min(680px,calc(100vh-2rem))] w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-2xl"
+      className="rt-panel pointer-events-auto flex h-[min(748px,calc(100dvh-7.5rem))] w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-2xl"
       role="dialog"
       aria-label="AI assistant"
     >

@@ -7,6 +7,10 @@
 // It also owns the conversation. The panel unmounts when collapsed, so state kept there
 // would take the thread with it — and F34 requires history to persist across open/close,
 // plus an unread dot when an answer lands while you are not looking.
+//
+// The bubble and the panel are never on screen together: opening swaps one for the other, and
+// the panel grows into the space the bubble gave up. The panel's own X (and Escape) is what
+// closes it, which is why the button has no open state.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AssistantContext } from '@roundtable/shared';
 
@@ -75,79 +79,72 @@ export function AssistantBubble({ sessionId, getContext }: AssistantBubbleProps)
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
-  const label = open
-    ? 'Close AI assistant'
-    : unread
-      ? 'Open AI assistant — new answer'
-      : 'Open AI assistant';
+  // Closing destroys the panel, so focus would fall to <body> and a keyboard user would lose
+  // their place. Hand it back to the bubble that has just reappeared.
+  const bubbleRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open) bubbleRef.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+
+  const label = unread ? 'Open AI assistant — new answer' : 'Open AI assistant';
 
   return (
     <div className="pointer-events-none fixed right-4 bottom-24 z-50 flex flex-col items-end gap-3 sm:right-6">
-      {open && (
+      {open ? (
         <AssistantPanel
           chat={chat}
           onClose={() => setOpen(false)}
           configured={configured}
           {...(modelLabel ? { modelLabel } : {})}
         />
-      )}
-
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-label={label}
-        aria-expanded={open}
-        className="rt-bubble pointer-events-auto relative grid size-14 place-items-center rounded-full bg-rt-primary-deep text-white shadow-lg ring-1 ring-white/40 transition hover:bg-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
-      >
-        {/* Pulse only while the agent is working — an idle bubble stays still. */}
-        {chat.streaming && (
-          <span
-            className="rt-bubble-ring absolute inset-0 rounded-full bg-rt-primary"
-            aria-hidden="true"
-          />
-        )}
-
-        <AssistantIcon open={open} />
-
-        {/* Unread beats the setup warning: if an answer is waiting, that is the news. */}
-        {!open && unread ? (
-          <span
-            className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-rt-secondary ring-2 ring-white"
-            title="New answer from the assistant"
-            aria-hidden="true"
-          />
-        ) : (
-          configured === false && (
+      ) : (
+        <button
+          ref={bubbleRef}
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={label}
+          aria-haspopup="dialog"
+          className="rt-bubble pointer-events-auto relative grid size-14 place-items-center rounded-full bg-rt-primary-deep text-white shadow-lg ring-1 ring-white/40 transition hover:bg-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
+        >
+          {/* Pulse only while the agent is working — an idle bubble stays still. A turn can
+              still be streaming down here, because collapsing does not cancel it. */}
+          {chat.streaming && (
             <span
-              className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-rt-secondary text-[10px] font-bold text-rt-ink"
-              title="No AI provider configured"
+              className="rt-bubble-ring absolute inset-0 rounded-full bg-rt-primary"
               aria-hidden="true"
-            >
-              !
-            </span>
-          )
-        )}
-      </button>
+            />
+          )}
+
+          <AssistantIcon />
+
+          {/* Unread beats the setup warning: if an answer is waiting, that is the news. */}
+          {unread ? (
+            <span
+              className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-rt-secondary ring-2 ring-white"
+              title="New answer from the assistant"
+              aria-hidden="true"
+            />
+          ) : (
+            configured === false && (
+              <span
+                className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-rt-secondary text-[10px] font-bold text-rt-ink"
+                title="No AI provider configured"
+                aria-hidden="true"
+              >
+                !
+              </span>
+            )
+          )}
+        </button>
+      )}
     </div>
   );
 }
 
-/** Sparkles when collapsed (F34), a chevron to dismiss when the panel is open. */
-function AssistantIcon({ open }: { open: boolean }) {
-  if (open) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="relative size-6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-      >
-        <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-
+/** Sparkles (F34). There is no open state: the button is gone while the panel is up. */
+function AssistantIcon() {
   return (
     <svg viewBox="0 0 32 32" className="relative size-7 fill-white" aria-hidden="true">
       <path

@@ -16,6 +16,7 @@ import {
 import { SseWriter } from '../../lib/sse.js';
 import { getUserId, requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
+import { assertSessionMember } from '../sessions/index.js';
 import { runAssistantTurn } from './agent.js';
 import { buildSessionContext } from './context.js';
 import {
@@ -95,6 +96,11 @@ assistantRouter.post('/sessions/:id/assistant/chat', requireAuth, async (req, re
   let request: ReturnType<typeof assistantChatRequestSchema.parse>;
   try {
     userId = getUserId(req);
+    // Before anything else: the assistant reads the live board into its prompt, so a caller
+    // who is not in this session must not get a turn at all. Membership is checked ahead of
+    // body validation so a non-member learns nothing about the session from the error, and
+    // ahead of the stream so this can still be a plain 403 rather than an SSE error frame.
+    await assertSessionMember(sessionId, userId);
     const parsed = assistantChatRequestSchema.safeParse(req.body);
     if (!parsed.success) throw validationError(parsed.error.issues);
     request = parsed.data;

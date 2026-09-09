@@ -56,6 +56,12 @@ vi.mock('../../db.js', () => ({
   },
 }));
 
+// --- membership, as a controllable edge ------------------------------------
+const assertSessionMember = vi.fn();
+vi.mock('../sessions/index.js', () => ({
+  assertSessionMember: (...args: unknown[]) => assertSessionMember(...args),
+}));
+
 // --- fake LLM provider -----------------------------------------------------
 const script: LlmStreamChunk[][] = [];
 vi.mock('./llm.js', () => ({
@@ -69,7 +75,7 @@ vi.mock('./llm.js', () => ({
 }));
 
 const { assistantRouter } = await import('./routes.js');
-const { errorHandler } = await import('../../middleware/error.js');
+const { errorHandler, ApiError } = await import('../../middleware/error.js');
 const { signToken } = await import('../auth/jwt.js');
 
 // A real token from the real signer: every request below is authenticated the way a browser
@@ -102,6 +108,8 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  assertSessionMember.mockReset();
+  assertSessionMember.mockResolvedValue(undefined);
   configs.clear();
   sessions.clear();
   sessions.set('s1', { id: 's1', title: 'Pick a database', status: 'active' });
@@ -250,6 +258,38 @@ describe('llm-config endpoints (F33)', () => {
 });
 
 describe('chat stream (F35/F36)', () => {
+  // The assistant reads the live board into its prompt, so this is the gate that stops a
+  // logged-in stranger reading a board they never joined by guessing a session id.
+  it('refuses a caller who is not a member of the session', async () => {
+    assertSessionMember.mockRejectedValue(
+      new ApiError(403, 'You are not a member of this session', 'NOT_SESSION_MEMBER'),
+    );
+
+    const response = await chat({ message: 'What have we proposed?' });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: 'NOT_SESSION_MEMBER' });
+    // A plain JSON refusal, not an SSE stream that opens and then apologises.
+    expect(response.headers.get('content-type')).toMatch(/application\/json/);
+  });
+
+  it('checks membership against the session in the URL, for the caller', async () => {
+    await chat({ message: 'hello' }, 's1');
+    expect(assertSessionMember).toHaveBeenCalledWith('s1', USER_ID);
+  });
+
+  it('never reaches the provider when membership fails', async () => {
+    assertSessionMember.mockRejectedValue(
+      new ApiError(403, 'You are not a member of this session', 'NOT_SESSION_MEMBER'),
+    );
+    script.push([{ type: 'content', text: 'should never be sent' }]);
+
+    await chat({ message: 'hello' });
+
+    // The scripted turn is still queued: nothing consumed it.
+    expect(script).toHaveLength(1);
+  });
+
   beforeEach(async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',
