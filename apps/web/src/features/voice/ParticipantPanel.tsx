@@ -82,8 +82,18 @@ export function ParticipantPanel({ participants, status }: ParticipantPanelProps
         </button>
         {/* Scrolls rather than truncating to a "+N". Cutting the list short
             would sooner or later hide whoever is talking behind a counter,
-            which is the one thing the strip exists to keep visible. */}
-        <ul className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto">
+            which is the one thing the strip exists to keep visible.
+
+            Which makes this the scroll container, and `overflow-y: auto`
+            computes `overflow-x` to `auto` with it — so the padding here is the
+            ring's room rather than decoration. The speaking halo sits at
+            `inset: -3px` and pulses ~4.7px past a 32px bubble, the mute badge
+            2px past its right edge, and without padding the strip clips exactly
+            the two things it stays open to show. A 44px rail leaves 6px either
+            side of the bubble, so that room comes out of the strip and the rail
+            keeps F24's width. The gap is 2.5 for the same reason: at 2, two
+            pulsing rings meet in the 8px between them. */}
+        <ul className="flex min-h-0 w-full flex-1 flex-col items-center gap-2.5 overflow-y-auto p-1.5">
           {seats.map((person) => {
             const isSpeaking = speaking.has(person.identity);
             const label = `${person.name}${person.isLocal ? ' (you)' : ''}${stateNote(
