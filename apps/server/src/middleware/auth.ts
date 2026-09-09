@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 
 import { verifyToken } from '../modules/auth/jwt.js';
+import { ApiError } from './error.js';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -32,4 +33,16 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 
   req.userId = result.userId;
   next();
+}
+
+/**
+ * The authenticated user's id. Throws rather than returning undefined, so a handler that
+ * is accidentally mounted without `requireAuth` fails as a 401 instead of querying with
+ * `userId: undefined`.
+ */
+export function getUserId(req: Request): string {
+  if (!req.userId) {
+    throw new ApiError(401, 'Not authenticated', 'UNAUTHENTICATED');
+  }
+  return req.userId;
 }

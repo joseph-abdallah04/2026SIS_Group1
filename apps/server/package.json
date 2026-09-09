@@ -14,7 +14,8 @@
     "db:seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "dotenv -e ../../.env -- tsx --conditions=development src/modules/assistant/eval/run.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

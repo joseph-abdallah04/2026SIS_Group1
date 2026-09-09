@@ -8,6 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './env.js';
 import { errorHandler } from './middleware/error.js';
+import { assistantRouter } from './modules/assistant/index.js';
 import { authRoutes, usersRoutes } from './modules/auth/index.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
 import { createSessionsRoutes } from './modules/sessions/index.js';
@@ -33,6 +34,8 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'roundtable-server' });
 });
 
+// Module owners mount their routers here (docs/02 §6). Each module exports an index.ts
+// with its public surface.
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 // Two routers share the `/api/sessions` prefix, so registration order
@@ -46,6 +49,14 @@ app.use('/api/sessions', pinboardRoutes);
 // (docs/06 §6): pinboard has `:id/proposals*`, voice has `:id/livekit-token`.
 app.use('/api/sessions', voiceRoutes);
 
+// The assistant owns `/api/me/llm-config*` and `/api/sessions/:id/assistant/*`; both live
+// under one router, so it mounts at `/api` rather than a module-shaped prefix. It goes
+// after the pinboard router — Express tries each in turn, and the pinboard's more specific
+// `/api/sessions` paths should match first.
+app.use('/api', assistantRouter);
+
+// Error handler goes after every route: Express only reaches it for requests the routes
+// above threw on.
 app.use(errorHandler);
 
 // Serve the built SPA in production (docs/02 §9). No-op in dev, where Vite serves the frontend.

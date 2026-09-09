@@ -22,6 +22,12 @@
       "node": "./dist/schemas.js",
       "default": "./src/schemas.ts"
     },
+    "./assistant": {
+      "types": "./src/assistant.ts",
+      "development": "./src/assistant.ts",
+      "node": "./dist/assistant.js",
+      "default": "./src/assistant.ts"
+    },
     "./assets/roundtable-logo.svg": "./src/assets/roundtable-logo.svg"
   },
   "scripts": {

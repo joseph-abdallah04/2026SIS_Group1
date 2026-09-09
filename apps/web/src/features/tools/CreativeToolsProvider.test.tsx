@@ -44,6 +44,52 @@ function ExtendButton({ proposal }: { proposal: BoardItem }) {
 }
 
 describe('creative sticky flow', () => {
+  // The assistant proposes straight from its chat panel, without ever opening or closing a
+  // studio tool — and closing is what used to release the write lock. One propose per page
+  // load, every one after it a silent `false` the panel could only report as a rejection.
+  it('allows a second proposal without an editor being opened and closed in between', async () => {
+    // Typed so the assertion below can read what the second call actually sent.
+    const propose = vi.fn<(input: ProposalCreateInput) => Promise<void>>(async () => undefined);
+
+    function TwiceButton() {
+      const { submitArtifact } = useCreativeTools();
+      return (
+        <button
+          onClick={async () => {
+            const first = await submitArtifact({ type: 'sticky', text: 'one', color: 'yellow' });
+            const second = await submitArtifact({ type: 'sticky', text: 'two', color: 'blue' });
+            results.push(first, second);
+          }}
+        >
+          Propose twice
+        </button>
+      );
+    }
+    const results: boolean[] = [];
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/sessions/demo']}>
+        <CreativeToolsProvider
+          isLive
+          proposals={[]}
+          propose={propose}
+          editProposal={async () => {}}
+        >
+          <TwiceButton />
+        </CreativeToolsProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Propose twice' }));
+
+    expect(results).toEqual([true, true]);
+    expect(propose).toHaveBeenCalledTimes(2);
+    expect(propose.mock.calls[1]?.[0]).toMatchObject({
+      artifactJson: { type: 'sticky', text: 'two' },
+    });
+  });
+
   it('trims and proposes a coloured sticky through the existing write contract', async () => {
     const user = userEvent.setup();
     const propose = vi.fn(async () => undefined);

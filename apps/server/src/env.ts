@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
@@ -27,7 +28,9 @@ const envSchema = z.object({
   LIVEKIT_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   LIVEKIT_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   LIVEKIT_API_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
-  LLM_KEY_ENCRYPTION_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  // AES-256-GCM key for LLM API keys at rest (docs/05 §8). 16+ chars so the derived key
+  // has real entropy; generate with `openssl rand -base64 32`.
+  LLM_KEY_ENCRYPTION_SECRET: z.preprocess(emptyToUndefined, z.string().min(16).optional()),
 });
 
 const parsed = envSchema.safeParse(process.env);

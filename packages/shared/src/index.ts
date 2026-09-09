@@ -210,3 +210,8 @@ export interface VoiceTokenResponse {
 }
 
 // === assistant module ===
+
+// Per-user LLM config (F33), session context (F35), agent tools (F36) and the SSE stream
+// event union consumed by the chat panel. Artifact shapes live in the pinboard section
+// above — the assistant produces those, it does not define them.
+export * from './assistant.js';
