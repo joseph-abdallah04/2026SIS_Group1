@@ -9,23 +9,16 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  AlignCenterHorizontal,
-  AlignCenterVertical,
-  AlignEndHorizontal,
-  AlignEndVertical,
-  AlignHorizontalDistributeCenter,
-  AlignStartHorizontal,
-  AlignStartVertical,
-  AlignVerticalDistributeCenter,
   ArrowDown,
   ArrowRight,
   CheckCircle2,
   Columns3,
   Circle,
-  ClipboardPaste,
-  Copy,
-  CopyPlus,
   Database,
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Bold,
   Diamond,
   DropletOff,
   Eraser,
@@ -48,6 +41,7 @@ import {
   SquareDashed,
   Spline,
   Squircle,
+  Table,
   Trash2,
   Triangle,
   Type,
@@ -70,6 +64,7 @@ import type {
   DiagramStrokeKey,
   DiagramStrokeStyle,
   DiagramStrokeWidthPreset,
+  TableCellAlign,
 } from '@roundtable/shared';
 import {
   DIAGRAM_FILL_COLORS,
@@ -129,7 +124,7 @@ import {
 import { Button } from '../../../components/ui/Button';
 import { DiagramShapeOutline } from '../../../components/ui/DiagramShapeOutline';
 import { IconButton } from '../../../components/ui/IconButton';
-import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
+import { DIAGRAM_NODE_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
 import {
   DIAGRAM_CANVAS_HEIGHT,
@@ -144,20 +139,17 @@ import {
   DIAGRAM_SHAPE_MEDIA_TYPE,
   addEdge,
   addNode,
-  alignNodes,
   clampNodesInsideContainer,
   clearEdgeStyle,
-  clearNodeSize,
-  clearNodeStyle,
   clientPointToDiagramPoint,
   containerAtPoint,
   deleteContainerWithContents,
   deleteEdge,
   deleteNodesWithEdges,
-  distributeNodes,
   edgeKey,
   draggedSelectionRoots,
   moveNodesBy,
+  diagramRectToClientRect,
   nodeBounds,
   normalizeRect,
   pasteDiagramFragment,
@@ -169,7 +161,6 @@ import {
   reparentNodes,
   resizeNode,
   styleEdge,
-  styleNodes,
   ungroupContainer,
   type DiagramAlignMode,
   type DiagramDistributeAxis,
@@ -191,6 +182,7 @@ import {
 } from './diagramView';
 import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
+import { StudioPropertiesBar } from '../studio/toolbar/StudioPropertiesBar';
 import { StudioToolRail } from '../studio/toolbar/StudioToolRail';
 import {
   createInkId,
@@ -218,7 +210,9 @@ import {
   type StudioSelection,
 } from '../studio/studioSelection';
 import {
+  cellsInRange,
   clampCellRef,
+  wholeTableRange,
   createTable,
   deleteColumn,
   deleteRow,
@@ -255,6 +249,19 @@ import {
   isNearFirstAnchor,
   nextAnchorPoint,
 } from '../studio/studioPaths';
+import {
+  commonProperties,
+  type StudioPropertyDescriptor,
+  type StudioTarget,
+} from '../studio/studioProperties';
+import {
+  alignOffsets,
+  distributeOffsets,
+  type ArrangeBox,
+  type ArrangeOffset,
+} from '../studio/studioArrange';
+import { Popover } from '../../../components/ui/Popover';
+import { Tooltip } from '../../../components/ui/Tooltip';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 
 /**
@@ -337,6 +344,7 @@ const SHAPE_ICONS: Record<DiagramNodeShape, LucideIcon> = {
  * goes with it) because that is the one people reach for without thinking.
  */
 const QUICK_STROKE_KEYS = ['ink', 'blue', 'green', 'amber', 'rose', 'violet'] as const;
+const QUICK_FILL_KEYS = ['surface', 'blue', 'green', 'amber', 'rose', 'violet'] as const;
 
 /**
  * The fill that belongs to each line colour. A closed path is filled with its
@@ -388,17 +396,53 @@ const SUBTOOL_SWATCH_SIZE = 'h-5 w-5';
 const TILE_BUTTON = `flex ${SUBTOOL_SIZE} items-center justify-center rounded-lg border border-rt-tertiary bg-rt-surface text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
 const TILE_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
 
+const CELL_ALIGN_ICONS: Record<TableCellAlign, LucideIcon> = {
+  left: AlignLeft,
+  center: AlignCenter,
+  right: AlignRight,
+};
+
+const BAR_CONTROL =
+  'flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
+
 /**
  * One run of related controls inside a tool strip. Named for the screen reader
  * rather than titled on screen: a strip this narrow has no room for headings,
  * and every control in it carries its own name.
  */
-function ToolStripGroup({ label, children }: { label: string; children: ReactNode }) {
+function ToolStripGroup({
+  label,
+  spacious = false,
+  row = false,
+  children,
+}: {
+  label: string;
+  /** Swatches are small and round; crowded, they read as one striped block. */
+  spacious?: boolean;
+  /**
+   * Laid out across rather than down. The rail's panels hang off a vertical
+   * column and read downwards; the properties bar's hang off a horizontal one
+   * and have to read the same way as the bar they came from.
+   */
+  row?: boolean;
+  children: ReactNode;
+}) {
+  const spacing = spacious
+    ? row
+      ? 'gap-2 px-1.5'
+      : 'gap-2 py-1.5'
+    : row
+      ? 'gap-1 pr-2 pl-2 first:pl-0 last:pr-0'
+      : 'gap-1 pb-1.5';
   return (
     <div
       role="group"
       aria-label={label}
-      className="flex flex-col items-center gap-1 border-b border-rt-tertiary pb-1.5 last:border-b-0 last:pb-0"
+      className={`flex items-center ${
+        row
+          ? 'border-r border-rt-tertiary last:border-r-0 last:pr-0'
+          : 'flex-col border-b border-rt-tertiary last:border-b-0 last:pb-0'
+      } ${spacing}`}
     >
       {children}
     </div>
@@ -459,22 +503,29 @@ function StrokeStyleIcon({ dash }: { dash?: string }) {
  */
 function ColorChoices<K extends string>({
   itemName,
+  row = false,
   keys,
   colorFor,
   activeKey,
   disabled,
   onSelect,
+  onClear,
+  clearName,
 }: {
   /** Singular, for each swatch's own name ("rose ink"). */
   itemName: string;
+  row?: boolean;
   keys: readonly K[];
   colorFor: (key: K) => string;
   activeKey: K | null;
   disabled?: boolean;
   onSelect: (key: K) => void;
+  /** Offered where "none" is a real answer — a shape can have no fill at all. */
+  onClear?: () => void;
+  clearName?: string;
 }) {
   return (
-    <ToolStripGroup label={`${itemName} colour`}>
+    <ToolStripGroup label={`${itemName} colour`} spacious row={row}>
       {keys.map((key) => (
         <SwatchButton
           key={key}
@@ -485,6 +536,11 @@ function ColorChoices<K extends string>({
           onSelect={() => onSelect(key)}
         />
       ))}
+      {onClear ? (
+        <IconButton label={clearName ?? 'None'} className={SUBTOOL_SIZE} onClick={onClear}>
+          <X aria-hidden="true" size={13} />
+        </IconButton>
+      ) : null}
     </ToolStripGroup>
   );
 }
@@ -536,6 +592,60 @@ function templateBounds(template: StudioTemplate) {
   const right = Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width));
   const bottom = Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height));
   return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * A control on the properties bar: an icon that opens its own choices.
+ *
+ * Defined here rather than inside the editor: a component declared during
+ * render is a new component type every time, so React would tear its subtree
+ * down and rebuild it on every keystroke — taking the focus in an open panel
+ * with it.
+ */
+function BarMenu({
+  label,
+  icon,
+  disabled,
+  openMenu,
+  onOpenChange,
+  children,
+}: {
+  label: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  openMenu: string | null;
+  onOpenChange: (next: string | null) => void;
+  children: (close: () => void) => ReactNode;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const open = openMenu === label;
+
+  return (
+    <span className="relative inline-flex">
+      <Tooltip label={label} placement="bottom">
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-label={label}
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => onOpenChange(open ? null : label)}
+          className={BAR_CONTROL}
+        >
+          {icon}
+        </button>
+      </Tooltip>
+      <Popover
+        open={open}
+        onClose={() => onOpenChange(null)}
+        label={`${label} options`}
+        placement="top-center"
+        triggerRef={triggerRef}
+      >
+        {children(() => onOpenChange(null))}
+      </Popover>
+    </span>
+  );
 }
 
 /** Shown faintly inside a selected element that has no label yet. */
@@ -599,6 +709,7 @@ const FONT_SIZE_LABELS: Record<DiagramFontSizePreset, string> = {
   small: 'S',
   medium: 'M',
   large: 'L',
+  xlarge: 'XL',
 };
 
 const STROKE_STYLE_LABELS: Record<DiagramStrokeStyle, string> = {
@@ -615,16 +726,6 @@ const LAYOUT_DIRECTIONS: {
   { direction: 'TB', label: 'Arrange top to bottom', Icon: ArrowDown },
   { direction: 'LR', label: 'Arrange left to right', Icon: ArrowRight },
 ];
-
-const ALIGN_ACTIONS: { mode: DiagramAlignMode; label: string; Icon: typeof AlignStartVertical }[] =
-  [
-    { mode: 'left', label: 'Align left edges', Icon: AlignStartVertical },
-    { mode: 'centerX', label: 'Align horizontal centres', Icon: AlignCenterVertical },
-    { mode: 'right', label: 'Align right edges', Icon: AlignEndVertical },
-    { mode: 'top', label: 'Align top edges', Icon: AlignStartHorizontal },
-    { mode: 'centerY', label: 'Align vertical centres', Icon: AlignCenterHorizontal },
-    { mode: 'bottom', label: 'Align bottom edges', Icon: AlignEndHorizontal },
-  ];
 
 // Sized by its grid column rather than fixed: seven fixed 28px swatches overflow
 // the 260px sidebar.
@@ -766,6 +867,8 @@ export function DiagramEditor() {
   // Where the element being placed would land. Following the cursor lets it be
   // positioned before it exists, rather than dropped somewhere and dragged.
   const [ghostCursor, setGhostCursor] = useState<DiagramPoint | null>(null);
+  // Which of the properties bar's controls has its choices open.
+  const [openBarMenu, setOpenBarMenu] = useState<string | null>(null);
   // Which shape the palette armed. Only meaningful under the `shape` tool.
   const [pendingShape, setPendingShape] = useState<DiagramNodeShape>('box');
   // A table or a starter frame that has been picked up but not put down. Both
@@ -866,7 +969,9 @@ export function DiagramEditor() {
   const inkPointerRef = useRef<number | null>(null);
   const eraseStartRef = useRef<DiagramSnapshot | null>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
-  const labelInputRef = useRef<HTMLInputElement>(null);
+  // The box the floating toolbars are positioned inside; the canvas is centred
+  // within it, so the two do not share an origin.
+  const canvasFrameRef = useRef<HTMLElement>(null);
   const edgeLabelInputRef = useRef<HTMLInputElement>(null);
   const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
@@ -892,18 +997,6 @@ export function DiagramEditor() {
         : null
     : null;
   const isSubmitting = submissionStatus === 'submitting';
-  const styledNodes = nodes.filter((node) => selectedIds.includes(node.id));
-  // A swatch reads as active only when every selected node already carries it.
-  const sharedNodeStyle = <
-    Key extends 'fillColor' | 'strokeColor' | 'strokeWidthPreset' | 'fontSizePreset',
-  >(
-    key: Key,
-  ): DiagramNode[Key] | undefined => {
-    const first = styledNodes[0]?.[key];
-    return first !== undefined && styledNodes.every((node) => node[key] === first)
-      ? first
-      : undefined;
-  };
   const zoomPercent = Math.round(diagramViewZoom(view) * 100);
   // Undo can take the container away while its delete question is still open.
   const containerAwaitingDelete = nodes.some((node) => node.id === pendingContainerDelete)
@@ -1121,6 +1214,9 @@ export function DiagramEditor() {
     setSelectedEdgeKey(edgeKey(result.edge));
     setSelectedIds([]);
     cancelConnection();
+    // Naming the arrow is the obvious next thing, and its field lives behind the
+    // bar's More button — so joining two elements opens that panel itself.
+    setOpenBarMenu('Arrow');
     queueMicrotask(() => edgeLabelInputRef.current?.focus());
   }
 
@@ -1170,24 +1266,506 @@ export function DiagramEditor() {
     setSelectedEdgeKey(null);
   }
 
-  function alignSelection(mode: DiagramAlignMode) {
-    if (selectedIds.length < 2) return;
+  /**
+   * Applies one style to everything selected, whatever kinds are in it.
+   *
+   * The bar only ever offers a control the whole selection supports, so this is
+   * never a partial action — each kind takes the keys it has and ignores the
+   * rest, and it all lands in one history entry.
+   */
+  function applySelectionStyle(style: {
+    strokeColor?: DiagramStrokeKey;
+    strokeWidthPreset?: DiagramStrokeWidthPreset;
+    strokeStyle?: DiagramStrokeStyle;
+    fillColor?: DiagramFillKey | null;
+    fontSizePreset?: DiagramFontSizePreset;
+  }) {
     clearError();
     const graph = history.snapshotRef.current;
+    const nodeIds = new Set(selectedIds);
+    const inkIds = new Set(selectedInkIds);
+    const pathIds = new Set(selectedPathIds);
+    const tableIds = new Set(selectedTableIds);
+
+    const withFill = <T extends { fillColor?: DiagramFillKey }>(element: T): T => {
+      if (style.fillColor === undefined) return element;
+      if (style.fillColor === null) {
+        // Rebuilt without the key: an explicit `undefined` is still a property,
+        // and the write path rejects one.
+        const next = { ...element };
+        delete next.fillColor;
+        return next;
+      }
+      return { ...element, fillColor: style.fillColor };
+    };
+
+    const strokeKeys = {
+      ...(style.strokeColor ? { strokeColor: style.strokeColor } : {}),
+      ...(style.strokeWidthPreset ? { strokeWidthPreset: style.strokeWidthPreset } : {}),
+    };
+
     history.commit({
-      nodes: alignNodes(graph.nodes, selectedIds, mode),
-      edges: graph.edges,
+      nodes: graph.nodes.map((node) =>
+        nodeIds.has(node.id)
+          ? withFill({
+              ...node,
+              ...strokeKeys,
+              ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
+            })
+          : node,
+      ),
+      edges: selectedEdge
+        ? styleEdge(graph.edges, selectedEdge, {
+            ...strokeKeys,
+            ...(style.strokeStyle ? { strokeStyle: style.strokeStyle } : {}),
+          })
+        : graph.edges,
+      ink: (graph.ink ?? []).map((stroke) =>
+        inkIds.has(stroke.id) ? { ...stroke, ...strokeKeys } : stroke,
+      ),
+      paths: (graph.paths ?? []).map((path) =>
+        pathIds.has(path.id)
+          ? withFill({
+              ...path,
+              ...strokeKeys,
+              ...(style.strokeStyle ? { strokeStyle: style.strokeStyle } : {}),
+            })
+          : path,
+      ),
+      tables: (graph.tables ?? []).map((table) =>
+        tableIds.has(table.id)
+          ? {
+              ...table,
+              ...strokeKeys,
+              ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
+            }
+          : table,
+      ),
     });
   }
 
-  function distributeSelection(axis: DiagramDistributeAxis) {
-    if (selectedIds.length < 3) return;
+  function renderPropertyControl(property: StudioPropertyDescriptor): ReactNode {
+    switch (property.id) {
+      case 'fillColor':
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={<PaintBucket aria-hidden="true" size={15} />}
+          >
+            {(close) => (
+              <ColorChoices
+                row
+                itemName="fill"
+                keys={QUICK_FILL_KEYS}
+                colorFor={(key) => DIAGRAM_FILL_COLORS[key]}
+                activeKey={selectedNode?.fillColor ?? selectedPath?.fillColor ?? null}
+                disabled={isSubmitting}
+                onSelect={(key) => {
+                  applySelectionStyle({ fillColor: key });
+                  close();
+                }}
+                onClear={() => {
+                  applySelectionStyle({ fillColor: null });
+                  close();
+                }}
+                clearName="No fill"
+              />
+            )}
+          </BarMenu>
+        );
+
+      case 'cellFill':
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={<PaintBucket aria-hidden="true" size={15} />}
+          >
+            {(close) => (
+              <ColorChoices
+                row
+                itemName="cell fill"
+                keys={QUICK_FILL_KEYS}
+                colorFor={(key) => DIAGRAM_FILL_COLORS[key]}
+                activeKey={null}
+                disabled={isSubmitting}
+                onSelect={(key) => {
+                  if (selectedTable && cellRange) {
+                    replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id);
+                  }
+                  close();
+                }}
+                onClear={() => {
+                  if (selectedTable && cellRange) {
+                    replaceTable(fillCellRange(selectedTable, cellRange, null), selectedTable.id);
+                  }
+                  close();
+                }}
+                clearName="No cell fill"
+              />
+            )}
+          </BarMenu>
+        );
+
+      case 'strokeColor': {
+        const current =
+          selectedNode?.strokeColor ??
+          selectedPath?.strokeColor ??
+          selectedEdge?.strokeColor ??
+          null;
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={
+              // The swatch is the icon: a line-shaped glyph says which control
+              // this is, but not what pressing it would do.
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 rounded-full border border-rt-ink/20"
+                style={{ backgroundColor: DIAGRAM_STROKE_COLORS[current ?? 'ink'] }}
+              />
+            }
+          >
+            {(close) => (
+              <ColorChoices
+                row
+                itemName="line"
+                keys={QUICK_STROKE_KEYS}
+                colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
+                activeKey={selectedNode?.strokeColor ?? selectedPath?.strokeColor ?? null}
+                disabled={isSubmitting}
+                onSelect={(key) => {
+                  applySelectionStyle({ strokeColor: key });
+                  close();
+                }}
+              />
+            )}
+          </BarMenu>
+        );
+      }
+
+      case 'strokeStyle':
+        // Folded into the width control when both are offered: they are one
+        // decision about how a line looks, and two buttons for it crowds a bar
+        // that has to fit above a selection.
+        return null;
+
+      case 'strokeWidth':
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={<StrokeWeightIcon weight={3.5} />}
+          >
+            {(close) => (
+              <div className="flex items-center">
+                <ToolStripGroup label="Line width" row>
+                  {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+                    <PresetButton
+                      key={preset}
+                      label={<StrokeWeightIcon weight={STROKE_WIDTH_SAMPLE[preset]} />}
+                      name={`${STROKE_WIDTH_LABELS[preset]} width`}
+                      active={selectedNode?.strokeWidthPreset === preset}
+                      disabled={isSubmitting}
+                      onSelect={() => {
+                        applySelectionStyle({ strokeWidthPreset: preset });
+                        close();
+                      }}
+                    />
+                  ))}
+                </ToolStripGroup>
+                {barProperties.some((entry) => entry.id === 'strokeStyle') ? (
+                  <ToolStripGroup label="Line style" row>
+                    {DIAGRAM_STROKE_STYLES.map((style) => (
+                      <PresetButton
+                        key={style}
+                        label={<StrokeStyleIcon dash={STROKE_STYLE_DASH[style]} />}
+                        name={`${STROKE_STYLE_LABELS[style]} style`}
+                        active={(selectedPath?.strokeStyle ?? selectedEdge?.strokeStyle) === style}
+                        disabled={isSubmitting}
+                        onSelect={() => {
+                          applySelectionStyle({ strokeStyle: style });
+                          close();
+                        }}
+                      />
+                    ))}
+                  </ToolStripGroup>
+                ) : null}
+              </div>
+            )}
+          </BarMenu>
+        );
+
+      case 'textFormat': {
+        const cellStyleTarget = selectedTable
+          ? (cellRange ?? wholeTableRange(selectedTable))
+          : null;
+
+        /** Whether every cell the change would touch is already bold. */
+        const cellsAllBold =
+          selectedTable && cellStyleTarget
+            ? cellsInRange(cellStyleTarget).every(
+                (ref) => tableCellAt(selectedTable, ref.row, ref.col)?.bold,
+              )
+            : false;
+
+        function styleCells(style: Parameters<typeof styleCellRange>[2]) {
+          if (!selectedTable || !cellStyleTarget) return;
+          replaceTable(styleCellRange(selectedTable, cellStyleTarget, style), selectedTable.id);
+        }
+
+        const size = selectedTable
+          ? (tableCellAt(
+              selectedTable,
+              cellStyleTarget?.focus.row ?? 0,
+              cellStyleTarget?.focus.col ?? 0,
+            )?.fontSizePreset ?? 'medium')
+          : (selectedNode?.fontSizePreset ?? 'medium');
+
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={<Type aria-hidden="true" size={15} />}
+          >
+            {() => (
+              <div className="flex items-center">
+                <ToolStripGroup label="Text size" row>
+                  {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
+                    <PresetButton
+                      key={preset}
+                      label={
+                        <span className="text-[10px] font-semibold">
+                          {FONT_SIZE_LABELS[preset]}
+                        </span>
+                      }
+                      name={`${preset} text`}
+                      active={size === preset}
+                      disabled={isSubmitting}
+                      onSelect={() => {
+                        if (selectedTable) styleCells({ fontSizePreset: preset });
+                        else applySelectionStyle({ fontSizePreset: preset });
+                      }}
+                    />
+                  ))}
+                </ToolStripGroup>
+
+                {selectedTable ? (
+                  <ToolStripGroup label="Text weight" row>
+                    <PresetButton
+                      label={<Bold aria-hidden="true" size={15} />}
+                      name="Bold cell text"
+                      active={cellsAllBold}
+                      disabled={isSubmitting}
+                      onSelect={() => styleCells({ bold: !cellsAllBold })}
+                    />
+                  </ToolStripGroup>
+                ) : null}
+
+                {selectedTable ? (
+                  <ToolStripGroup label="Text alignment" row>
+                    {TABLE_CELL_ALIGNS.map((align) => {
+                      const AlignIcon: LucideIcon = CELL_ALIGN_ICONS[align];
+                      return (
+                        <PresetButton
+                          key={align}
+                          label={<AlignIcon aria-hidden="true" size={15} />}
+                          name={`Align ${align}`}
+                          active={false}
+                          disabled={isSubmitting}
+                          onSelect={() => {
+                            if (!selectedTable || !cellStyleTarget) return;
+                            replaceTable(
+                              alignCellRange(selectedTable, cellStyleTarget, align),
+                              selectedTable.id,
+                            );
+                          }}
+                        />
+                      );
+                    })}
+                  </ToolStripGroup>
+                ) : null}
+
+                {selectedTable ? (
+                  <ColorChoices
+                    row
+                    itemName="cell text"
+                    keys={QUICK_STROKE_KEYS}
+                    colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
+                    activeKey={null}
+                    disabled={isSubmitting}
+                    onSelect={(key) => styleCells({ color: key })}
+                  />
+                ) : null}
+              </div>
+            )}
+          </BarMenu>
+        );
+      }
+    }
+  }
+
+  /** The selection described the way the property registry asks about it. */
+  function selectionTargets(): StudioTarget[] {
+    const graph = history.snapshotRef.current;
+    const targets: StudioTarget[] = [];
+
+    for (const node of graph.nodes) {
+      if (selectedIds.includes(node.id)) targets.push({ kind: 'node', element: node });
+    }
+    if (selectedEdge) targets.push({ kind: 'edge', element: selectedEdge });
+    for (const stroke of graph.ink ?? []) {
+      if (selectedInkIds.includes(stroke.id)) targets.push({ kind: 'ink', element: stroke });
+    }
+    for (const path of graph.paths ?? []) {
+      if (selectedPathIds.includes(path.id)) targets.push({ kind: 'path', element: path });
+    }
+    for (const table of graph.tables ?? []) {
+      if (!selectedTableIds.includes(table.id)) continue;
+      // A table is two different things to style depending on whether the
+      // selection has gone inside it.
+      const inCellMode = tableEditing && selectedTableId === table.id && cellRange !== null;
+      targets.push({
+        kind: 'table',
+        element: table,
+        inCellMode,
+        cellsHaveText:
+          inCellMode && cellRange
+            ? cellsInRange(cellRange).some((ref) =>
+                Boolean(tableCellAt(table, ref.row, ref.col)?.text?.trim()),
+              )
+            : false,
+      });
+    }
+    return targets;
+  }
+
+  /** Where the selection appears on screen, for the bar to hang off. */
+  function selectionClientRect(): DiagramRect | null {
+    const boxes = selectionBoundsBoxes();
+    if (boxes.length === 0) return null;
+    const left = Math.min(...boxes.map((box) => box.x));
+    const top = Math.min(...boxes.map((box) => box.y));
+    const right = Math.max(...boxes.map((box) => box.x + box.width));
+    const bottom = Math.max(...boxes.map((box) => box.y + box.height));
+    return diagramRectToClientRect(
+      { x: left, y: top, width: right - left, height: bottom - top },
+      surfaceBounds(),
+      view,
+    );
+  }
+
+  /** Every selected element's bounding box, whatever kind it is. */
+  function selectionBoxes(): ArrangeBox[] {
+    const graph = history.snapshotRef.current;
+    const boxes: ArrangeBox[] = [];
+
+    for (const node of graph.nodes) {
+      if (selectedIds.includes(node.id)) boxes.push({ key: node.id, ...nodeBounds(node) });
+    }
+    for (const stroke of graph.ink ?? []) {
+      if (!selectedInkIds.includes(stroke.id)) continue;
+      const bounds = inkBounds(stroke);
+      if (bounds) boxes.push({ key: stroke.id, ...bounds });
+    }
+    for (const path of graph.paths ?? []) {
+      if (!selectedPathIds.includes(path.id)) continue;
+      const bounds = pathBounds(path);
+      if (bounds) boxes.push({ key: path.id, ...bounds });
+    }
+    for (const table of graph.tables ?? []) {
+      if (selectedTableIds.includes(table.id)) boxes.push({ key: table.id, ...tableBounds(table) });
+    }
+    return boxes;
+  }
+
+  /**
+   * The same boxes, plus the ends of a selected arrow. Only for positioning: an
+   * arrow cannot be arranged, but its properties still have to appear somewhere,
+   * and the nodes it joins are where anyone would look.
+   */
+  function selectionBoundsBoxes(): ArrangeBox[] {
+    const boxes = selectionBoxes();
+    if (!selectedEdge) return boxes;
+    const graph = history.snapshotRef.current;
+    for (const node of graph.nodes) {
+      if (node.id === selectedEdge.from || node.id === selectedEdge.to) {
+        boxes.push({ key: `edge-end-${node.id}`, ...nodeBounds(node) });
+      }
+    }
+    return boxes;
+  }
+
+  /**
+   * Arranges whatever is selected.
+   *
+   * Alignment is the one thing every kind has in common — a stroke and a table
+   * share no property to style, but they both occupy a rectangle — so this is
+   * offered to any multi-selection, and each kind is moved the way that kind
+   * moves.
+   */
+  function arrangeSelection(compute: (boxes: ArrangeBox[]) => Map<string, ArrangeOffset>) {
+    const boxes = selectionBoxes();
+    const offsets = compute(boxes);
+    if (offsets.size === 0) return;
+
     clearError();
     const graph = history.snapshotRef.current;
+    const shift = (key: string) => offsets.get(key);
     history.commit({
-      nodes: distributeNodes(graph.nodes, selectedIds, axis),
+      nodes: graph.nodes.map((node) => {
+        const offset = shift(node.id);
+        if (!offset) return node;
+        return {
+          ...node,
+          ...placeNodePosition(
+            { x: node.x + offset.x, y: node.y + offset.y },
+            effectiveDiagramNodeSize(node),
+            false,
+          ),
+        };
+      }),
       edges: graph.edges,
+      ink: (graph.ink ?? []).map((stroke) => {
+        const offset = shift(stroke.id);
+        if (!offset) return stroke;
+        return {
+          ...stroke,
+          points: stroke.points.map((point) => ({
+            x: point.x + offset.x,
+            y: point.y + offset.y,
+          })),
+        };
+      }),
+      paths: (graph.paths ?? []).map((path) => {
+        const offset = shift(path.id);
+        return offset ? movePathBy(path, offset.x, offset.y) : path;
+      }),
+      tables: (graph.tables ?? []).map((table) => {
+        const offset = shift(table.id);
+        return offset ? moveTableBy(table, offset.x, offset.y) : table;
+      }),
     });
+  }
+
+  function alignSelection(mode: DiagramAlignMode) {
+    arrangeSelection((boxes) => alignOffsets(boxes, mode));
+  }
+
+  function distributeSelection(axis: DiagramDistributeAxis) {
+    arrangeSelection((boxes) => distributeOffsets(boxes, axis));
   }
 
   function copySelection(): StudioFragment | null {
@@ -1226,20 +1804,6 @@ export function DiagramEditor() {
     pasteFragment(copySelection());
   }
 
-  function applyNodeStyle(style: Parameters<typeof styleNodes>[2]) {
-    if (selectedIds.length === 0) return;
-    clearError();
-    const graph = history.snapshotRef.current;
-    history.commit({ nodes: styleNodes(graph.nodes, selectedIds, style), edges: graph.edges });
-  }
-
-  function resetNodeStyle() {
-    if (selectedIds.length === 0) return;
-    clearError();
-    const graph = history.snapshotRef.current;
-    history.commit({ nodes: clearNodeStyle(graph.nodes, selectedIds), edges: graph.edges });
-  }
-
   function applyEdgeStyle(style: Parameters<typeof styleEdge>[2]) {
     if (!selectedEdge) return;
     clearError();
@@ -1252,13 +1816,6 @@ export function DiagramEditor() {
     clearError();
     const graph = history.snapshotRef.current;
     history.commit({ nodes: graph.nodes, edges: clearEdgeStyle(graph.edges, selectedEdge) });
-  }
-
-  function resetSelectedNodeSize() {
-    if (!selectedNode) return;
-    clearError();
-    const graph = history.snapshotRef.current;
-    history.commit({ nodes: clearNodeSize(graph.nodes, selectedNode.id), edges: graph.edges });
   }
 
   function normalizeSelectedLabel() {
@@ -1418,6 +1975,19 @@ export function DiagramEditor() {
       return;
     }
 
+    // A mixed selection moves as one. The node-only drag path knows how to drop
+    // a shape into a container, which a mixed group has no business doing, so
+    // that stays for selections made purely of shapes.
+    const mixedSelection =
+      selectedIds.includes(node.id) &&
+      selectedInkIds.length + selectedPathIds.length + selectedTableIds.length > 0;
+    if (mixedSelection) {
+      event.preventDefault();
+      event.stopPropagation();
+      beginElementMove(event, 'node', node.id);
+      return;
+    }
+
     const selection = selectedIds.includes(node.id) ? selectedIds : [node.id];
     // Moving a container moves everything nested inside it, so the group keeps
     // its shape; the selection itself is unchanged.
@@ -1529,7 +2099,7 @@ export function DiagramEditor() {
    */
   function reorderSelection(move: 'front' | 'back') {
     const selection = currentSelection();
-    if (isSelectionEmpty(selection)) return;
+    if (isSelectionEmpty(selection) && !selectedEdge) return;
     const graph = history.snapshotRef.current;
     const moving = new Set<string>([
       ...selection.inkIds,
@@ -1733,12 +2303,36 @@ export function DiagramEditor() {
   /** Delete every selected element, whatever kind, in one history entry. */
   function deleteSelection() {
     const selection = currentSelection();
-    if (isSelectionEmpty(selection)) return;
+    if (isSelectionEmpty(selection) && !selectedEdge) return;
     const graph = history.snapshotRef.current;
+
+    // Deleting a container is two different intentions — lose what is inside it,
+    // or keep it — so it asks before doing either.
+    if (selection.nodeIds.length === 1 && selectionSize(selection) === 1) {
+      const target = graph.nodes.find((node) => node.id === selection.nodeIds[0]);
+      if (
+        target &&
+        diagramCanParent(target.shape) &&
+        diagramDescendantIds(graph.nodes, target.id).length > 0
+      ) {
+        setPendingContainerDelete(target.id);
+        return;
+      }
+    }
+
     const inkGone = new Set(selection.inkIds);
     const pathGone = new Set(selection.pathIds);
     const tableGone = new Set(selection.tableIds);
     const gone = new Set([...inkGone, ...pathGone, ...tableGone]);
+
+    // An arrow takes precedence: completing a connection leaves both the arrow
+    // and the element it landed on selected, and deleting then means the arrow.
+    if (selectedEdge) {
+      clearError();
+      history.commit({ nodes: graph.nodes, edges: deleteEdge(graph.edges, selectedEdge) });
+      setSelectedEdgeKey(null);
+      return;
+    }
 
     const remaining =
       selection.nodeIds.length > 0
@@ -1958,7 +2552,7 @@ export function DiagramEditor() {
    */
   function beginElementMove(
     event: PointerEvent<SVGElement>,
-    kind: 'path' | 'table' | 'ink',
+    kind: 'path' | 'table' | 'ink' | 'node',
     id: string,
   ) {
     const canvas = canvasRef.current;
@@ -1969,9 +2563,28 @@ export function DiagramEditor() {
     // grabbing anything else drags only that, which is how every canvas editor
     // behaves and stops a stray click hauling the rest of the board along.
     const current = currentSelection();
-    const key = kind === 'path' ? 'pathIds' : kind === 'table' ? 'tableIds' : 'inkIds';
+    const key =
+      kind === 'path'
+        ? 'pathIds'
+        : kind === 'table'
+          ? 'tableIds'
+          : kind === 'ink'
+            ? 'inkIds'
+            : 'nodeIds';
     const selection: StudioSelection = current[key].includes(id)
-      ? current
+      ? {
+          ...current,
+          // A container carries what is nested inside it, so the group keeps
+          // its shape however it was grabbed.
+          nodeIds: [
+            ...new Set(
+              current.nodeIds.flatMap((nodeId) => [
+                nodeId,
+                ...diagramDescendantIds(history.snapshotRef.current.nodes, nodeId),
+              ]),
+            ),
+          ],
+        }
       : { ...EMPTY_STUDIO_SELECTION, [key]: [id] };
 
     const previous = history.snapshotRef.current;
@@ -2405,6 +3018,392 @@ export function DiagramEditor() {
             Pick a size, then press the canvas where it should go
           </p>
         </PopoverSection>
+      </div>
+    );
+  }
+
+  /**
+   * Everything the selection can be done to that is not a styling property:
+   * its label, its size, the arrows out of it, the rows and columns inside
+   * it. These used to fill a permanent sidebar; they belong to whatever is
+   * selected, so they now live behind the properties bar's own button and the
+   * canvas keeps the width.
+   */
+  /** A table's structure: the rows and columns themselves, and their fill. */
+  function renderTableStructure() {
+    return (
+      <div className="max-h-[70vh] w-64 overflow-y-auto">
+        {selectedTable && cellRange ? (
+          <section className="mt-4" aria-label="Table">
+            <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Table
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  replaceTable(insertRow(selectedTable, cellRange.focus.row + 1), selectedTable.id)
+                }
+              >
+                Row below
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  replaceTable(
+                    insertColumn(selectedTable, cellRange.focus.col + 1),
+                    selectedTable.id,
+                  )
+                }
+              >
+                Column right
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const next = deleteRow(selectedTable, cellRange.focus.row);
+                  replaceTable(next, selectedTable.id);
+                  const clamped = clampCellRef(next, cellRange.focus);
+                  setCellRange({ anchor: clamped, focus: clamped });
+                }}
+              >
+                Delete row
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const next = deleteColumn(selectedTable, cellRange.focus.col);
+                  replaceTable(next, selectedTable.id);
+                  const clamped = clampCellRef(next, cellRange.focus);
+                  setCellRange({ anchor: clamped, focus: clamped });
+                }}
+              >
+                Delete column
+              </Button>
+            </div>
+
+            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Cell fill
+            </p>
+            <div className="mt-2 grid grid-cols-8 gap-1.5">
+              {DIAGRAM_FILL_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`${key} cell fill`}
+                  color={DIAGRAM_FILL_COLORS[key]}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id)
+                  }
+                />
+              ))}
+              <IconButton
+                label="Clear cell fill"
+                className="h-full w-full"
+                onClick={() =>
+                  replaceTable(fillCellRange(selectedTable, cellRange, null), selectedTable.id)
+                }
+              >
+                <X aria-hidden="true" size={13} />
+              </IconButton>
+            </div>
+
+            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+              Cell text
+            </p>
+            <div className="mt-2 grid grid-cols-8 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`${key} cell text`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(
+                      styleCellRange(selectedTable, cellRange, { color: key }),
+                      selectedTable.id,
+                    )
+                  }
+                />
+              ))}
+              <IconButton
+                label="Default cell text colour"
+                className="h-full w-full"
+                onClick={() =>
+                  replaceTable(
+                    styleCellRange(selectedTable, cellRange, { color: null }),
+                    selectedTable.id,
+                  )
+                }
+              >
+                <X aria-hidden="true" size={13} />
+              </IconButton>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={FONT_SIZE_LABELS[preset]}
+                  // The letter alone does not identify the control; the word does.
+                  name={`${preset} cell text`}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(
+                      styleCellRange(selectedTable, cellRange, { fontSizePreset: preset }),
+                      selectedTable.id,
+                    )
+                  }
+                />
+              ))}
+              <PresetButton
+                label="B"
+                name="Bold cell text"
+                active={Boolean(
+                  tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)?.bold,
+                )}
+                onSelect={() =>
+                  replaceTable(
+                    styleCellRange(selectedTable, cellRange, {
+                      bold: !tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)
+                        ?.bold,
+                    }),
+                    selectedTable.id,
+                  )
+                }
+              />
+            </div>
+
+            <div className="mt-2 flex gap-1.5">
+              {TABLE_CELL_ALIGNS.map((align) => (
+                <PresetButton
+                  key={align}
+                  label={align[0]!.toUpperCase()}
+                  name={`Align ${align}`}
+                  active={false}
+                  onSelect={() =>
+                    replaceTable(alignCellRange(selectedTable, cellRange, align), selectedTable.id)
+                  }
+                />
+              ))}
+              <PresetButton
+                label="H"
+                name={selectedTable.headerRow ? 'Turn header row off' : 'Turn header row on'}
+                active={Boolean(selectedTable.headerRow)}
+                onSelect={() =>
+                  replaceTable(
+                    { ...selectedTable, headerRow: !selectedTable.headerRow },
+                    selectedTable.id,
+                  )
+                }
+              />
+            </div>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
+
+  /** An arrow's own settings, including the one thing it cannot be given on the
+   * canvas: a label. */
+  function renderEdgeDetails() {
+    return (
+      <div className="max-h-[70vh] w-64 overflow-y-auto">
+        {selectedEdge ? (
+          <section className="mt-4 border-t border-rt-tertiary pt-4" aria-label="Selected arrow">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+                  Selected arrow
+                </p>
+                <p className="mt-1 truncate text-[11px] text-rt-ink-muted">
+                  {selectedNodeById(nodes, selectedEdge.from)?.label} →{' '}
+                  {selectedNodeById(nodes, selectedEdge.to)?.label}
+                </p>
+              </div>
+              <IconButton label="Delete selected arrow" onClick={removeSelectedEdge}>
+                <Trash2 aria-hidden="true" size={16} />
+              </IconButton>
+            </div>
+            <label
+              htmlFor="diagram-edge-label"
+              className="mt-3 block text-[12px] font-semibold text-rt-ink"
+            >
+              Label <span className="font-normal text-rt-ink-faint">(optional)</span>
+            </label>
+            <input
+              ref={edgeLabelInputRef}
+              id="diagram-edge-label"
+              value={selectedEdge.label ?? ''}
+              maxLength={DIAGRAM_EDGE_LABEL_LIMIT}
+              onFocus={() => {
+                edgeLabelStartRef.current ??= history.snapshotRef.current;
+              }}
+              onChange={(event) => {
+                clearError();
+                const graph = history.snapshotRef.current;
+                history.preview({
+                  nodes: graph.nodes,
+                  edges: renameEdge(graph.edges, selectedEdge, event.target.value),
+                });
+              }}
+              onBlur={normalizeSelectedEdgeLabel}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelEdgeLabelEdit();
+                  canvasRef.current?.focus();
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
+              placeholder="e.g. sends request"
+              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
+            />
+            <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
+              {(selectedEdge.label ?? '').length}/{DIAGRAM_EDGE_LABEL_LIMIT}
+            </p>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-[11px] font-medium text-rt-ink-muted">Arrow style</p>
+              <Button
+                variant="quiet"
+                className="min-h-7 px-2 text-[11px]"
+                aria-label="Reset arrow style"
+                disabled={isSubmitting}
+                title="Return this arrow to the default appearance"
+                onClick={resetEdgeStyle}
+              >
+                Reset
+              </Button>
+            </div>
+            <div className="mt-1 grid grid-cols-7 gap-1.5">
+              {DIAGRAM_STROKE_KEYS.map((key) => (
+                <SwatchButton
+                  key={key}
+                  label={`Arrow ${key}`}
+                  color={DIAGRAM_STROKE_COLORS[key]}
+                  active={selectedEdge.strokeColor === key}
+                  disabled={isSubmitting}
+                  onSelect={() => applyEdgeStyle({ strokeColor: key })}
+                />
+              ))}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
+                <PresetButton
+                  key={preset}
+                  label={STROKE_WIDTH_LABELS[preset]}
+                  name={`Arrow width ${preset}`}
+                  active={selectedEdge.strokeWidthPreset === preset}
+                  disabled={isSubmitting}
+                  onSelect={() => applyEdgeStyle({ strokeWidthPreset: preset })}
+                />
+              ))}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              {DIAGRAM_STROKE_STYLES.map((style) => (
+                <PresetButton
+                  key={style}
+                  label={STROKE_STYLE_LABELS[style]}
+                  name={`Arrow style ${style}`}
+                  active={selectedEdge.strokeStyle === style}
+                  disabled={isSubmitting}
+                  onSelect={() => applyEdgeStyle({ strokeStyle: style })}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
+
+  /**
+   * The question asked before a container is deleted. Floating over the canvas
+   * rather than tucked into a panel: it is a question, and one that has to be
+   * answered before anything else happens.
+   */
+  function renderContainerDeletePrompt() {
+    return (
+      <div className="pointer-events-auto absolute bottom-4 left-1/2 z-30 w-72 -translate-x-1/2">
+        {containerAwaitingDelete ? (
+          <section
+            className="mt-4 rounded-lg border border-rt-secondary bg-rt-secondary-wash p-3"
+            aria-label="Delete container"
+          >
+            <p role="alert" className="text-[12px] leading-relaxed text-rt-secondary-deep">
+              This container holds {diagramDescendantIds(nodes, containerAwaitingDelete).length}{' '}
+              {diagramDescendantIds(nodes, containerAwaitingDelete).length === 1
+                ? 'element'
+                : 'elements'}
+              . Delete them too, or keep them on the canvas?
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              <Button
+                variant="secondary"
+                className="min-h-8 px-2.5"
+                onClick={() => resolveContainerDelete('ungroup')}
+              >
+                <Ungroup aria-hidden="true" size={15} />
+                Keep contents
+              </Button>
+              <Button className="min-h-8 px-2.5" onClick={() => resolveContainerDelete('contents')}>
+                <Trash2 aria-hidden="true" size={15} />
+                Delete contents
+              </Button>
+              <Button
+                variant="quiet"
+                className="min-h-8 px-2.5"
+                aria-label="Cancel deleting the container"
+                onClick={() => setPendingContainerDelete(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderArrangeOptions(close: () => void) {
+    return (
+      <div className="w-40">
+        <PopoverSection label="Flow">
+          <div className="flex gap-1">
+            {LAYOUT_DIRECTIONS.map(({ direction, label, Icon }) => (
+              <PresetButton
+                key={direction}
+                label={<Icon aria-hidden="true" size={15} />}
+                name={label}
+                active={layoutDirection === direction}
+                disabled={isSubmitting}
+                onSelect={() => setLayoutDirection(direction)}
+              />
+            ))}
+          </div>
+        </PopoverSection>
+        <Button
+          variant="secondary"
+          className="w-full"
+          // Distinct from the rail button that opens this panel, which is also
+          // called Arrange: one opens the choices, this one acts on them.
+          aria-label="Arrange the diagram"
+          disabled={nodes.length < 2 || isSubmitting}
+          title="Lay the diagram out along its arrows"
+          onClick={() => {
+            clearError();
+            const graph = history.snapshotRef.current;
+            history.commit({
+              nodes: layoutDiagram(graph.nodes, graph.edges, layoutDirection),
+              edges: graph.edges,
+            });
+            close();
+          }}
+        >
+          Arrange
+        </Button>
       </div>
     );
   }
@@ -3223,8 +4222,152 @@ export function DiagramEditor() {
   }
 
   const error = validationError ?? submissionError;
-  const canAlign = selectedIds.length >= 2 && !isSubmitting;
-  const canDistribute = selectedIds.length >= 3 && !isSubmitting;
+  /**
+   * The properties bar, or nothing.
+   *
+   * Withheld while a tool is armed or a label is being typed: it belongs to a
+   * selection you are looking at, not to one you are in the middle of leaving.
+   */
+  const barTargets = selectionTargets();
+  const barProperties = commonProperties(barTargets);
+  const barSelectionRect = selectionClientRect();
+  const barSurface = surfaceBounds();
+  const barFrame = canvasFrameRef.current?.getBoundingClientRect();
+  const propertiesBar =
+    barTargets.length > 0 && barSelectionRect && canvasTool === 'select' && !editingNodeId ? (
+      <StudioPropertiesBar
+        properties={barProperties}
+        renderControl={renderPropertyControl}
+        selection={barSelectionRect}
+        viewport={{
+          x: barSurface.left,
+          y: barSurface.top,
+          width: barSurface.width,
+          height: barSurface.height,
+        }}
+        origin={{ x: barFrame?.left ?? 0, y: barFrame?.top ?? 0 }}
+        selectionSize={barTargets.length}
+        onAlign={alignSelection}
+        onDistribute={distributeSelection}
+        actions={
+          <>
+            {selectedPath ? (
+              <Tooltip
+                label={pathEditing ? 'Done editing points' : 'Edit points'}
+                placement="bottom"
+              >
+                <button
+                  type="button"
+                  aria-label={pathEditing ? 'Done editing points' : 'Edit points'}
+                  aria-pressed={pathEditing}
+                  disabled={isSubmitting}
+                  onClick={() => setPathEditing((current) => !current)}
+                  className={`${BAR_CONTROL} ${pathEditing ? 'bg-rt-primary-tint text-rt-ink' : ''}`}
+                >
+                  <Spline aria-hidden="true" size={15} />
+                </button>
+              </Tooltip>
+            ) : null}
+            {selectedPath && pathEditing && selectedAnchor !== null ? (
+              <Tooltip
+                label={
+                  isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
+                    ? 'Make corner'
+                    : 'Make curve'
+                }
+                placement="bottom"
+              >
+                <button
+                  type="button"
+                  aria-label={
+                    isSmoothAnchor(selectedPath.anchors[selectedAnchor]!)
+                      ? 'Make corner'
+                      : 'Make curve'
+                  }
+                  disabled={isSubmitting}
+                  onClick={() =>
+                    replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
+                  }
+                  className={BAR_CONTROL}
+                >
+                  <PenTool aria-hidden="true" size={15} />
+                </button>
+              </Tooltip>
+            ) : null}
+            {selectedNode && selectedIds.length === 1 ? (
+              <Tooltip label="Connect" placement="bottom">
+                <button
+                  type="button"
+                  aria-label="Connect"
+                  aria-pressed={connectionMode}
+                  disabled={isSubmitting}
+                  onClick={() => (connectionMode ? cancelConnection() : startConnection())}
+                  className={`${BAR_CONTROL} ${connectionMode ? 'bg-rt-primary-tint text-rt-ink' : ''}`}
+                >
+                  <Link2 aria-hidden="true" size={15} />
+                </button>
+              </Tooltip>
+            ) : null}
+            <Tooltip label="Bring selection to front" placement="bottom">
+              <button
+                type="button"
+                aria-label="Bring selection to front"
+                disabled={isSubmitting}
+                onClick={() => reorderSelection('front')}
+                className={BAR_CONTROL}
+              >
+                <BringToFront aria-hidden="true" size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip label="Send selection to back" placement="bottom">
+              <button
+                type="button"
+                aria-label="Send selection to back"
+                disabled={isSubmitting}
+                onClick={() => reorderSelection('back')}
+                className={BAR_CONTROL}
+              >
+                <SendToBack aria-hidden="true" size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip label="Delete selection" placement="bottom">
+              <button
+                type="button"
+                aria-label="Delete selection"
+                disabled={isSubmitting}
+                onClick={deleteSelection}
+                className={BAR_CONTROL}
+              >
+                <Trash2 aria-hidden="true" size={15} />
+              </button>
+            </Tooltip>
+            {selectedTable ? (
+              <BarMenu
+                openMenu={openBarMenu}
+                onOpenChange={setOpenBarMenu}
+                disabled={isSubmitting}
+                label="Rows and columns"
+                icon={<Table aria-hidden="true" size={15} />}
+              >
+                {() => renderTableStructure()}
+              </BarMenu>
+            ) : null}
+            {selectedEdge ? (
+              <BarMenu
+                openMenu={openBarMenu}
+                onOpenChange={setOpenBarMenu}
+                disabled={isSubmitting}
+                label="Arrow"
+                icon={<Link2 aria-hidden="true" size={15} />}
+              >
+                {() => renderEdgeDetails()}
+              </BarMenu>
+            ) : null}
+          </>
+        }
+      />
+    ) : null;
+
   const canvasCursor = isPanning
     ? 'cursor-grabbing'
     : panReady
@@ -3988,665 +5131,42 @@ export function DiagramEditor() {
 
   return (
     <form
-      className="grid min-h-0 flex-1 grid-rows-[auto_minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-cols-[212px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden"
+      className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden"
       onKeyDown={onFormKeyDown}
       onSubmit={(event) => void onSubmit(event)}
     >
-      <aside className="border-b border-rt-tertiary bg-rt-surface p-4 select-none md:min-h-0 md:overflow-y-auto md:border-r md:border-b-0 md:p-5">
-        {extensionSource ? (
-          <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-            Extending {extensionSource.authorName}&apos;s diagram
-          </div>
-        ) : null}
-
-        {selectedPath ? renderPenOptions() : null}
-
-        {selectedTable && cellRange ? (
-          <section className="mt-4" aria-label="Table">
-            <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Table
-            </p>
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  replaceTable(insertRow(selectedTable, cellRange.focus.row + 1), selectedTable.id)
-                }
-              >
-                Row below
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  replaceTable(
-                    insertColumn(selectedTable, cellRange.focus.col + 1),
-                    selectedTable.id,
-                  )
-                }
-              >
-                Column right
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const next = deleteRow(selectedTable, cellRange.focus.row);
-                  replaceTable(next, selectedTable.id);
-                  const clamped = clampCellRef(next, cellRange.focus);
-                  setCellRange({ anchor: clamped, focus: clamped });
-                }}
-              >
-                Delete row
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const next = deleteColumn(selectedTable, cellRange.focus.col);
-                  replaceTable(next, selectedTable.id);
-                  const clamped = clampCellRef(next, cellRange.focus);
-                  setCellRange({ anchor: clamped, focus: clamped });
-                }}
-              >
-                Delete column
-              </Button>
+      <section
+        ref={canvasFrameRef}
+        className="relative flex min-h-0 items-center justify-center overflow-auto p-3 sm:p-6"
+      >
+        <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1 sm:top-4 sm:right-4">
+          {extensionSource ? (
+            <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
+              Extending {extensionSource.authorName}&apos;s diagram
             </div>
-
-            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Cell fill
-            </p>
-            <div className="mt-2 grid grid-cols-8 gap-1.5">
-              {DIAGRAM_FILL_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`${key} cell fill`}
-                  color={DIAGRAM_FILL_COLORS[key]}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id)
-                  }
-                />
-              ))}
-              <IconButton
-                label="Clear cell fill"
-                className="h-full w-full"
-                onClick={() =>
-                  replaceTable(fillCellRange(selectedTable, cellRange, null), selectedTable.id)
-                }
-              >
-                <X aria-hidden="true" size={13} />
-              </IconButton>
-            </div>
-
-            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Cell text
-            </p>
-            <div className="mt-2 grid grid-cols-8 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`${key} cell text`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(
-                      styleCellRange(selectedTable, cellRange, { color: key }),
-                      selectedTable.id,
-                    )
-                  }
-                />
-              ))}
-              <IconButton
-                label="Default cell text colour"
-                className="h-full w-full"
-                onClick={() =>
-                  replaceTable(
-                    styleCellRange(selectedTable, cellRange, { color: null }),
-                    selectedTable.id,
-                  )
-                }
-              >
-                <X aria-hidden="true" size={13} />
-              </IconButton>
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={FONT_SIZE_LABELS[preset]}
-                  // The letter alone does not identify the control; the word does.
-                  name={`${preset} cell text`}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(
-                      styleCellRange(selectedTable, cellRange, { fontSizePreset: preset }),
-                      selectedTable.id,
-                    )
-                  }
-                />
-              ))}
-              <PresetButton
-                label="B"
-                name="Bold cell text"
-                active={Boolean(
-                  tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)?.bold,
-                )}
-                onSelect={() =>
-                  replaceTable(
-                    styleCellRange(selectedTable, cellRange, {
-                      bold: !tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)
-                        ?.bold,
-                    }),
-                    selectedTable.id,
-                  )
-                }
-              />
-            </div>
-
-            <div className="mt-2 flex gap-1.5">
-              {TABLE_CELL_ALIGNS.map((align) => (
-                <PresetButton
-                  key={align}
-                  label={align[0]!.toUpperCase()}
-                  name={`Align ${align}`}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(alignCellRange(selectedTable, cellRange, align), selectedTable.id)
-                  }
-                />
-              ))}
-              <PresetButton
-                label="H"
-                name={selectedTable.headerRow ? 'Turn header row off' : 'Turn header row on'}
-                active={Boolean(selectedTable.headerRow)}
-                onSelect={() =>
-                  replaceTable(
-                    { ...selectedTable, headerRow: !selectedTable.headerRow },
-                    selectedTable.id,
-                  )
-                }
-              />
-            </div>
-          </section>
-        ) : null}
-
-        <div className="mt-4 flex items-center justify-between border-y border-rt-tertiary py-3">
-          <span className="text-[11px] text-rt-ink-faint">
-            {nodes.length}/{DIAGRAM_NODE_LIMIT} elements
-          </span>
-          <Button
-            variant="quiet"
-            className="min-h-8 px-2.5"
-            disabled={nodes.length < 2 || isSubmitting}
-            title="Lay the diagram out along its arrows"
-            onClick={() => {
-              clearError();
-              const graph = history.snapshotRef.current;
-              history.commit({
-                nodes: layoutDiagram(graph.nodes, graph.edges, layoutDirection),
-                edges: graph.edges,
-              });
-            }}
-          >
-            <AlignHorizontalDistributeCenter aria-hidden="true" size={15} />
-            Arrange
-          </Button>
-        </div>
-
-        <div className="mt-2 flex items-center gap-1.5">
-          <span className="text-[11px] text-rt-ink-faint">Flow</span>
-          {LAYOUT_DIRECTIONS.map(({ direction, label, Icon }) => (
-            <IconButton
-              key={direction}
-              label={label}
-              className={`h-8 w-8 ${
-                layoutDirection === direction
-                  ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
-                  : ''
-              }`}
-              aria-pressed={layoutDirection === direction}
-              disabled={isSubmitting}
-              onClick={() => setLayoutDirection(direction)}
-            >
-              <Icon aria-hidden="true" size={15} />
-            </IconButton>
-          ))}
-        </div>
-
-        <section className="mt-4" aria-label="Selection">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Selection
-            </p>
-            <p className="text-[10px] text-rt-ink-faint" aria-live="polite">
-              {selectionSize(currentSelection())} selected
-            </p>
-          </div>
-          <div className="mt-2 flex items-center gap-1.5">
-            <IconButton
-              label="Duplicate selection"
-              title="Duplicate (Ctrl+D)"
-              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
-              onClick={duplicateSelection}
-            >
-              <CopyPlus aria-hidden="true" size={16} />
-            </IconButton>
-            <IconButton
-              label="Copy selection"
-              title="Copy (Ctrl+C)"
-              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
-              onClick={() => copySelection()}
-            >
-              <Copy aria-hidden="true" size={16} />
-            </IconButton>
-            <IconButton
-              label="Paste copied elements"
-              title="Paste (Ctrl+V)"
-              disabled={isFragmentEmpty(clipboard) || isSubmitting}
-              onClick={() => pasteFragment(clipboard)}
-            >
-              <ClipboardPaste aria-hidden="true" size={16} />
-            </IconButton>
-            <IconButton
-              label="Bring selection to front"
-              title="Bring in front of the ink"
-              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
-              onClick={() => reorderSelection('front')}
-            >
-              <BringToFront aria-hidden="true" size={16} />
-            </IconButton>
-            <IconButton
-              label="Send selection to back"
-              title="Send behind the ink"
-              disabled={isSelectionEmpty(currentSelection()) || isSubmitting}
-              onClick={() => reorderSelection('back')}
-            >
-              <SendToBack aria-hidden="true" size={16} />
-            </IconButton>
-          </div>
-          <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-            {ALIGN_ACTIONS.map(({ mode, label, Icon }) => (
-              <IconButton
-                key={mode}
-                label={label}
-                className="h-9 w-9"
-                disabled={!canAlign}
-                onClick={() => alignSelection(mode)}
-              >
-                <Icon aria-hidden="true" size={15} />
-              </IconButton>
-            ))}
-            <IconButton
-              label="Distribute horizontally"
-              className="h-9 w-9"
-              disabled={!canDistribute}
-              onClick={() => distributeSelection('horizontal')}
-            >
-              <AlignHorizontalDistributeCenter aria-hidden="true" size={15} />
-            </IconButton>
-            <IconButton
-              label="Distribute vertically"
-              className="h-9 w-9"
-              disabled={!canDistribute}
-              onClick={() => distributeSelection('vertical')}
-            >
-              <AlignVerticalDistributeCenter aria-hidden="true" size={15} />
-            </IconButton>
-          </div>
-        </section>
-
-        {selectedIds.length > 0 ? (
-          <section className="mt-4" aria-label="Element style">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                Element style
-              </p>
-              <Button
-                variant="quiet"
-                className="min-h-7 px-2 text-[11px]"
-                aria-label="Reset element style"
-                disabled={isSubmitting}
-                title="Return the selection to the default appearance"
-                onClick={resetNodeStyle}
-              >
-                Reset
-              </Button>
-            </div>
-
-            <p className="mt-2 text-[11px] font-medium text-rt-ink-muted">Fill</p>
-            <div className="mt-1 grid grid-cols-7 gap-1.5">
-              {DIAGRAM_FILL_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`Fill ${key}`}
-                  color={DIAGRAM_FILL_COLORS[key]}
-                  active={sharedNodeStyle('fillColor') === key}
-                  disabled={isSubmitting}
-                  onSelect={() => applyNodeStyle({ fillColor: key })}
-                />
-              ))}
-            </div>
-
-            <p className="mt-2.5 text-[11px] font-medium text-rt-ink-muted">Border</p>
-            <div className="mt-1 grid grid-cols-7 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`Border ${key}`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={sharedNodeStyle('strokeColor') === key}
-                  disabled={isSubmitting}
-                  onSelect={() => applyNodeStyle({ strokeColor: key })}
-                />
-              ))}
-            </div>
-
-            <p className="mt-2.5 text-[11px] font-medium text-rt-ink-muted">Border width</p>
-            <div className="mt-1 flex gap-1.5">
-              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={STROKE_WIDTH_LABELS[preset]}
-                  name={`Border width ${preset}`}
-                  active={sharedNodeStyle('strokeWidthPreset') === preset}
-                  disabled={isSubmitting}
-                  onSelect={() => applyNodeStyle({ strokeWidthPreset: preset })}
-                />
-              ))}
-            </div>
-
-            <p className="mt-2.5 text-[11px] font-medium text-rt-ink-muted">Text size</p>
-            <div className="mt-1 flex gap-1.5">
-              {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={FONT_SIZE_LABELS[preset]}
-                  name={`Text size ${preset}`}
-                  active={sharedNodeStyle('fontSizePreset') === preset}
-                  disabled={isSubmitting}
-                  onSelect={() => applyNodeStyle({ fontSizePreset: preset })}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="mt-4" aria-label="Arrows">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                Arrows
-              </p>
-              <p className="mt-0.5 text-[10px] text-rt-ink-faint">
-                {edges.length}/{DIAGRAM_EDGE_LIMIT}
-              </p>
-            </div>
-            {connectionMode ? (
-              <Button variant="quiet" className="min-h-8 px-2.5" onClick={cancelConnection}>
-                <X aria-hidden="true" size={15} />
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                className="min-h-8 px-2.5"
-                disabled={nodes.length < 2 || edges.length >= DIAGRAM_EDGE_LIMIT || isSubmitting}
-                title="Draw an arrow between two elements"
-                onClick={() => startConnection()}
-              >
-                <Link2 aria-hidden="true" size={15} />
-                Connect
-              </Button>
-            )}
-          </div>
-          {connectionMode ? (
-            <p
-              role="status"
-              className="mt-2 rounded-lg bg-rt-primary-tint px-3 py-2 text-[11px] leading-relaxed text-rt-primary-deep"
-            >
-              {connectionSourceId
-                ? `Choose a destination for ${selectedNodeById(nodes, connectionSourceId)?.label ?? 'this element'}.`
-                : 'Choose the starting element.'}
-            </p>
           ) : null}
-        </section>
+          <p className="rounded-lg border border-rt-tertiary bg-rt-surface px-2 py-1 text-[11px] text-rt-ink-faint">
+            {nodes.length}/{DIAGRAM_NODE_LIMIT} elements
+          </p>
+        </div>
 
-        {containerAwaitingDelete ? (
-          <section
-            className="mt-4 rounded-lg border border-rt-secondary bg-rt-secondary-wash p-3"
-            aria-label="Delete container"
+        {containerAwaitingDelete ? renderContainerDeletePrompt() : null}
+
+        {connectionMode ? (
+          <p
+            role="status"
+            className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-rt-secondary bg-rt-secondary-wash px-3 py-1.5 text-[12px] text-rt-secondary-deep"
           >
-            <p role="alert" className="text-[12px] leading-relaxed text-rt-secondary-deep">
-              This container holds {diagramDescendantIds(nodes, containerAwaitingDelete).length}{' '}
-              {diagramDescendantIds(nodes, containerAwaitingDelete).length === 1
-                ? 'element'
-                : 'elements'}
-              . Delete them too, or keep them on the canvas?
-            </p>
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              <Button
-                variant="secondary"
-                className="min-h-8 px-2.5"
-                onClick={() => resolveContainerDelete('ungroup')}
-              >
-                <Ungroup aria-hidden="true" size={15} />
-                Keep contents
-              </Button>
-              <Button className="min-h-8 px-2.5" onClick={() => resolveContainerDelete('contents')}>
-                <Trash2 aria-hidden="true" size={15} />
-                Delete contents
-              </Button>
-              <Button
-                variant="quiet"
-                className="min-h-8 px-2.5"
-                aria-label="Cancel deleting the container"
-                onClick={() => setPendingContainerDelete(null)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </section>
+            {connectionSourceId
+              ? `Choose a destination for ${
+                  selectedNodeById(nodes, connectionSourceId)?.label || 'this element'
+                }.`
+              : 'Choose the element the arrow starts from.'}
+          </p>
         ) : null}
 
-        {selectedNode ? (
-          <section className="mt-4" aria-label="Selected element">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                Selected {DIAGRAM_SHAPE_LABELS[displayShape(selectedNode)].toLowerCase()}
-              </span>
-              <IconButton label="Delete selected element" onClick={removeSelectedNodes}>
-                <Trash2 aria-hidden="true" size={16} />
-              </IconButton>
-            </div>
-            <label
-              htmlFor="diagram-node-label"
-              className="mt-3 block text-[12px] font-semibold text-rt-ink"
-            >
-              Label
-            </label>
-            <input
-              ref={labelInputRef}
-              id="diagram-node-label"
-              value={selectedNode.label}
-              maxLength={DIAGRAM_LABEL_LIMIT}
-              onFocus={() => {
-                nodeLabelStartRef.current ??= history.snapshotRef.current;
-              }}
-              onChange={(event) => {
-                clearError();
-                const graph = history.snapshotRef.current;
-                history.preview({
-                  nodes: renameNode(graph.nodes, selectedNode.id, event.target.value),
-                  edges: graph.edges,
-                });
-              }}
-              onBlur={normalizeSelectedLabel}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelNodeLabelEdit();
-                  canvasRef.current?.focus();
-                } else if (event.key === 'Enter') {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-              }}
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
-            />
-            <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
-              {selectedNode.label.length}/{DIAGRAM_LABEL_LIMIT}
-            </p>
-            {selectedNode.parentId ? (
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-[11px] text-rt-ink-faint">
-                  Inside {selectedNodeById(nodes, selectedNode.parentId)?.label || 'a container'}
-                </span>
-                <Button
-                  variant="quiet"
-                  className="min-h-7 px-2 text-[11px]"
-                  disabled={isSubmitting}
-                  title="Move this element out of its container"
-                  onClick={() => {
-                    clearError();
-                    const graph = history.snapshotRef.current;
-                    history.commit({
-                      nodes: reparentNodes(graph.nodes, [selectedNode.id], null),
-                      edges: graph.edges,
-                    });
-                  }}
-                >
-                  <Ungroup aria-hidden="true" size={14} />
-                  Remove from container
-                </Button>
-              </div>
-            ) : null}
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-[11px] tabular-nums text-rt-ink-faint">
-                {Math.round(effectiveDiagramNodeSize(selectedNode).width)} ×{' '}
-                {Math.round(effectiveDiagramNodeSize(selectedNode).height)}
-                {selectedNode.width === undefined ? ' (default)' : ''}
-              </span>
-              <Button
-                variant="quiet"
-                className="min-h-7 px-2 text-[11px]"
-                disabled={selectedNode.width === undefined || isSubmitting}
-                title="Return this element to its default size"
-                onClick={resetSelectedNodeSize}
-              >
-                Reset size
-              </Button>
-            </div>
-          </section>
-        ) : null}
+        {propertiesBar}
 
-        {selectedEdge ? (
-          <section className="mt-4 border-t border-rt-tertiary pt-4" aria-label="Selected arrow">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                  Selected arrow
-                </p>
-                <p className="mt-1 truncate text-[11px] text-rt-ink-muted">
-                  {selectedNodeById(nodes, selectedEdge.from)?.label} →{' '}
-                  {selectedNodeById(nodes, selectedEdge.to)?.label}
-                </p>
-              </div>
-              <IconButton label="Delete selected arrow" onClick={removeSelectedEdge}>
-                <Trash2 aria-hidden="true" size={16} />
-              </IconButton>
-            </div>
-            <label
-              htmlFor="diagram-edge-label"
-              className="mt-3 block text-[12px] font-semibold text-rt-ink"
-            >
-              Label <span className="font-normal text-rt-ink-faint">(optional)</span>
-            </label>
-            <input
-              ref={edgeLabelInputRef}
-              id="diagram-edge-label"
-              value={selectedEdge.label ?? ''}
-              maxLength={DIAGRAM_EDGE_LABEL_LIMIT}
-              onFocus={() => {
-                edgeLabelStartRef.current ??= history.snapshotRef.current;
-              }}
-              onChange={(event) => {
-                clearError();
-                const graph = history.snapshotRef.current;
-                history.preview({
-                  nodes: graph.nodes,
-                  edges: renameEdge(graph.edges, selectedEdge, event.target.value),
-                });
-              }}
-              onBlur={normalizeSelectedEdgeLabel}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelEdgeLabelEdit();
-                  canvasRef.current?.focus();
-                } else if (event.key === 'Enter') {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-              }}
-              placeholder="e.g. sends request"
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
-            />
-            <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
-              {(selectedEdge.label ?? '').length}/{DIAGRAM_EDGE_LABEL_LIMIT}
-            </p>
-
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <p className="text-[11px] font-medium text-rt-ink-muted">Arrow style</p>
-              <Button
-                variant="quiet"
-                className="min-h-7 px-2 text-[11px]"
-                aria-label="Reset arrow style"
-                disabled={isSubmitting}
-                title="Return this arrow to the default appearance"
-                onClick={resetEdgeStyle}
-              >
-                Reset
-              </Button>
-            </div>
-            <div className="mt-1 grid grid-cols-7 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`Arrow ${key}`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={selectedEdge.strokeColor === key}
-                  disabled={isSubmitting}
-                  onSelect={() => applyEdgeStyle({ strokeColor: key })}
-                />
-              ))}
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={STROKE_WIDTH_LABELS[preset]}
-                  name={`Arrow width ${preset}`}
-                  active={selectedEdge.strokeWidthPreset === preset}
-                  disabled={isSubmitting}
-                  onSelect={() => applyEdgeStyle({ strokeWidthPreset: preset })}
-                />
-              ))}
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_STROKE_STYLES.map((style) => (
-                <PresetButton
-                  key={style}
-                  label={STROKE_STYLE_LABELS[style]}
-                  name={`Arrow style ${style}`}
-                  active={selectedEdge.strokeStyle === style}
-                  disabled={isSubmitting}
-                  onSelect={() => applyEdgeStyle({ strokeStyle: style })}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
-      </aside>
-
-      <section className="relative flex min-h-0 items-center justify-center overflow-auto p-3 sm:p-6">
         <StudioToolRail
           tool={canvasTool}
           onToolChange={selectCanvasTool}
@@ -4664,6 +5184,7 @@ export function DiagramEditor() {
           penOptions={renderPenOptions}
           tableOptions={renderTableOptions}
           templateOptions={renderTemplateOptions}
+          arrangeOptions={renderArrangeOptions}
         />
 
         <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">

@@ -24,6 +24,12 @@ import {
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
+import {
+  alignOffsets,
+  distributeOffsets,
+  type ArrangeBox,
+  type ArrangeOffset,
+} from '../studio/studioArrange';
 import { inkToData, type StudioInkStroke } from '../studio/studioInk';
 
 export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
@@ -193,6 +199,26 @@ export function clientPointToDiagramPoint(
   return {
     x: viewBox.x + ((clientPoint.x - bounds.left) / bounds.width) * viewBox.width,
     y: viewBox.y + ((clientPoint.y - bounds.top) / bounds.height) * viewBox.height,
+  };
+}
+
+/**
+ * The reverse: a rectangle in scene units, in the surface's own client space.
+ * The properties bar needs it to know where the selection actually appears.
+ */
+export function diagramRectToClientRect(
+  rect: DiagramRect,
+  bounds: DiagramSurfaceBounds,
+  viewBox: DiagramRect = DIAGRAM_FULL_VIEW_BOX,
+): DiagramRect {
+  if (viewBox.width <= 0 || viewBox.height <= 0) return { x: 0, y: 0, width: 0, height: 0 };
+  const scaleX = bounds.width / viewBox.width;
+  const scaleY = bounds.height / viewBox.height;
+  return {
+    x: bounds.left + (rect.x - viewBox.x) * scaleX,
+    y: bounds.top + (rect.y - viewBox.y) * scaleY,
+    width: rect.width * scaleX,
+    height: rect.height * scaleY,
   };
 }
 
@@ -379,46 +405,16 @@ export function moveNodesBy(
 // Alignment is an exactness operation, so it never snaps afterwards: rounding a
 // shared edge onto the grid moves differently sized nodes by different amounts
 // and breaks the very alignment that was just computed.
+//
+// The arithmetic lives in `studioArrange`, over plain boxes, because the
+// properties bar arranges strokes, paths and tables the same way. These two
+// stay as the node-shaped door onto it.
 export function alignNodes(
   nodes: readonly DiagramNode[],
   ids: readonly string[],
   mode: DiagramAlignMode,
 ): DiagramNode[] {
-  const selected = nodes.filter((node) => ids.includes(node.id));
-  if (selected.length < 2) return [...nodes];
-
-  const boxes = selected.map(nodeBounds);
-  const left = Math.min(...boxes.map((box) => box.x));
-  const right = Math.max(...boxes.map((box) => box.x + box.width));
-  const top = Math.min(...boxes.map((box) => box.y));
-  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
-
-  return nodes.map((node) => {
-    if (!ids.includes(node.id)) return node;
-    const size = effectiveDiagramNodeSize(node);
-    const target = { x: node.x, y: node.y };
-    switch (mode) {
-      case 'left':
-        target.x = left;
-        break;
-      case 'centerX':
-        target.x = (left + right) / 2 - size.width / 2;
-        break;
-      case 'right':
-        target.x = right - size.width;
-        break;
-      case 'top':
-        target.y = top;
-        break;
-      case 'centerY':
-        target.y = (top + bottom) / 2 - size.height / 2;
-        break;
-      case 'bottom':
-        target.y = bottom - size.height;
-        break;
-    }
-    return { ...node, ...placeNodePosition(target, effectiveDiagramNodeSize(node), false) };
-  });
+  return applyNodeOffsets(nodes, ids, (boxes) => alignOffsets(boxes, mode));
 }
 
 // Equal gaps between bounding boxes, with the outermost two left where they are.
@@ -428,34 +424,29 @@ export function distributeNodes(
   ids: readonly string[],
   axis: DiagramDistributeAxis,
 ): DiagramNode[] {
+  return applyNodeOffsets(nodes, ids, (boxes) => distributeOffsets(boxes, axis));
+}
+
+function applyNodeOffsets(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+  compute: (boxes: ArrangeBox[]) => Map<string, ArrangeOffset>,
+): DiagramNode[] {
   const selected = nodes.filter((node) => ids.includes(node.id));
-  if (selected.length < 3) return [...nodes];
-
-  const horizontal = axis === 'horizontal';
-  const extent = (node: DiagramNode) =>
-    horizontal ? effectiveDiagramNodeSize(node).width : effectiveDiagramNodeSize(node).height;
-  const start = (node: DiagramNode) => (horizontal ? node.x : node.y);
-
-  const ordered = [...selected].sort((a, b) => start(a) - start(b));
-  const first = ordered[0]!;
-  const last = ordered.at(-1)!;
-  const spanStart = start(first);
-  const spanEnd = start(last) + extent(last);
-  const totalExtent = ordered.reduce((sum, node) => sum + extent(node), 0);
-  const gap = (spanEnd - spanStart - totalExtent) / (ordered.length - 1);
-
-  const placed = new Map<string, number>();
-  let cursor = spanStart;
-  for (const node of ordered) {
-    placed.set(node.id, cursor);
-    cursor += extent(node) + gap;
-  }
+  const offsets = compute(selected.map((node) => ({ key: node.id, ...nodeBounds(node) })));
+  if (offsets.size === 0) return [...nodes];
 
   return nodes.map((node) => {
-    const position = placed.get(node.id);
-    if (position === undefined) return node;
-    const target = horizontal ? { x: position, y: node.y } : { x: node.x, y: position };
-    return { ...node, ...placeNodePosition(target, effectiveDiagramNodeSize(node), false) };
+    const offset = offsets.get(node.id);
+    if (!offset) return node;
+    return {
+      ...node,
+      ...placeNodePosition(
+        { x: node.x + offset.x, y: node.y + offset.y },
+        effectiveDiagramNodeSize(node),
+        false,
+      ),
+    };
   });
 }
 

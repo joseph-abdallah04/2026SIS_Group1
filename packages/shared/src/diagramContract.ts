@@ -165,7 +165,7 @@ export type DiagramFillKey = 'neutral' | 'surface' | 'blue' | 'green' | 'amber' 
 export type DiagramStrokeKey =
   'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink';
 export type DiagramStrokeWidthPreset = 'thin' | 'regular' | 'thick';
-export type DiagramFontSizePreset = 'small' | 'medium' | 'large';
+export type DiagramFontSizePreset = 'small' | 'medium' | 'large' | 'xlarge';
 export type DiagramStrokeStyle = 'solid' | 'dashed' | 'dotted';
 
 export const DIAGRAM_FILL_KEYS = [
@@ -198,10 +198,13 @@ export const DIAGRAM_STROKE_WIDTH_PRESETS = [
   'thick',
 ] as const satisfies readonly DiagramStrokeWidthPreset[];
 
+// `xlarge` is appended rather than inserted: the order drives the size picker,
+// and existing diagrams' options should not shuffle underneath people.
 export const DIAGRAM_FONT_SIZE_PRESETS = [
   'small',
   'medium',
   'large',
+  'xlarge',
 ] as const satisfies readonly DiagramFontSizePreset[];
 
 export const DIAGRAM_STROKE_STYLES = [
@@ -255,10 +258,17 @@ export const DIAGRAM_EDGE_STROKE_WIDTHS: Record<DiagramStrokeWidthPreset, number
 };
 
 /** `medium` is the 11px both surfaces already used for node labels. */
+/**
+ * Four steps, spread far enough apart to be told apart. The old 9/11/14 were
+ * within a couple of points of each other, so picking one barely showed —
+ * `medium` keeps the 11px both surfaces have always drawn labels at, which is
+ * what stops stored diagrams changing under this.
+ */
 export const DIAGRAM_FONT_SIZES: Record<DiagramFontSizePreset, number> = {
-  small: 9,
+  small: 8,
   medium: 11,
-  large: 14,
+  large: 15,
+  xlarge: 20,
 };
 
 export const DIAGRAM_LEGACY_FONT_SIZE = DIAGRAM_FONT_SIZES.medium;

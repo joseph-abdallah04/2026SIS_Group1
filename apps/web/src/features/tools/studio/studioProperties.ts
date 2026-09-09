@@ -20,28 +20,13 @@ import type { DiagramEdge, DiagramNode, PathElement, TableElement } from '@round
 import type { StudioInkStroke } from './studioInk';
 
 export type StudioPropertyId =
-  | 'strokeColor'
-  | 'strokeWidth'
-  | 'strokeStyle'
-  | 'fillColor'
-  | 'fontSize'
-  | 'textColor'
-  | 'bold'
-  | 'textAlign'
-  | 'cellFill'
-  | 'headerRow';
+  'strokeColor' | 'strokeWidth' | 'strokeStyle' | 'fillColor' | 'textFormat' | 'cellFill';
 
 export type StudioPropertyGroup = 'stroke' | 'fill' | 'text' | 'table';
 
 /** What the bar renders for this property. */
 export type StudioPropertyControl =
-  | 'strokeSwatch'
-  | 'fillSwatch'
-  | 'widthPreset'
-  | 'stylePreset'
-  | 'fontPreset'
-  | 'alignPreset'
-  | 'toggle';
+  'strokeSwatch' | 'fillSwatch' | 'widthPreset' | 'stylePreset' | 'textPanel' | 'toggle';
 
 export interface StudioPropertyDescriptor {
   id: StudioPropertyId;
@@ -65,11 +50,9 @@ const PROPERTY_ORDER: StudioPropertyDescriptor[] = [
   { id: 'strokeColor', label: 'Line colour', group: 'stroke', control: 'strokeSwatch' },
   { id: 'strokeWidth', label: 'Line width', group: 'stroke', control: 'widthPreset' },
   { id: 'strokeStyle', label: 'Line style', group: 'stroke', control: 'stylePreset' },
-  { id: 'fontSize', label: 'Text size', group: 'text', control: 'fontPreset' },
-  { id: 'bold', label: 'Bold', group: 'text', control: 'toggle' },
-  { id: 'textColor', label: 'Text colour', group: 'text', control: 'strokeSwatch' },
-  { id: 'textAlign', label: 'Text alignment', group: 'text', control: 'alignPreset' },
-  { id: 'headerRow', label: 'Header row', group: 'table', control: 'toggle' },
+  // One control rather than four. Text has enough settings to fill a bar on its
+  // own, and they are only wanted while text is actually being worked on.
+  { id: 'textFormat', label: 'Format text', group: 'text', control: 'textPanel' },
 ];
 
 const DESCRIPTOR_BY_ID = new Map(PROPERTY_ORDER.map((entry) => [entry.id, entry]));
@@ -107,14 +90,15 @@ function hasText(value: string | undefined): boolean {
 export function propertiesFor(target: StudioTarget): StudioPropertyId[] {
   switch (target.kind) {
     case 'node': {
+      // Formatting is offered once there is text to format; an empty shape is
+      // typed into by double-pressing it, not by a control.
       const ids: StudioPropertyId[] = ['fillColor', 'strokeColor', 'strokeWidth'];
-      // A shape is always drawn, but its label may be empty.
-      if (hasText(target.element.label)) ids.push('fontSize');
+      if (hasText(target.element.label)) ids.push('textFormat');
       return ids;
     }
     case 'edge': {
       const ids: StudioPropertyId[] = ['strokeColor', 'strokeWidth', 'strokeStyle'];
-      if (hasText(target.element.label)) ids.push('fontSize');
+      if (hasText(target.element.label)) ids.push('textFormat');
       return ids;
     }
     case 'ink':
@@ -126,15 +110,13 @@ export function propertiesFor(target: StudioTarget): StudioPropertyId[] {
       if (target.element.closed) ids.unshift('fillColor');
       return ids;
     }
-    case 'table': {
-      if (!target.inCellMode) {
-        return ['strokeColor', 'strokeWidth', 'fontSize', 'headerRow'];
-      }
-      const ids: StudioPropertyId[] = ['cellFill'];
-      if (target.cellsHaveText) ids.push('fontSize', 'bold', 'textColor', 'textAlign');
-      else ids.push('textAlign');
-      return ids;
-    }
+    case 'table':
+      // A table is offered text formatting whether or not any cell has been
+      // filled in: the settings apply to every cell, so they are as useful
+      // before typing as after.
+      return target.inCellMode
+        ? ['cellFill', 'strokeColor', 'strokeWidth', 'textFormat']
+        : ['strokeColor', 'strokeWidth', 'textFormat'];
   }
 }
 

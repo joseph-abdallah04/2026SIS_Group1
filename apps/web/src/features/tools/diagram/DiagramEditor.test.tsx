@@ -111,6 +111,54 @@ async function placeText(
   fireEvent.blur(input);
 }
 
+/** Types into an element's label the way the canvas does: double-press it. */
+async function typeNodeLabel(
+  user: ReturnType<typeof userEvent.setup>,
+  canvas: Element,
+  name: string,
+  pointerId: number,
+  text: string,
+) {
+  const node = screen.getByRole('button', { name });
+  pressNode(node, canvas, { pointerId, time: pointerId * 10 });
+  pressNode(node, canvas, { pointerId: pointerId + 1, time: pointerId * 10 + 180 });
+  const input = await screen.findByLabelText(/^Edit .* label$/);
+  await user.clear(input);
+  await user.type(input, text);
+  fireEvent.blur(input);
+}
+
+/** A property's own choices live behind its button on the bar. */
+async function openBarPanel(user: ReturnType<typeof userEvent.setup>, name: string) {
+  const trigger = screen.getByRole('button', { name });
+  if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+}
+
+/**
+ * The bar keeps two panels of its own: a table's rows and columns, and an
+ * arrow's settings. Everything else the old sidebar held is reached on the
+ * canvas instead — a label by double-pressing, a size by its corner handles.
+ */
+async function openMore(user: ReturnType<typeof userEvent.setup>) {
+  for (const name of ['Rows and columns', 'Arrow']) {
+    const trigger = screen.queryByRole('button', { name });
+    if (!trigger) continue;
+    if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+    return;
+  }
+}
+
+/** Arranging moved onto the rail, in with the other canvas-wide settings. */
+async function openArrangeMenu(user: ReturnType<typeof userEvent.setup>) {
+  const trigger = screen.getByRole('button', { name: 'Arrange' });
+  if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+}
+
+async function arrangeDiagram(user: ReturnType<typeof userEvent.setup>) {
+  await openArrangeMenu(user);
+  await user.click(screen.getByRole('button', { name: 'Arrange the diagram' }));
+}
+
 function Harness({
   children,
   propose,
@@ -256,8 +304,7 @@ describe('diagram editor', () => {
     const { user, canvas } = await openDiagram();
 
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    await user.clear(screen.getByLabelText('Label'));
-    await user.type(screen.getByLabelText('Label'), 'API');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 31, 'API');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     await placeText(user, canvas, 21, [500, 400], 'Note');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
@@ -507,7 +554,8 @@ describe('diagram editor', () => {
       </Harness>,
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
-    await user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+    await openMore(user);
+    await user.click(screen.getByRole('button', { name: 'Delete selection' }));
     expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
@@ -622,8 +670,10 @@ describe('diagram editor', () => {
     expect(screen.getByText("Extending Alice's diagram")).toBeInTheDocument();
     expect(screen.getByText('2/100 elements')).toBeInTheDocument();
     await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+    await openMore(user);
     await user.type(screen.getByLabelText('Label (optional)'), 'references');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
@@ -655,17 +705,18 @@ describe('diagram editor', () => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
+    const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    await user.clear(screen.getByLabelText('Label'));
-    await user.type(screen.getByLabelText('Label'), 'Client');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 33, 'Client');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
-    await user.clear(screen.getByLabelText('Label'));
-    await user.type(screen.getByLabelText('Label'), 'Server');
+    await typeNodeLabel(user, canvas, 'Dotted rectangle: Unlabelled', 35, 'Server');
 
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     expect(screen.getByText('Choose a destination for Server.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Client' }));
+    // Joining two elements opens the panel holding the arrow's name and puts
+    // the cursor in it: naming it is the obvious next thing.
     const edgeLabel = screen.getByLabelText('Label (optional)');
     expect(edgeLabel).toHaveFocus();
     await user.type(edgeLabel, '  sends   request  ');
@@ -690,8 +741,10 @@ describe('diagram editor', () => {
     const { user } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
+    await openMore(user);
     const edgeLabel = screen.getByLabelText('Label (optional)');
     await user.type(edgeLabel, 'calls');
     await user.tab();
@@ -715,7 +768,7 @@ describe('diagram editor', () => {
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     const box = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
     const before = box.getAttribute('transform');
-    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await arrangeDiagram(user);
     expect(box.getAttribute('transform')).not.toBe(before);
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
@@ -730,13 +783,14 @@ describe('diagram editor', () => {
     const { user } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
 
     expect(
       screen.getByRole('button', { name: 'Arrow from Unlabelled to Unlabelled' }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Delete selected arrow' }));
+    await user.click(screen.getByRole('button', { name: 'Delete selection' }));
 
     expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
     expect(screen.getByText('2 elements · 0 arrows')).toBeInTheDocument();
@@ -774,7 +828,8 @@ describe('diagram editor', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
 
-    await user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+    await openMore(user);
+    await user.click(screen.getByRole('button', { name: 'Delete selection' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     const payload = propose.mock.calls[0]?.[0];
@@ -790,6 +845,7 @@ describe('diagram editor', () => {
     const { user } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
@@ -799,6 +855,7 @@ describe('diagram editor', () => {
     );
 
     await user.keyboard('{Escape}');
+    await openMore(user);
     expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     expect(propose).toHaveBeenCalledTimes(1);
@@ -962,9 +1019,9 @@ describe('diagram viewport and productivity', () => {
     fireEvent.pointerUp(canvas, { pointerId: 61, clientX: 400, clientY: 200 });
 
     expect(screen.queryByTestId('selection-marquee')).not.toBeInTheDocument();
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Align bottom edges' }));
+    await user.click(screen.getByRole('button', { name: 'Align' }));
+    await user.click(screen.getByRole('button', { name: 'Align bottom' }));
 
     // Box bottom 80 and container bottom 136 both settle on 136.
     expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
@@ -984,14 +1041,10 @@ describe('diagram viewport and productivity', () => {
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     const box = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
 
-    expect(screen.getByText('1 selected')).toBeInTheDocument();
-
     pressNode(box, canvas, { pointerId: 62, time: 1000, shiftKey: true });
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
     expect(box).toHaveAttribute('aria-pressed', 'true');
 
     pressNode(box, canvas, { pointerId: 63, time: 3000, shiftKey: true });
-    expect(screen.getByText('1 selected')).toBeInTheDocument();
     expect(box).toHaveAttribute('aria-pressed', 'false');
   });
 
@@ -1001,7 +1054,6 @@ describe('diagram viewport and productivity', () => {
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
 
     const box = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
     fireEvent.pointerDown(box, { button: 0, pointerId: 64, clientX: 30, clientY: 30 });
@@ -1024,13 +1076,11 @@ describe('diagram viewport and productivity', () => {
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
 
     const box = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
     fireEvent.pointerDown(box, { button: 0, pointerId: 66, clientX: 30, clientY: 30 });
     fireEvent.pointerUp(canvas, { pointerId: 66, clientX: 30, clientY: 30 });
 
-    expect(screen.getByText('1 selected')).toBeInTheDocument();
     expect(box).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Dotted rectangle: Unlabelled' })).toHaveAttribute(
       'aria-pressed',
@@ -1230,7 +1280,6 @@ describe('diagram resize and style', () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    expect(screen.getByRole('button', { name: 'Reset size' })).toBeDisabled();
 
     fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
       button: 0,
@@ -1240,11 +1289,15 @@ describe('diagram resize and style', () => {
     });
     fireEvent.pointerMove(canvas, { pointerId: 72, clientX: 224, clientY: 128 });
     fireEvent.pointerUp(canvas, { pointerId: 72, clientX: 224, clientY: 128 });
-    expect(screen.getByText('200 × 104')).toBeInTheDocument();
+    const outlineWidth = () => {
+      const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+      return node.querySelector('rect[rx="8"]')?.getAttribute('width');
+    };
+    expect(outlineWidth()).toBe('200');
 
-    await user.click(screen.getByRole('button', { name: 'Reset size' }));
-
-    expect(screen.getByText('120 × 56 (default)')).toBeInTheDocument();
+    // Undo is the way back: the numeric size fields went with the sidebar.
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(outlineWidth()).toBe('120');
   });
 
   it('blocks a proposal while a resize is still in flight', async () => {
@@ -1274,8 +1327,11 @@ describe('diagram resize and style', () => {
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
 
-    await user.click(screen.getByRole('button', { name: 'Fill blue' }));
-    await user.click(screen.getByRole('button', { name: 'Border rose' }));
+    await openMore(user);
+    await openBarPanel(user, 'Fill');
+    await user.click(screen.getByRole('button', { name: 'blue fill' }));
+    await openBarPanel(user, 'Line colour');
+    await user.click(screen.getByRole('button', { name: 'rose line' }));
 
     expect(nodeRect('Rounded rectangle: Unlabelled')).toHaveAttribute(
       'fill',
@@ -1302,8 +1358,13 @@ describe('diagram resize and style', () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    await user.click(screen.getByRole('button', { name: 'Fill green' }));
-    expect(screen.getByRole('button', { name: 'Fill green' })).toHaveAttribute(
+    await openMore(user);
+    await openBarPanel(user, 'Fill');
+    await openBarPanel(user, 'Fill');
+    await user.click(screen.getByRole('button', { name: 'green fill' }));
+    await openMore(user);
+    await openBarPanel(user, 'Fill');
+    expect(screen.getByRole('button', { name: 'green fill' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -1312,24 +1373,12 @@ describe('diagram resize and style', () => {
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
 
-    expect(screen.getByRole('button', { name: 'Fill green' })).toHaveAttribute(
+    await openMore(user);
+    await openBarPanel(user, 'Fill');
+    expect(screen.getByRole('button', { name: 'green fill' })).toHaveAttribute(
       'aria-pressed',
       'false',
     );
-  });
-
-  it('resets a styled node back to the pre-v2 appearance', async () => {
-    render(<Harness propose={propose()} />);
-    const { user } = await openDiagram();
-    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    await user.click(screen.getByRole('button', { name: 'Fill amber' }));
-    await user.click(screen.getByRole('button', { name: 'Text size large' }));
-
-    await user.click(screen.getByRole('button', { name: 'Reset element style' }));
-
-    expect(nodeRect('Rounded rectangle: Unlabelled')).toHaveAttribute('fill', '#EEF2F4');
-    expect(nodeRect('Rounded rectangle: Unlabelled')).toHaveAttribute('stroke', '#4D6A74');
-    expect(nodeRect('Rounded rectangle: Unlabelled')).toHaveAttribute('stroke-width', '1.5');
   });
 
   it('styles an arrow and keeps its dash geometry in step with its width', async () => {
@@ -1344,6 +1393,7 @@ describe('diagram resize and style', () => {
     const arrow = screen.getByRole('button', { name: 'Arrow from Client to Server' });
     fireEvent.pointerDown(arrow, { button: 0, pointerId: 74 });
 
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Arrow width thick' }));
     await user.click(screen.getByRole('button', { name: 'Arrow style dotted' }));
 
@@ -1508,7 +1558,6 @@ describe('diagram shapes and container groups', () => {
     fireEvent.pointerUp(canvas, { pointerId: 80, clientX: 68, clientY: 56 });
 
     expect(screen.queryByTestId('container-drop-target')).not.toBeInTheDocument();
-    expect(screen.getByText('Inside a container')).toBeInTheDocument();
   });
 
   it('ungroups a node dragged back out of its container', async () => {
@@ -1517,7 +1566,6 @@ describe('diagram shapes and container groups', () => {
     const box = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
 
     dragNode(box, canvas, { pointerId: 81, from: [320, 30], to: [68, 56] });
-    expect(screen.getByText('Inside a container')).toBeInTheDocument();
 
     dragNode(box, canvas, { pointerId: 82, from: [100, 60], to: [700, 460] });
 
@@ -1574,7 +1622,6 @@ describe('diagram shapes and container groups', () => {
 
     // Nest the second container inside the first...
     dragNode(inner!, canvas, { pointerId: 86, from: [320, 30], to: [38, 36] });
-    expect(screen.getByText('Inside a container')).toBeInTheDocument();
 
     // ...then drag the parent so it comes to rest over its own child.
     dragNode(outer!, canvas, { pointerId: 87, from: [30, 30], to: [38, 38] });
@@ -1615,8 +1662,6 @@ describe('diagram shapes and container groups', () => {
       types: [DIAGRAM_SHAPE_MEDIA_TYPE],
       data: 'box',
     });
-
-    expect(screen.getByText('Inside a container')).toBeInTheDocument();
   });
 
   it('pulls contents back inside when the container is made smaller', async () => {
@@ -1663,7 +1708,8 @@ describe('diagram shapes and container groups', () => {
         clientY: 30,
       });
       fireEvent.pointerUp(opened.canvas, { pointerId: 93, clientX: 30, clientY: 30 });
-      await opened.user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+      await openMore(opened.user);
+      await opened.user.click(screen.getByRole('button', { name: 'Delete selection' }));
       return opened;
     }
 
@@ -1719,7 +1765,8 @@ describe('diagram shapes and container groups', () => {
       const { user } = await openDiagram();
       await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
 
-      await user.click(screen.getByRole('button', { name: 'Delete selected element' }));
+      await openMore(user);
+      await user.click(screen.getByRole('button', { name: 'Delete selection' }));
 
       expect(screen.getByText('0/100 elements')).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -1783,7 +1830,7 @@ describe('diagram routing and graph-aware arrange', () => {
       { from: 'n2', to: 'n3' },
     ]);
 
-    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await arrangeDiagram(user);
 
     // Top to bottom is the default flow.
     expect(positionOf('Rounded rectangle: Client').y).toBeLessThan(
@@ -1802,8 +1849,9 @@ describe('diagram routing and graph-aware arrange', () => {
       { from: 'n2', to: 'n3' },
     ]);
 
+    await openArrangeMenu(user);
     await user.click(screen.getByRole('button', { name: 'Arrange left to right' }));
-    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await arrangeDiagram(user);
 
     expect(positionOf('Rounded rectangle: Client').x).toBeLessThan(
       positionOf('Rounded rectangle: Api').x,
@@ -1817,6 +1865,7 @@ describe('diagram routing and graph-aware arrange', () => {
   it('marks the chosen flow direction as pressed', async () => {
     const { user } = await openFixture([{ from: 'n1', to: 'n2' }]);
 
+    await openArrangeMenu(user);
     expect(screen.getByRole('button', { name: 'Arrange top to bottom' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -1838,7 +1887,7 @@ describe('diagram routing and graph-aware arrange', () => {
     const { user } = await openFixture([{ from: 'n1', to: 'n2' }]);
     const before = positionOf('Rounded rectangle: Client');
 
-    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await arrangeDiagram(user);
     expect(positionOf('Rounded rectangle: Client')).not.toEqual(before);
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
@@ -1892,7 +1941,7 @@ describe('diagram routing and graph-aware arrange', () => {
       { from: 'n2', to: 'n3' },
     ]);
 
-    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    await arrangeDiagram(user);
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     const input = send.mock.calls[0]?.[0];
@@ -2724,9 +2773,11 @@ describe('studio tables', () => {
 
     await placeTable(user, canvas, 425);
     await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Row below' }));
     expect(screen.getByRole('button', { name: 'Cell row 4 column 1' })).toBeInTheDocument();
 
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Delete row' }));
     expect(screen.queryByRole('button', { name: 'Cell row 4 column 1' })).toBeNull();
   });
@@ -2740,6 +2791,7 @@ describe('studio tables', () => {
 
     await placeTable(user, canvas, 430);
     await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Column right' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
@@ -2764,6 +2816,8 @@ describe('studio tables', () => {
       pointerId: 436,
       shiftKey: true,
     });
+    await openMore(user);
+    await openBarPanel(user, 'Cell fill');
     await user.click(screen.getByRole('button', { name: 'blue cell fill' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
@@ -2925,8 +2979,8 @@ describe('studio element moving', () => {
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 7102, clientX: 480, clientY: 300 });
 
     expect(screen.getByRole('button', { name: 'Cell row 2 column 3' })).toBeInTheDocument();
-    // It lands unselected, so the cell inspector is not open until it is entered.
-    expect(screen.queryByRole('button', { name: 'Row below' })).toBeNull();
+    // It lands unselected, so nothing is offered for it until it is entered.
+    expect(screen.queryByRole('toolbar', { name: 'Selection properties' })).toBeNull();
   });
 });
 
@@ -3023,8 +3077,10 @@ describe('studio pen feedback and styling', () => {
     const outline = screen.getByRole('button', { name: 'Path with 2 points' });
     fireEvent.pointerDown(outline, { button: 0, pointerId: 565, clientX: 200, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 565, clientX: 200, clientY: 200 });
+    await openBarPanel(user, 'Line colour');
     await user.click(screen.getByRole('button', { name: 'amber line' }));
-    await user.click(screen.getByRole('button', { name: 'Dashed line' }));
+    await openBarPanel(user, 'Line width');
+    await user.click(screen.getByRole('button', { name: 'Dashed style' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await screen.findByRole('heading', { name: 'Studio canvas proposed' });
@@ -3089,7 +3145,8 @@ describe('studio table cell text', () => {
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 7103, clientX: 480, clientY: 300 });
     doublePress(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 770, 400, 290);
 
-    await user.click(screen.getByRole('button', { name: 'large cell text' }));
+    await openBarPanel(user, 'Format text');
+    await user.click(screen.getByRole('button', { name: 'large text' }));
     await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
     await user.click(screen.getByRole('button', { name: 'rose cell text' }));
 
@@ -3187,6 +3244,36 @@ describe('studio multi-selection', () => {
     expect(artifact.ink).toHaveLength(1);
     expect(artifact.paths).toHaveLength(1);
     expect(artifact.tables).toHaveLength(1);
+  });
+
+  it('moves the whole mixed selection when it is grabbed by the shape', async () => {
+    // Grabbing a shape used to start the shape-only drag, so the ink, the line
+    // and the table stayed behind while the shape walked off without them.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+    await drawEverything(user, canvas, 660);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 670, clientX: 2, clientY: 2 });
+    fireEvent.pointerMove(canvas, { pointerId: 670, clientX: 950, clientY: 590 });
+    fireEvent.pointerUp(canvas, { pointerId: 670, clientX: 950, clientY: 590 });
+
+    const strokeBefore = screen.getByTestId('ink-stroke').getAttribute('d');
+    const pathBefore = screen.getByRole('button', { name: 'Path with 2 points' }).getAttribute('d');
+
+    const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    const shapeBefore = shape.getAttribute('transform');
+    fireEvent.pointerDown(shape, { button: 0, pointerId: 675, clientX: 200, clientY: 160 });
+    fireEvent.pointerMove(canvas, { pointerId: 675, clientX: 264, clientY: 224 });
+    fireEvent.pointerUp(canvas, { pointerId: 675, clientX: 264, clientY: 224 });
+
+    expect(shape.getAttribute('transform')).not.toBe(shapeBefore);
+    expect(screen.getByTestId('ink-stroke').getAttribute('d')).not.toBe(strokeBefore);
+    expect(screen.getByRole('button', { name: 'Path with 2 points' }).getAttribute('d')).not.toBe(
+      pathBefore,
+    );
   });
 
   it('takes everything with Ctrl+A, including the studio elements', async () => {
@@ -3292,9 +3379,11 @@ describe('studio multi-selection', () => {
     fireEvent.pointerDown(cell, { button: 0, pointerId: 685, clientX: 400, clientY: 290 });
     fireEvent.pointerUp(canvas, { pointerId: 685, clientX: 400, clientY: 290 });
     // Selected whole: the cell inspector is not open yet.
+    await openMore(user);
     expect(screen.queryByRole('button', { name: 'Row below' })).toBeNull();
 
     doublePress(cell, canvas, 690, 400, 290);
+    await openMore(user);
     expect(screen.getByRole('button', { name: 'Row below' })).toBeInTheDocument();
   });
 });
@@ -3340,7 +3429,7 @@ describe('studio clipboard and snapping', () => {
 
     await drawLine(user, canvas, 700);
     selectPath(canvas, 705);
-    await user.click(screen.getByRole('button', { name: 'Duplicate selection' }));
+    await user.keyboard('{Control>}d{/Control}');
 
     expect(screen.getAllByTestId('studio-path')).toHaveLength(2);
 
@@ -3378,8 +3467,8 @@ describe('studio clipboard and snapping', () => {
     fireEvent.pointerDown(cell, { button: 0, pointerId: 715, clientX: 400, clientY: 290 });
     fireEvent.pointerUp(canvas, { pointerId: 715, clientX: 400, clientY: 290 });
 
-    await user.click(screen.getByRole('button', { name: 'Copy selection' }));
-    await user.click(screen.getByRole('button', { name: 'Paste copied elements' }));
+    await user.keyboard('{Control>}c{/Control}');
+    await user.keyboard('{Control>}v{/Control}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await screen.findByRole('heading', { name: 'Studio canvas proposed' });
@@ -3411,7 +3500,7 @@ describe('studio clipboard and snapping', () => {
       clientY: 320,
     });
     fireEvent.pointerUp(canvas, { pointerId: 725, clientX: 340, clientY: 320 });
-    await user.click(screen.getByRole('button', { name: 'Duplicate selection' }));
+    await user.keyboard('{Control>}d{/Control}');
 
     expect(screen.getAllByTestId('ink-stroke')).toHaveLength(2);
   });
@@ -3424,8 +3513,9 @@ describe('studio clipboard and snapping', () => {
     const { user } = await openDiagram();
 
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    // The paste control stays disabled until the clipboard holds something.
-    expect(screen.getByRole('button', { name: 'Paste copied elements' })).toBeDisabled();
+    // Pasting an empty clipboard does nothing rather than complaining.
+    await user.keyboard('{Control>}v{/Control}');
+    expect(screen.getAllByRole('button', { name: /^Rounded rectangle:/ })).toHaveLength(1);
   });
 
   /**
@@ -4089,6 +4179,53 @@ describe('placing a shape from the palette', () => {
     );
     expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByTestId('placement-ghost')).toBeNull();
+  });
+});
+
+describe('formatting text', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('offers a shape only what its label can carry, without greying the rest out', async () => {
+    // A shape's label carries a size and nothing else. Showing bold, colour and
+    // alignment disabled says "not yet", which is not what is going on.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 91, 'Idea');
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    expect(screen.getByRole('button', { name: 'large text' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Bold cell text' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Align left' })).toBeNull();
+  });
+
+  it('proposes the extra-large size through the real contract', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { canvas } = await openDiagram();
+    const user = userEvent.setup();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 93, 'Idea');
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    await user.click(screen.getByRole('button', { name: 'xlarge text' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const input = send.mock.calls[0]?.[0];
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]?.fontSizePreset).toBe('xlarge');
   });
 });
 

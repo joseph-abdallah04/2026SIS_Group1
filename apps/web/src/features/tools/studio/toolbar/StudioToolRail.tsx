@@ -11,6 +11,7 @@ import {
   Table,
   Type,
   Undo2,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -26,7 +27,8 @@ export type RailTool =
   'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template';
 
 /** Which rail button a tool lights up. Erase lives inside Freehand. */
-type RailSlot = 'select' | 'freehand' | 'pen' | 'shapes' | 'text' | 'table' | 'templates';
+type RailSlot =
+  'select' | 'freehand' | 'pen' | 'shapes' | 'text' | 'table' | 'templates' | 'arrange';
 
 const SLOT_FOR_TOOL: Record<RailTool, RailSlot> = {
   select: 'select',
@@ -50,6 +52,7 @@ const MENU_LABELS: Partial<Record<RailSlot, string>> = {
   shapes: 'Shapes',
   table: 'Table',
   templates: 'Templates',
+  arrange: 'Arrange',
 };
 
 /**
@@ -66,6 +69,7 @@ const MENU_ANCHOR: Partial<Record<RailSlot, 'rail' | 'button'>> = {
   shapes: 'rail',
   table: 'button',
   templates: 'button',
+  arrange: 'button',
 };
 
 /**
@@ -99,6 +103,11 @@ interface StudioToolRailProps {
   penOptions: (close: () => void) => ReactNode;
   tableOptions: (close: () => void) => ReactNode;
   templateOptions: (close: () => void) => ReactNode;
+  /**
+   * Laying the whole diagram out along its arrows. A canvas setting rather than
+   * a tool: it acts on everything at once and nothing has to be selected first.
+   */
+  arrangeOptions: (close: () => void) => ReactNode;
 }
 
 const RAIL_BUTTON = `flex h-9 w-9 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
@@ -196,6 +205,7 @@ export function StudioToolRail({
   penOptions,
   tableOptions,
   templateOptions,
+  arrangeOptions,
 }: StudioToolRailProps) {
   const [openMenu, setOpenMenu] = useState<RailSlot | null>(null);
   // Which button to hand focus back to when the panel closes. A single mutable
@@ -260,6 +270,8 @@ export function StudioToolRail({
         return tableOptions(closeMenu);
       case 'templates':
         return templateOptions(closeMenu);
+      case 'arrange':
+        return arrangeOptions(closeMenu);
       default:
         return null;
     }
@@ -368,7 +380,7 @@ export function StudioToolRail({
         </RailGroup>
       </div>
 
-      <div className="pointer-events-auto">
+      <div className="pointer-events-auto relative">
         <RailGroup label="Canvas">
           <RailButton label="Show grid" Icon={Grid3x3} active={showGrid} onClick={onToggleGrid} />
           <RailButton
@@ -376,6 +388,14 @@ export function StudioToolRail({
             Icon={Magnet}
             active={snapEnabled}
             onClick={onToggleSnap}
+          />
+          <RailButton
+            label="Arrange"
+            Icon={Workflow}
+            active={openMenu === 'arrange'}
+            disabled={disabled}
+            {...menuButton('arrange')}
+            onClick={() => toggleMenu('arrange')}
           />
         </RailGroup>
       </div>

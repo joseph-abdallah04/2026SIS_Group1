@@ -26,6 +26,7 @@ function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {
       </button>
     ),
     templateOptions: () => <button type="button">Flow</button>,
+    arrangeOptions: () => <button type="button">Arrange now</button>,
     ...overrides,
   };
   // The rail is controlled: which tool is armed comes back in as a prop, and
@@ -236,6 +237,18 @@ describe('the rail sub-toolbars', () => {
     const rail = screen.getByRole('toolbar', { name: 'Studio tools' });
     expect(rail.contains(panel)).toBe(false);
     expect(panel.parentElement).toBe(rail.parentElement);
+  });
+
+  it('keeps arranging with the canvas settings, not with the tools', async () => {
+    // Arranging acts on the whole board and needs nothing selected first, which
+    // makes it a canvas setting rather than a tool you pick up.
+    const user = userEvent.setup();
+    renderRail();
+    const canvas = screen.getByRole('toolbar', { name: 'Canvas' });
+    expect(canvas.querySelector('[aria-label="Arrange"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Arrange' }));
+    expect(screen.getByRole('button', { name: 'Arrange now' })).toBeInTheDocument();
   });
 
   it('hangs a short sub-toolbar from the button that opened it', async () => {

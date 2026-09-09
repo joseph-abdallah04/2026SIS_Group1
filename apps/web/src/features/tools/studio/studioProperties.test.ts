@@ -53,14 +53,14 @@ const table = (inCellMode = false, cellsHaveText = false): StudioTarget => ({
 const ids = (target: StudioTarget) => propertiesFor(target);
 
 describe('what one element supports', () => {
-  it('gives a shape a fill and a line, and text only once it has a label', () => {
+  it('gives a shape a fill and a line, and formatting only once it has text', () => {
     expect(ids(node(''))).toEqual(['fillColor', 'strokeColor', 'strokeWidth']);
-    expect(ids(node('Idea'))).toContain('fontSize');
+    expect(ids(node('Idea'))).toContain('textFormat');
   });
 
-  it('gives an arrow a line style, and text only once it is labelled', () => {
+  it('gives an arrow a line style, and formatting only once it is labelled', () => {
     expect(ids(edge())).toEqual(['strokeColor', 'strokeWidth', 'strokeStyle']);
-    expect(ids(edge('becomes'))).toContain('fontSize');
+    expect(ids(edge('becomes'))).toContain('textFormat');
   });
 
   it('gives ink a colour and a width and nothing else', () => {
@@ -76,16 +76,15 @@ describe('what one element supports', () => {
   });
 
   it('treats a table as its grid until the selection is inside it', () => {
-    expect(ids(table(false))).toEqual(['strokeColor', 'strokeWidth', 'fontSize', 'headerRow']);
+    expect(ids(table(false))).toEqual(['strokeColor', 'strokeWidth', 'textFormat']);
     expect(ids(table(true))).toContain('cellFill');
-    expect(ids(table(true))).not.toContain('headerRow');
+    expect(ids(table(true))).not.toContain('fillColor');
   });
 
-  it('offers cell text controls only once the cells have text', () => {
-    expect(ids(table(true, false))).not.toContain('bold');
-    expect(ids(table(true, true))).toEqual(
-      expect.arrayContaining(['cellFill', 'fontSize', 'bold', 'textColor', 'textAlign']),
-    );
+  it('offers a table its text settings before any cell has been filled in', () => {
+    // They apply to every cell, so they are as useful before typing as after.
+    expect(ids(table(false))).toContain('textFormat');
+    expect(ids(table(true, false))).toContain('textFormat');
   });
 });
 
@@ -95,7 +94,7 @@ describe('what a selection has in common', () => {
       'fillColor',
       'strokeColor',
       'strokeWidth',
-      'fontSize',
+      'textFormat',
     ]);
   });
 
@@ -125,10 +124,19 @@ describe('what a selection has in common', () => {
     expect(shared).not.toContain('cellFill');
   });
 
-  it('comes back empty when nothing is shared, so the caller can fall back', () => {
-    // Ink and a table's cells have no property in common; the bar shows the
-    // alignment tools instead of nothing.
-    expect(commonProperties([ink, table(true, true)])).toEqual([]);
+  it('narrows to what a mixed selection genuinely shares', () => {
+    // A shape and a table both draw a line and both carry text, so those
+    // survive; the fill does not, because a table's is a cell fill.
+    expect(commonProperties([node('Idea'), table(true, true)]).map((entry) => entry.id)).toEqual([
+      'strokeColor',
+      'strokeWidth',
+      'textFormat',
+    ]);
+    // Ink carries a line and nothing else, so a fill leaves nothing shared.
+    expect(commonProperties([ink, node('Idea')]).map((entry) => entry.id)).toEqual([
+      'strokeColor',
+      'strokeWidth',
+    ]);
   });
 
   it('is empty for an empty selection', () => {

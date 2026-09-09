@@ -1,12 +1,14 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-type PopoverPlacement = 'right' | 'right-center' | 'top' | 'bottom';
+type PopoverPlacement = 'right' | 'right-center' | 'top' | 'top-center' | 'bottom';
 
 const PLACEMENT_CLASSES: Record<PopoverPlacement, string> = {
   right: 'left-full top-0 ml-2',
   // Held level with the middle of its anchor rather than its top.
   'right-center': 'left-full top-1/2 ml-2 -translate-y-1/2',
   top: 'bottom-full left-0 mb-2',
+  // Held over the middle of its anchor rather than its left edge.
+  'top-center': 'bottom-full left-1/2 mb-2 -translate-x-1/2',
   bottom: 'top-full left-0 mt-2',
 };
 
