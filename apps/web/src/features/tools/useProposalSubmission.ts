@@ -67,10 +67,20 @@ export function useProposalSubmission({
       setStatus('success');
       return true;
     } catch (cause) {
-      submitting.current = false;
       setStatus('idle');
       setError(proposalErrorMessage(cause));
       return false;
+    } finally {
+      // Released however the call ends, not just on failure. The ref guards against a
+      // second write while one is in flight; once the first has settled it has done its
+      // job, and `status` is what records that this editor already had its turn.
+      //
+      // It used to be released only in the catch, which was invisible to the studio —
+      // an editor shows a success screen and can only be left by closing it, and closing
+      // resets. A caller that submits repeatedly without ever opening or closing a tool,
+      // like the assistant's Propose button, got exactly one write per page load and
+      // silent `false` for every one after it.
+      submitting.current = false;
     }
   }
 

@@ -69,7 +69,9 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
     setProposeState(
       entryId,
       ok ? 'proposed' : 'failed',
-      ok ? undefined : (creativeTools.submissionError ?? 'The board rejected it.'),
+      // Only claim the board rejected it when the board actually said so. A `false` with no
+      // error means the write never left the client — another proposal was still in flight.
+      ok ? undefined : (creativeTools.submissionError ?? 'Could not send it — try again.'),
     );
   };
 
