@@ -57,7 +57,7 @@ Tracks are suggestions for balancing load; each is one engineer unless noted. Pa
 | D     | Toolbar shell (F22); drawing tool core (F20) — local editor first, propose via C's pipeline once ready                             |
 | E     | Data model + API for voting/summary designed & merged early (schemas block nobody); begin F27 shortlist selection UI behind flag   |
 | F     | F11–F13 voice in-session via LiveKit; mute toggle                                                                                  |
-| G     | Agenda side panel UI (F24); participant presence list; dashboard pages (F07)                                                       |
+| G     | Agenda side panel UI (F24); dashboard pages (F07)                                                                                  |
 | A     | On-call for unblocking; seed script with demo users; error-handling/toast patterns                                                 |
 
 **Demo:** full lobby flow + everyone sees sticky notes/reactions appear instantly + voices work.

@@ -508,6 +508,30 @@ POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, e
   the server: voice still owns no tables, and the only thing lost across a
   refresh is the participant's own intent. Someone who rejoins muted never
   opens the microphone at all — no prompt, no recording indicator
+- The participant rail (F13) is docked on the **right** of the board, mirroring
+  F24's agenda rail on the left, and collapses to a ~44px strip that keeps the
+  speaking rings and mute badges. **For the AI Assistant owner:** F34's floating
+  chat panel opens over this side and will overlay the rail. That is accepted —
+  the strip is the answer, so presence survives while the assistant is open. If
+  the assistant panel ever becomes layout-pushing rather than floating, the two
+  need reconciling
+- There are no avatars in this product (`User` has `displayName` only). The rail
+  reuses the waiting room's initials bubbles — `initialsFromName` and
+  `swatchForId` from `features/sessions/waitingRoomSeats` — keyed on LiveKit
+  identity, which `issueVoiceToken` mints as the user id, so a person's bubble
+  carries across the join. Note `swatchForId`, **not** `colorsForParticipants`:
+  the latter walks collisions against whichever id set it is handed, so seating
+  a live roster with it made a person's colour depend on who else was connected
+  — about a fifth of five-person rooms recoloured someone already on the rail
+  when the next person joined. The waiting room keeps the walk on purpose (names
+  there are hover-only, so distinct fills do the distinguishing); the rail shows
+  names always, so it trades duplicate fills for stability
+- The rail's roster is LiveKit's alone; it never merges the sessions module's
+  member list. Everyone who opens the session view joins the room whether or not
+  they grant a microphone, so the room already _is_ the presence list
+- Speaking is de-flickered with a 600ms trailing hold (`useSustainedSpeaking`).
+  Rising edges are never delayed — F13 wants a reaction within ~0.5s — but the
+  gaps between words would otherwise strobe the ring at syllable rate
 
 ---
 
