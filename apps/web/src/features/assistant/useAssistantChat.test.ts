@@ -87,7 +87,13 @@ describe('applyEvent', () => {
       { type: 'tool-result', toolName: 'sticky_ideation', ok: true, summary: '5 sticky notes' },
     ]);
     expect(entries).toEqual([
-      { kind: 'tool', id: 'e1', toolName: 'sticky_ideation', status: 'done', summary: '5 sticky notes' },
+      {
+        kind: 'tool',
+        id: 'e1',
+        toolName: 'sticky_ideation',
+        status: 'done',
+        summary: '5 sticky notes',
+      },
     ]);
   });
 
@@ -96,9 +102,7 @@ describe('applyEvent', () => {
       { type: 'error', message: 'The model ran out of tokens.' },
       { type: 'done', reason: 'error' },
     ]);
-    expect(entries).toEqual([
-      { kind: 'error', id: 'e1', message: 'The model ran out of tokens.' },
-    ]);
+    expect(entries).toEqual([{ kind: 'error', id: 'e1', message: 'The model ran out of tokens.' }]);
   });
 
   it('does not reopen a finished bubble on the next turn', () => {

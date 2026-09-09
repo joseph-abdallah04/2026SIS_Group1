@@ -54,9 +54,7 @@ describe('chat persistence', () => {
   });
 
   it('fails a tool that was still running, and says why', () => {
-    saveChat(SESSION, [
-      { kind: 'tool', id: 't1', toolName: 'web_search', status: 'running' },
-    ]);
+    saveChat(SESSION, [{ kind: 'tool', id: 't1', toolName: 'web_search', status: 'running' }]);
     expect(loadChat(SESSION)).toEqual([
       {
         kind: 'tool',
@@ -83,7 +81,14 @@ describe('chat persistence', () => {
   it('keeps completed tool results, including their search links', () => {
     const results = [{ title: 'Socket.IO', url: 'https://socket.io', snippet: 'v4' }];
     saveChat(SESSION, [
-      { kind: 'tool', id: 't1', toolName: 'web_search', status: 'done', summary: '1 result', results },
+      {
+        kind: 'tool',
+        id: 't1',
+        toolName: 'web_search',
+        status: 'done',
+        summary: '1 result',
+        results,
+      },
     ]);
     expect(loadChat(SESSION)[0]).toMatchObject({ status: 'done', results });
   });

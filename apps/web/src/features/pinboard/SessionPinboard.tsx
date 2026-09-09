@@ -13,7 +13,7 @@ import { AssistantBubble } from '../assistant';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
-import { VoiceNotice, useVoiceRoom } from '../voice';
+import { MicToggle, VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -72,6 +72,11 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   // Also before the early returns, for the same reason. Reads `board` at call time, so the
   // assistant is handed the board as it is when the user hits send (F35).
   const buildAssistantContext = useCallback((): AssistantContext => describeBoard(board), [board]);
+
+  // The room's own name for us, minted into the token server-side — the only
+  // name F12's toggle can show that is guaranteed to match what the rest of the
+  // room sees beside our audio.
+  const selfName = voice.participants.find((p) => p.isLocal)?.name ?? null;
 
   if (!sessionId) {
     return (
@@ -172,6 +177,16 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
               questions={questions}
               activeQuestionId={board.questionId}
               isLeader={isLeader}
+            />
+          }
+          micControl={
+            <MicToggle
+              name={selfName}
+              micEnabled={voice.micEnabled}
+              micStatus={voice.micStatus}
+              status={voice.status}
+              busy={voice.micBusy}
+              toggle={voice.toggleMic}
             />
           }
           reactToProposal={reactToProposal}

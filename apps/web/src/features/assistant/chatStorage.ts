@@ -8,11 +8,7 @@
 // Storage is best-effort throughout. Private-mode browsers throw on access, quotas run out,
 // and a transcript from an older build may not match today's shapes. Every one of those ends
 // as "start with an empty chat", never as a crash.
-import {
-  parseArtifact,
-  type AssistantToolName,
-  type WebSearchResult,
-} from '@roundtable/shared';
+import { parseArtifact, type AssistantToolName, type WebSearchResult } from '@roundtable/shared';
 
 import type { ChatEntry, ProposeState } from './useAssistantChat';
 
@@ -107,21 +103,6 @@ export function clearChat(sessionId: string): void {
  * running never finished, and a Propose that was mid-flight has no request behind it any
  * more. Leaving any of those as they were stores a spinner that never stops.
  */
-/** Search results are rendered as links, so a malformed one is dropped rather than shown. */
-function reviveSearchResults(value: unknown): WebSearchResult[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const results = value.filter((item): item is WebSearchResult => {
-    if (typeof item !== 'object' || item === null) return false;
-    const candidate = item as Record<string, unknown>;
-    return (
-      typeof candidate.title === 'string' &&
-      typeof candidate.url === 'string' &&
-      typeof candidate.snippet === 'string'
-    );
-  });
-  return results.length > 0 ? results : undefined;
-}
-
 function reviveEntry(value: unknown): ChatEntry | null {
   if (typeof value !== 'object' || value === null) return null;
   const entry = value as Record<string, unknown>;
@@ -187,4 +168,19 @@ function reviveEntry(value: unknown): ChatEntry | null {
     default:
       return null;
   }
+}
+
+/** Search results are rendered as links, so a malformed one is dropped rather than shown. */
+function reviveSearchResults(value: unknown): WebSearchResult[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const results = value.filter((item): item is WebSearchResult => {
+    if (typeof item !== 'object' || item === null) return false;
+    const candidate = item as Record<string, unknown>;
+    return (
+      typeof candidate.title === 'string' &&
+      typeof candidate.url === 'string' &&
+      typeof candidate.snippet === 'string'
+    );
+  });
+  return results.length > 0 ? results : undefined;
 }

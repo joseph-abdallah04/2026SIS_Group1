@@ -25,7 +25,10 @@ export function ToolActivity({ toolName, status, summary, results }: ToolActivit
     <div className="space-y-1.5">
       <div className="inline-flex items-center gap-2 rounded-full bg-rt-primary-tint px-2.5 py-1 text-xs text-rt-ink-muted">
         {status === 'running' ? (
-          <span className="size-2 animate-pulse rounded-full bg-rt-primary-deep" aria-hidden="true" />
+          <span
+            className="size-2 animate-pulse rounded-full bg-rt-primary-deep"
+            aria-hidden="true"
+          />
         ) : status === 'failed' ? (
           <span className="size-2 rounded-full bg-red-500" aria-hidden="true" />
         ) : (

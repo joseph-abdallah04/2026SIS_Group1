@@ -239,7 +239,7 @@ dropped individually rather than taking the panel down.
 
 Restoring resolves the in-flight states, because whatever they were waiting for died with the
 old page: a half-streamed reply is no longer streaming, a tool left running is marked
-interrupted, and a Propose caught mid-flight goes back to idle (a Propose that *finished*
+interrupted, and a Propose caught mid-flight goes back to idle (a Propose that _finished_
 keeps its outcome, so you can still see what you put on the board). Writes are debounced by
 half a second, since `setItem` is synchronous and streaming would otherwise serialize the
 whole conversation several times a second.

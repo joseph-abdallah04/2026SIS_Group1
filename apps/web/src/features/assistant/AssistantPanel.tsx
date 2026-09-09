@@ -98,7 +98,13 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
           aria-label="Close assistant"
           className="min-h-8 px-2"
         >
-          <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth={2}>
+          <svg
+            viewBox="0 0 20 20"
+            className="size-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
             <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
           </svg>
         </Button>

@@ -9,6 +9,7 @@ import {
 } from 'livekit-client';
 
 import { ApiClientError } from '../../lib/api';
+import { readMicMuted, writeMicMuted } from './micPreference';
 import { fetchVoiceToken } from './voiceApi';
 
 /**
@@ -27,11 +28,17 @@ export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' |
  * can't hear me" into "voice is broken".
  */
 export type MicStatus =
-  /** Not asked for yet. */
+  /**
+   * The device has not been asked for. Either nothing has happened yet, or you
+   * rejoined muted (F12) — in which case we deliberately never touched it.
+   */
   | 'idle'
   /** The browser prompt is open, or we are acquiring the device. */
   | 'requesting'
-  /** Publishing (whether or not currently muted — mute is F12). */
+  /**
+   * The device is ours and the track is published. Says nothing about mute:
+   * a muted participant is still `live`, they are simply publishing silence.
+   */
   | 'live'
   /** Permission refused. This is what the "mic blocked" banner is for. */
   | 'blocked'
@@ -86,11 +93,31 @@ export function useVoiceRoom(sessionId: string) {
    */
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
 
+  /**
+   * A toggle is in flight. Acquiring a device takes long enough to double-click
+   * through, and two overlapping `setMicrophoneEnabled` calls settle in
+   * whichever order the browser finishes them — which is how you end up muted
+   * after asking twice to unmute.
+   */
+  const [micBusy, setMicBusy] = useState(false);
+
   const roomRef = useRef<Room | null>(null);
   const attemptRef = useRef(0);
   const [retryToken, setRetryToken] = useState(0);
   /** The live subscription behind `micPermissionDenied`, so it can be torn down. */
   const permissionStatusRef = useRef<PermissionStatus | null>(null);
+  /** Guards `micBusy` without waiting for a render to land. */
+  const micBusyRef = useRef(false);
+  /**
+   * The mic operation currently settling, if any. The join path waits on it
+   * rather than being turned away by the guard above — see `connect`.
+   */
+  const micOpRef = useRef<Promise<void> | null>(null);
+  /**
+   * Who the server says we are, from the token. The mute preference is stored
+   * per user, and this is the only place the client learns its own id.
+   */
+  const identityRef = useRef<string | null>(null);
 
   /**
    * Watches the OS/browser-level mic permission so a fix made outside this
@@ -128,6 +155,89 @@ export function useVoiceRoom(sessionId: string) {
     setError(null);
     setRetryToken((n) => n + 1);
   }, []);
+
+  /**
+   * Mute or unmute the local track, and remember the choice (F12).
+   *
+   * One function for three callers that used to be three near-copies: the
+   * toggle, the "mic blocked" banner's retry, and the join path. They differ
+   * only in what they mean, not in what has to happen — and the interesting
+   * case is the one they share, where there is no published track yet and
+   * "unmute" has to acquire the device first. That is why the toggle works for
+   * someone who joined with the mic blocked and allowed it afterwards: nothing
+   * here assumes the track already exists.
+   *
+   * Named so it can call itself: the permission watcher's recovery is created
+   * inside this function and needs to run it again.
+   */
+  const applyMicEnabled = useCallback(
+    function applyMic(enabled: boolean): Promise<void> {
+      const room = roomRef.current;
+      if (!room || micBusyRef.current) return Promise.resolve();
+
+      // Unmuting with nothing published means `getUserMedia` — a permission
+      // prompt, or several hundred milliseconds of device startup. Muting, and
+      // unmuting a track we already hold, are neither, so they must not flash
+      // the "requesting" state through the UI.
+      const needsDevice =
+        enabled && !room.localParticipant.getTrackPublication(Track.Source.Microphone);
+
+      micBusyRef.current = true;
+      setMicBusy(true);
+      if (needsDevice) setMicStatus('requesting');
+
+      // Kept in a ref as well as returned: the join path has no handle on a
+      // toggle a user started, and needs one to wait for.
+      const op = (async () => {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(enabled);
+          // The view was left, or the room was rebuilt, while this was in flight.
+          if (roomRef.current !== room) return;
+
+          // Read back rather than assume: muting while nothing was ever
+          // published is a no-op inside the SDK, and claiming `live` off the back
+          // of it would show a toggle that thinks it holds a device it does not.
+          const publishing =
+            room.localParticipant.getTrackPublication(Track.Source.Microphone) !== undefined;
+          setMicStatus(publishing ? 'live' : 'idle');
+          setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+          // Only an unmute proves the permission is ours; a mute proves nothing.
+          if (enabled) setMicPermissionDenied(false);
+          if (identityRef.current) writeMicMuted(sessionId, identityRef.current, !enabled);
+        } catch (err) {
+          if (roomRef.current !== room) return;
+
+          // Whatever went wrong, the room is the authority on what is actually
+          // going out. Leaving `micEnabled` at its old value is how the toggle
+          // ends up reading "Mic on" for someone nobody can hear — nothing else
+          // corrects it, because a failure fires no track event.
+          setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+
+          // Only acquiring a device can fail for want of permission. Muting
+          // rejects for unrelated reasons — `mute()` waits on a lock and on a
+          // republish, either of which can throw mid-reconnect — and calling
+          // that "blocked" would raise a false "nobody can hear you" over a live
+          // mic, then arm the permission watcher to silently unmute later.
+          if (!enabled) return;
+
+          const failure = MediaDeviceFailure.getFailure(err);
+          if (failure === MediaDeviceFailure.NotFound) {
+            setMicStatus('no-device');
+            return;
+          }
+          setMicStatus('blocked');
+          watchMicPermission(() => void applyMic(true));
+        } finally {
+          micBusyRef.current = false;
+          setMicBusy(false);
+        }
+      })();
+
+      micOpRef.current = op;
+      return op;
+    },
+    [sessionId, watchMicPermission],
+  );
 
   useEffect(() => {
     if (!sessionId) return;
@@ -212,37 +322,14 @@ export function useVoiceRoom(sessionId: string) {
       scheduleReconnect();
     };
 
-    /**
-     * Publish the microphone. Split out because the "mic blocked" banner's
-     * retry button calls exactly this, on a room that is already connected.
-     */
-    async function enableMicrophone(): Promise<void> {
-      if (cancelled) return;
-      setMicStatus('requesting');
-      try {
-        await room.localParticipant.setMicrophoneEnabled(true);
-        if (cancelled) return;
-        setMicStatus('live');
-        setMicPermissionDenied(false);
-      } catch (err) {
-        if (cancelled) return;
-        const failure = MediaDeviceFailure.getFailure(err);
-        if (failure === MediaDeviceFailure.NotFound) {
-          setMicStatus('no-device');
-          return;
-        }
-        setMicStatus('blocked');
-        watchMicPermission(() => void enableMicrophone());
-      }
-    }
-
     async function connect(): Promise<void> {
       if (cancelled) return;
       setStatus((prev) => (prev === 'reconnecting' ? prev : 'connecting'));
 
       try {
-        const { url, token } = await fetchVoiceToken(sessionId);
+        const { url, token, identity } = await fetchVoiceToken(sessionId);
         if (cancelled) return;
+        identityRef.current = identity;
 
         await room.connect(url, token);
         if (cancelled) {
@@ -256,7 +343,33 @@ export function useVoiceRoom(sessionId: string) {
         setStatus('connected');
         setError(null);
         syncParticipants();
-        await enableMicrophone();
+
+        // Rejoin the way you left (F12). Muted means the microphone is not
+        // touched at all — not acquired and muted, simply never opened. A
+        // refresh should not relight the browser's recording indicator for
+        // someone who chose silence, and it must not raise a permission prompt
+        // at somebody who has never granted one. Unmuting later acquires the
+        // device then, which is the same path a blocked-then-allowed mic takes.
+        // A toggle can still be settling from before a drop — a permission
+        // prompt left open, say. It was aimed at a connection that no longer
+        // exists, and its guard would silently swallow the calls below,
+        // leaving us connected with no microphone and nothing to retry it.
+        if (micOpRef.current) await micOpRef.current.catch(() => {});
+        if (cancelled) return;
+
+        if (readMicMuted(sessionId, identity)) {
+          // Normally there is nothing to mute and that is the point — the
+          // device is never opened. But if that settling toggle did publish
+          // one, it must not go out hot just because we skipped the acquire.
+          if (room.localParticipant.getTrackPublication(Track.Source.Microphone)) {
+            await applyMicEnabled(false);
+          } else {
+            setMicEnabledState(false);
+            setMicStatus('idle');
+          }
+        } else {
+          await applyMicEnabled(true);
+        }
       } catch (err) {
         if (cancelled) return;
 
@@ -312,38 +425,31 @@ export function useVoiceRoom(sessionId: string) {
       setStatus('idle');
       setParticipants([]);
       setMicPermissionDenied(false);
+      // The next room starts from nothing: leaving with a live mic and coming
+      // back to a session whose join is still in flight would otherwise show a
+      // toggle claiming to be on.
+      setMicStatus('idle');
+      setMicEnabledState(false);
     };
-  }, [sessionId, retryToken, watchMicPermission]);
+    // `applyMicEnabled` changes only with `sessionId`, which is already here:
+    // this does not cost the room an extra rebuild.
+  }, [sessionId, retryToken, applyMicEnabled]);
 
   /** The "mic blocked" banner's retry button. Re-prompts without rejoining. */
-  const requestMicrophone = useCallback(async () => {
+  const requestMicrophone = useCallback(() => applyMicEnabled(true), [applyMicEnabled]);
+
+  /**
+   * Flip the mic (F12) — what the toggle and the M shortcut both call.
+   *
+   * The current state is read off the room rather than from `micEnabled`: a
+   * keypress that arrives between a remote mute and its re-render would
+   * otherwise toggle away from a state that is already stale.
+   */
+  const toggleMic = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
-
-    setMicStatus('requesting');
-    try {
-      await room.localParticipant.setMicrophoneEnabled(true);
-      setMicStatus('live');
-      setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
-      setMicPermissionDenied(false);
-    } catch (err) {
-      const failure = MediaDeviceFailure.getFailure(err);
-      if (failure === MediaDeviceFailure.NotFound) {
-        setMicStatus('no-device');
-        return;
-      }
-      setMicStatus('blocked');
-      watchMicPermission(() => void requestMicrophone());
-    }
-  }, [watchMicPermission]);
-
-  /** Mute/unmute the local track. The toggle UI and its persistence are F12. */
-  const setMicEnabled = useCallback(async (enabled: boolean) => {
-    const room = roomRef.current;
-    if (!room) return;
-    await room.localParticipant.setMicrophoneEnabled(enabled);
-    setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
-  }, []);
+    await applyMicEnabled(!room.localParticipant.isMicrophoneEnabled);
+  }, [applyMicEnabled]);
 
   /**
    * Browsers refuse to play audio until the page has been interacted with, and
@@ -360,14 +466,16 @@ export function useVoiceRoom(sessionId: string) {
   return {
     status,
     micStatus,
+    /** False while muted — including when muted means "never published". */
     micEnabled,
+    micBusy,
     micPermissionDenied,
     participants,
     error,
     audioBlocked,
     retry,
     requestMicrophone,
-    setMicEnabled,
+    toggleMic,
     unlockAudio,
   };
 }
