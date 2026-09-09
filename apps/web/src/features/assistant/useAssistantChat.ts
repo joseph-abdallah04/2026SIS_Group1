@@ -5,8 +5,9 @@
 // what makes a tool-using agent readable.
 //
 // History lives only here. The server stores nothing about a conversation (docs/06) — each
-// request carries the turns the client chooses to send.
-import { useCallback, useRef, useState } from 'react';
+// request carries the turns the client chooses to send. A copy is mirrored into
+// `sessionStorage` so a refresh does not throw the thread away; see chatStorage.ts.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AssistantContext,
   AssistantHistoryMessage,
@@ -17,6 +18,7 @@ import type {
 } from '@roundtable/shared';
 
 import { streamAssistantChat } from './api';
+import { clearChat, loadChat, saveChat } from './chatStorage';
 
 export type ProposeState = 'idle' | 'sending' | 'proposed' | 'failed';
 
@@ -44,6 +46,16 @@ export type ChatEntry =
 /** Turns sent back to the model as context. Tool chatter and artifacts stay client-side. */
 const HISTORY_LIMIT = 10;
 
+/**
+ * How long to wait after the transcript settles before writing it.
+ *
+ * Streaming changes state several times a second and `sessionStorage.setItem` is synchronous,
+ * so writing on every delta would serialize the whole conversation into a blocking call over
+ * and over while the reply types out. Half a second is short enough that a refresh mid-answer
+ * still finds your question, and long enough that streaming costs one write per beat.
+ */
+const SAVE_DEBOUNCE_MS = 500;
+
 export interface UseAssistantChatOptions {
   sessionId: string;
   /** Read fresh on every send, so the agent sees the board as it is *now*. */
@@ -51,9 +63,22 @@ export interface UseAssistantChatOptions {
 }
 
 export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOptions) {
-  const [entries, setEntries] = useState<ChatEntry[]>([]);
+  // Lazy initialiser: reads storage once on mount rather than on every render.
+  const [entries, setEntries] = useState<ChatEntry[]>(() => loadChat(sessionId));
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Mirror the transcript to sessionStorage, debounced. The write happens on the way out too,
+  // so a refresh landing inside the debounce window still keeps the last change.
+  const latest = useRef(entries);
+  latest.current = entries;
+  useEffect(() => {
+    const timer = setTimeout(() => saveChat(sessionId, latest.current), SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [entries, sessionId]);
+  useEffect(() => {
+    return () => saveChat(sessionId, latest.current);
+  }, [sessionId]);
 
   const send = useCallback(
     async (message: string) => {
@@ -101,7 +126,8 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
   const clear = useCallback(() => {
     abortRef.current?.abort();
     setEntries([]);
-  }, []);
+    clearChat(sessionId);
+  }, [sessionId]);
 
   const setProposeState = useCallback((entryId: string, propose: ProposeState, error?: string) => {
     setEntries((prev) =>
@@ -264,8 +290,14 @@ function findLastIndex(entries: ChatEntry[], predicate: (entry: ChatEntry) => bo
   return -1;
 }
 
+// Ids only need to be unique within a render tree, but a restored transcript makes that
+// harder than it looks: the counter starts at zero again after a reload, so a plain `e1`
+// would collide with the `e1` that came back out of storage and React would key two
+// different entries the same. The per-load prefix makes a collision impossible without
+// having to scan what was restored.
+const LOAD_PREFIX = Math.random().toString(36).slice(2, 8);
 let counter = 0;
 function nextId(): string {
   counter += 1;
-  return `e${counter}`;
+  return `e${LOAD_PREFIX}${counter}`;
 }

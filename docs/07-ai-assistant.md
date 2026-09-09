@@ -220,6 +220,30 @@ the web for something already on the board, and the universal check that a turn 
 back empty. Credentials come from the environment, not the database, so it needs neither
 Postgres nor a login.
 
+## Chat persistence
+
+The transcript is mirrored into `sessionStorage`, keyed per session id, so a refresh does not
+throw the thread away (`chatStorage.ts`). `sessionStorage` rather than `localStorage` on
+purpose: the chat is private to one person in one sitting, so it should survive a reload and a
+navigation and then go away with the tab. Two sessions open in two tabs never see each other's
+conversation.
+
+Everything about it is best-effort — private-mode browsers throw on access, quotas run out,
+and a transcript written by an older build may not match today's shapes. Every one of those
+ends as "start with an empty chat", never as a crash, and entries that fail validation are
+dropped individually rather than taking the panel down.
+
+Restoring resolves the in-flight states, because whatever they were waiting for died with the
+old page: a half-streamed reply is no longer streaming, a tool left running is marked
+interrupted, and a Propose caught mid-flight goes back to idle (a Propose that *finished*
+keeps its outcome, so you can still see what you put on the board). Writes are debounced by
+half a second, since `setItem` is synchronous and streaming would otherwise serialize the
+whole conversation several times a second.
+
+One non-obvious consequence: entry ids carry a random per-page-load prefix. The counter
+restarts at zero on reload, so a plain `e1` would collide with the `e1` that just came back
+out of storage and React would key two different entries identically.
+
 ## Tests
 
 `npm run test --workspace @roundtable/server` — 74 assistant tests, no network and no API
