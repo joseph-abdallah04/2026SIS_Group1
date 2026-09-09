@@ -208,7 +208,7 @@ Frontend: apps/web/src/features/pinboard/
 
 ```
 Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
-ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId, emoji)
+ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
 
 ### Socket events
@@ -266,7 +266,7 @@ reaction lands in the same place on every board.
 
 - Proposal artifacts are **editable by their author only** (F16); other users build on them via the separate "Extend" flow (F23), which creates a new proposal owned by that user
 - `extendsProposalId` links child proposals to parents; never delete parent if child exists
-- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
+- One reaction per person per proposal, enforced by a unique constraint on (proposalId, userId). Pressing the emoji you already left removes it; pressing a different one moves yours to it. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
 - Reactions are held to the same phase lock as every other board write: they move only while the question is in `discussion`. They are not votes (F27–F31), and a tally moving beside a live ballot would be read as one
 
 ---

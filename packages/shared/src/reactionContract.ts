@@ -6,6 +6,12 @@
  * and everyone can see who left them. They exist to put some energy on a board
  * that would otherwise be a silent wall of notes.
  *
+ * One per person per proposal. A reaction says how you feel about an idea, and
+ * you do not feel two ways about it at once, so picking a second emoji moves
+ * yours rather than adding to it. It also keeps a card's chips readable: with
+ * several each, a busy proposal turns into a wall of counts that says less
+ * than a single row does.
+ *
  * Any emoji can be left on a proposal. A handful are offered as chips on every
  * card because reaching for a picker to say "yes, this" is friction on the
  * cheapest interaction the board has; everything else is one press away behind

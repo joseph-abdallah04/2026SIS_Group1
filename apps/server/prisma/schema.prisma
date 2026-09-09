@@ -185,10 +185,14 @@ model ProposalReaction {
   emoji      String   @db.VarChar(32)
   createdAt  DateTime @default(now())
 
-  // The reason a reaction cannot be double-counted: pressing the chip twice
+  // One reaction per person per proposal, not per emoji. A reaction says how
+  // somebody feels about an idea, and a person has one feeling about it at a
+  // time: picking a second emoji replaces the first rather than adding to it.
+  //
+  // It is also what makes double-counting impossible. Pressing a chip twice
   // asks for a row that already exists, and the database refuses it. The rule
   // is here rather than only in service code so no future caller can lose it.
-  @@unique([proposalId, userId, emoji])
+  @@unique([proposalId, userId])
   // Reads are always "every reaction on this proposal, oldest first".
   @@index([proposalId, createdAt])
   @@map("proposal_reactions")

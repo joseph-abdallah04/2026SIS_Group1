@@ -338,19 +338,23 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * Add or take back one person's emoji reaction (F18).
+ * Set, change or take back one person's reaction (F18).
  *
- * The direction is decided here, from what is stored, rather than by the
- * client saying "add" or "remove". A client that has fallen behind would
+ * A person has one reaction per proposal, so this has three outcomes rather
+ * than two. Pressing the chip you already left takes it back. Pressing a
+ * different one moves your reaction to it, because a reaction says how you
+ * feel about an idea and you do not feel two ways at once. Pressing when you
+ * have none leaves one.
+ *
+ * Which of the three happens is decided here, from what is stored, rather than
+ * by the client saying "add" or "remove". A client that has fallen behind would
  * otherwise ask to remove a reaction it no longer has, or add one it already
  * left, and the board would end up reflecting the order intents happened to
- * arrive in instead of how many times the chip was pressed.
+ * arrive in instead of what was actually pressed.
  *
- * Double-counting is impossible by construction: one row per person, per
- * emoji, per proposal is a unique index, so the tenth press of a chip can
- * neither insert a second row nor remove one that was never there. A press
- * that races itself across two tabs lands on "reacted", which is what was
- * asked for both times.
+ * Double-counting is impossible by construction: one row per person per
+ * proposal is a unique index, so the tenth press of a chip can neither insert a
+ * second row nor remove one that was never there.
  *
  * Returns the proposal's whole reaction state, not a delta, so the broadcast
  * corrects any client that missed an earlier one.
@@ -367,17 +371,27 @@ export async function toggleReaction({
 }): Promise<{ proposalId: string; questionId: string; reactions: ReactionGroup[] }> {
   const { row } = await loadForMutation(proposalId, actor, 'react');
 
-  const { count } = await prisma.proposalReaction.deleteMany({
-    where: { proposalId, userId: actor.id, emoji },
+  const mine = await prisma.proposalReaction.findUnique({
+    where: { proposalId_userId: { proposalId, userId: actor.id } },
+    select: { emoji: true },
   });
 
-  if (count === 0) {
+  if (mine?.emoji === emoji) {
+    // Pressing what you already left takes it back.
+    await prisma.proposalReaction.deleteMany({ where: { proposalId, userId: actor.id } });
+  } else {
     try {
-      await prisma.proposalReaction.create({ data: { proposalId, userId: actor.id, emoji } });
+      // Whether this is your first reaction or a change of mind, the row that
+      // has to exist afterwards is the same one, so one write covers both.
+      await prisma.proposalReaction.upsert({
+        where: { proposalId_userId: { proposalId, userId: actor.id } },
+        create: { proposalId, userId: actor.id, emoji },
+        update: { emoji },
+      });
     } catch (err) {
-      // Two of this person's own clients pressed the same chip at once. The
-      // unique index refused the second, and the reaction is on, which is
-      // exactly what both presses asked for. Anything else is a real failure.
+      // Two of this person's own clients pressed at once and the index refused
+      // the second insert. They have a reaction, which is what both presses
+      // asked for. Anything else is a real failure.
       if (!isUniqueViolation(err)) throw err;
     }
   }

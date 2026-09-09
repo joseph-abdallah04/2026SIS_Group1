@@ -391,6 +391,7 @@ export function PositionedProposal({
             reactions={item.reactions}
             viewerId={viewerId}
             onReact={(emoji) => onReact(item, emoji)}
+            width={CARD_WIDTH[item.type]}
           />
 
           {canEdit || canDelete ? (
