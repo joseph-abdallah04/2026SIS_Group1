@@ -1,9 +1,23 @@
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StudioToolRail, type RailTool } from './StudioToolRail';
+
+/** Answers the rail's own breakpoint query, which jsdom does not implement. */
+function mockViewport(width: number) {
+  vi.stubGlobal(
+    'matchMedia',
+    (query: string) =>
+      ({
+        matches: query.includes('max-width: 639px') ? width <= 639 : false,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList,
+  );
+}
 
 function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {}) {
   const props = {
@@ -27,6 +41,7 @@ function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {
     ),
     templateOptions: () => <button type="button">Flow</button>,
     arrangeOptions: () => <button type="button">Arrange now</button>,
+    onShowShortcuts: vi.fn(),
     ...overrides,
   };
   // The rail is controlled: which tool is armed comes back in as a prop, and
@@ -295,6 +310,90 @@ describe('the rail sub-toolbars', () => {
     await user.click(screen.getByRole('button', { name: 'Table' }));
     await user.click(screen.getByRole('button', { name: 'Select' }));
     expect(screen.queryByRole('button', { name: '3 x 3' })).toBeNull();
+  });
+});
+
+describe('on a small screen', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lies along the bottom, and turns its arrow keys with it', async () => {
+    // A column down the left of a 320px canvas takes a third of the drawing
+    // surface with it.
+    mockViewport(360);
+    const user = userEvent.setup();
+    renderRail();
+
+    const tools = screen.getByRole('toolbar', { name: 'Studio tools' });
+    expect(tools).toHaveAttribute('aria-orientation', 'horizontal');
+
+    await user.tab();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('button', { name: 'Freehand' })).toHaveFocus();
+  });
+
+  it('stays a column on a wide one', () => {
+    mockViewport(1280);
+    renderRail();
+    expect(screen.getByRole('toolbar', { name: 'Studio tools' })).toHaveAttribute(
+      'aria-orientation',
+      'vertical',
+    );
+  });
+});
+
+describe('reaching the rail from the keyboard', () => {
+  it('is one tab stop, however many tools it holds', () => {
+    // Tabbing past twenty buttons to reach the canvas is the difference between
+    // a keyboard being usable and being technically supported.
+    renderRail();
+    const tools = screen.getByRole('toolbar', { name: 'Studio tools' });
+    const tabbable = [...tools.querySelectorAll('button')].filter(
+      (button) => button.tabIndex === 0,
+    );
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]).toHaveAttribute('aria-label', 'Select');
+  });
+
+  it('moves between the tools with the arrows', async () => {
+    const user = userEvent.setup();
+    renderRail();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveFocus();
+
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('button', { name: 'Freehand' })).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveFocus();
+  });
+
+  it('wraps, because a toolbar is a ring rather than a dead end', async () => {
+    const user = userEvent.setup();
+    renderRail();
+    await user.tab();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('button', { name: 'Templates' })).toHaveFocus();
+  });
+
+  it('jumps to either end', async () => {
+    const user = userEvent.setup();
+    renderRail();
+    await user.tab();
+    await user.keyboard('{End}');
+    expect(screen.getByRole('button', { name: 'Templates' })).toHaveFocus();
+    await user.keyboard('{Home}');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveFocus();
+  });
+
+  it('skips a tool that cannot be used', async () => {
+    // Undo is disabled with no history; arrowing onto it would be a dead stop.
+    const user = userEvent.setup();
+    renderRail({ canUndo: false });
+    const history = screen.getByRole('toolbar', { name: 'History' });
+    const first = history.querySelector<HTMLButtonElement>('button[tabindex="0"]');
+    expect(first).toHaveAttribute('aria-label', 'Redo diagram change');
+    void user;
   });
 });
 

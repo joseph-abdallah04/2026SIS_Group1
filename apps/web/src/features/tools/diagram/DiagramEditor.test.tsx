@@ -128,6 +128,14 @@ async function typeNodeLabel(
   fireEvent.blur(input);
 }
 
+/** Two quick presses on a cell open it, the way the canvas detects them. */
+function doublePressCell(cell: Element, canvas: Element, pointerId: number) {
+  fireEvent.pointerDown(cell, { button: 0, pointerId, clientX: 400, clientY: 290 });
+  fireEvent.pointerUp(canvas, { pointerId, clientX: 400, clientY: 290 });
+  fireEvent.pointerDown(cell, { button: 0, pointerId: pointerId + 1, clientX: 400, clientY: 290 });
+  fireEvent.pointerUp(canvas, { pointerId: pointerId + 1, clientX: 400, clientY: 290 });
+}
+
 /** A property's own choices live behind its button on the bar. */
 async function openBarPanel(user: ReturnType<typeof userEvent.setup>, name: string) {
   const trigger = screen.getByRole('button', { name });
@@ -4179,6 +4187,88 @@ describe('placing a shape from the palette', () => {
     );
     expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByTestId('placement-ghost')).toBeNull();
+  });
+});
+
+describe('tool shortcuts on the canvas', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('arms a tool from its letter', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    canvas.focus();
+    await user.keyboard('p');
+    expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('v');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('types into a table cell rather than switching tools', async () => {
+    // The collision this guard exists for: a selected cell takes plain letters,
+    // and "Table" begins with the table tool's own shortcut.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 950, clientX: 480, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 950, clientX: 480, clientY: 300 });
+    doublePressCell(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 951);
+
+    await user.keyboard('Time');
+    expect(screen.getByRole('textbox', { name: 'Cell row 1 column 1' })).toHaveValue('Time');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('types into a label rather than switching tools', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    pressNode(node, canvas, { pointerId: 960, time: 3000 });
+    pressNode(node, canvas, { pointerId: 961, time: 3180 });
+
+    const input = await screen.findByLabelText('Edit box label');
+    await user.type(input, 'Blueprint');
+    expect(input).toHaveValue('Blueprint');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves a half-drawn shape alone', async () => {
+    // Mid-pen, P would abandon the anchors already placed. Enter and Escape are
+    // the way out of a shape, not the tool's own letter.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 970, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 970, clientX: 200, clientY: 200 });
+
+    canvas.focus();
+    await user.keyboard('v');
+    expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves Ctrl combinations to the canvas', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    canvas.focus();
+    // Ctrl+V is paste, and paste with an empty clipboard leaves the board alone.
+    await user.keyboard('{Control>}v{/Control}');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
 

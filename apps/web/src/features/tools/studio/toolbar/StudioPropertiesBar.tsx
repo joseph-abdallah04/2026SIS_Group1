@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 
 import { Popover } from '../../../../components/ui/Popover';
+import { useMediaQuery } from '../../../../components/ui/useMediaQuery';
+import { useRovingToolbar } from '../../../../components/ui/useRovingToolbar';
 import { Tooltip } from '../../../../components/ui/Tooltip';
 import { groupProperties, type StudioPropertyDescriptor } from '../studioProperties';
 import { placePropertiesBar, type PlacementRect } from '../studioBarPlacement';
@@ -53,7 +55,7 @@ interface StudioPropertiesBarProps {
 }
 
 const BAR_BUTTON =
-  'flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
+  'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
 
 function Divider() {
   return <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-rt-tertiary" />;
@@ -86,7 +88,11 @@ export function StudioPropertiesBar({
   onDistribute,
   actions,
 }: StudioPropertiesBarProps) {
-  const barRef = useRef<HTMLDivElement>(null);
+  const roving = useRovingToolbar<HTMLDivElement>('horizontal');
+  const barRef = roving.ref;
+  // On a small screen the bar sits above the docked rail rather than over the
+  // selection: floating it there would cover most of what it is describing.
+  const docked = useMediaQuery('(max-width: 639px)');
   const alignTriggerRef = useRef<HTMLButtonElement>(null);
   const [alignOpen, setAlignOpen] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0, measured: false });
@@ -108,18 +114,23 @@ export function StudioPropertiesBar({
   const showAlignment = selectionSize > 1;
   const showDistribute = selectionSize > 2;
   const placed = placePropertiesBar(selection, size, viewport);
+  const dockedStyle = { left: '0.5rem', right: '0.5rem', bottom: '3.75rem' };
 
   return (
     <div
       ref={barRef}
+      onKeyDown={roving.onKeyDown}
       role="toolbar"
       aria-orientation="horizontal"
       aria-label="Selection properties"
-      data-side={placed.side}
-      className="rt-studio-rise pointer-events-auto absolute z-20 flex w-max items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)]"
+      data-side={docked ? 'docked' : placed.side}
+      className={`rt-studio-rise pointer-events-auto absolute z-20 flex items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)] ${
+        docked ? 'overflow-x-auto' : 'w-max'
+      }`}
       style={{
-        left: `${placed.x - origin.x}px`,
-        top: `${placed.y - origin.y}px`,
+        ...(docked
+          ? dockedStyle
+          : { left: `${placed.x - origin.x}px`, top: `${placed.y - origin.y}px` }),
         // Hidden until it has been measured once, so it is never seen in the
         // wrong place first. Measured, not non-zero: a layout that reports no
         // size still knows where the bar belongs.

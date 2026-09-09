@@ -183,6 +183,7 @@ import {
 import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
 import { StudioPropertiesBar } from '../studio/toolbar/StudioPropertiesBar';
+import { StudioShortcutSheet } from '../studio/toolbar/StudioShortcutSheet';
 import { StudioToolRail } from '../studio/toolbar/StudioToolRail';
 import {
   createInkId,
@@ -262,6 +263,7 @@ import {
 } from '../studio/studioArrange';
 import { Popover } from '../../../components/ui/Popover';
 import { Tooltip } from '../../../components/ui/Tooltip';
+import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 
 /**
@@ -403,7 +405,7 @@ const CELL_ALIGN_ICONS: Record<TableCellAlign, LucideIcon> = {
 };
 
 const BAR_CONTROL =
-  'flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
+  'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
 
 /**
  * One run of related controls inside a tool strip. Named for the screen reader
@@ -869,6 +871,7 @@ export function DiagramEditor() {
   const [ghostCursor, setGhostCursor] = useState<DiagramPoint | null>(null);
   // Which of the properties bar's controls has its choices open.
   const [openBarMenu, setOpenBarMenu] = useState<string | null>(null);
+  const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
   // Which shape the palette armed. Only meaningful under the `shape` tool.
   const [pendingShape, setPendingShape] = useState<DiagramNodeShape>('box');
   // A table or a starter frame that has been picked up but not put down. Both
@@ -3967,6 +3970,29 @@ export function DiagramEditor() {
       return;
     }
 
+    if (event.key === '?' && !editingNodeId && !editingCell) {
+      event.preventDefault();
+      setShortcutSheetOpen(true);
+      return;
+    }
+
+    // Tool shortcuts, before the table's own typing: `toolForShortcut` is what
+    // decides which of the two a plain letter means, and it declines whenever
+    // the canvas is busy with something the letter belongs to.
+    const shortcutTool = toolForShortcut(event.key, {
+      editingText: editingNodeId !== null || editingCell !== null,
+      inCellMode: Boolean(selectedTable && cellRange),
+      submitting: isSubmitting,
+      drawing: pathAnchorsRef.current.length > 0,
+      modifier: event.ctrlKey || event.metaKey || event.altKey,
+    });
+    if (shortcutTool) {
+      event.preventDefault();
+      if (shortcutTool === 'shape') setPendingShape('box');
+      selectCanvasTool(shortcutTool);
+      return;
+    }
+
     // A selected table takes the navigation and typing keys first: inside a grid
     // the arrows move between cells rather than nudging an element.
     if (selectedTable && cellRange && !editingCell) {
@@ -5153,6 +5179,8 @@ export function DiagramEditor() {
           </p>
         </div>
 
+        <StudioShortcutSheet open={shortcutSheetOpen} onClose={() => setShortcutSheetOpen(false)} />
+
         {containerAwaitingDelete ? renderContainerDeletePrompt() : null}
 
         {connectionMode ? (
@@ -5188,6 +5216,7 @@ export function DiagramEditor() {
           tableOptions={renderTableOptions}
           templateOptions={renderTemplateOptions}
           arrangeOptions={renderArrangeOptions}
+          onShowShortcuts={() => setShortcutSheetOpen(true)}
         />
 
         <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">

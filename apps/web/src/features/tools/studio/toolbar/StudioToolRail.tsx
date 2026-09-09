@@ -10,12 +10,15 @@ import {
   Shapes,
   Table,
   Type,
+  Keyboard,
   Undo2,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
 import { Popover } from '../../../../components/ui/Popover';
+import { useMediaQuery } from '../../../../components/ui/useMediaQuery';
+import { useRovingToolbar } from '../../../../components/ui/useRovingToolbar';
 import { Tooltip } from '../../../../components/ui/Tooltip';
 
 /**
@@ -108,20 +111,33 @@ interface StudioToolRailProps {
    * a tool: it acts on everything at once and nothing has to be selected first.
    */
   arrangeOptions: (close: () => void) => ReactNode;
+  /** Opens the shortcut sheet; a shortcut nobody can find is not one. */
+  onShowShortcuts: () => void;
 }
 
-const RAIL_BUTTON = `flex h-9 w-9 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const RAIL_BUTTON = `flex h-9 w-9 items-center justify-center max-sm:h-11 max-sm:w-11 rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
 const RAIL_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
 const RAIL_IDLE =
   'border-transparent bg-transparent text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink';
 
-function RailGroup({ children, label }: { children: ReactNode; label: string }) {
+function RailGroup({
+  children,
+  label,
+  orientation,
+}: {
+  children: ReactNode;
+  label: string;
+  orientation: 'horizontal' | 'vertical';
+}) {
+  const roving = useRovingToolbar<HTMLDivElement>(orientation);
   return (
     <div
+      ref={roving.ref}
+      onKeyDown={roving.onKeyDown}
       role="toolbar"
-      aria-orientation="vertical"
+      aria-orientation={orientation}
       aria-label={label}
-      className="rt-studio-rise flex flex-col gap-1 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)]"
+      className="rt-studio-rise flex shrink-0 gap-1 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)] sm:flex-col"
     >
       {children}
     </div>
@@ -206,6 +222,7 @@ export function StudioToolRail({
   tableOptions,
   templateOptions,
   arrangeOptions,
+  onShowShortcuts,
 }: StudioToolRailProps) {
   const [openMenu, setOpenMenu] = useState<RailSlot | null>(null);
   // Which button to hand focus back to when the panel closes. A single mutable
@@ -213,6 +230,12 @@ export function StudioToolRail({
   const openTriggerRef = useRef<HTMLButtonElement | null>(null);
   const triggers = useRef<Partial<Record<RailSlot, HTMLButtonElement | null>>>({});
   const slot = SLOT_FOR_TOOL[tool];
+  // Below the small breakpoint the rail lies along the bottom: a column down the
+  // left of a 320px canvas takes a third of the drawing surface with it. Its
+  // arrow keys turn with it — an arrow that moves the wrong way is worse than
+  // no arrow at all.
+  const docked = useMediaQuery('(max-width: 639px)');
+  const orientation: 'horizontal' | 'vertical' = docked ? 'horizontal' : 'vertical';
 
   function closeMenu() {
     setOpenMenu(null);
@@ -238,11 +261,13 @@ export function StudioToolRail({
       },
       // Rendered inside the button only when it is what the panel hangs from.
       menu:
-        openMenu === which && MENU_ANCHOR[which] === 'button' ? renderMenu('right-center') : null,
+        openMenu === which && MENU_ANCHOR[which] === 'button'
+          ? renderMenu(docked ? 'top-center' : 'right-center')
+          : null,
     };
   }
 
-  function renderMenu(placement: 'right' | 'right-center') {
+  function renderMenu(placement: 'right' | 'right-center' | 'top' | 'top-center') {
     if (!openMenu) return null;
     return (
       <Popover
@@ -278,9 +303,15 @@ export function StudioToolRail({
   }
 
   return (
-    <div className="pointer-events-none absolute top-3 left-3 z-20 flex flex-col gap-2 sm:top-4 sm:left-4">
+    <div
+      className={
+        docked
+          ? 'pointer-events-none absolute inset-x-2 bottom-2 z-20 flex gap-2 overflow-x-auto'
+          : 'pointer-events-none absolute top-3 left-3 z-20 flex flex-col gap-2 sm:top-4 sm:left-4'
+      }
+    >
       <div className="pointer-events-auto relative">
-        <RailGroup label="Studio tools">
+        <RailGroup label="Studio tools" orientation={orientation}>
           <RailButton
             label="Select"
             shortcut="V"
@@ -358,11 +389,11 @@ export function StudioToolRail({
           />
         </RailGroup>
 
-        {openMenu && MENU_ANCHOR[openMenu] === 'rail' ? renderMenu('right') : null}
+        {openMenu && MENU_ANCHOR[openMenu] === 'rail' ? renderMenu(docked ? 'top' : 'right') : null}
       </div>
 
       <div className="pointer-events-auto">
-        <RailGroup label="History">
+        <RailGroup label="History" orientation={orientation}>
           <RailButton
             label="Undo diagram change"
             shortcut="Ctrl+Z"
@@ -381,13 +412,19 @@ export function StudioToolRail({
       </div>
 
       <div className="pointer-events-auto relative">
-        <RailGroup label="Canvas">
+        <RailGroup label="Canvas" orientation={orientation}>
           <RailButton label="Show grid" Icon={Grid3x3} active={showGrid} onClick={onToggleGrid} />
           <RailButton
             label="Snap to grid"
             Icon={Magnet}
             active={snapEnabled}
             onClick={onToggleSnap}
+          />
+          <RailButton
+            label="Keyboard shortcuts"
+            shortcut="?"
+            Icon={Keyboard}
+            onClick={onShowShortcuts}
           />
           <RailButton
             label="Arrange"
