@@ -6,7 +6,7 @@ import { AgendaPanel } from '../agenda/AgendaPanel';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
-import { MicToggle, VoiceNotice, useVoiceRoom } from '../voice';
+import { MicToggle, ParticipantPanel, VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -177,6 +177,9 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
               busy={voice.micBusy}
               toggle={voice.toggleMic}
             />
+          }
+          participants={
+            <ParticipantPanel participants={voice.participants} status={voice.status} />
           }
           reactToProposal={reactToProposal}
         />
