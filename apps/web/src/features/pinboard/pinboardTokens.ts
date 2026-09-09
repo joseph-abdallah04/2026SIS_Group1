@@ -30,21 +30,6 @@ export const ZOOM_LEVELS = [
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
 /**
- * How much bigger or smaller one press, notch or pinch makes the board.
- *
- * A press moves by a proportion rather than by one stop on the ladder. Stepping
- * one stop at a time made every press cover a different amount of ground: ten
- * points is a fifth of the board at 50% and a fortieth of it at 400%, so the
- * same action crawled at one end and lurched at the other. Zooming by a ratio
- * is the same size move wherever you are, and it crosses the whole range in
- * about seven presses instead of sixteen.
- *
- * The finer stops are still worth having. They are where a press lands, so the
- * ratio can be honoured closely rather than rounded to the nearest quarter.
- */
-export const ZOOM_STEP_RATIO = 1.2;
-
-/**
  * Card styling. The project palette throughout — the Organic wireframes
  * supplied the card's *structure* (body, then a footer carrying the author and
  * the time), not its colours.
