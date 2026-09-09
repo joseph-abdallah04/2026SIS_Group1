@@ -281,3 +281,51 @@ body {
     transform: none;
   }
 }
+
+/*
+ * T1 studio motion.
+ *
+ * The rail, the properties bar and their panels appear and disappear constantly,
+ * so their entry is short and small: long enough to say something arrived, never
+ * long enough to be waited for. Nothing animates out — a panel that lingers
+ * after it has been dismissed reads as lag.
+ */
+@keyframes rt-studio-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-studio-rise {
+  animation: rt-studio-rise 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * Opacity only, deliberately. A popover is positioned by transform for its
+ * centred placements, and an animation ending in `transform: none` would throw
+ * that centring away on the last frame.
+ */
+@keyframes rt-studio-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rt-studio-fade {
+  animation: rt-studio-fade 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-studio-rise,
+  .rt-studio-fade {
+    animation: none;
+  }
+}

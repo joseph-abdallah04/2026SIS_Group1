@@ -4938,6 +4938,9 @@ export function DiagramEditor() {
       >
         {selected ? (
           <rect
+            // The ring fades up rather than snapping on, so a selection that
+            // changes under the cursor is followed rather than noticed.
+            className="rt-studio-fade"
             x={-5}
             y={-5}
             width={size.width + 10}

@@ -116,7 +116,7 @@ export function StudioPropertiesBar({
       aria-orientation="horizontal"
       aria-label="Selection properties"
       data-side={placed.side}
-      className="pointer-events-auto absolute z-20 flex w-max items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)]"
+      className="rt-studio-rise pointer-events-auto absolute z-20 flex w-max items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)]"
       style={{
         left: `${placed.x - origin.x}px`,
         top: `${placed.y - origin.y}px`,

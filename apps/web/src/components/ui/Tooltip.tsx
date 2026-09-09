@@ -62,7 +62,7 @@ export function Tooltip({ label, shortcut, placement = 'right', children }: Tool
           id={id}
           role="presentation"
           aria-hidden="true"
-          className={`pointer-events-none absolute z-50 flex items-center gap-1.5 rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-white shadow-lg ${PLACEMENT_CLASSES[placement]}`}
+          className={`rt-studio-fade pointer-events-none absolute z-50 flex items-center gap-1.5 rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-white shadow-lg ${PLACEMENT_CLASSES[placement]}`}
         >
           {label}
           {shortcut ? (

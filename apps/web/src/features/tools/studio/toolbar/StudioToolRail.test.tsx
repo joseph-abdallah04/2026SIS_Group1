@@ -298,6 +298,24 @@ describe('the rail sub-toolbars', () => {
   });
 });
 
+describe('motion on the rail', () => {
+  it('lets each group settle in rather than appear', () => {
+    renderRail();
+    for (const bar of screen.getAllByRole('toolbar')) {
+      expect(bar).toHaveClass('rt-studio-rise');
+    }
+  });
+
+  it('fades a sub-toolbar in, since its placement is a transform', async () => {
+    // A rise ends in `transform: none`, which would throw away the centring a
+    // popover is positioned with.
+    const user = userEvent.setup();
+    renderRail();
+    await user.click(screen.getByRole('button', { name: 'Templates' }));
+    expect(screen.getByRole('group', { name: 'Templates options' })).toHaveClass('rt-studio-fade');
+  });
+});
+
 describe('tooltips on the rail', () => {
   it('names the tool and its shortcut on hover', async () => {
     const user = userEvent.setup();

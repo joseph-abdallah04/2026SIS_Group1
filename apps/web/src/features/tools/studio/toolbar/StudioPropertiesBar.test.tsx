@@ -109,6 +109,11 @@ describe('the properties bar', () => {
     );
   });
 
+  it('settles in rather than appearing', () => {
+    renderBar();
+    expect(screen.getByRole('toolbar')).toHaveClass('rt-studio-rise');
+  });
+
   it('says which side of the selection it settled on', () => {
     // jsdom measures nothing, so the bar has no height here and lands above;
     // the placement arithmetic itself is covered without a DOM.

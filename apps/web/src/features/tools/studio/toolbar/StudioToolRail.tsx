@@ -121,7 +121,7 @@ function RailGroup({ children, label }: { children: ReactNode; label: string }) 
       role="toolbar"
       aria-orientation="vertical"
       aria-label={label}
-      className="flex flex-col gap-1 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)]"
+      className="rt-studio-rise flex flex-col gap-1 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)]"
     >
       {children}
     </div>
