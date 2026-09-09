@@ -6,9 +6,17 @@
 ## What it does
 
 Every participant gets a private ideation buddy in a floating bubble at the bottom-right of a
-session. Opening it swaps the bubble for the panel — the two are never on screen together, and
-the panel grows downward into the space the bubble held, so its top edge does not move. The
-panel's own X, or Escape, closes it and brings the bubble back with focus on it. It knows what is happening in the session, can search the web, and can draft sticky
+session. Opening it swaps the bubble for the panel — the two are never on screen together. The
+panel's own X, or Escape, closes it and brings the bubble back with focus on it.
+
+**The panel is movable and resizable**: drag the header to move it, drag any corner to resize,
+double-click the header to put it back. Position and size are remembered in `localStorage`
+(a lasting preference, unlike the transcript, which is per-tab) and re-clamped whenever the
+window changes, so a panel can never end up somewhere it cannot be grabbed. It ships sitting
+bottom-right at a height that clears the board header — the fixed height it had before ran
+straight through the session status and End session controls. The arithmetic lives in exported
+pure functions (`clampGeometry`, `resizeFrom`) and is unit-tested directly, because jsdom has
+no layout and a simulated drag there would prove nothing. It knows what is happening in the session, can search the web, and can draft sticky
 notes and diagrams that the user drops onto the shared pinboard with one click.
 
 Nobody else sees your chat. The assistant reads session state and never writes it — the only

@@ -90,55 +90,60 @@ export function AssistantBubble({ sessionId, getContext }: AssistantBubbleProps)
 
   const label = unread ? 'Open AI assistant — new answer' : 'Open AI assistant';
 
+  // The panel places itself (usePanelGeometry), so it is a sibling of the corner container
+  // rather than a child of it — nothing about where the bubble sits should constrain where
+  // the panel can be dragged.
+  if (open) {
+    return (
+      <AssistantPanel
+        chat={chat}
+        onClose={() => setOpen(false)}
+        configured={configured}
+        {...(modelLabel ? { modelLabel } : {})}
+      />
+    );
+  }
+
   return (
     <div className="pointer-events-none fixed right-4 bottom-24 z-50 flex flex-col items-end gap-3 sm:right-6">
-      {open ? (
-        <AssistantPanel
-          chat={chat}
-          onClose={() => setOpen(false)}
-          configured={configured}
-          {...(modelLabel ? { modelLabel } : {})}
-        />
-      ) : (
-        <button
-          ref={bubbleRef}
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label={label}
-          aria-haspopup="dialog"
-          className="rt-bubble pointer-events-auto relative grid size-14 place-items-center rounded-full bg-rt-primary-deep text-white shadow-lg ring-1 ring-white/40 transition hover:bg-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
-        >
-          {/* Pulse only while the agent is working — an idle bubble stays still. A turn can
-              still be streaming down here, because collapsing does not cancel it. */}
-          {chat.streaming && (
-            <span
-              className="rt-bubble-ring absolute inset-0 rounded-full bg-rt-primary"
-              aria-hidden="true"
-            />
-          )}
+      <button
+        ref={bubbleRef}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={label}
+        aria-haspopup="dialog"
+        className="rt-bubble pointer-events-auto relative grid size-14 place-items-center rounded-full bg-rt-primary-deep text-white shadow-lg ring-1 ring-white/40 transition hover:bg-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none"
+      >
+        {/* Pulse only while the agent is working — an idle bubble stays still. A turn can
+            still be streaming down here, because collapsing does not cancel it. */}
+        {chat.streaming && (
+          <span
+            className="rt-bubble-ring absolute inset-0 rounded-full bg-rt-primary"
+            aria-hidden="true"
+          />
+        )}
 
-          <AssistantIcon />
+        <AssistantIcon />
 
-          {/* Unread beats the setup warning: if an answer is waiting, that is the news. */}
-          {unread ? (
+        {/* Unread beats the setup warning: if an answer is waiting, that is the news. */}
+        {unread ? (
+          <span
+            className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-rt-secondary ring-2 ring-white"
+            title="New answer from the assistant"
+            aria-hidden="true"
+          />
+        ) : (
+          configured === false && (
             <span
-              className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-rt-secondary ring-2 ring-white"
-              title="New answer from the assistant"
+              className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-rt-secondary text-[10px] font-bold text-rt-ink"
+              title="No AI provider configured"
               aria-hidden="true"
-            />
-          ) : (
-            configured === false && (
-              <span
-                className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-rt-secondary text-[10px] font-bold text-rt-ink"
-                title="No AI provider configured"
-                aria-hidden="true"
-              >
-                !
-              </span>
-            )
-          )}
-        </button>
-      )}
+            >
+              !
+            </span>
+          )
+        )}
+      </button>
     </div>
   );
 }

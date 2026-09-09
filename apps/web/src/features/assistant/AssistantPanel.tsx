@@ -3,7 +3,7 @@
 // The conversation itself does NOT live here. `AssistantBubble` owns it, because F34
 // requires the thread to survive collapsing the panel — and this component unmounts when
 // the panel closes. The panel is a view over state it does not hold.
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { Link } from 'react-router-dom';
 
 import { Button } from '../../components/ui/Button';
@@ -11,6 +11,7 @@ import { CreativeToolsContext } from '../tools/CreativeToolsContext';
 import { ArtifactCard } from './ArtifactCard';
 import { ToolActivity } from './ToolActivity';
 import type { AssistantChat } from './useAssistantChat';
+import { usePanelGeometry, type ResizeCorner } from './usePanelGeometry';
 
 const SUGGESTIONS = [
   'Give me 5 sticky notes for this question',
@@ -38,6 +39,9 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
   // somewhere the board is not.
   const creativeTools = useContext(CreativeToolsContext);
   const canPropose = Boolean(creativeTools?.isLive);
+
+  const { geometry, dragging, startMove, startResize, onPointerMove, endGesture, reset } =
+    usePanelGeometry();
 
   // Follow the tail as tokens arrive — and on reopen, land at the newest message.
   useEffect(() => {
@@ -69,18 +73,35 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
     );
   };
 
-  // Height note: 748px, not 680. The bubble is hidden while the panel is up, so it reclaims
-  // the 56px button and the 12px gap beneath it — growing downward, which keeps the top edge
-  // where it was so opening reads as the panel unfolding rather than jumping up the screen.
-  // The viewport cap subtracts the container's 6rem bottom offset plus 1.5rem of breathing
-  // room, so a short window cannot push the header off the top of the screen.
   return (
     <aside
-      className="rt-panel pointer-events-auto flex h-[min(748px,calc(100dvh-7.5rem))] w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-2xl"
+      className="rt-panel pointer-events-auto fixed flex flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-2xl"
+      // Position and size are the user's, not the layout's — see usePanelGeometry. The size
+      // it ships with clears the board header, which the old fixed height was covering.
+      style={{
+        left: geometry.x,
+        top: geometry.y,
+        width: geometry.width,
+        height: geometry.height,
+        // Stops the transcript being text-selected while the panel is being dragged around.
+        userSelect: dragging ? 'none' : undefined,
+      }}
+      onPointerMove={onPointerMove}
+      onPointerUp={endGesture}
+      onPointerCancel={endGesture}
       role="dialog"
       aria-label="AI assistant"
     >
-      <header className="flex items-center gap-2 border-b border-rt-primary-tint px-4 py-3">
+      <ResizeGrips onStart={startResize} />
+
+      <header
+        className={`flex items-center gap-2 border-b border-rt-primary-tint px-4 py-3 ${
+          dragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
+        onPointerDown={startMove}
+        onDoubleClick={reset}
+        title="Drag to move · double-click to reset"
+      >
         <div className="min-w-0 flex-1">
           <h2 className="text-[13px] font-semibold text-rt-ink">Assistant</h2>
           <p className="truncate text-[11px] text-rt-ink-faint">
@@ -210,6 +231,37 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
         </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * Corner grips. All four, because the panel can be dragged anywhere: once it is not in the
+ * bottom-right corner any more, "the only handle is on the corner nearest the screen edge"
+ * becomes an arbitrary restriction.
+ */
+function ResizeGrips({
+  onStart,
+}: {
+  onStart: (corner: ResizeCorner) => (event: PointerEvent<HTMLElement>) => void;
+}) {
+  const corners: Array<{ corner: ResizeCorner; className: string; label: string }> = [
+    { corner: 'nw', className: 'top-0 left-0 cursor-nwse-resize', label: 'top left' },
+    { corner: 'ne', className: 'top-0 right-0 cursor-nesw-resize', label: 'top right' },
+    { corner: 'sw', className: 'bottom-0 left-0 cursor-nesw-resize', label: 'bottom left' },
+    { corner: 'se', className: 'bottom-0 right-0 cursor-nwse-resize', label: 'bottom right' },
+  ];
+  return (
+    <>
+      {corners.map(({ corner, className, label }) => (
+        <div
+          key={corner}
+          onPointerDown={onStart(corner)}
+          aria-hidden="true"
+          title={`Drag to resize (${label})`}
+          className={`absolute z-10 size-4 ${className}`}
+        />
+      ))}
+    </>
   );
 }
 
