@@ -51,6 +51,13 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
   /**
+   * F38's way to put one of your earlier proposals on the board, rendered in
+   * the footer beside the creative tools. A node for the same reason `agenda`
+   * is: what goes in it is fetched and wired by the page, and this component
+   * stays the thing that lays a board out.
+   */
+  myProposals?: ReactNode;
+  /**
    * F12's mute toggle, for the header. A node for the same reason `agenda` is:
    * the board does not know what a LiveKit room is, and should not start
    * knowing in order to give voice somewhere prominent to sit.
@@ -200,6 +207,7 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  myProposals,
   micControl,
   viewerId,
   editProposal,
@@ -705,6 +713,7 @@ export function PinboardCanvas({
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
         <CreativeToolbar />
+        {myProposals}
         {writeError ? (
           <p role="status" className="text-[11px] font-medium text-rt-secondary-deep">
             {writeError}

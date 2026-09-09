@@ -162,6 +162,35 @@ export function compareBoardItems(a: BoardItem, b: BoardItem): number {
   return a.id < b.id ? -1 : 1;
 }
 
+/**
+ * One question's worth of a member's own proposals (F38).
+ *
+ * Grouped by question rather than returned flat, because the point of the list
+ * is to find something you said while a different question was on the board,
+ * and a proposal means little without the question it was answering.
+ */
+export interface AuthoredProposalGroup {
+  questionId: string;
+  questionText: string;
+  questionPosition: number;
+  questionStatus: QuestionStatus;
+  /**
+   * This is the question the board is showing. Proposals here are already on
+   * the current board, so they are listed for context but cannot be reused
+   * onto it.
+   */
+  isCurrent: boolean;
+  items: BoardItem[];
+}
+
+/** Everything this member has proposed in one session (F38), newest first. */
+export interface AuthoredProposalsResponse {
+  sessionId: string;
+  /** Null when no question is open, in which case nothing can be reused. */
+  currentQuestionId: string | null;
+  groups: AuthoredProposalGroup[];
+}
+
 export interface BoardResponse {
   sessionId: string;
   sessionTitle: string;

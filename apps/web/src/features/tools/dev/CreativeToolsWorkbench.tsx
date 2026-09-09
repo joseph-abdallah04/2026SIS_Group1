@@ -36,6 +36,7 @@ export function CreativeToolsWorkbench() {
   return (
     <CreativeToolsProvider
       isLive
+      viewerId="current-developer"
       proposals={proposals}
       propose={propose}
       editProposal={async () => {}}

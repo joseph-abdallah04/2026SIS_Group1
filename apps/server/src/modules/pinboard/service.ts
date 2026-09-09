@@ -1,5 +1,7 @@
 import {
   isEmoji,
+  type AuthoredProposalGroup,
+  type AuthoredProposalsResponse,
   type BoardItem,
   type BoardResponse,
   type ReactionGroup,
@@ -13,7 +15,12 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
 import { requireMutableProposal, type Actor, type ProposalMutation } from './permissions.js';
-import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js';
+import {
+  getActiveQuestion,
+  getQuestion,
+  getSession,
+  getSessionWithQuestions,
+} from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
 // agreed order), its create side (F15: proposals land for everyone at once),
@@ -157,14 +164,25 @@ export async function createProposal({
   }
 
   if (input.extendsProposalId) {
+    // Scoped to the session rather than to this question. Extending (F23)
+    // always names something on the board in front of you, but reusing your
+    // own earlier work (F38) names something from a question that has since
+    // closed, and both arrive here as the same write. The session is still the
+    // boundary: a proposal from somebody else's session stays unreachable, and
+    // reporting it the same way as a deleted one keeps that from being a way
+    // to test whether an id exists.
     const parent = await prisma.proposal.findFirst({
-      where: { id: input.extendsProposalId, questionId, deletedAt: null },
+      where: {
+        id: input.extendsProposalId,
+        deletedAt: null,
+        question: { sessionId: question.sessionId },
+      },
       select: { id: true },
     });
     if (!parent) {
       throw new ApiError(
         400,
-        'Cannot extend a proposal that is not on this board',
+        'Cannot build on a proposal that is not in this session',
         'INVALID_EXTENDS',
       );
     }
@@ -369,6 +387,74 @@ export async function toggleReaction({
     questionId: row.questionId,
     reactions: await listReactions(proposalId),
   };
+}
+
+/**
+ * Everything one member has proposed across a whole session (F38).
+ *
+ * The board read returns one question at a time, because that is what a board
+ * is. This crosses that boundary on purpose: the point is to find something
+ * you proposed while a different question was up, so it has to see the
+ * questions the board has moved past.
+ *
+ * Scoped to a single author by the caller, never by a filter the client sends.
+ * A member may see their own history; whether anyone may see somebody else's
+ * is a different question, and this is not the endpoint that answers it.
+ *
+ * Questions come back newest first, which is the order they are useful in: the
+ * thing you proposed a minute ago is far likelier to be worth reusing than the
+ * one from the top of the agenda. Empty questions are dropped rather than
+ * listed as headings with nothing under them.
+ */
+export async function listAuthoredProposals({
+  sessionId,
+  authorId,
+}: {
+  sessionId: string;
+  authorId: string;
+}): Promise<AuthoredProposalsResponse> {
+  const session = await getSessionWithQuestions(sessionId);
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+
+  const active = await getActiveQuestion(sessionId);
+  const questionIds = session.questions.map((question) => question.id);
+
+  const rows = questionIds.length
+    ? await prisma.proposal.findMany({
+        where: { questionId: { in: questionIds }, authorId, deletedAt: null },
+        include: BOARD_ITEM_INCLUDE,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      })
+    : [];
+
+  const byQuestion = new Map<string, BoardItem[]>();
+  for (const row of rows) {
+    const item = toBoardItem(row);
+    const bucket = byQuestion.get(item.questionId);
+    if (bucket) bucket.push(item);
+    else byQuestion.set(item.questionId, [item]);
+  }
+
+  const groups: AuthoredProposalGroup[] = [...session.questions]
+    .sort((a, b) => b.position - a.position)
+    .flatMap((question) => {
+      const items = byQuestion.get(question.id);
+      if (!items) return [];
+      return [
+        {
+          questionId: question.id,
+          questionText: question.text,
+          questionPosition: question.position,
+          questionStatus: question.status,
+          isCurrent: question.id === active?.id,
+          items,
+        },
+      ];
+    });
+
+  return { sessionId, currentQuestionId: active?.id ?? null, groups };
 }
 
 export async function getBoardForSession(sessionId: string): Promise<BoardResponse> {

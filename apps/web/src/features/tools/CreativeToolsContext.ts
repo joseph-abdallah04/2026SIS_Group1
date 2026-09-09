@@ -9,6 +9,13 @@ export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
   extensionSource: BoardItem | null;
   /**
+   * The source is this viewer's own work, so the editor says "reusing yours"
+   * rather than naming them as though they were someone else (F38). Copying
+   * your own earlier proposal onto the current question and building on a
+   * colleague's are the same write; only the wording differs.
+   */
+  isReusingOwn: boolean;
+  /**
    * The proposal being rewritten in place, as opposed to copied. Editing keeps
    * the original's id, author and position; extending creates a new proposal
    * that merely starts from the same artifact.

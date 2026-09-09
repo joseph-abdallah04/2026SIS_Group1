@@ -20,6 +20,7 @@ export function StickyEditor() {
   const {
     closeTool,
     extensionSource,
+    isReusingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -86,7 +87,9 @@ export function StickyEditor() {
         >
           {extensionSource ? (
             <div className="mb-5 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-              Extending {extensionSource.authorName}&apos;s sticky
+              {isReusingOwn
+                ? 'Reusing your sticky'
+                : `Extending ${extensionSource.authorName}'s sticky`}
             </div>
           ) : null}
 

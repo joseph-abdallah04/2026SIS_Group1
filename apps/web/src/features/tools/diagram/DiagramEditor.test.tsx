@@ -29,7 +29,13 @@ function Harness({
 }) {
   return (
     <MemoryRouter initialEntries={['/sessions/demo']}>
-      <CreativeToolsProvider isLive proposals={[]} propose={propose} editProposal={async () => {}}>
+      <CreativeToolsProvider
+        viewerId={null}
+        isLive
+        proposals={[]}
+        propose={propose}
+        editProposal={async () => {}}
+      >
         <CreativeToolbar />
         {children}
         <CreativeStudio />

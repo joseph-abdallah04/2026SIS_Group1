@@ -3,6 +3,7 @@ import type { Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { AgendaPanel } from '../agenda/AgendaPanel';
+import { MyProposalsLauncher } from './MyProposalsLauncher';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
@@ -130,9 +131,25 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     );
   }
 
+  // Plain expressions rather than memos: everything above this point can
+  // return early, and a hook here would run on some renders and not others.
+  const acceptsProposals = isLive && board.questionStatus === 'discussion';
+
+  // What makes the "my proposals" list stale: the board moving to a different
+  // question, and this member adding, removing or rewording something on it.
+  // Other people's cards are left out because the list never shows them.
+  const myProposalsRevision = [
+    board.questionId ?? 'none',
+    board.items
+      .filter((item) => item.authorId === viewerId)
+      .map((item) => `${item.id}${item.editedAt ?? ''}`)
+      .join(','),
+  ].join('|');
+
   return (
     <CreativeToolsProvider
-      isLive={isLive && board.questionStatus === 'discussion'}
+      isLive={acceptsProposals}
+      viewerId={viewerId}
       proposals={board.items}
       propose={propose}
       editProposal={editProposal}
@@ -166,6 +183,13 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
               questions={questions}
               activeQuestionId={board.questionId}
               isLeader={isLeader}
+            />
+          }
+          myProposals={
+            <MyProposalsLauncher
+              sessionId={sessionId}
+              revision={myProposalsRevision}
+              canPropose={acceptsProposals}
             />
           }
           micControl={

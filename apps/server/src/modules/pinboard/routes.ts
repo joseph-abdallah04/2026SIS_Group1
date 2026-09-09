@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { requireAuth } from '../../middleware/auth.js';
 import { assertSessionMember } from '../sessions/index.js';
-import { getBoardForSession } from './service.js';
+import { getBoardForSession, listAuthoredProposals } from './service.js';
 
 export const pinboardRoutes = Router();
 
@@ -25,6 +25,28 @@ pinboardRoutes.get<{ sessionId: string }>(
       await assertSessionMember(req.params.sessionId, req.userId!);
       const board = await getBoardForSession(req.params.sessionId);
       res.json(board);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Your own proposals across the whole session (F38), so an earlier one can be
+// reused on the question now in front of you.
+//
+// The author is the authenticated user, never a parameter: this returns one
+// person's history, and letting a client name whose history it wants would
+// make it a different endpoint with a different rule behind it. Membership is
+// checked exactly as it is for the board itself.
+pinboardRoutes.get<{ sessionId: string }>(
+  '/:sessionId/proposals/mine',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      await assertSessionMember(req.params.sessionId, req.userId!);
+      res.json(
+        await listAuthoredProposals({ sessionId: req.params.sessionId, authorId: req.userId! }),
+      );
     } catch (err) {
       next(err);
     }
