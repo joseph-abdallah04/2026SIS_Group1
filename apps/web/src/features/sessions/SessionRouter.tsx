@@ -8,6 +8,7 @@ import { LiveSessionExitGuard } from './LiveSessionExitGuard';
 import { useSessionDetail } from './useSessionDetail';
 import { useSessionEndedListener } from './useSessionEndedListener';
 import { useSessionPhaseListener } from './useSessionPhaseListener';
+import { useQuestionAddedListener } from './useQuestionAddedListener';
 import { WaitingRoom } from './WaitingRoom';
 
 /**
@@ -20,7 +21,8 @@ import { WaitingRoom } from './WaitingRoom';
 export function SessionRouter() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-  const { session, loading, error, reload, applyQuestionPhase } = useSessionDetail(sessionId);
+  const { session, loading, error, reload, applyQuestionPhase, applyAddedQuestion } =
+    useSessionDetail(sessionId);
   const currentUserId = useCurrentUserId();
   // F32: one listener for both live views, since the waiting room and the
   // pinboard can each be the thing the leader ends from.
@@ -28,6 +30,7 @@ export function SessionRouter() {
   // F25: patch the agenda in place instead of re-fetching, so advancing a
   // question doesn't blank the live view (see `applyQuestionPhase`).
   useSessionPhaseListener(sessionId, applyQuestionPhase);
+  useQuestionAddedListener(sessionId, applyAddedQuestion);
 
   if (!sessionId) {
     return (
@@ -83,7 +86,11 @@ export function SessionRouter() {
       return (
         <>
           {exitGuard}
-          <SessionPinboard isLeader={isLeader} questions={session.questions} />
+          <SessionPinboard
+            isLeader={isLeader}
+            questions={session.questions}
+            joinCode={session.code}
+          />
         </>
       );
     case 'ended':

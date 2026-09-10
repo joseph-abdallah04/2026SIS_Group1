@@ -2,7 +2,9 @@ import { useParams } from 'react-router-dom';
 import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { PhaseTimer } from '../../components/PhaseTimer';
 import { AgendaPanel } from '../agenda/AgendaPanel';
+import { JoinCodeCard } from '../sessions/JoinCodeCard';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
 import { CreativeStudio } from '../tools/CreativeStudio';
@@ -44,9 +46,11 @@ interface SessionPinboardProps {
   isLeader: boolean;
   /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
   questions: Question[];
+  /** Still joinable while the session is live — shown on the participant rail. */
+  joinCode: string | null;
 }
 
-export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
+export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const {
@@ -211,6 +215,7 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
                 voterStatuses={voting.voterStatuses}
                 winnerProposalId={voting.winnerProposalId}
                 tiedProposalIds={voting.tiedProposalIds}
+                votingEndsAt={voting.votingEndsAt}
                 phase={voting.phase === 'closed' ? 'closed' : 'open'}
                 busy={voting.busy}
                 error={voting.error}
@@ -245,9 +250,25 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
             />
           }
           participants={
-            <ParticipantPanel participants={voice.participants} status={voice.status} />
+            <ParticipantPanel
+              participants={voice.participants}
+              status={voice.status}
+              footer={joinCode ? <JoinCodeCard code={joinCode} /> : null}
+            />
           }
           reactToProposal={reactToProposal}
+          headerTimer={
+            board.discussionTimer &&
+            (board.questionStatus === 'discussion' ||
+              (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (
+              <PhaseTimer
+                startedAt={board.discussionTimer.startedAt}
+                durationSeconds={board.discussionTimer.durationSeconds}
+                allowOvertime
+                label="Discussion"
+              />
+            ) : null
+          }
         />
         <SessionJoinNotices />
       </main>

@@ -50,6 +50,8 @@ const SESSION: SessionDetail = {
   createdAt: new Date('2026-09-01T00:00:00.000Z'),
   startedAt: new Date('2026-09-01T01:00:00.000Z'),
   endedAt: new Date('2026-09-01T02:00:00.000Z'),
+  discussionTimerSeconds: null,
+  votingTimerSeconds: null,
   questions: [
     {
       id: 'q1',

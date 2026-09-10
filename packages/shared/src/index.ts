@@ -23,6 +23,10 @@ export interface Session {
   // Set once, on lobby -> active (F09).
   startedAt: Date | null;
   endedAt: Date | null;
+  /** Seconds, or null when the session has no discussion clock. */
+  discussionTimerSeconds: number | null;
+  /** Seconds, or null when the session has no voting clock. */
+  votingTimerSeconds: number | null;
 }
 
 /** Row shape for the dashboard's session list (F04/F07). */
@@ -156,6 +160,18 @@ export function compareBoardItems(a: BoardItem, b: BoardItem): number {
   return a.id < b.id ? -1 : 1;
 }
 
+/**
+ * A countdown anchored to a server timestamp. Clients display remaining time
+ * from `startedAt + durationSeconds`; they never decide when a phase ends.
+ */
+export interface SessionTimerSnapshot {
+  startedAt: string;
+  durationSeconds: number;
+}
+
+/** Last ten seconds of a countdown flash red so the room can see it running out. */
+export const TIMER_FLASH_SECONDS = 10;
+
 export interface BoardResponse {
   sessionId: string;
   sessionTitle: string;
@@ -170,6 +186,12 @@ export interface BoardResponse {
   questionPosition: number | null;
   questionStatus: QuestionStatus | null;
   items: BoardItem[];
+  /**
+   * Discussion clock for the open question. Present during discussion and
+   * shortlisting; null once the ballot is open, when no timer was configured,
+   * or when nothing is being discussed.
+   */
+  discussionTimer: SessionTimerSnapshot | null;
 }
 
 // === voting module ===
@@ -258,6 +280,11 @@ export interface VotingPublicState {
   winnerProposalId: string | null;
   /** Set by the server when the top score is shared. Empty while voting is open. */
   tiedProposalIds: string[];
+  /**
+   * When the open ballot will auto-close, as UTC ISO. Null if this session
+   * has no voting timer, or the round is not open.
+   */
+  votingEndsAt: string | null;
 }
 
 /** Join snapshot / REST read: the public tally plus this viewer's own ballot. */
@@ -287,6 +314,7 @@ export function emptyVotingState(questionId: string | null = null): VotingViewer
     voterCount: 0,
     winnerProposalId: null,
     tiedProposalIds: [],
+    votingEndsAt: null,
     myVote: null,
     voterStatuses: null,
   };

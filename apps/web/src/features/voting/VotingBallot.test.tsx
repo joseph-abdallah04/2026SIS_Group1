@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { CARD_WIDTH } from '../pinboard/pinboardTokens';
 import { VotingBallot } from './VotingBallot';
 
 function sticky(id: string, text: string): BoardItem {
@@ -13,6 +14,45 @@ function sticky(id: string, text: string): BoardItem {
     authorName: 'Alice',
     type: 'sticky',
     artifactJson: { type: 'sticky', text, color: 'yellow' },
+    x: 0,
+    y: 0,
+    createdAt: '2026-09-05T00:00:00.000Z',
+    extendsProposalId: null,
+    reactions: [],
+  };
+}
+
+function drawing(id: string): BoardItem {
+  return {
+    id,
+    questionId: 'q1',
+    authorId: 'u1',
+    authorName: 'Alice',
+    type: 'drawing',
+    artifactJson: {
+      type: 'drawing',
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>',
+    },
+    x: 0,
+    y: 0,
+    createdAt: '2026-09-05T00:00:00.000Z',
+    extendsProposalId: null,
+    reactions: [],
+  };
+}
+
+function diagram(id: string): BoardItem {
+  return {
+    id,
+    questionId: 'q1',
+    authorId: 'u1',
+    authorName: 'Alice',
+    type: 'diagram',
+    artifactJson: {
+      type: 'diagram',
+      nodes: [{ id: 'n1', label: 'API', x: 0, y: 0, shape: 'box' }],
+      edges: [],
+    },
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
@@ -158,8 +198,40 @@ describe('VotingBallot', () => {
     expect(screen.getByText('Results')).toBeInTheDocument();
     expect(screen.getByText('This proposal won.')).toBeInTheDocument();
     expect(screen.getByText('Winner')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue to next question' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Ship the API/i })).not.toBeInTheDocument();
+  });
+
+  it('lets only the leader continue after results are shown', async () => {
+    const onContinue = vi.fn();
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={ITEMS}
+        tallies={[
+          { proposalId: 'p1', votes: 2, percent: 67 },
+          { proposalId: 'p2', votes: 1, percent: 33 },
+        ]}
+        myVote="p1"
+        votedCount={3}
+        voterCount={3}
+        isLeader
+        viewerId="u1"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId="p1"
+        tiedProposalIds={[]}
+        phase="closed"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={onContinue}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue to next question' }));
+    expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
   it('labels every tied proposal the server named, even if the bars look uneven', () => {
@@ -192,5 +264,103 @@ describe('VotingBallot', () => {
     expect(screen.getByText('It’s a tie.')).toBeInTheDocument();
     expect(screen.getAllByText('Tied')).toHaveLength(2);
     expect(screen.queryByText('Winner')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Waiting for the leader to continue/)).toBeInTheDocument();
+  });
+
+  it('shows the voting clock on an open ballot when a deadline is set', () => {
+    const endsAt = new Date(Date.now() + 125_000).toISOString();
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={ITEMS}
+        tallies={[]}
+        myVote={null}
+        votedCount={0}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        votingEndsAt={endsAt}
+        phase="open"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('timer', { name: /voting/i })).toBeInTheDocument();
+  });
+
+  it('sizes each slot to the proposal so mixed cards do not share a stretched column', () => {
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[diagram('diag1'), drawing('draw1'), sticky('p1', 'Ship the API')]}
+        tallies={[]}
+        myVote="draw1"
+        votedCount={1}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    const selected = screen.getByRole('button', { pressed: true });
+    expect(selected).toHaveStyle({ width: `${CARD_WIDTH.drawing}px` });
+    expect(screen.getByRole('button', { name: /Ship the API/i })).toHaveStyle({
+      width: `${CARD_WIDTH.sticky}px`,
+    });
+    expect(screen.getByText('API').closest('button')).toHaveStyle({
+      width: `${CARD_WIDTH.diagram}px`,
+    });
+  });
+
+  it('keeps the winner ring on the winning card’s own width', () => {
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[diagram('diag1'), drawing('draw1'), sticky('p1', 'Ship the API')]}
+        tallies={[
+          { proposalId: 'draw1', votes: 2, percent: 100 },
+          { proposalId: 'diag1', votes: 0, percent: 0 },
+          { proposalId: 'p1', votes: 0, percent: 0 },
+        ]}
+        myVote="draw1"
+        votedCount={2}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId="draw1"
+        tiedProposalIds={[]}
+        phase="closed"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('Winner').closest('li')).toHaveStyle({
+      width: `${CARD_WIDTH.drawing}px`,
+    });
   });
 });

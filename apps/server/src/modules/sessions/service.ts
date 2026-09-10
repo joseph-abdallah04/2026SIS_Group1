@@ -7,12 +7,14 @@ import {
   normalizeSessionCode,
   SHORTLIST_MIN,
   type Question,
-  type QuestionStatus,
   type Session,
   type SessionSummary,
+  type SessionTimerSnapshot,
+  type QuestionStatus,
 } from '@roundtable/shared';
 import {
   SESSION_CODE_ALPHABET,
+  SESSION_QUESTION_LIMIT,
   type CreateSessionInput,
   type UpdateSessionInput,
 } from '@roundtable/shared/schemas';
@@ -96,6 +98,8 @@ export async function createSession({ leaderId, input }: CreateSessionArgs): Pro
         leaderId,
         code: null,
         status: 'draft',
+        discussionTimerSeconds: input.discussionTimerSeconds ?? null,
+        votingTimerSeconds: input.votingTimerSeconds ?? null,
       },
     });
 
@@ -185,7 +189,11 @@ export async function updateSessionDraft({
 
     const session = await tx.session.update({
       where: { id: sessionId },
-      data: { title: input.title },
+      data: {
+        title: input.title,
+        discussionTimerSeconds: input.discussionTimerSeconds ?? null,
+        votingTimerSeconds: input.votingTimerSeconds ?? null,
+      },
     });
 
     await tx.question.deleteMany({ where: { sessionId } });
@@ -424,7 +432,10 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
       select: { id: true },
     });
     if (first) {
-      await tx.question.update({ where: { id: first.id }, data: { status: 'discussion' } });
+      await tx.question.update({
+        where: { id: first.id },
+        data: { status: 'discussion', discussionStartedAt: new Date() },
+      });
     }
 
     return tx.session.update({
@@ -576,7 +587,10 @@ export async function setQuestionPhase({
 
     const updated = await tx.question.update({
       where: { id: questionId },
-      data: { status },
+      data: {
+        status,
+        ...(status === 'discussion' ? { discussionStartedAt: new Date() } : {}),
+      },
       select: QUESTION_REF_SELECT,
     });
 
@@ -669,6 +683,79 @@ export async function focusQuestion({
 
 export function emitQuestionFocus(io: RealtimeServer, sessionId: string, questionId: string): void {
   io.to(sessionRoom(sessionId)).emit('sessionFocus', { sessionId, questionId });
+}
+
+export interface AddSessionQuestionArgs {
+  sessionId: string;
+  leaderId: string;
+  /** Already validated by the caller against `addSessionQuestionSchema`. */
+  text: string;
+}
+
+/**
+ * Append one pending question to a live agenda. Drafts still go through
+ * `updateSessionDraft` (replace the whole list); ended sessions are frozen.
+ * Position is the next index after whatever is already there — the client
+ * only sends the text.
+ */
+export async function addSessionQuestion({
+  sessionId,
+  leaderId,
+  text,
+}: AddSessionQuestionArgs): Promise<Question> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: {
+        leaderId: true,
+        status: true,
+        _count: { select: { questions: true } },
+      },
+    });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.leaderId !== leaderId) {
+      throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+    }
+    if (session.status !== 'active' && session.status !== 'lobby') {
+      throw new ApiError(
+        409,
+        `Cannot add a question to a session that is ${session.status}`,
+        'INVALID_TRANSITION',
+      );
+    }
+    if (session._count.questions >= SESSION_QUESTION_LIMIT) {
+      throw new ApiError(
+        409,
+        `The agenda already has ${SESSION_QUESTION_LIMIT} questions`,
+        'AGENDA_FULL',
+      );
+    }
+
+    const last = await tx.question.findFirst({
+      where: { sessionId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+
+    return tx.question.create({
+      data: {
+        sessionId,
+        text,
+        position: (last?.position ?? -1) + 1,
+        status: 'pending',
+      },
+      select: { ...QUESTION_REF_SELECT, createdAt: true },
+    });
+  });
+}
+
+export function emitQuestionAdded(io: RealtimeServer, question: Question): void {
+  io.to(sessionRoom(question.sessionId)).emit('questionAdded', {
+    sessionId: question.sessionId,
+    question,
+  });
 }
 
 /**
@@ -1068,6 +1155,8 @@ export interface SessionRef {
   title: string;
   status: Session['status'];
   leaderId: string;
+  discussionTimerSeconds: number | null;
+  votingTimerSeconds: number | null;
 }
 
 export interface QuestionRef {
@@ -1106,8 +1195,49 @@ const QUESTION_REF_SELECT = {
 export async function getSession(sessionId: string): Promise<SessionRef | null> {
   return prisma.session.findUnique({
     where: { id: sessionId },
-    select: { id: true, title: true, status: true, leaderId: true },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      leaderId: true,
+      discussionTimerSeconds: true,
+      votingTimerSeconds: true,
+    },
   });
+}
+
+/**
+ * Discussion clock for whoever is currently talking, including shortlisting.
+ * Hidden once the ballot is open: the voting module owns that overlay's clock.
+ */
+export async function getDiscussionTimer(sessionId: string): Promise<SessionTimerSnapshot | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { discussionTimerSeconds: true },
+  });
+  if (!session?.discussionTimerSeconds) return null;
+
+  const questions = await prisma.question.findMany({
+    where: { sessionId, status: { in: ['discussion', 'voting'] } },
+    select: { id: true, status: true, discussionStartedAt: true },
+  });
+  const live =
+    questions.find((question) => question.status === 'discussion') ??
+    questions.find((question) => question.status === 'voting');
+  if (!live?.discussionStartedAt) return null;
+
+  if (live.status === 'voting') {
+    const round = await prisma.votingRound.findUnique({
+      where: { questionId: live.id },
+      select: { status: true },
+    });
+    if (round && (round.status === 'open' || round.status === 'closed')) return null;
+  }
+
+  return {
+    startedAt: live.discussionStartedAt.toISOString(),
+    durationSeconds: session.discussionTimerSeconds,
+  };
 }
 
 export async function getQuestion(questionId: string): Promise<QuestionRef | null> {

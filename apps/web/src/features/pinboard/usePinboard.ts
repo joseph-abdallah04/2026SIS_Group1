@@ -131,6 +131,7 @@ export function usePinboard(sessionId: string) {
         questionPosition: snapshot.questionPosition,
         questionStatus: snapshot.questionStatus,
         items: [...snapshot.proposals].sort(compareBoardItems),
+        discussionTimer: snapshot.discussionTimer,
       });
     },
     [sessionId],

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  addSessionQuestionSchema,
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
@@ -12,8 +13,10 @@ import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
 import {
   assertSessionMember,
+  addSessionQuestion,
   createSession,
   deleteSession,
+  emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
@@ -190,6 +193,31 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       });
       emitQuestionFocus(io, req.params.id, question.id);
       res.json(question);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Append a pending question to a live agenda. Leader-only; the client
+  // sends the text and waits for `questionAdded` like it does for phase.
+  sessionsRoutes.post<{ id: string }>('/:id/questions', requireAuth, async (req, res, next) => {
+    try {
+      const parsed = addSessionQuestionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ApiError(
+          400,
+          parsed.error.issues[0]?.message ?? 'Invalid question',
+          'VALIDATION_ERROR',
+        );
+      }
+
+      const question = await addSessionQuestion({
+        sessionId: req.params.id,
+        leaderId: req.userId!,
+        text: parsed.data.text,
+      });
+      emitQuestionAdded(io, question);
+      res.status(201).json(question);
     } catch (err) {
       next(err);
     }

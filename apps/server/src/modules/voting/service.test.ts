@@ -48,6 +48,10 @@ vi.mock('./sessionsAdapter.js', () => ({
   getSessionWithQuestions,
 }));
 vi.mock('../pinboard/index.js', () => ({ listProposals }));
+vi.mock('./deadlines.js', () => ({
+  scheduleVotingDeadline: vi.fn(),
+  cancelVotingDeadline: vi.fn(),
+}));
 
 const {
   toggleShortlist,
@@ -60,7 +64,9 @@ const {
   continueAfterVote,
   pickWinningProposalId,
   getSessionVoteOutcomes,
+  expireOpenVotingIfDue,
 } = await import('./service.js');
+const { scheduleVotingDeadline, cancelVotingDeadline } = await import('./deadlines.js');
 
 const LEADER = 'leader-1';
 const SESSION = {
@@ -68,6 +74,8 @@ const SESSION = {
   title: 'Roadmap',
   status: 'active' as const,
   leaderId: LEADER,
+  discussionTimerSeconds: null,
+  votingTimerSeconds: null,
 };
 const VOTING_QUESTION = {
   id: 'q1',
@@ -216,8 +224,20 @@ describe('startVotingRound', () => {
     });
     expect(roundUpdate).toHaveBeenCalledWith({
       where: { id: 'r1' },
-      data: { status: 'open' },
+      data: { status: 'open', openedAt: expect.any(Date) },
     });
+    expect(scheduleVotingDeadline).not.toHaveBeenCalled();
+  });
+
+  it('arms the voting deadline when the session has a voting clock', async () => {
+    getSession.mockResolvedValue({ ...SESSION, votingTimerSeconds: 120 });
+    roundFindUnique.mockResolvedValue({
+      id: 'r1',
+      status: 'shortlisting',
+      items: [{ proposalId: 'p1' }, { proposalId: 'p2' }],
+    });
+    await startVotingRound({ sessionId: 's1', actorId: LEADER });
+    expect(scheduleVotingDeadline).toHaveBeenCalledWith('s1', 'r1', expect.any(Date));
   });
 
   it('is a no-op if the round is already open', async () => {
@@ -345,6 +365,17 @@ describe('getShortlistState / getVotingState', () => {
       ],
     });
   });
+
+  it('exposes the ballot deadline while the round is open', async () => {
+    const openedAt = new Date('2026-09-10T12:00:00.000Z');
+    getSession.mockResolvedValue({ ...SESSION, votingTimerSeconds: 60 });
+    roundFindUnique.mockResolvedValue(openRound({ openedAt, votes: [] }));
+
+    await expect(getVotingState('q1', LEADER)).resolves.toMatchObject({
+      phase: 'open',
+      votingEndsAt: new Date(openedAt.getTime() + 60_000).toISOString(),
+    });
+  });
 });
 
 describe('castVote', () => {
@@ -470,6 +501,7 @@ describe('closeVotingRound', () => {
     });
     expect(setQuestionPhase).not.toHaveBeenCalled();
     expect(result.voting.phase).toBe('closed');
+    expect(cancelVotingDeadline).toHaveBeenCalledWith('r1');
   });
 
   it('stores no winner when the top score is shared', async () => {
@@ -592,5 +624,33 @@ describe('getSessionVoteOutcomes', () => {
         tiedProposalIds: ['p1', 'p2'],
       },
     ]);
+  });
+});
+
+describe('expireOpenVotingIfDue', () => {
+  it('does nothing when the session has no voting clock', async () => {
+    await expect(expireOpenVotingIfDue('s1')).resolves.toBeNull();
+    expect(roundUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does nothing while the deadline is still in the future', async () => {
+    getSession.mockResolvedValue({ ...SESSION, votingTimerSeconds: 60 });
+    roundFindUnique.mockResolvedValue(
+      openRound({ openedAt: new Date(Date.now() + 30_000), votes: [] }),
+    );
+    await expect(expireOpenVotingIfDue('s1')).resolves.toBeNull();
+  });
+
+  it('closes the round so the room sees the result, without advancing', async () => {
+    getSession.mockResolvedValue({ ...SESSION, votingTimerSeconds: 60 });
+    const past = new Date(Date.now() - 61_000);
+    roundFindUnique
+      .mockResolvedValueOnce(openRound({ openedAt: past, votes: [] }))
+      .mockResolvedValueOnce(openRound({ openedAt: past, votes: [] }))
+      .mockResolvedValue(openRound({ openedAt: past, status: 'closed', votes: [] }));
+
+    const result = await expireOpenVotingIfDue('s1');
+    expect(result?.voting.phase).toBe('closed');
+    expect(setQuestionPhase).not.toHaveBeenCalled();
   });
 });

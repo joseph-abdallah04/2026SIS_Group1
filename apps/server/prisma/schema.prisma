@@ -74,6 +74,10 @@ model Session {
   // spent in the waiting room.
   startedAt DateTime?
   endedAt   DateTime?
+  // Optional clocks set at create/draft edit. Null means that timer is off.
+  // Stored in seconds so the client can count without rounding minutes.
+  discussionTimerSeconds Int? @map("discussion_timer_seconds")
+  votingTimerSeconds     Int? @map("voting_timer_seconds")
   // The question the board is showing. Distinct from each question's own
   // status: the leader can look back at an answered question's pinboard
   // without reopening it (proposals stay closed). Set when the session
@@ -96,6 +100,9 @@ model Question {
   position  Int
   status    QuestionStatus @default(pending)
   createdAt DateTime       @default(now())
+  // When this question last entered `discussion`. The discussion clock
+  // counts from here; it is not a deadline — overtime is display-only.
+  discussionStartedAt DateTime? @map("discussion_started_at")
 
   proposals   Proposal[]
   votingRound VotingRound?
@@ -217,6 +224,7 @@ model VotingRound {
   question   Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
   status     VotingRoundStatus @default(shortlisting)
   createdAt  DateTime          @default(now())
+  openedAt   DateTime?         @map("opened_at")
   closedAt   DateTime?
   items      VotingShortlistItem[]
   votes      Vote[]

@@ -5,6 +5,7 @@ import {
   type VotingTally,
 } from '@roundtable/shared';
 
+import { CARD_RADIUS, CARD_WIDTH, STICKY_RADIUS } from '../pinboard/pinboardTokens';
 import { ProposalCard } from '../pinboard/ProposalCard';
 import { VoteResultBadge, voteResultRing } from '../voting/VoteResultBadge';
 
@@ -66,14 +67,26 @@ function QuestionRecap({
               winnerId === item.id ? 'winner' : tied.has(item.id) ? 'tied' : null;
             const tally = tallyFor(question.tallies, item.id);
             return (
-              <li key={item.id} className="relative">
+              <li
+                key={item.id}
+                className={`relative shrink-0 ${kind ? 'z-10' : ''}`}
+                style={{
+                  width: CARD_WIDTH[item.type],
+                  borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
+                }}
+              >
                 {kind ? <VoteResultBadge kind={kind} /> : null}
-                <div className={voteResultRing(kind)}>
+                <div
+                  className={voteResultRing(kind)}
+                  style={{
+                    width: CARD_WIDTH[item.type],
+                    borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
+                  }}
+                >
                   <ProposalCard
                     item={item}
                     isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId === leaderId}
-                    isShortlisted={kind !== null}
                   />
                 </div>
                 {tally ? (

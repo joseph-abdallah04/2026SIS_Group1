@@ -66,6 +66,7 @@ const REST_BOARD: BoardResponse = {
   questionPosition: 0,
   questionStatus: 'discussion',
   items: [],
+  discussionTimer: null,
 };
 
 function snapshot(overrides: Partial<SessionStatePayload> = {}): SessionStatePayload {
@@ -84,6 +85,7 @@ function snapshot(overrides: Partial<SessionStatePayload> = {}): SessionStatePay
     shortlist: [],
     shortlistLocked: false,
     voting: emptyVotingState('q1'),
+    discussionTimer: null,
     ...overrides,
   };
 }

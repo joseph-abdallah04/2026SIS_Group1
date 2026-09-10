@@ -6,6 +6,7 @@
 import type {
   BoardItem,
   BoardResponse,
+  Question,
   QuestionStatus,
   ReactionGroup,
   SessionStatus,
@@ -209,6 +210,12 @@ export interface ServerToClientEvents {
    * re-read the board the same way they do for `sessionPhase`.
    */
   sessionFocus(payload: { sessionId: string; questionId: string }): void;
+  /**
+   * The leader appended a question to a live agenda (`POST /:id/questions`).
+   * Clients insert this row — they do not invent one locally after the POST,
+   * same rule as `sessionPhase`.
+   */
+  questionAdded(payload: { sessionId: string; question: Question }): void;
 
   // === pinboard module ===
   /**

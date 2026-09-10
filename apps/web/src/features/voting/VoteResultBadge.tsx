@@ -14,8 +14,10 @@ export function VoteResultBadge({ kind }: { kind: 'winner' | 'tied' }) {
   );
 }
 
-export function voteResultRing(kind: 'winner' | 'tied' | null): string | undefined {
-  if (kind === 'winner') return 'rounded-xl ring-2 ring-rt-secondary ring-offset-2';
-  if (kind === 'tied') return 'rounded-xl ring-2 ring-rt-cool ring-offset-2';
-  return undefined;
+export function voteResultRing(kind: 'winner' | 'tied' | 'selected' | null): string {
+  if (kind === 'winner' || kind === 'selected') {
+    return 'ring-2 ring-rt-secondary ring-offset-2 ring-offset-rt-surface';
+  }
+  if (kind === 'tied') return 'ring-2 ring-rt-cool ring-offset-2 ring-offset-rt-surface';
+  return '';
 }

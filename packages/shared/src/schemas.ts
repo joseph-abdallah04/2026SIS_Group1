@@ -46,12 +46,66 @@ export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 // === sessions module ===
 
+/** Seconds field on a session clock — 0, 15, 30, or 45. */
+export const TIMER_SECOND_STEP = 15;
+/** Longest discussion timer a leader may set. */
+export const DISCUSSION_TIMER_MAX_SECONDS = 3 * 60 * 60;
+/** Longest voting timer a leader may set. */
+export const VOTING_TIMER_MAX_SECONDS = 60 * 60;
+
+export interface TimerDurationParts {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+export function splitTimerSeconds(total: number | null | undefined): TimerDurationParts {
+  if (total == null || total <= 0) return { hours: 0, minutes: 0, seconds: 0 };
+  let seconds = Math.round((total % 60) / TIMER_SECOND_STEP) * TIMER_SECOND_STEP;
+  let minutes = Math.floor((total % 3600) / 60);
+  let hours = Math.floor(total / 3600);
+  if (seconds === 60) {
+    seconds = 0;
+    minutes += 1;
+  }
+  if (minutes === 60) {
+    minutes = 0;
+    hours += 1;
+  }
+  return { hours, minutes, seconds };
+}
+
+export function combineTimerSeconds(parts: TimerDurationParts): number | null {
+  const total = parts.hours * 3600 + parts.minutes * 60 + parts.seconds;
+  return total > 0 ? total : null;
+}
+
+const optionalTimerSeconds = (max: number) =>
+  z
+    .number()
+    .int()
+    .min(TIMER_SECOND_STEP)
+    .max(max)
+    .multipleOf(TIMER_SECOND_STEP)
+    .nullable()
+    .optional();
+
+/** Longest a single question may be. */
+export const SESSION_QUESTION_TEXT_MAX = 500;
+/** Hard cap on an agenda, including questions added mid-session. */
+export const SESSION_QUESTION_LIMIT = 50;
+
+export const questionTextSchema = z.string().trim().min(1).max(SESSION_QUESTION_TEXT_MAX);
+
 // F04: title + an ordered list of questions. Order is exactly the array
 // order — the server assigns `position` from array index, so reordering
 // client-side and resubmitting is how a question list gets reordered.
+// Timer seconds are optional: omit or `null` means that clock is off.
 export const createSessionSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  questions: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
+  questions: z.array(questionTextSchema).min(1).max(SESSION_QUESTION_LIMIT),
+  discussionTimerSeconds: optionalTimerSeconds(DISCUSSION_TIMER_MAX_SECONDS),
+  votingTimerSeconds: optionalTimerSeconds(VOTING_TIMER_MAX_SECONDS),
 });
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
@@ -101,6 +155,14 @@ export const focusQuestionSchema = z.object({
 });
 
 export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
+
+// Leader appending one pending question to a live agenda. Position and
+// status are assigned server-side — the body is only the text.
+export const addSessionQuestionSchema = z.object({
+  text: questionTextSchema,
+});
+
+export type AddSessionQuestionInput = z.infer<typeof addSessionQuestionSchema>;
 
 // === pinboard module ===
 

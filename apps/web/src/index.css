@@ -369,3 +369,24 @@ body {
     animation: none;
   }
 }
+
+@keyframes rt-timer-flash {
+  0%,
+  100% {
+    color: var(--color-rt-ink);
+  }
+  50% {
+    color: #b42318;
+  }
+}
+
+.rt-timer-flash {
+  animation: rt-timer-flash 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-timer-flash {
+    animation: none;
+    color: #b42318;
+  }
+}

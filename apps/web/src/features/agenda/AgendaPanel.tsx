@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { SHORTLIST_MIN, type Question, type QuestionStatus, type VotingPhase } from '@roundtable/shared';
+import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/shared/schemas';
 
 import { BoardRail } from '../../components/BoardRail';
+import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
 
@@ -83,6 +85,8 @@ export function AgendaPanel({
     error: phaseError,
   } = useSetQuestionPhase(sessionId);
   const { focus, error: focusError } = useFocusQuestion(sessionId);
+  const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
+  const [draft, setDraft] = useState('');
 
   const activeIndex = questions.findIndex((question) => question.id === activeQuestionId);
   const position = activeIndex >= 0 ? `${activeIndex + 1}/${questions.length}` : null;
@@ -91,8 +95,15 @@ export function AgendaPanel({
     (question) => question.status === 'discussion' || question.status === 'voting',
   );
   const firstPending = questions.find((question) => question.status === 'pending');
-  const error = phaseError ?? focusError;
+  const error = phaseError ?? focusError ?? addError;
   const title = `Agenda ${position ?? ''}`;
+  const canAdd = isLeader && questions.length < SESSION_QUESTION_LIMIT;
+
+  async function onAdd(event: FormEvent) {
+    event.preventDefault();
+    const ok = await addQuestion(draft);
+    if (ok) setDraft('');
+  }
 
   return (
     <BoardRail
@@ -260,6 +271,35 @@ export function AgendaPanel({
           })}
         </ol>
       )}
+
+      {canAdd ? (
+        <form
+          onSubmit={(event) => void onAdd(event)}
+          className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2"
+        >
+          <label className="sr-only" htmlFor="agenda-new-question">
+            New question
+          </label>
+          <div className="flex gap-1.5">
+            <input
+              id="agenda-new-question"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Add a question…"
+              maxLength={SESSION_QUESTION_TEXT_MAX}
+              disabled={adding}
+              className="min-h-8 min-w-0 flex-1 rounded-md border border-rt-tertiary bg-rt-surface px-2 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={adding || draft.trim().length === 0}
+              className="shrink-0 rounded-md bg-rt-secondary px-2.5 text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-50"
+            >
+              {adding ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       {error && (
         <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-red-600">

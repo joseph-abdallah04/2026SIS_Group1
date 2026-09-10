@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import { BoardRail } from '../../components/BoardRail';
 import { ParticipantBubble } from './ParticipantBubble';
@@ -10,6 +10,11 @@ interface ParticipantPanelProps {
   participants: readonly VoiceParticipant[];
   /** The connection, so an empty list can say *why* it is empty. */
   status: VoiceStatus;
+  /**
+   * Pinned under the roster when the rail is open — the live join code, which
+   * voice does not own. Hidden with the rest of the body when collapsed.
+   */
+  footer?: ReactNode;
 }
 
 /**
@@ -61,7 +66,7 @@ function stateNote(isMuted: boolean, isSpeaking: boolean): string {
  * `<li>`: screen-reader support for labelling a bare list item is patchy, and
  * a row that announces as nothing is worse than one that announces plainly.
  */
-export function ParticipantPanel({ participants, status }: ParticipantPanelProps) {
+export function ParticipantPanel({ participants, status, footer }: ParticipantPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const speaking = useSustainedSpeaking(participants);
   // `useSustainedSpeaking` re-renders on every speech edge; the sort and the
@@ -167,6 +172,12 @@ export function ParticipantPanel({ participants, status }: ParticipantPanelProps
         <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-faint">
           Reconnecting — this list may be out of date.
         </p>
+      ) : null}
+
+      {footer ? (
+        <div className="-mx-3 mt-auto shrink-0 border-t border-rt-tertiary px-3 py-2.5">
+          {footer}
+        </div>
       ) : null}
     </BoardRail>
   );

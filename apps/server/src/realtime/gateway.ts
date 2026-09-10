@@ -12,7 +12,7 @@ import type { SessionStatePayload } from '@roundtable/shared/events';
 import { verifyToken } from '../modules/auth/index.js';
 import { getBoardForSession, registerPinboardSocketHandlers } from '../modules/pinboard/index.js';
 import { getSession, getSessionMemberIdentity } from '../modules/sessions/index.js';
-import { getVotingState, registerVotingSocketHandlers } from '../modules/voting/index.js';
+import { getVotingState, registerVotingSocketHandlers, bindVotingDeadlineIo, recoverVotingDeadlines } from '../modules/voting/index.js';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket, type SocketUser } from './types.js';
 
 /**
@@ -90,6 +90,9 @@ async function emitMemberLeftIfLast(
 }
 
 export function registerRealtimeGateway(io: RealtimeServer): void {
+  bindVotingDeadlineIo(io);
+  void recoverVotingDeadlines();
+
   io.on('connection', (socket) => {
     socket.data.user = null;
     socket.data.sessionId = null;

@@ -1,11 +1,24 @@
 import { useState, type FormEvent } from 'react';
-import { createSessionSchema, type CreateSessionInput } from '@roundtable/shared/schemas';
+import {
+  createSessionSchema,
+  DISCUSSION_TIMER_MAX_SECONDS,
+  VOTING_TIMER_MAX_SECONDS,
+  type CreateSessionInput,
+  type TimerDurationParts,
+} from '@roundtable/shared/schemas';
 
 import { Button } from '../../components/ui/Button';
+import {
+  secondsFromTimerParts,
+  TimerDurationFields,
+  timerPartsFromSeconds,
+} from './TimerDurationFields';
 
 interface SessionQuestionsFormProps {
   initialTitle?: string;
   initialQuestions?: string[];
+  initialDiscussionTimerSeconds?: number | null;
+  initialVotingTimerSeconds?: number | null;
   submitLabel: string;
   submittingLabel: string;
   submitting: boolean;
@@ -14,6 +27,8 @@ interface SessionQuestionsFormProps {
   /** Rendered after the submit button — F05's Delete, or create-page Cancel. */
   extraActions?: React.ReactNode;
 }
+
+const ZERO_DURATION: TimerDurationParts = { hours: 0, minutes: 0, seconds: 0 };
 
 /**
  * The title + ordered-questions editor shared by F04 (create) and F05 (edit
@@ -27,6 +42,8 @@ interface SessionQuestionsFormProps {
 export function SessionQuestionsForm({
   initialTitle = '',
   initialQuestions = [''],
+  initialDiscussionTimerSeconds = null,
+  initialVotingTimerSeconds = null,
   submitLabel,
   submittingLabel,
   submitting,
@@ -37,6 +54,12 @@ export function SessionQuestionsForm({
   const [title, setTitle] = useState(initialTitle);
   const [questions, setQuestions] = useState<string[]>(
     initialQuestions.length > 0 ? initialQuestions : [''],
+  );
+  const [discussionTimer, setDiscussionTimer] = useState(
+    () => timerPartsFromSeconds(initialDiscussionTimerSeconds) ?? ZERO_DURATION,
+  );
+  const [votingTimer, setVotingTimer] = useState(
+    () => timerPartsFromSeconds(initialVotingTimerSeconds) ?? ZERO_DURATION,
   );
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -79,6 +102,8 @@ export function SessionQuestionsForm({
     const parsed = createSessionSchema.safeParse({
       title,
       questions: questions.map((q) => q.trim()).filter((q) => q.length > 0),
+      discussionTimerSeconds: secondsFromTimerParts(discussionTimer),
+      votingTimerSeconds: secondsFromTimerParts(votingTimer),
     });
     if (!parsed.success) {
       setValidationError(parsed.error.issues[0]?.message ?? 'Invalid session');
@@ -155,6 +180,32 @@ export function SessionQuestionsForm({
           + Add question
         </Button>
       </div>
+
+      <fieldset className="flex flex-col gap-3">
+        <legend className="text-[13px] font-semibold text-rt-ink">Timers (optional)</legend>
+        <p className="text-[12px] leading-relaxed text-rt-ink-muted">
+          Leave a clock at 0:00:00 to skip it. Neither is required to save a draft or start a
+          session. Seconds step in 15s.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TimerDurationFields
+            id="discussion-timer"
+            label="Discussion timer"
+            maxSeconds={DISCUSSION_TIMER_MAX_SECONDS}
+            value={discussionTimer}
+            onChange={setDiscussionTimer}
+            hint="Starts when discussion begins. Visible to everyone. Does not end the phase — it turns red if you run over."
+          />
+          <TimerDurationFields
+            id="voting-timer"
+            label="Voting timer"
+            maxSeconds={VOTING_TIMER_MAX_SECONDS}
+            value={votingTimer}
+            onChange={setVotingTimer}
+            hint="Starts when the ballot opens. When it hits zero, voting ends and everyone sees the result. The leader then continues."
+          />
+        </div>
+      </fieldset>
 
       {(validationError ?? error) && (
         <p className="text-[13px] text-red-600">{validationError ?? error}</p>

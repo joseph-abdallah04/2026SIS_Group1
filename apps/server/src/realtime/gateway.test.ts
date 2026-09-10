@@ -34,8 +34,11 @@ vi.mock('../modules/voting/index.js', () => ({
     voterStatuses: null,
     winnerProposalId: null,
     tiedProposalIds: [],
+    votingEndsAt: null,
   })),
   registerVotingSocketHandlers: vi.fn(),
+  bindVotingDeadlineIo: vi.fn(),
+  recoverVotingDeadlines: vi.fn(async () => undefined),
 }));
 
 const { registerRealtimeGateway } = await import('./gateway.js');
@@ -150,11 +153,13 @@ beforeEach(() => {
   getBoardForSession.mockResolvedValue({
     sessionId: 's1',
     sessionTitle: 'Roadmap',
+    leaderId: 'leader-1',
     questionId: null,
     questionText: null,
     questionPosition: null,
     questionStatus: null,
     items: [],
+    discussionTimer: null,
   });
 });
 

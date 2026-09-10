@@ -4,8 +4,10 @@
 export { createSessionsRoutes } from './routes.js';
 export {
   assertSessionMember,
+  addSessionQuestion,
   createSession,
   deleteSession,
+  emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
@@ -13,6 +15,7 @@ export {
   endSession,
   generateSessionCode,
   getActiveQuestion,
+  getDiscussionTimer,
   getQuestion,
   getSession,
   getSessionMemberIdentity,

@@ -19,6 +19,7 @@ import {
   getVotingStateForSession,
   startVotingRound,
   toggleShortlist,
+  type ContinueVotingResult,
   type ShortlistState,
 } from './service.js';
 
@@ -155,15 +156,31 @@ export function registerVotingSocketHandlers(io: RealtimeServer, socket: Realtim
 
   onWriteIntent(socket, 'votingClose', emptyVotingIntentSchema, async (_input, actor) => {
     const result = await closeVotingRound({ sessionId: actor.sessionId, actorId: actor.id });
-    await emitVotingUpdated(io, actor.sessionId, result.voting);
+    await broadcastVoteClosed(io, actor.sessionId, result.voting);
   });
 
   onWriteIntent(socket, 'votingContinue', emptyVotingIntentSchema, async (_input, actor) => {
     const result = await continueAfterVote({ sessionId: actor.sessionId, actorId: actor.id });
-    await emitVotingUpdated(io, actor.sessionId, result.voting);
-    emitQuestionPhase(io, actor.sessionId, result.answered);
-    if (result.opened) {
-      emitQuestionPhase(io, actor.sessionId, result.opened);
-    }
+    await broadcastVoteAdvance(io, actor.sessionId, result);
   });
+}
+
+export async function broadcastVoteClosed(
+  io: RealtimeServer,
+  sessionId: string,
+  voting: VotingPublicState,
+): Promise<void> {
+  await emitVotingUpdated(io, sessionId, voting);
+}
+
+export async function broadcastVoteAdvance(
+  io: RealtimeServer,
+  sessionId: string,
+  result: ContinueVotingResult,
+): Promise<void> {
+  await emitVotingUpdated(io, sessionId, result.voting);
+  emitQuestionPhase(io, sessionId, result.answered);
+  if (result.opened) {
+    emitQuestionPhase(io, sessionId, result.opened);
+  }
 }

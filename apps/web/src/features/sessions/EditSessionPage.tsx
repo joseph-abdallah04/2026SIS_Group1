@@ -49,6 +49,8 @@ export function EditSessionPage() {
           <SessionQuestionsForm
             initialTitle={session.title}
             initialQuestions={session.questions.map((q) => q.text)}
+            initialDiscussionTimerSeconds={session.discussionTimerSeconds}
+            initialVotingTimerSeconds={session.votingTimerSeconds}
             submitLabel="Save changes"
             submittingLabel="Saving…"
             submitting={submitting}

@@ -279,4 +279,43 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
     expect(screen.getByText(/end the session when you/)).toBeInTheDocument();
   });
+
+  it('lets the leader type a question into the agenda and posts it', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.type(screen.getByLabelText('New question'), 'What did we miss?');
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
+        text: 'What did we miss?',
+      }),
+    );
+    expect(screen.queryByDisplayValue('What did we miss?')).not.toBeInTheDocument();
+    expect(screen.queryByText('What did we miss?')).not.toBeInTheDocument();
+  });
+
+  it('does not offer the add field to a participant', () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      isLeader: false,
+    });
+
+    expect(screen.queryByLabelText('New question')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+  });
+
+  it('does not post a blank question', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(post).not.toHaveBeenCalled();
+  });
 });

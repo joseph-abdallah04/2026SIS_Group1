@@ -26,12 +26,14 @@ import {
   setQuestionPhase,
   type QuestionRef,
 } from './sessionsAdapter.js';
+import { cancelVotingDeadline, scheduleVotingDeadline } from './deadlines.js';
 
 export type ShortlistState = VotingShortlist;
 
 type RoundWithBallots = {
   id: string;
   status: 'shortlisting' | 'open' | 'closed';
+  openedAt: Date | null;
   items: { proposalId: string }[];
   votes: { voterId: string; proposalId: string }[];
 };
@@ -193,6 +195,11 @@ export async function getVotingState(
         }))
       : null;
 
+  const votingEndsAt =
+    phase === 'open' && round?.openedAt && session?.votingTimerSeconds
+      ? new Date(round.openedAt.getTime() + session.votingTimerSeconds * 1000).toISOString()
+      : null;
+
   return {
     questionId,
     phase,
@@ -202,6 +209,7 @@ export async function getVotingState(
     voterCount: members.length,
     winnerProposalId: outcome.winnerProposalId,
     tiedProposalIds: outcome.tiedProposalIds,
+    votingEndsAt,
     myVote,
     voterStatuses,
   };
@@ -370,10 +378,20 @@ export async function startVotingRound({
     return toShortlist(question.id, proposalIds, true);
   }
 
+  const openedAt = new Date();
   await prisma.votingRound.update({
     where: { id: round.id },
-    data: { status: 'open' },
+    data: { status: 'open', openedAt },
   });
+
+  const session = await getSession(sessionId);
+  if (session?.votingTimerSeconds) {
+    scheduleVotingDeadline(
+      sessionId,
+      round.id,
+      new Date(openedAt.getTime() + session.votingTimerSeconds * 1000),
+    );
+  }
 
   return toShortlist(question.id, proposalIds, true);
 }
@@ -448,6 +466,7 @@ export async function closeVotingRound({
   }
 
   if (round.status === 'open') {
+    cancelVotingDeadline(round.id);
     const winningProposalId = pickWinningProposalId(
       round.items.map((item) => item.proposalId),
       round.votes,
@@ -519,6 +538,26 @@ export async function continueAfterVote({
     answered,
     opened,
   };
+}
+
+/**
+ * If an open ballot has passed its configured deadline, close it so everyone
+ * sees the result. Advancing stays with the leader (`continueAfterVote`).
+ */
+export async function expireOpenVotingIfDue(sessionId: string): Promise<CloseVotingResult | null> {
+  const session = await getSession(sessionId);
+  if (!session?.votingTimerSeconds) return null;
+
+  const question = await getActiveQuestion(sessionId);
+  if (!question || question.status !== 'voting') return null;
+
+  const round = await loadRound(question.id);
+  if (!round || round.status !== 'open' || !round.openedAt) return null;
+
+  const endsAt = round.openedAt.getTime() + session.votingTimerSeconds * 1000;
+  if (Date.now() < endsAt) return null;
+
+  return closeVotingRound({ sessionId, actorId: session.leaderId });
 }
 
 /** Closed-round results for F31. No voter identities — only counts and the declared outcome. */

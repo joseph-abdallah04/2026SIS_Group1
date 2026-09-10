@@ -242,6 +242,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
     voterStatuses: voting.voterStatuses,
     winnerProposalId: voting.winnerProposalId,
     tiedProposalIds: voting.tiedProposalIds,
+    votingEndsAt: voting.votingEndsAt,
     error,
     busy,
     toggle,

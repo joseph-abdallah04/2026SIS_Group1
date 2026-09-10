@@ -81,6 +81,8 @@ interface PinboardCanvasProps {
   boardOverlay?: ReactNode;
   /** F28 ballot — covers the board + rails until the leader ends the vote. */
   ballot?: ReactNode;
+  /** Discussion clock. Hidden by the parent once the ballot overlay is up. */
+  headerTimer?: ReactNode;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -229,6 +231,7 @@ export function PinboardCanvas({
   shortlistControl,
   boardOverlay,
   ballot,
+  headerTimer,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -579,6 +582,7 @@ export function PinboardCanvas({
             </h1>
           )}
         </div>
+        {headerTimer}
         <div className="ml-auto flex items-center gap-2.5">
           {shortlistControl}
           {micControl}

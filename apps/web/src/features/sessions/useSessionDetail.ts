@@ -38,6 +38,17 @@ export function useSessionDetail(sessionId: string) {
     );
   }, []);
 
+  const applyAddedQuestion = useCallback((question: Question) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      if (prev.questions.some((row) => row.id === question.id)) return prev;
+      return {
+        ...prev,
+        questions: [...prev.questions, question].sort((a, b) => a.position - b.position),
+      };
+    });
+  }, []);
+
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
@@ -57,5 +68,5 @@ export function useSessionDetail(sessionId: string) {
     };
   }, [sessionId, reloadToken]);
 
-  return { session, loading, error, reload, applyQuestionPhase };
+  return { session, loading, error, reload, applyQuestionPhase, applyAddedQuestion };
 }

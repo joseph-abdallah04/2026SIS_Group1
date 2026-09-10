@@ -211,4 +211,20 @@ describe('ParticipantPanel', () => {
     renderPanel(room(), 'reconnecting');
     expect(screen.getByText(/may be out of date/)).toBeInTheDocument();
   });
+
+  it('pins a footer under the roster, and hides it when collapsed', async () => {
+    const user = userEvent.setup();
+    render(
+      <ParticipantPanel
+        participants={room()}
+        status="connected"
+        footer={<p>Join code K7NP-3WQZ</p>}
+      />,
+    );
+
+    expect(screen.getByText('Join code K7NP-3WQZ')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Collapse participants/ }));
+    expect(screen.queryByText('Join code K7NP-3WQZ')).not.toBeInTheDocument();
+  });
 });
