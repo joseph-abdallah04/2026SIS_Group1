@@ -2,10 +2,10 @@ import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
 import { signToken } from '../modules/auth/jwt.js';
-import { requireAuth } from './auth.js';
+import { allowQueryBearer, requireAuth } from './auth.js';
 
-function mockReqRes(authorization?: string) {
-  const req = { headers: { authorization } } as Request;
+function mockReqRes(authorization?: string, query: Request['query'] = {}) {
+  const req = { headers: { authorization }, query } as Request;
   const json = vi.fn();
   const status = vi.fn().mockReturnValue({ json });
   const res = { status } as unknown as Response;
@@ -37,5 +37,20 @@ describe('requireAuth', () => {
     expect(status).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(1);
     expect(req.userId).toBe('user-42');
+  });
+});
+
+describe('allowQueryBearer', () => {
+  it('copies ?token= onto Authorization when the header is missing', () => {
+    const { req, next } = mockReqRes(undefined, { token: 'query-jwt' });
+    allowQueryBearer(req, {} as Response, next);
+    expect(req.headers.authorization).toBe('Bearer query-jwt');
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves an existing Authorization header alone', () => {
+    const { req, next } = mockReqRes('Bearer header-jwt', { token: 'query-jwt' });
+    allowQueryBearer(req, {} as Response, next);
+    expect(req.headers.authorization).toBe('Bearer header-jwt');
   });
 });

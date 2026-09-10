@@ -1,4 +1,9 @@
-import type { QuestionStatus, SessionRecap, SessionRecapQuestion, VotingTally } from '@roundtable/shared';
+import {
+  recapQuestionStatusLabel,
+  type SessionRecap,
+  type SessionRecapQuestion,
+  type VotingTally,
+} from '@roundtable/shared';
 
 import { ProposalCard } from '../pinboard/ProposalCard';
 import { VoteResultBadge, voteResultRing } from '../voting/VoteResultBadge';
@@ -13,19 +18,6 @@ function formatWhen(iso: string | null): string | null {
     minute: '2-digit',
   });
 }
-
-/**
- * Past tense, and read from the end of the session: a question the leader
- * never opened and one they were mid-discussion on are both "not covered"
- * once the session is over.
- */
-const ENDED_QUESTION_LABELS: Record<QuestionStatus, string> = {
-  pending: 'Not reached',
-  discussion: 'Not reached',
-  voting: 'Not reached',
-  answered: 'Answered',
-  skipped: 'Skipped',
-};
 
 function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally | null {
   return tallies.find((row) => row.proposalId === proposalId) ?? null;
@@ -53,12 +45,7 @@ function QuestionRecap({
           {question.text}
         </h3>
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">
-          {question.status === 'voting' &&
-          (question.winnerProposalId ||
-            question.tiedProposalIds.length > 0 ||
-            question.proposals.length > 0)
-            ? ENDED_QUESTION_LABELS.answered
-            : ENDED_QUESTION_LABELS[question.status]}
+          {recapQuestionStatusLabel(question)}
         </span>
       </header>
 
@@ -105,6 +92,7 @@ function QuestionRecap({
 
 /**
  * F31 recap: title, dates, who took part, the shortlist, and the winner.
+ * S04's download lives on the ended-session footer, beside Back to dashboard.
  */
 export function SessionSummaryView({
   summary,

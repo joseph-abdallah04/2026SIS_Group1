@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { useCurrentUserId } from '../../lib/currentUser';
+import { DownloadRecapButton } from '../summary/DownloadRecapButton';
 import { SessionSummaryView } from '../summary/SessionSummaryView';
 import { useSessionSummary } from '../summary/useSessionSummary';
 import type { SessionDetail } from './useSessionDetail';
@@ -36,12 +37,15 @@ export function SessionEndedPage({ session }: { session: SessionDetail }) {
         ) : null}
         {summary ? <SessionSummaryView summary={summary} viewerId={viewerId} /> : null}
 
-        <Link
-          to="/dashboard"
-          className="self-start text-[13px] font-semibold text-rt-primary-deep hover:underline"
-        >
-          Back to dashboard
-        </Link>
+        <div className="mt-auto flex items-center justify-between gap-4 pt-4">
+          <Link
+            to="/dashboard"
+            className="text-[13px] font-semibold text-rt-primary-deep hover:underline"
+          >
+            Back to dashboard
+          </Link>
+          {summary ? <DownloadRecapButton sessionId={session.id} /> : null}
+        </div>
       </div>
     </main>
   );

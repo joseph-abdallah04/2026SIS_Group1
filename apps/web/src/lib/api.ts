@@ -18,6 +18,17 @@ export class ApiClientError extends Error {
 // INVALID_CREDENTIALS), which must NOT bounce the user to /login.
 const AUTH_FAILURE_CODES = new Set(['MISSING_TOKEN', 'INVALID_TOKEN', 'TOKEN_EXPIRED']);
 
+function throwIfFailed(status: number, body: { error?: string; code?: string } | null): void {
+  if (body?.code && AUTH_FAILURE_CODES.has(body.code)) {
+    redirectToLogin();
+  }
+  throw new ApiClientError(
+    status,
+    body?.error ?? `Request failed (${status})`,
+    body?.code,
+  );
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(path, {
@@ -31,14 +42,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = (await res.json().catch(() => null)) as
     (T & { error?: string; code?: string }) | null;
   if (!res.ok) {
-    if (body?.code && AUTH_FAILURE_CODES.has(body.code)) {
-      redirectToLogin();
-    }
-    throw new ApiClientError(
-      res.status,
-      body?.error ?? `Request failed (${res.status})`,
-      body?.code,
-    );
+    throwIfFailed(res.status, body);
   }
   return body as T;
 }

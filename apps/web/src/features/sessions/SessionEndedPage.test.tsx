@@ -34,6 +34,10 @@ vi.mock('../summary/useSessionSummary', () => ({
 vi.mock('../../lib/currentUser', () => ({
   useCurrentUserId: () => 'leader-1',
 }));
+vi.mock('../../lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/auth')>('../../lib/auth');
+  return { ...actual, getToken: () => 'test-jwt' };
+});
 
 const { SessionEndedPage } = await import('./SessionEndedPage');
 
@@ -72,5 +76,20 @@ describe('SessionEndedPage', () => {
       screen.queryByText(/auto-generated summary of what was decided/i),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Download Session Summary' })).toHaveAttribute(
+      'href',
+      '/api/sessions/s1/summary.pdf?token=test-jwt',
+    );
+  });
+
+  it('keeps the download on the opposite side of Back to dashboard', () => {
+    render(
+      <MemoryRouter>
+        <SessionEndedPage session={SESSION} />
+      </MemoryRouter>,
+    );
+
+    const footer = screen.getByRole('link', { name: 'Back to dashboard' }).parentElement;
+    expect(footer?.className).toMatch(/justify-between/);
   });
 });

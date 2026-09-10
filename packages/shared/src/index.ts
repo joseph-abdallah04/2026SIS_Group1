@@ -337,6 +337,32 @@ export interface SessionRecap {
   questions: SessionRecapQuestion[];
 }
 
+/**
+ * Past-tense label for the recap (screen and PDF). A question left in
+ * `voting` with a shortlist or result still reads as answered once the
+ * session is over.
+ */
+export function recapQuestionStatusLabel(question: SessionRecapQuestion): string {
+  if (
+    question.status === 'voting' &&
+    (question.winnerProposalId ||
+      question.tiedProposalIds.length > 0 ||
+      question.proposals.length > 0)
+  ) {
+    return 'Answered';
+  }
+  switch (question.status) {
+    case 'pending':
+    case 'discussion':
+    case 'voting':
+      return 'Not reached';
+    case 'answered':
+      return 'Answered';
+    case 'skipped':
+      return 'Skipped';
+  }
+}
+
 // === voice module ===
 
 /**

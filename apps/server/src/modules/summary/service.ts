@@ -2,6 +2,7 @@ import { SHORTLIST_MAX, type SessionRecap, type SessionRecapQuestion } from '@ro
 
 import { ApiError } from '../../middleware/error.js';
 import { listProposals } from './pinboardAdapter.js';
+import { recapPdfFilename, renderSessionRecapPdf } from './pdf.js';
 import {
   assertSessionMember,
   getSessionWithQuestions,
@@ -79,5 +80,17 @@ export async function getSessionSummary(
       isLeader: member.userId === session.leaderId,
     })),
     questions,
+  };
+}
+
+/** S04: same recap as JSON, laid out as a PDF the client can download. */
+export async function getSessionSummaryPdf(
+  sessionId: string,
+  viewerId: string,
+): Promise<{ pdf: Buffer; filename: string }> {
+  const summary = await getSessionSummary(sessionId, viewerId);
+  return {
+    pdf: await renderSessionRecapPdf(summary),
+    filename: recapPdfFilename(summary.title),
   };
 }

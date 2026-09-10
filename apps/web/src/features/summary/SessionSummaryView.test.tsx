@@ -74,6 +74,7 @@ describe('SessionSummaryView', () => {
     expect(screen.getByText('Winner')).toBeInTheDocument();
     expect(screen.getByText('Skipped')).toBeInTheDocument();
     expect(screen.getByText('Nothing was shortlisted for this question.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download Session Summary' })).not.toBeInTheDocument();
   });
 
   it('labels a tie on every shortlisted proposal that shares the top score', () => {

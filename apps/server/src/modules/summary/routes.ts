@@ -1,9 +1,26 @@
 import { Router } from 'express';
 
-import { requireAuth } from '../../middleware/auth.js';
-import { getSessionSummary } from './service.js';
+import { allowQueryBearer, requireAuth } from '../../middleware/auth.js';
+import { getSessionSummary, getSessionSummaryPdf } from './service.js';
 
 export const summaryRoutes = Router();
+
+summaryRoutes.get<{ sessionId: string }>(
+  '/:sessionId/summary.pdf',
+  allowQueryBearer,
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const { pdf, filename } = await getSessionSummaryPdf(req.params.sessionId, req.userId!);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 summaryRoutes.get<{ sessionId: string }>(
   '/:sessionId/summary',
