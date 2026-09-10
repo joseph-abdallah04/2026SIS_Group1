@@ -83,9 +83,10 @@ describe('ParticipantPanel', () => {
   });
 
   it('counts the room in the header', () => {
-    renderPanel();
+    const { container } = renderPanel();
 
     expect(screen.getByText(/In the room/)).toHaveTextContent('5');
+    expect(container.querySelector('aside')).toHaveClass('w-64');
   });
 
   it('rings whoever is speaking, and only them', () => {
@@ -164,6 +165,7 @@ describe('ParticipantPanel', () => {
       await user.click(screen.getByRole('button', { name: /Collapse participants/ }));
       const expand = screen.getByRole('button', { name: /Expand participants/ });
       expect(expand).toHaveAccessibleName(/5 people/);
+      expect(screen.getByText(/In the room/)).toHaveTextContent('5');
 
       await user.click(expand);
       expect(screen.getByRole('button', { name: /Collapse participants/ })).toBeInTheDocument();

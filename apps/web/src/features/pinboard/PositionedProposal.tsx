@@ -319,8 +319,9 @@ export function PositionedProposal({
         // promise that grabbing is the only thing a card does, when clicking it
         // also reaches its Edit and Remove controls — and it would put a hand
         // over most of a busy board. The cursor changes once a drag is actually
-        // under way, which is the moment it means something.
-        cursor: isDragging ? 'grabbing' : 'default',
+        // under way, which is the moment it means something. During shortlisting
+        // the card itself is the control, so a pointer is accurate.
+        cursor: isDragging ? 'grabbing' : canToggleShortlist ? 'pointer' : 'default',
         // Without this the browser claims touch drags for scrolling first.
         touchAction: draggable ? 'none' : undefined,
         // Text inside a card must not become a selection while dragging it.
@@ -333,6 +334,15 @@ export function PositionedProposal({
       onPointerMove={draggable ? dragHandlers.onPointerMove : undefined}
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
+      onClick={
+        canToggleShortlist
+          ? (event) => {
+              // The corner tick is its own button and already toggles.
+              if ((event.target as HTMLElement).closest('button')) return;
+              onToggleShortlist(item.id);
+            }
+          : undefined
+      }
     >
       {canToggleShortlist ? (
         <button

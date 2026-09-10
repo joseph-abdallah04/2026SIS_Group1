@@ -5,6 +5,7 @@ import { randomInt } from 'node:crypto';
 
 import {
   normalizeSessionCode,
+  SHORTLIST_MIN,
   type Question,
   type QuestionStatus,
   type Session,
@@ -445,13 +446,16 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
  * - `discussion -> answered` is absent because answering is what closes a
  *   vote (F30) — a leader who wants to move on without voting skips instead,
  *   which records *that* rather than inventing an answer nobody chose;
+ * - `voting -> discussion` is the shortlisting escape hatch: accidental
+ *   "Open voting" before the ballot is locked. Once ballots are in, the
+ *   round has to close or skip — it cannot rewind;
  * - `answered` and `skipped` are terminal, so the agenda only moves forward
  *   and a question cannot be reopened after the board has moved past it.
  */
 const PHASE_TRANSITIONS: Record<QuestionStatus, readonly QuestionStatus[]> = {
   pending: ['discussion', 'skipped'],
   discussion: ['voting', 'skipped'],
-  voting: ['answered', 'skipped'],
+  voting: ['discussion', 'answered', 'skipped'],
   answered: [],
   skipped: [],
 };
@@ -525,6 +529,33 @@ export async function setQuestionPhase({
       );
     }
 
+    if (status === 'voting') {
+      const proposalCount = await tx.proposal.count({
+        where: { questionId, deletedAt: null },
+      });
+      if (proposalCount < SHORTLIST_MIN) {
+        throw new ApiError(
+          409,
+          `Add at least ${SHORTLIST_MIN} proposals before opening voting`,
+          'NOT_ENOUGH_TO_VOTE',
+        );
+      }
+    }
+
+    if (question.status === 'voting' && status === 'discussion') {
+      const round = await tx.votingRound.findUnique({
+        where: { questionId },
+        select: { status: true },
+      });
+      if (round && round.status !== 'shortlisting') {
+        throw new ApiError(
+          409,
+          'The vote has already started — it cannot go back to discussion',
+          'VOTING_ALREADY_STARTED',
+        );
+      }
+    }
+
     if (status === 'discussion' || status === 'voting') {
       const open = await tx.question.findFirst({
         where: {
@@ -548,6 +579,14 @@ export async function setQuestionPhase({
       data: { status },
       select: QUESTION_REF_SELECT,
     });
+
+    // Drop an unfinished shortlist so a later "Open voting" does not revive
+    // ticks from the attempt the leader backed out of.
+    if (question.status === 'voting' && status === 'discussion') {
+      await tx.votingRound.deleteMany({
+        where: { questionId, status: 'shortlisting' },
+      });
+    }
 
     // The board follows the question that just changed, except when closing
     // one: then it advances to the next pending question so the room is not

@@ -98,8 +98,14 @@ export function useVoting(sessionId: string, questionId: string | null) {
     }
 
     void load();
+    const socket = getSocket();
+    const onPhase = (payload: { sessionId: string }) => {
+      if (payload.sessionId === sessionId) void load();
+    };
+    socket.on('sessionPhase', onPhase);
     return () => {
       cancelled = true;
+      socket.off('sessionPhase', onPhase);
     };
   }, [sessionId, questionId, applyViewer]);
 
@@ -136,10 +142,21 @@ export function useVoting(sessionId: string, questionId: string | null) {
     }
   }, []);
 
+  // Ticking a card is a board write, not a bar action — do not flip `busy` or
+  // the proceed control flashes "Working…" on every select.
+  const runQuiet = useCallback(async (work: () => Promise<void>, fallback: string) => {
+    setError(null);
+    try {
+      await work();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : fallback);
+    }
+  }, []);
+
   const toggle = useCallback(
     (proposalId: string) => {
       if (busy) return Promise.resolve();
-      return run(
+      return runQuiet(
         () =>
           writeIntent(
             (ack) => getSocket().emit('shortlistToggle', { proposalId }, ack),
@@ -148,7 +165,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
         'Could not update the shortlist',
       );
     },
-    [busy, run],
+    [busy, runQuiet],
   );
 
   const clear = useCallback(

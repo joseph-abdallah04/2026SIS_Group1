@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { Question, QuestionStatus, VotingPhase } from '@roundtable/shared';
+import { SHORTLIST_MIN, type Question, type QuestionStatus, type VotingPhase } from '@roundtable/shared';
 
+import { BoardRail } from '../../components/BoardRail';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
 
@@ -13,6 +14,13 @@ interface AgendaPanelProps {
   isLeader: boolean;
   /** Hides Skip once the ballot is showing the result (F30). */
   votingPhase?: VotingPhase;
+  /**
+   * Whether the open discussion question has enough proposals to form a
+   * shortlist (`SHORTLIST_MIN`). False disables "Open voting". Omitted when
+   * the board is showing a different question, so the server is the remaining
+   * gate.
+   */
+  hasProposals?: boolean;
 }
 
 /**
@@ -52,7 +60,8 @@ function statusLabel(status: QuestionStatus, votingPhase?: VotingPhase): string 
 
 /**
  * F24: the ordered question list beside the board, with F25/F26's leader
- * controls. The leader can click a finished question to put that question's
+ * controls. The chrome is `BoardRail`, shared with F13's presence list on the
+ * other edge. The leader can click a finished question to put that question's
  * pinboard back on screen without reopening it.
  *
  * Collapse state is local to each participant — the leader collapsing their
@@ -64,6 +73,7 @@ export function AgendaPanel({
   activeQuestionId,
   isLeader,
   votingPhase,
+  hasProposals,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [confirmingSkip, setConfirmingSkip] = useState<string | null>(null);
@@ -82,52 +92,21 @@ export function AgendaPanel({
   );
   const firstPending = questions.find((question) => question.status === 'pending');
   const error = phaseError ?? focusError;
-
-  if (collapsed) {
-    return (
-      <aside className="flex w-11 shrink-0 flex-col items-center gap-3 border-r border-rt-tertiary bg-rt-surface-alt py-3">
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          aria-expanded={false}
-          aria-label="Expand agenda"
-          title="Expand agenda"
-          className="text-[13px] font-semibold text-rt-primary-deep hover:opacity-70"
-        >
-          ›
-        </button>
-        <span
-          className="text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase"
-          style={{ writingMode: 'vertical-rl' }}
-        >
-          Agenda {position ?? ''}
-        </span>
-      </aside>
-    );
-  }
+  const title = `Agenda ${position ?? ''}`;
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-rt-tertiary bg-rt-surface-alt">
-      <div className="flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">
-        <span className="text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
-          Agenda {position ?? ''}
-        </span>
-        <button
-          type="button"
-          onClick={() => setCollapsed(true)}
-          aria-expanded={true}
-          aria-label="Collapse agenda"
-          title="Collapse agenda"
-          className="text-[13px] font-semibold text-rt-primary-deep hover:opacity-70"
-        >
-          ‹
-        </button>
-      </div>
-
+    <BoardRail
+      side="left"
+      title={title}
+      collapsed={collapsed}
+      onToggle={() => setCollapsed((open) => !open)}
+      expandLabel="Expand agenda"
+      collapseLabel="Collapse agenda"
+    >
       {questions.length === 0 ? (
-        <p className="px-3 py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
+        <p className="py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
       ) : (
-        <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+        <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2">
           {questions.map((question, index) => {
             const isFocused = question.id === activeQuestionId;
             const label = statusLabel(question.status, votingPhase);
@@ -141,11 +120,16 @@ export function AgendaPanel({
             const onThisQuestion = openQuestion
               ? question.id === openQuestion.id
               : firstPending !== undefined && question.id === firstPending.id;
+            const stillShortlisting =
+              question.status === 'voting' &&
+              votingPhase !== 'open' &&
+              votingPhase !== 'closed';
             const showControls =
               isLeader &&
               onThisQuestion &&
-              (next !== undefined || (question.status === 'voting' && canSkipVote));
+              (next !== undefined || stillShortlisting || (question.status === 'voting' && canSkipVote));
             const busy = phaseBusyId === question.id;
+            const openVotingBlocked = next?.status === 'voting' && hasProposals === false;
 
             return (
               <li
@@ -213,10 +197,26 @@ export function AgendaPanel({
                       <button
                         type="button"
                         onClick={() => void setPhase(question.id, next.status)}
-                        disabled={busy}
+                        disabled={busy || openVotingBlocked}
+                        title={
+                          openVotingBlocked
+                            ? `Add at least ${SHORTLIST_MIN} proposals before opening voting`
+                            : undefined
+                        }
                         className="self-start rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
                       >
                         {busy ? 'Working…' : next.label}
+                      </button>
+                    ) : null}
+
+                    {stillShortlisting ? (
+                      <button
+                        type="button"
+                        onClick={() => void setPhase(question.id, 'discussion')}
+                        disabled={busy}
+                        className="self-start text-[11px] font-medium text-rt-ink-muted hover:underline"
+                      >
+                        Back to discussion
                       </button>
                     ) : null}
 
@@ -262,18 +262,18 @@ export function AgendaPanel({
       )}
 
       {error && (
-        <p className="shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-red-600">
+        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-red-600">
           {error}
         </p>
       )}
 
       {allDone && (
-        <p className="shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-muted">
+        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-muted">
           {isLeader
             ? 'Every question is done — end the session when you’re ready.'
             : 'Every question is done.'}
         </p>
       )}
-    </aside>
+    </BoardRail>
   );
 }

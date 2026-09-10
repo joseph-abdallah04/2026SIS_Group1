@@ -6,6 +6,7 @@ interface ShortlistPromptProps {
   error: string | null;
   onProceed: () => void;
   onClear: () => void;
+  onBack: () => void;
 }
 
 /**
@@ -13,16 +14,29 @@ interface ShortlistPromptProps {
  * then proceed. Sits just above the footer so it is next to the frozen toolbar
  * rather than competing with End session in the header.
  */
-export function ShortlistPrompt({ count, busy, error, onProceed, onClear }: ShortlistPromptProps) {
+export function ShortlistPrompt({
+  count,
+  busy,
+  error,
+  onProceed,
+  onClear,
+  onBack,
+}: ShortlistPromptProps) {
   const canStart = count >= SHORTLIST_MIN && count <= SHORTLIST_MAX;
 
   return (
     <div className="pointer-events-auto flex max-w-[min(36rem,calc(100%-2rem))] flex-wrap items-center justify-center gap-3 rounded-full border border-rt-secondary/40 bg-white px-4 py-2 shadow-[0_8px_28px_rgba(8,12,21,0.16)]">
-      <p className="text-[12.5px] font-medium text-rt-ink">
-        {count === 0
-          ? `Select ${SHORTLIST_MIN}–${SHORTLIST_MAX} proposals, then proceed`
-          : `${count} selected · pick ${SHORTLIST_MIN}–${SHORTLIST_MAX}`}
+      <p className="min-w-[13.5rem] text-[12.5px] font-medium text-rt-ink tabular-nums">
+        {count} selected · pick {SHORTLIST_MIN}–{SHORTLIST_MAX}
       </p>
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={busy}
+        className="text-[12px] font-medium text-rt-ink-muted hover:underline disabled:opacity-50"
+      >
+        Back to discussion
+      </button>
       <button
         type="button"
         onClick={onClear}
@@ -31,19 +45,26 @@ export function ShortlistPrompt({ count, busy, error, onProceed, onClear }: Shor
       >
         Clear
       </button>
-      <button
-        type="button"
-        onClick={onProceed}
-        disabled={busy || !canStart}
-        title={
-          canStart
-            ? 'Open the ballot with these proposals'
-            : `Select ${SHORTLIST_MIN}–${SHORTLIST_MAX} proposals`
-        }
-        className="rounded-full bg-rt-secondary px-3.5 py-1.5 text-[12.5px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60"
+      <span
+        className={`transition-opacity duration-300 ease-out ${
+          canStart && !busy ? 'opacity-100' : 'opacity-45'
+        }`}
       >
-        {busy ? 'Working…' : 'Proceed to voting'}
-      </button>
+        <button
+          type="button"
+          onClick={onProceed}
+          disabled={busy || !canStart}
+          aria-busy={busy}
+          title={
+            canStart
+              ? 'Open the ballot with these proposals'
+              : `Select ${SHORTLIST_MIN}–${SHORTLIST_MAX} proposals`
+          }
+          className="rounded-full bg-rt-secondary px-3.5 py-1.5 text-[12.5px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:pointer-events-none"
+        >
+          Proceed to voting
+        </button>
+      </span>
       {error ? (
         <span className="max-w-[14rem] truncate text-[11px] text-red-600">{error}</span>
       ) : null}

@@ -25,6 +25,9 @@ const questionFindUnique = vi.fn();
 const questionFindFirst = vi.fn();
 const questionUpdate = vi.fn();
 const questionFindManyTopLevel = vi.fn();
+const proposalCount = vi.fn();
+const votingRoundFindUnique = vi.fn();
+const votingRoundDeleteMany = vi.fn();
 
 // The transaction handle exposes the same stubs as the top-level client: the
 // guards now run *inside* the transaction that writes (so a draft cannot stop
@@ -47,6 +50,13 @@ const txClient = {
     findUnique: questionFindUnique,
     findFirst: questionFindFirst,
     update: questionUpdate,
+  },
+  proposal: {
+    count: proposalCount,
+  },
+  votingRound: {
+    findUnique: votingRoundFindUnique,
+    deleteMany: votingRoundDeleteMany,
   },
   sessionMember: {
     create: sessionMemberCreate,
@@ -905,6 +915,9 @@ describe('setQuestionPhase (F25/F26)', () => {
   beforeEach(() => {
     sessionFindUnique.mockResolvedValue(activeSession);
     questionFindFirst.mockResolvedValue(null);
+    proposalCount.mockResolvedValue(2);
+    votingRoundFindUnique.mockResolvedValue(null);
+    votingRoundDeleteMany.mockResolvedValue({ count: 0 });
     questionUpdate.mockImplementation(({ data }: { data: { status: string } }) =>
       Promise.resolve(question({ status: data.status as QuestionRow['status'] })),
     );
@@ -939,6 +952,7 @@ describe('setQuestionPhase (F25/F26)', () => {
     ['pending', 'skipped'],
     ['discussion', 'voting'],
     ['discussion', 'skipped'],
+    ['voting', 'discussion'],
     ['voting', 'answered'],
     ['voting', 'skipped'],
   ] as const)('allows %s -> %s', async (from, to) => {
@@ -1013,6 +1027,33 @@ describe('setQuestionPhase (F25/F26)', () => {
       status: { in: ['discussion', 'voting'] },
     });
   });
+
+  it(`refuses to open voting with fewer than two proposals`, async () => {
+    questionFindUnique.mockResolvedValue(question({ status: 'discussion' }));
+    proposalCount.mockResolvedValue(1);
+    await expect(advance('voting')).rejects.toMatchObject({ code: 'NOT_ENOUGH_TO_VOTE' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('lets the leader return to discussion while still shortlisting', async () => {
+    questionFindUnique.mockResolvedValue(question({ status: 'voting' }));
+    votingRoundFindUnique.mockResolvedValue({ status: 'shortlisting' });
+    await expect(advance('discussion')).resolves.toMatchObject({ status: 'discussion' });
+    expect(votingRoundDeleteMany).toHaveBeenCalledWith({
+      where: { questionId: 'q1', status: 'shortlisting' },
+    });
+  });
+
+  it.each(['open', 'closed'] as const)(
+    'refuses to rewind once the ballot is %s',
+    async (roundStatus) => {
+      questionFindUnique.mockResolvedValue(question({ status: 'voting' }));
+      votingRoundFindUnique.mockResolvedValue({ status: roundStatus });
+      await expect(advance('discussion')).rejects.toMatchObject({ code: 'VOTING_ALREADY_STARTED' });
+      expect(questionUpdate).not.toHaveBeenCalled();
+      expect(votingRoundDeleteMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('looks for the next pending question when closing, not for another open one', async () => {
     questionFindUnique.mockResolvedValue(question({ status: 'voting' }));

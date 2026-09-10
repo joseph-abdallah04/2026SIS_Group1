@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 
+import { BoardRail } from '../../components/BoardRail';
 import { ParticipantBubble } from './ParticipantBubble';
 import { presenceLabel, seatParticipants } from './participantList';
 import type { VoiceParticipant, VoiceStatus } from './useVoiceRoom';
@@ -41,11 +42,12 @@ function stateNote(isMuted: boolean, isSpeaking: boolean): string {
 /**
  * Who is in the session and who is talking (F13).
  *
- * A docked rail on the right, mirroring F24's agenda on the left, so presence
- * is readable without a click — a speaking indicator behind a popover is a
- * speaking indicator nobody sees. It collapses to a strip of bubbles that
- * keeps the rings and the mute badges, which is what makes room for F34's
- * assistant panel to open over this side later without taking presence away.
+ * The chrome is `BoardRail` — the same piece as F24's agenda, mirrored onto
+ * the right. Presence stays readable without a click: a speaking indicator
+ * behind a popover is a speaking indicator nobody sees. It collapses to a
+ * strip of bubbles that keeps the rings and the mute badges, which is what
+ * makes room for F34's assistant panel to open over this side later without
+ * taking presence away.
  *
  * Collapse is local state, like `AgendaPanel`'s: one person tidying their own
  * screen is not an instruction to the other four.
@@ -66,33 +68,32 @@ export function ParticipantPanel({ participants, status }: ParticipantPanelProps
   // swatches do not change between those.
   const seats = useMemo(() => seatParticipants(participants), [participants]);
   const count = seats.length;
+  const title = `In the room ${count > 0 ? count : ''}`;
 
-  if (collapsed) {
-    return (
-      <aside className="flex w-11 shrink-0 flex-col items-center gap-2 border-l border-rt-tertiary bg-rt-surface-alt py-3">
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          aria-expanded={false}
-          aria-label={`Expand participants — ${presenceLabel(count)} in the room`}
-          title={`Expand participants (${presenceLabel(count)})`}
-          className="text-[13px] font-semibold text-rt-primary-deep hover:opacity-70"
-        >
-          ‹
-        </button>
-        {/* Scrolls rather than truncating to a "+N". Cutting the list short
-            would sooner or later hide whoever is talking behind a counter,
-            which is the one thing the strip exists to keep visible.
-
-            Which makes this the scroll container, and `overflow-y: auto`
-            computes `overflow-x` to `auto` with it — so the padding here is the
-            ring's room rather than decoration. The speaking halo sits at
-            `inset: -3px` and pulses ~4.7px past a 32px bubble, the mute badge
-            2px past its right edge, and without padding the strip clips exactly
-            the two things it stays open to show. A 44px rail leaves 6px either
-            side of the bubble, so that room comes out of the strip and the rail
-            keeps F24's width. The gap is 2.5 for the same reason: at 2, two
-            pulsing rings meet in the 8px between them. */}
+  return (
+    <BoardRail
+      side="right"
+      title={title}
+      collapsed={collapsed}
+      onToggle={() => setCollapsed((open) => !open)}
+      expandLabel={`Expand participants — ${presenceLabel(count)} in the room`}
+      collapseLabel="Collapse participants"
+      expandTitle={`Expand participants (${presenceLabel(count)})`}
+      collapseTitle="Collapse participants"
+      collapsedExtra={
+        // Scrolls rather than truncating to a "+N". Cutting the list short
+        // would sooner or later hide whoever is talking behind a counter,
+        // which is the one thing the strip exists to keep visible.
+        //
+        // Which makes this the scroll container, and `overflow-y: auto`
+        // computes `overflow-x` to `auto` with it — so the padding here is the
+        // ring's room rather than decoration. The speaking halo sits at
+        // `inset: -3px` and pulses ~4.7px past a 32px bubble, the mute badge
+        // 2px past its right edge, and without padding the strip clips exactly
+        // the two things it stays open to show. A 44px rail leaves 6px either
+        // side of the bubble, so that room comes out of the strip and the rail
+        // keeps F24's width. The gap is 2.5 for the same reason: at 2, two
+        // pulsing rings meet in the 8px between them.
         <ul className="flex min-h-0 w-full flex-1 flex-col items-center gap-2.5 overflow-y-auto p-1.5">
           {seats.map((person) => {
             const isSpeaking = speaking.has(person.identity);
@@ -116,32 +117,12 @@ export function ParticipantPanel({ participants, status }: ParticipantPanelProps
             );
           })}
         </ul>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="flex w-56 shrink-0 flex-col border-l border-rt-tertiary bg-rt-surface-alt">
-      <div className="flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setCollapsed(true)}
-          aria-expanded={true}
-          aria-label="Collapse participants"
-          title="Collapse participants"
-          className="text-[13px] font-semibold text-rt-primary-deep hover:opacity-70"
-        >
-          ›
-        </button>
-        <span className="text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
-          In the room {count > 0 ? count : ''}
-        </span>
-      </div>
-
+      }
+    >
       {count === 0 ? (
-        <p className="px-3 py-3 text-[12px] text-rt-ink-muted">{emptyMessage(status)}</p>
+        <p className="py-3 text-[12px] text-rt-ink-muted">{emptyMessage(status)}</p>
       ) : (
-        <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
+        <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto py-2">
           {seats.map((person) => {
             const isSpeaking = speaking.has(person.identity);
             const note = stateNote(person.isMuted, isSpeaking);
@@ -149,7 +130,7 @@ export function ParticipantPanel({ participants, status }: ParticipantPanelProps
             return (
               <li
                 key={person.identity}
-                className="flex items-center gap-2.5 rounded-md px-1.5 py-1"
+                className="flex items-center gap-2.5 rounded-md px-2.5 py-2"
               >
                 <ParticipantBubble
                   initials={person.initials}
@@ -183,10 +164,10 @@ export function ParticipantPanel({ participants, status }: ParticipantPanelProps
       {/* Said once, at the foot of the rail, rather than as a badge on every
           muted row: with five people the badges are already on the bubbles. */}
       {count > 0 && status === 'reconnecting' ? (
-        <p className="shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-faint">
+        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-faint">
           Reconnecting — this list may be out of date.
         </p>
       ) : null}
-    </aside>
+    </BoardRail>
   );
 }

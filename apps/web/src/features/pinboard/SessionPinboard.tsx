@@ -1,9 +1,10 @@
 import { useParams } from 'react-router-dom';
-import type { Question } from '@roundtable/shared';
+import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { AgendaPanel } from '../agenda/AgendaPanel';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
+import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { ShortlistBar } from '../voting/ShortlistBar';
@@ -17,7 +18,7 @@ import { usePinboard } from './usePinboard';
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Loading session…</span>
       </header>
@@ -62,6 +63,7 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     viewerId,
   } = usePinboard(sessionId);
   const voting = useVoting(sessionId, board?.questionId ?? null);
+  const { setPhase, busyQuestionId: phaseBusyId, error: phaseError } = useSetQuestionPhase(sessionId);
   // Entering the session view joins the room; leaving it (or ending the
   // session) unmounts this and disconnects — F11's connect/disconnect points.
   // Called before any early return so the room is not torn down and rebuilt
@@ -184,10 +186,13 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
             selecting && isLeader ? (
               <ShortlistPrompt
                 count={voting.proposalIds.length}
-                busy={voting.busy}
-                error={voting.error}
+                busy={voting.busy || phaseBusyId === board.questionId}
+                error={voting.error ?? phaseError}
                 onProceed={() => void voting.startVote()}
                 onClear={() => void voting.clear()}
+                onBack={() => {
+                  if (board.questionId) void setPhase(board.questionId, 'discussion');
+                }}
               />
             ) : null
           }
@@ -222,6 +227,11 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
               activeQuestionId={board.questionId}
               isLeader={isLeader}
               votingPhase={voting.phase}
+              hasProposals={
+                board.questionStatus === 'discussion'
+                  ? board.items.length >= SHORTLIST_MIN
+                  : undefined
+              }
             />
           }
           micControl={

@@ -37,11 +37,13 @@ function renderPanel({
   activeQuestionId,
   isLeader = true,
   votingPhase,
+  hasProposals,
 }: {
   questions: Question[];
   activeQuestionId: string | null;
   isLeader?: boolean;
   votingPhase?: VotingPhase;
+  hasProposals?: boolean;
 }) {
   return render(
     <AgendaPanel
@@ -50,6 +52,7 @@ function renderPanel({
       activeQuestionId={activeQuestionId}
       isLeader={isLeader}
       votingPhase={votingPhase}
+      hasProposals={hasProposals}
     />,
   );
 }
@@ -132,6 +135,44 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
     expect(screen.queryByRole('button', { name: 'Mark answered' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Skip question' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to discussion' })).toBeInTheDocument();
+  });
+
+  it('lets the leader leave shortlisting and return to discussion', async () => {
+    renderPanel({
+      questions: [question(0, 'voting')],
+      activeQuestionId: 'q1',
+      votingPhase: 'shortlisting',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to discussion' }));
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
+      questionId: 'q1',
+      status: 'discussion',
+    });
+  });
+
+  it('does not offer a way back once the ballot is open', () => {
+    renderPanel({
+      questions: [question(0, 'voting')],
+      activeQuestionId: 'q1',
+      votingPhase: 'open',
+    });
+
+    expect(screen.queryByRole('button', { name: 'Back to discussion' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer Open voting without enough proposals to shortlist', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      hasProposals: false,
+    });
+
+    expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Open voting' }));
+    expect(post).not.toHaveBeenCalled();
   });
 
   it('hides Skip while the ballot is showing the result', () => {

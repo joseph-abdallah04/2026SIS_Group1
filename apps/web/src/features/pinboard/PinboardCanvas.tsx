@@ -565,7 +565,7 @@ export function PinboardCanvas({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-6 py-3 text-rt-ink">
+      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-3 text-rt-ink">
         <RoundTableLogo />
         <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
           <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
@@ -611,7 +611,7 @@ export function PinboardCanvas({
       {/* Agenda left (F24), board centre, participants right (F13) — all above
           the footer, so the toolbar and zoom control keep the full width they
           had. Both rails collapse independently to give the board back. */}
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
 
         {/*
@@ -623,7 +623,7 @@ export function PinboardCanvas({
       */}
         <div
           ref={viewportRef}
-          className="relative min-h-0 flex-1 overflow-hidden bg-rt-surface-alt"
+          className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-rt-surface-alt"
           style={{
             // Only promise a grab when one is actually on offer. Showing `grab`
             // everywhere implied the whole board could be dragged, including over
