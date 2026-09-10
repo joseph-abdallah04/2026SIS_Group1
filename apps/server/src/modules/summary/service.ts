@@ -59,6 +59,7 @@ export async function getSessionSummary(
         status: question.status,
         proposals,
         winnerProposalId: outcome?.winnerProposalId ?? null,
+        tiedProposalIds: outcome?.tiedProposalIds ?? [],
         tallies: outcome?.tallies ?? [],
         votedCount: outcome?.votedCount ?? 0,
       };

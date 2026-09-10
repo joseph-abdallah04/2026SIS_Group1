@@ -16,7 +16,6 @@ const itemCreate = vi.fn();
 const itemFindMany = vi.fn();
 const voteUpsert = vi.fn();
 const answerUpsert = vi.fn();
-const answerFindMany = vi.fn();
 const roundFindMany = vi.fn();
 
 const tx = {
@@ -35,7 +34,7 @@ vi.mock('../../db.js', () => ({
     votingRound: { findUnique: roundFindUnique, update: roundUpdate, findMany: roundFindMany },
     votingShortlistItem: { deleteMany: itemDeleteMany },
     vote: { upsert: voteUpsert },
-    answer: { upsert: answerUpsert, findMany: answerFindMany },
+    answer: { upsert: answerUpsert },
     $transaction: (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
   },
 }));
@@ -58,6 +57,7 @@ const {
   getVotingState,
   castVote,
   closeVotingRound,
+  continueAfterVote,
   pickWinningProposalId,
   getSessionVoteOutcomes,
 } = await import('./service.js');
@@ -284,10 +284,51 @@ describe('getShortlistState / getVotingState', () => {
       phase: 'open',
       myVote: 'p1',
       votedCount: 2,
+      winnerProposalId: null,
+      tiedProposalIds: [],
       tallies: [
         { proposalId: 'p1', votes: 1, percent: 50 },
         { proposalId: 'p2', votes: 1, percent: 50 },
       ],
+    });
+  });
+
+  it('declares the winner and puts them first only after the round is closed', async () => {
+    getQuestion.mockResolvedValue({ ...VOTING_QUESTION, status: 'voting' });
+    roundFindUnique.mockResolvedValue({
+      id: 'r1',
+      status: 'closed',
+      items: [{ proposalId: 'p2' }, { proposalId: 'p1' }],
+      votes: [
+        { voterId: LEADER, proposalId: 'p1' },
+        { voterId: 'u2', proposalId: 'p1' },
+      ],
+    });
+
+    await expect(getVotingState('q1', LEADER)).resolves.toMatchObject({
+      phase: 'closed',
+      proposalIds: ['p1', 'p2'],
+      winnerProposalId: 'p1',
+      tiedProposalIds: [],
+    });
+  });
+
+  it('declares a tie on the closed round instead of picking a winner', async () => {
+    getQuestion.mockResolvedValue({ ...VOTING_QUESTION, status: 'voting' });
+    roundFindUnique.mockResolvedValue({
+      id: 'r1',
+      status: 'closed',
+      items: [{ proposalId: 'p1' }, { proposalId: 'p2' }],
+      votes: [
+        { voterId: LEADER, proposalId: 'p1' },
+        { voterId: 'u2', proposalId: 'p2' },
+      ],
+    });
+
+    await expect(getVotingState('q1', LEADER)).resolves.toMatchObject({
+      phase: 'closed',
+      winnerProposalId: null,
+      tiedProposalIds: ['p1', 'p2'],
     });
   });
 
@@ -366,23 +407,18 @@ describe('pickWinningProposalId', () => {
       pickWinningProposalId(
         ['p1', 'p2'],
         [{ proposalId: 'p1' }, { proposalId: 'p1' }, { proposalId: 'p2' }],
-        [proposal('p1'), proposal('p2')],
       ),
     ).toBe('p1');
   });
 
-  it('breaks a tie on the most recently created proposal', () => {
+  it('leaves a tie unbroken', () => {
     expect(
-      pickWinningProposalId(
-        ['p1', 'p2'],
-        [{ proposalId: 'p1' }, { proposalId: 'p2' }],
-        [proposal('p1', '2026-09-01T00:00:00.000Z'), proposal('p2', '2026-09-02T00:00:00.000Z')],
-      ),
-    ).toBe('p2');
+      pickWinningProposalId(['p1', 'p2'], [{ proposalId: 'p1' }, { proposalId: 'p2' }]),
+    ).toBeNull();
   });
 
   it('returns null when nobody voted', () => {
-    expect(pickWinningProposalId(['p1', 'p2'], [], [proposal('p1'), proposal('p2')])).toBeNull();
+    expect(pickWinningProposalId(['p1', 'p2'], [])).toBeNull();
   });
 });
 
@@ -405,7 +441,7 @@ describe('closeVotingRound', () => {
     });
   });
 
-  it('writes the winner, marks the question answered, and opens the next one', async () => {
+  it('writes the winner and keeps the question in voting so the overlay can show it', async () => {
     roundFindUnique
       .mockResolvedValueOnce(
         openRound({
@@ -424,7 +460,6 @@ describe('closeVotingRound', () => {
           { voterId: 'u2', proposalId: 'p1' },
         ],
       });
-    getQuestion.mockResolvedValue({ ...VOTING_QUESTION, status: 'answered' });
 
     const result = await closeVotingRound({ sessionId: 's1', actorId: LEADER });
 
@@ -433,6 +468,65 @@ describe('closeVotingRound', () => {
       create: { questionId: 'q1', winningProposalId: 'p1' },
       update: { winningProposalId: 'p1' },
     });
+    expect(setQuestionPhase).not.toHaveBeenCalled();
+    expect(result.voting.phase).toBe('closed');
+  });
+
+  it('stores no winner when the top score is shared', async () => {
+    roundFindUnique
+      .mockResolvedValueOnce(
+        openRound({
+          votes: [
+            { voterId: LEADER, proposalId: 'p1' },
+            { voterId: 'u2', proposalId: 'p2' },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce({
+        id: 'r1',
+        status: 'closed',
+        items: [{ proposalId: 'p1' }, { proposalId: 'p2' }],
+        votes: [
+          { voterId: LEADER, proposalId: 'p1' },
+          { voterId: 'u2', proposalId: 'p2' },
+        ],
+      });
+
+    await closeVotingRound({ sessionId: 's1', actorId: LEADER });
+
+    expect(answerUpsert).toHaveBeenCalledWith({
+      where: { questionId: 'q1' },
+      create: { questionId: 'q1', winningProposalId: null },
+      update: { winningProposalId: null },
+    });
+  });
+});
+
+describe('continueAfterVote', () => {
+  it('refuses before the round is closed', async () => {
+    roundFindUnique.mockResolvedValue(openRound());
+    await expect(continueAfterVote({ sessionId: 's1', actorId: LEADER })).rejects.toMatchObject({
+      code: 'VOTING_NOT_CLOSED',
+    });
+  });
+
+  it('marks the question answered and opens the next one', async () => {
+    roundFindUnique.mockResolvedValue({
+      id: 'r1',
+      status: 'closed',
+      items: [{ proposalId: 'p1' }],
+      votes: [{ voterId: LEADER, proposalId: 'p1' }],
+    });
+    getActiveQuestion.mockResolvedValueOnce(VOTING_QUESTION).mockResolvedValueOnce({
+      id: 'q2',
+      sessionId: 's1',
+      text: 'Next',
+      position: 1,
+      status: 'discussion' as const,
+    });
+
+    const result = await continueAfterVote({ sessionId: 's1', actorId: LEADER });
+
     expect(setQuestionPhase).toHaveBeenNthCalledWith(1, {
       sessionId: 's1',
       questionId: 'q1',
@@ -446,34 +540,56 @@ describe('closeVotingRound', () => {
       status: 'discussion',
     });
     expect(result.opened?.id).toBe('q2');
-    expect(result.voting.phase).toBe('closed');
   });
 });
 
 describe('getSessionVoteOutcomes', () => {
-  it('returns anonymous tallies and the stored winner, never voter ids', async () => {
+  it('returns anonymous tallies and the declared outcome, never voter ids', async () => {
     roundFindMany.mockResolvedValue([
       {
         questionId: 'q1',
-        items: [{ proposalId: 'p1' }, { proposalId: 'p2' }],
+        status: 'closed',
+        items: [{ proposalId: 'p2' }, { proposalId: 'p1' }],
         votes: [
           { voterId: LEADER, proposalId: 'p1' },
           { voterId: 'u2', proposalId: 'p1' },
         ],
       },
     ]);
-    answerFindMany.mockResolvedValue([{ questionId: 'q1', winningProposalId: 'p1' }]);
 
     await expect(getSessionVoteOutcomes('s1')).resolves.toEqual([
       {
         questionId: 'q1',
         proposalIds: ['p1', 'p2'],
         winnerProposalId: 'p1',
+        tiedProposalIds: [],
         tallies: [
-          { proposalId: 'p1', votes: 2, percent: 100 },
           { proposalId: 'p2', votes: 0, percent: 0 },
+          { proposalId: 'p1', votes: 2, percent: 100 },
         ],
         votedCount: 2,
+      },
+    ]);
+  });
+
+  it('declares a tie on a closed round instead of reading a stored winner', async () => {
+    roundFindMany.mockResolvedValue([
+      {
+        questionId: 'q1',
+        status: 'closed',
+        items: [{ proposalId: 'p1' }, { proposalId: 'p2' }],
+        votes: [
+          { voterId: LEADER, proposalId: 'p1' },
+          { voterId: 'u2', proposalId: 'p2' },
+        ],
+      },
+    ]);
+
+    await expect(getSessionVoteOutcomes('s1')).resolves.toMatchObject([
+      {
+        questionId: 'q1',
+        winnerProposalId: null,
+        tiedProposalIds: ['p1', 'p2'],
       },
     ]);
   });

@@ -21,6 +21,7 @@ const RECAP: SessionRecap = {
       status: 'answered',
       proposals: [],
       winnerProposalId: null,
+      tiedProposalIds: [],
       tallies: [],
       votedCount: 0,
     },

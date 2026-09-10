@@ -78,9 +78,10 @@ beforeEach(() => {
       questionId: 'q1',
       proposalIds: ['p1', 'p2'],
       winnerProposalId: 'p1',
+      tiedProposalIds: [],
       tallies: [
-        { proposalId: 'p1', votes: 2, percent: 67 },
         { proposalId: 'p2', votes: 1, percent: 33 },
+        { proposalId: 'p1', votes: 2, percent: 67 },
       ],
       votedCount: 3,
     },
@@ -116,9 +117,10 @@ describe('getSessionSummary', () => {
       id: 'q1',
       status: 'answered',
       winnerProposalId: 'p1',
+      tiedProposalIds: [],
       votedCount: 3,
     });
-    expect(summary.questions[0]?.proposals).toEqual([WINNER, RUNNER_UP]);
+    expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2']);
     expect(listProposals).toHaveBeenCalledTimes(1);
     expect(summary.questions[1]).toMatchObject({
       id: 'q2',

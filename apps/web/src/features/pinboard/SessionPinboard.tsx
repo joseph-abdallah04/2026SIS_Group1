@@ -135,8 +135,9 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     );
   }
 
-  const selecting = board.questionStatus === 'voting' && voting.phase !== 'open';
-  const balloting = voting.phase === 'open';
+  const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
+  const balloting = voting.phase === 'open' || voting.phase === 'closed';
+  // Server already ordered the shortlist (winner / ties first when closed).
   const ballotItems = voting.proposalIds
     .map((id) => board.items.find((item) => item.id === id))
     .filter((item): item is NonNullable<typeof item> => item !== undefined);
@@ -203,10 +204,14 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
                 viewerId={viewerId}
                 leaderId={board.leaderId}
                 voterStatuses={voting.voterStatuses}
+                winnerProposalId={voting.winnerProposalId}
+                tiedProposalIds={voting.tiedProposalIds}
+                phase={voting.phase === 'closed' ? 'closed' : 'open'}
                 busy={voting.busy}
                 error={voting.error}
                 onVote={(id) => void voting.castVote(id)}
                 onClose={() => void voting.closeVote()}
+                onContinue={() => void voting.continueVote()}
               />
             ) : null
           }
@@ -216,6 +221,7 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
               questions={questions}
               activeQuestionId={board.questionId}
               isLeader={isLeader}
+              votingPhase={voting.phase}
             />
           }
           micControl={

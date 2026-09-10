@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Question, QuestionStatus } from '@roundtable/shared';
+import type { Question, QuestionStatus, VotingPhase } from '@roundtable/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn();
@@ -36,10 +36,12 @@ function renderPanel({
   questions,
   activeQuestionId,
   isLeader = true,
+  votingPhase,
 }: {
   questions: Question[];
   activeQuestionId: string | null;
   isLeader?: boolean;
+  votingPhase?: VotingPhase;
 }) {
   return render(
     <AgendaPanel
@@ -47,6 +49,7 @@ function renderPanel({
       questions={questions}
       activeQuestionId={activeQuestionId}
       isLeader={isLeader}
+      votingPhase={votingPhase}
     />,
   );
 }
@@ -129,6 +132,17 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
     expect(screen.queryByRole('button', { name: 'Mark answered' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Skip question' })).toBeInTheDocument();
+  });
+
+  it('hides Skip while the ballot is showing the result', () => {
+    renderPanel({
+      questions: [question(0, 'voting')],
+      activeQuestionId: 'q1',
+      votingPhase: 'closed',
+    });
+
+    expect(screen.getByText('Results')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip question' })).not.toBeInTheDocument();
   });
 
   // The status arrives on the `sessionPhase` broadcast, so a panel that

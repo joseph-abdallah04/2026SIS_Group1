@@ -2,8 +2,10 @@ import {
   SHORTLIST_MAX,
   SHORTLIST_MIN,
   emptyVotingState,
+  orderByVoteOutcome,
   toPublicVotingState,
-  type BoardItem,
+  voteOutcomeFromTallies,
+  type VoteOutcome,
   type VotingPhase,
   type VotingPublicState,
   type VotingShortlist,
@@ -116,17 +118,35 @@ function computeTallies(
   return { tallies, votedCount };
 }
 
+const NO_OUTCOME: VoteOutcome = { winnerProposalId: null, tiedProposalIds: [] };
+
+function orderProposalIds(proposalIds: string[], outcome: VoteOutcome): string[] {
+  return orderByVoteOutcome(
+    proposalIds.map((id) => ({ id })),
+    outcome,
+  ).map((item) => item.id);
+}
+
+/** Winner / tie from the ballots. Only declared once the round is closed. */
+function closedOutcome(
+  proposalIds: string[],
+  votes: { proposalId: string }[],
+  revealed: boolean,
+): VoteOutcome {
+  if (!revealed) return NO_OUTCOME;
+  return voteOutcomeFromTallies(computeTallies(proposalIds, votes).tallies);
+}
+
 function phaseFor(
   questionStatus: QuestionRef['status'] | undefined,
   roundStatus: RoundWithBallots['status'] | undefined,
 ): VotingPhase {
   if (questionStatus === 'voting') {
-    // A closed round whose question is still `voting` is an interrupted
-    // close — keep the ballot up so the leader can finish advancing.
-    if (roundStatus === 'open' || roundStatus === 'closed') return 'open';
+    if (roundStatus === 'open') return 'open';
+    // Round closed, question not yet advanced: the same overlay shows the result.
+    if (roundStatus === 'closed') return 'closed';
     return 'shortlisting';
   }
-  if (roundStatus === 'closed') return 'closed';
   return 'idle';
 }
 
@@ -162,6 +182,7 @@ export async function getVotingState(
       : null;
 
   const phase = phaseFor(question?.status, round?.status);
+  const outcome = closedOutcome(proposalIds, round?.votes ?? [], phase === 'closed');
   const session = question ? await getSession(question.sessionId) : null;
   const voterStatuses: VotingVoterStatus[] | null =
     viewerId && session && viewerId === session.leaderId && phase === 'open'
@@ -175,10 +196,12 @@ export async function getVotingState(
   return {
     questionId,
     phase,
-    proposalIds,
+    proposalIds: orderProposalIds(proposalIds, outcome),
     tallies,
     votedCount,
     voterCount: members.length,
+    winnerProposalId: outcome.winnerProposalId,
+    tiedProposalIds: outcome.tiedProposalIds,
     myVote,
     voterStatuses,
   };
@@ -389,46 +412,25 @@ export async function castVote({
 }
 
 /**
- * Most votes wins. A tie is broken by the most recently created proposal
- * (docs/01 F30). No votes at all means there is no winner.
+ * Most votes wins. A tie is a tie — no recency fallback. No votes means
+ * there is no winner.
  */
 export function pickWinningProposalId(
   proposalIds: string[],
   votes: { proposalId: string }[],
-  proposals: Pick<BoardItem, 'id' | 'createdAt'>[],
 ): string | null {
-  if (proposalIds.length === 0) return null;
-
-  const counts = new Map(proposalIds.map((id) => [id, 0]));
-  for (const vote of votes) {
-    if (!counts.has(vote.proposalId)) continue;
-    counts.set(vote.proposalId, (counts.get(vote.proposalId) ?? 0) + 1);
-  }
-  const max = Math.max(...counts.values());
-  if (max === 0) return null;
-
-  const tied = proposalIds.filter((id) => counts.get(id) === max);
-  if (tied.length === 1) return tied[0] ?? null;
-
-  const byId = new Map(proposals.map((item) => [item.id, item.createdAt]));
-  const ranked = [...tied].sort((a, b) => {
-    const createdA = byId.get(a) ?? '';
-    const createdB = byId.get(b) ?? '';
-    if (createdA !== createdB) return createdA < createdB ? 1 : -1;
-    return a < b ? 1 : -1;
-  });
-  return ranked[0] ?? null;
+  const { tallies } = computeTallies(proposalIds, votes);
+  return voteOutcomeFromTallies(tallies).winnerProposalId;
 }
 
 export interface CloseVotingResult {
   voting: VotingPublicState;
-  answered: QuestionRef;
-  opened: QuestionRef | null;
 }
 
 /**
- * Leader ends the round: persist the winner, close the question, and open the
- * next pending one so the room lands on a live board rather than "Up next".
+ * Leader ends the round: persist the winner or a tie, and leave the question
+ * in `voting` so the same overlay can show the result. Advancing is
+ * `continueAfterVote`.
  */
 export async function closeVotingRound({
   sessionId,
@@ -446,11 +448,9 @@ export async function closeVotingRound({
   }
 
   if (round.status === 'open') {
-    const proposals = await listProposals(question.id);
     const winningProposalId = pickWinningProposalId(
       round.items.map((item) => item.proposalId),
       round.votes,
-      proposals,
     );
 
     await prisma.$transaction(async (tx) => {
@@ -464,6 +464,36 @@ export async function closeVotingRound({
         update: { winningProposalId },
       });
     });
+  }
+
+  return {
+    voting: toPublicVotingState(await getVotingState(question.id)),
+  };
+}
+
+export interface ContinueVotingResult {
+  voting: VotingPublicState;
+  answered: QuestionRef;
+  opened: QuestionRef | null;
+}
+
+/**
+ * Leader leaves the result overlay: mark the question answered and open the
+ * next pending one, if any.
+ */
+export async function continueAfterVote({
+  sessionId,
+  actorId,
+}: {
+  sessionId: string;
+  actorId: string;
+}): Promise<ContinueVotingResult> {
+  await requireLiveLeader(sessionId, actorId);
+  const question = await requireVotingQuestion(sessionId);
+
+  const round = await loadRound(question.id);
+  if (!round || round.status !== 'closed') {
+    throw new ApiError(409, 'End the vote before continuing', 'VOTING_NOT_CLOSED');
   }
 
   const answered = await setQuestionPhase({
@@ -485,48 +515,41 @@ export async function closeVotingRound({
     : null;
 
   return {
-    voting: toPublicVotingState(await getVotingState(question.id)),
+    voting: toPublicVotingState(await getVotingStateForSession(sessionId)),
     answered,
     opened,
   };
 }
 
-/** Closed-round results for F31. No voter identities — only counts and the stored winner. */
+/** Closed-round results for F31. No voter identities — only counts and the declared outcome. */
 export interface QuestionVoteOutcome {
   questionId: string;
-  /** The shortlist that went to a vote — F31 shows these, not the whole board. */
+  /** Shortlist in display order: winner (or ties) first. */
   proposalIds: string[];
   winnerProposalId: string | null;
+  tiedProposalIds: string[];
   tallies: VotingTally[];
   votedCount: number;
 }
 
 export async function getSessionVoteOutcomes(sessionId: string): Promise<QuestionVoteOutcome[]> {
-  const [rounds, answers] = await Promise.all([
-    prisma.votingRound.findMany({
-      where: { sessionId },
-      include: {
-        items: { orderBy: { proposalId: 'asc' } },
-        votes: true,
-      },
-    }),
-    prisma.answer.findMany({
-      where: { question: { sessionId } },
-      select: { questionId: true, winningProposalId: true },
-    }),
-  ]);
-
-  const winnerByQuestion = new Map(
-    answers.map((row) => [row.questionId, row.winningProposalId] as const),
-  );
+  const rounds = await prisma.votingRound.findMany({
+    where: { sessionId },
+    include: {
+      items: { orderBy: { proposalId: 'asc' } },
+      votes: true,
+    },
+  });
 
   return rounds.map((round) => {
-    const proposalIds = round.items.map((item) => item.proposalId);
-    const { tallies, votedCount } = computeTallies(proposalIds, round.votes);
+    const rawIds = round.items.map((item) => item.proposalId);
+    const { tallies, votedCount } = computeTallies(rawIds, round.votes);
+    const outcome = closedOutcome(rawIds, round.votes, round.status === 'closed');
     return {
       questionId: round.questionId,
-      proposalIds,
-      winnerProposalId: winnerByQuestion.get(round.questionId) ?? null,
+      proposalIds: orderProposalIds(rawIds, outcome),
+      winnerProposalId: outcome.winnerProposalId,
+      tiedProposalIds: outcome.tiedProposalIds,
       tallies,
       votedCount,
     };

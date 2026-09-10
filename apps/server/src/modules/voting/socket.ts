@@ -14,6 +14,7 @@ import {
   castVote,
   clearShortlist,
   closeVotingRound,
+  continueAfterVote,
   getVotingState,
   getVotingStateForSession,
   startVotingRound,
@@ -25,7 +26,12 @@ type Actor = { id: string; sessionId: string };
 
 type VotingIntent = keyof Pick<
   ClientToServerEvents,
-  'shortlistToggle' | 'shortlistClear' | 'votingStart' | 'voteCast' | 'votingClose'
+  | 'shortlistToggle'
+  | 'shortlistClear'
+  | 'votingStart'
+  | 'voteCast'
+  | 'votingClose'
+  | 'votingContinue'
 >;
 
 function actorFor(socket: RealtimeSocket): Actor | null {
@@ -149,6 +155,11 @@ export function registerVotingSocketHandlers(io: RealtimeServer, socket: Realtim
 
   onWriteIntent(socket, 'votingClose', emptyVotingIntentSchema, async (_input, actor) => {
     const result = await closeVotingRound({ sessionId: actor.sessionId, actorId: actor.id });
+    await emitVotingUpdated(io, actor.sessionId, result.voting);
+  });
+
+  onWriteIntent(socket, 'votingContinue', emptyVotingIntentSchema, async (_input, actor) => {
+    const result = await continueAfterVote({ sessionId: actor.sessionId, actorId: actor.id });
     await emitVotingUpdated(io, actor.sessionId, result.voting);
     emitQuestionPhase(io, actor.sessionId, result.answered);
     if (result.opened) {

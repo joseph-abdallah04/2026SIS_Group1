@@ -41,10 +41,14 @@ describe('VotingBallot', () => {
         viewerId="u2"
         leaderId="u1"
         voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
         busy={false}
         error={null}
         onVote={onVote}
         onClose={() => undefined}
+        onContinue={() => undefined}
       />,
     );
 
@@ -76,10 +80,14 @@ describe('VotingBallot', () => {
           { userId: 'u1', displayName: 'Leader', hasVoted: true },
           { userId: 'u2', displayName: 'Ada', hasVoted: false },
         ]}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
         busy={false}
         error={null}
         onVote={() => undefined}
         onClose={onClose}
+        onContinue={() => undefined}
       />,
     );
 
@@ -105,14 +113,84 @@ describe('VotingBallot', () => {
         viewerId="u2"
         leaderId="u1"
         voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
         busy={false}
         error={null}
         onVote={() => undefined}
         onClose={() => undefined}
+        onContinue={() => undefined}
       />,
     );
 
     expect(screen.queryByText('Still to vote')).not.toBeInTheDocument();
     expect(screen.getByText('Your vote is in')).toBeInTheDocument();
+  });
+
+  it('shows the winner inside the same overlay after the vote closes', () => {
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={ITEMS}
+        tallies={[
+          { proposalId: 'p1', votes: 2, percent: 67 },
+          { proposalId: 'p2', votes: 1, percent: 33 },
+        ]}
+        myVote="p1"
+        votedCount={3}
+        voterCount={3}
+        isLeader
+        viewerId="u1"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId="p1"
+        tiedProposalIds={[]}
+        phase="closed"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('Results')).toBeInTheDocument();
+    expect(screen.getByText('This proposal won.')).toBeInTheDocument();
+    expect(screen.getByText('Winner')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Ship the API/i })).not.toBeInTheDocument();
+  });
+
+  it('labels every tied proposal the server named, even if the bars look uneven', () => {
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={ITEMS}
+        tallies={[
+          { proposalId: 'p1', votes: 2, percent: 67 },
+          { proposalId: 'p2', votes: 1, percent: 33 },
+        ]}
+        myVote="p1"
+        votedCount={3}
+        voterCount={3}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={['p1', 'p2']}
+        phase="closed"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('It’s a tie.')).toBeInTheDocument();
+    expect(screen.getAllByText('Tied')).toHaveLength(2);
+    expect(screen.queryByText('Winner')).not.toBeInTheDocument();
   });
 });

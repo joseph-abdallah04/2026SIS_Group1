@@ -152,10 +152,13 @@ export interface ClientToServerEvents {
    */
   voteCast(payload: VoteCastInput, ack?: (res: WriteAck) => void): void;
   /**
-   * Leader closes the open round, writes the answer, and advances the agenda
-   * (F30, manual — the room does not wait for every ballot).
+   * Leader closes the open round and writes the answer (F30, manual — the
+   * room does not close itself on the last ballot, so people can still change
+   * their vote). The overlay stays up on the result until `votingContinue`.
    */
   votingClose(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
+  /** Leader dismisses the in-ballot result and opens the next question. */
+  votingContinue(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===

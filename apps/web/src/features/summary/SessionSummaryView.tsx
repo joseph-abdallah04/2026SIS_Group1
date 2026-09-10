@@ -1,6 +1,7 @@
 import type { QuestionStatus, SessionRecap, SessionRecapQuestion, VotingTally } from '@roundtable/shared';
 
 import { ProposalCard } from '../pinboard/ProposalCard';
+import { VoteResultBadge, voteResultRing } from '../voting/VoteResultBadge';
 
 function formatWhen(iso: string | null): string | null {
   if (!iso) return null;
@@ -42,6 +43,7 @@ function QuestionRecap({
   leaderId: string;
 }) {
   const winnerId = question.winnerProposalId;
+  const tied = new Set(question.tiedProposalIds);
 
   return (
     <section className="rounded-lg border border-rt-tertiary bg-rt-surface px-4 py-4">
@@ -51,7 +53,12 @@ function QuestionRecap({
           {question.text}
         </h3>
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">
-          {ENDED_QUESTION_LABELS[question.status]}
+          {question.status === 'voting' &&
+          (question.winnerProposalId ||
+            question.tiedProposalIds.length > 0 ||
+            question.proposals.length > 0)
+            ? ENDED_QUESTION_LABELS.answered
+            : ENDED_QUESTION_LABELS[question.status]}
         </span>
       </header>
 
@@ -68,25 +75,18 @@ function QuestionRecap({
       ) : (
         <ul className="mt-3 flex flex-wrap gap-4">
           {question.proposals.map((item) => {
-            const isWinner = winnerId === item.id;
+            const kind =
+              winnerId === item.id ? 'winner' : tied.has(item.id) ? 'tied' : null;
             const tally = tallyFor(question.tallies, item.id);
             return (
               <li key={item.id} className="relative">
-                {isWinner ? (
-                  <span className="absolute -top-2 left-2 z-10 rounded-full bg-rt-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-rt-ink">
-                    Winner
-                  </span>
-                ) : null}
-                <div
-                  className={
-                    isWinner ? 'rounded-xl ring-2 ring-rt-secondary ring-offset-2' : undefined
-                  }
-                >
+                {kind ? <VoteResultBadge kind={kind} /> : null}
+                <div className={voteResultRing(kind)}>
                   <ProposalCard
                     item={item}
                     isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId === leaderId}
-                    isShortlisted={isWinner}
+                    isShortlisted={kind !== null}
                   />
                 </div>
                 {tally ? (

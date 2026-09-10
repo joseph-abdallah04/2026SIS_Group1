@@ -201,6 +201,19 @@ export function useVoting(sessionId: string, questionId: string | null) {
     [run],
   );
 
+  const continueVote = useCallback(
+    () =>
+      run(
+        () =>
+          writeIntent(
+            (ack) => getSocket().emit('votingContinue', {}, ack),
+            'Could not continue',
+          ),
+        'Could not continue',
+      ),
+    [run],
+  );
+
   return {
     phase: voting.phase,
     proposalIds: voting.proposalIds,
@@ -210,6 +223,8 @@ export function useVoting(sessionId: string, questionId: string | null) {
     voterCount: voting.voterCount,
     myVote: voting.myVote,
     voterStatuses: voting.voterStatuses,
+    winnerProposalId: voting.winnerProposalId,
+    tiedProposalIds: voting.tiedProposalIds,
     error,
     busy,
     toggle,
@@ -217,5 +232,6 @@ export function useVoting(sessionId: string, questionId: string | null) {
     startVote,
     castVote,
     closeVote,
+    continueVote,
   };
 }

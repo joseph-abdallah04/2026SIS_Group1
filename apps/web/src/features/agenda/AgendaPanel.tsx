@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Question, QuestionStatus } from '@roundtable/shared';
+import type { Question, QuestionStatus, VotingPhase } from '@roundtable/shared';
 
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
@@ -11,6 +11,8 @@ interface AgendaPanelProps {
   activeQuestionId: string | null;
   /** Only the leader gets the phase controls (F25/F26); everyone sees the list. */
   isLeader: boolean;
+  /** Hides Skip once the ballot is showing the result (F30). */
+  votingPhase?: VotingPhase;
 }
 
 /**
@@ -33,12 +35,12 @@ function isComplete(status: QuestionStatus): boolean {
   return status === 'answered' || status === 'skipped';
 }
 
-function statusLabel(status: QuestionStatus): string | null {
+function statusLabel(status: QuestionStatus, votingPhase?: VotingPhase): string | null {
   switch (status) {
     case 'discussion':
       return 'Discussing';
     case 'voting':
-      return 'Voting';
+      return votingPhase === 'closed' ? 'Results' : 'Voting';
     case 'answered':
       return 'Answered';
     case 'skipped':
@@ -61,6 +63,7 @@ export function AgendaPanel({
   questions,
   activeQuestionId,
   isLeader,
+  votingPhase,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [confirmingSkip, setConfirmingSkip] = useState<string | null>(null);
@@ -127,7 +130,8 @@ export function AgendaPanel({
         <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
           {questions.map((question, index) => {
             const isFocused = question.id === activeQuestionId;
-            const label = statusLabel(question.status);
+            const label = statusLabel(question.status, votingPhase);
+            const canSkipVote = question.status !== 'voting' || votingPhase !== 'closed';
             const next = NEXT_PHASE[question.status];
             // Phase controls stay on the question that is actually open, even
             // while the board is looking back at an earlier one. Pending gets
@@ -138,7 +142,9 @@ export function AgendaPanel({
               ? question.id === openQuestion.id
               : firstPending !== undefined && question.id === firstPending.id;
             const showControls =
-              isLeader && onThisQuestion && (next !== undefined || question.status === 'voting');
+              isLeader &&
+              onThisQuestion &&
+              (next !== undefined || (question.status === 'voting' && canSkipVote));
             const busy = phaseBusyId === question.id;
 
             return (
@@ -214,37 +220,39 @@ export function AgendaPanel({
                       </button>
                     ) : null}
 
-                    {confirmingSkip === question.id ? (
-                      <span className="flex items-center gap-2 text-[11px]">
-                        <span className="text-rt-ink-muted">Skip it?</span>
+                    {canSkipVote ? (
+                      confirmingSkip === question.id ? (
+                        <span className="flex items-center gap-2 text-[11px]">
+                          <span className="text-rt-ink-muted">Skip it?</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmingSkip(null);
+                              void setPhase(question.id, 'skipped');
+                            }}
+                            disabled={busy}
+                            className="font-semibold text-rt-primary-deep hover:underline"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingSkip(null)}
+                            className="text-rt-ink-muted hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => {
-                            setConfirmingSkip(null);
-                            void setPhase(question.id, 'skipped');
-                          }}
-                          disabled={busy}
-                          className="font-semibold text-rt-primary-deep hover:underline"
+                          onClick={() => setConfirmingSkip(question.id)}
+                          className="self-start text-[11px] font-medium text-rt-ink-muted hover:underline"
                         >
-                          Yes
+                          Skip question
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmingSkip(null)}
-                          className="text-rt-ink-muted hover:underline"
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmingSkip(question.id)}
-                        className="self-start text-[11px] font-medium text-rt-ink-muted hover:underline"
-                      >
-                        Skip question
-                      </button>
-                    )}
+                      )
+                    ) : null}
                   </div>
                 )}
               </li>

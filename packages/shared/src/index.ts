@@ -204,6 +204,44 @@ export interface VotingTally {
   percent: number;
 }
 
+/** Who won, or who is tied, from anonymous tallies. A tie has no single winner. */
+export interface VoteOutcome {
+  winnerProposalId: string | null;
+  tiedProposalIds: string[];
+}
+
+/**
+ * Most votes wins. Equal top scores stay a tie — recency is not a quality signal.
+ * No votes means no winner and no tie.
+ */
+export function voteOutcomeFromTallies(tallies: readonly VotingTally[]): VoteOutcome {
+  let max = 0;
+  for (const row of tallies) {
+    if (row.votes > max) max = row.votes;
+  }
+  if (max === 0) return { winnerProposalId: null, tiedProposalIds: [] };
+  const top = tallies.filter((row) => row.votes === max).map((row) => row.proposalId);
+  if (top.length === 1) {
+    return { winnerProposalId: top[0] ?? null, tiedProposalIds: [] };
+  }
+  return { winnerProposalId: null, tiedProposalIds: top };
+}
+
+/** Winner (or every tied proposal) first, then the rest of the shortlist. */
+export function orderByVoteOutcome<T extends { id: string }>(
+  items: readonly T[],
+  outcome: VoteOutcome,
+): T[] {
+  const featured = new Set(
+    outcome.winnerProposalId ? [outcome.winnerProposalId] : outcome.tiedProposalIds,
+  );
+  if (featured.size === 0) return [...items];
+  return [
+    ...items.filter((item) => featured.has(item.id)),
+    ...items.filter((item) => !featured.has(item.id)),
+  ];
+}
+
 /**
  * Room-wide voting state. Safe to broadcast: it never names who voted for what.
  * `votedCount` / `voterCount` is "how many of the people currently in the
@@ -216,6 +254,10 @@ export interface VotingPublicState {
   tallies: VotingTally[];
   votedCount: number;
   voterCount: number;
+  /** Set by the server when the round is closed. Null while voting is still open. */
+  winnerProposalId: string | null;
+  /** Set by the server when the top score is shared. Empty while voting is open. */
+  tiedProposalIds: string[];
 }
 
 /** Join snapshot / REST read: the public tally plus this viewer's own ballot. */
@@ -243,6 +285,8 @@ export function emptyVotingState(questionId: string | null = null): VotingViewer
     tallies: [],
     votedCount: 0,
     voterCount: 0,
+    winnerProposalId: null,
+    tiedProposalIds: [],
     myVote: null,
     voterStatuses: null,
   };
@@ -270,6 +314,7 @@ export interface SessionRecapQuestion {
   status: QuestionStatus;
   proposals: BoardItem[];
   winnerProposalId: string | null;
+  tiedProposalIds: string[];
   tallies: VotingTally[];
   votedCount: number;
 }

@@ -39,6 +39,7 @@ const RECAP: SessionRecap = {
       status: 'answered',
       proposals: [sticky('p1', 'The API'), sticky('p2', 'The UI')],
       winnerProposalId: 'p1',
+      tiedProposalIds: [],
       tallies: [
         { proposalId: 'p1', votes: 2, percent: 67 },
         { proposalId: 'p2', votes: 1, percent: 33 },
@@ -52,6 +53,7 @@ const RECAP: SessionRecap = {
       status: 'skipped',
       proposals: [],
       winnerProposalId: null,
+      tiedProposalIds: [],
       tallies: [],
       votedCount: 0,
     },
@@ -72,5 +74,31 @@ describe('SessionSummaryView', () => {
     expect(screen.getByText('Winner')).toBeInTheDocument();
     expect(screen.getByText('Skipped')).toBeInTheDocument();
     expect(screen.getByText('Nothing was shortlisted for this question.')).toBeInTheDocument();
+  });
+
+  it('labels a tie on every shortlisted proposal that shares the top score', () => {
+    render(
+      <SessionSummaryView
+        summary={{
+          ...RECAP,
+          questions: [
+            {
+              ...RECAP.questions[0]!,
+              winnerProposalId: null,
+              tiedProposalIds: ['p1', 'p2'],
+              tallies: [
+                { proposalId: 'p1', votes: 1, percent: 50 },
+                { proposalId: 'p2', votes: 1, percent: 50 },
+              ],
+              votedCount: 2,
+            },
+          ],
+        }}
+        viewerId="u2"
+      />,
+    );
+
+    expect(screen.getAllByText('Tied')).toHaveLength(2);
+    expect(screen.queryByText('Winner')).not.toBeInTheDocument();
   });
 });
