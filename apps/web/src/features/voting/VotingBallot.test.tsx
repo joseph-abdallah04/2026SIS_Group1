@@ -40,6 +40,7 @@ describe('VotingBallot', () => {
         isLeader={false}
         viewerId="u2"
         leaderId="u1"
+        voterStatuses={null}
         busy={false}
         error={null}
         onVote={onVote}
@@ -71,6 +72,10 @@ describe('VotingBallot', () => {
         isLeader
         viewerId="u1"
         leaderId="u1"
+        voterStatuses={[
+          { userId: 'u1', displayName: 'Leader', hasVoted: true },
+          { userId: 'u2', displayName: 'Ada', hasVoted: false },
+        ]}
         busy={false}
         error={null}
         onVote={() => undefined}
@@ -79,7 +84,35 @@ describe('VotingBallot', () => {
     );
 
     expect(screen.getByText('Your vote is in')).toBeInTheDocument();
+    expect(screen.getByText('Still to vote')).toBeInTheDocument();
+    expect(screen.getByText('Ada')).toBeInTheDocument();
+    expect(screen.getByText('Voted')).toBeInTheDocument();
+    expect(screen.getByText('Leader')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'End voting' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the name list from a participant', () => {
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={ITEMS}
+        tallies={[]}
+        myVote="p1"
+        votedCount={1}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByText('Still to vote')).not.toBeInTheDocument();
+    expect(screen.getByText('Your vote is in')).toBeInTheDocument();
   });
 });

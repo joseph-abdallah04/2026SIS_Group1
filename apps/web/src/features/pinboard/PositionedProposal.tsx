@@ -342,13 +342,14 @@ export function PositionedProposal({
             event.stopPropagation();
             onToggleShortlist(item.id);
           }}
-          className={`absolute -top-2 -left-2 z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+          className={`absolute top-0 left-0 z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
             isShortlisted
               ? 'border-rt-secondary bg-rt-secondary text-white'
               : 'border-rt-secondary bg-white text-rt-secondary'
           }`}
           style={{
-            transform: 'translate(-20%, -20%)',
+            // Sit on the corner: half on the card, half off it.
+            transform: 'translate(-50%, -50%)',
             cursor: 'pointer',
           }}
           aria-label={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}

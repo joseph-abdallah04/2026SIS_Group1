@@ -894,6 +894,25 @@ export async function listSessionMembers(sessionId: string): Promise<SessionMemb
   }));
 }
 
+/**
+ * Everyone who ever sat in this session, including people who later left.
+ * F31's recap and the vote denominator treat membership as history
+ * (docs/02 §4); `listSessionMembers` stays the live "still here" list.
+ */
+export async function listSessionParticipants(sessionId: string): Promise<SessionMemberRow[]> {
+  const rows = await prisma.sessionMember.findMany({
+    where: { sessionId },
+    orderBy: { joinedAt: 'asc' },
+    select: { userId: true, joinedAt: true, user: { select: { displayName: true } } },
+  });
+
+  return rows.map((row) => ({
+    userId: row.userId,
+    displayName: row.user.displayName,
+    joinedAt: row.joinedAt,
+  }));
+}
+
 export interface SessionMemberIdentity {
   id: string;
   displayName: string;

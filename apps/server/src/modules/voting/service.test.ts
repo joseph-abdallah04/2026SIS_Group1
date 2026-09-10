@@ -16,6 +16,8 @@ const itemCreate = vi.fn();
 const itemFindMany = vi.fn();
 const voteUpsert = vi.fn();
 const answerUpsert = vi.fn();
+const answerFindMany = vi.fn();
+const roundFindMany = vi.fn();
 
 const tx = {
   votingRound: { findUnique: roundFindUnique, create: roundCreate, update: roundUpdate },
@@ -30,10 +32,10 @@ const tx = {
 
 vi.mock('../../db.js', () => ({
   prisma: {
-    votingRound: { findUnique: roundFindUnique, update: roundUpdate },
+    votingRound: { findUnique: roundFindUnique, update: roundUpdate, findMany: roundFindMany },
     votingShortlistItem: { deleteMany: itemDeleteMany },
     vote: { upsert: voteUpsert },
-    answer: { upsert: answerUpsert },
+    answer: { upsert: answerUpsert, findMany: answerFindMany },
     $transaction: (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
   },
 }));
@@ -57,6 +59,7 @@ const {
   castVote,
   closeVotingRound,
   pickWinningProposalId,
+  getSessionVoteOutcomes,
 } = await import('./service.js');
 
 const LEADER = 'leader-1';
@@ -287,6 +290,20 @@ describe('getShortlistState / getVotingState', () => {
       ],
     });
   });
+
+  it('gives the leader voted/not-yet names, and a participant nothing', async () => {
+    roundFindUnique.mockResolvedValue(
+      openRound({ votes: [{ voterId: 'u2', proposalId: 'p1' }] }),
+    );
+
+    await expect(getVotingState('q1', 'u2')).resolves.toMatchObject({ voterStatuses: null });
+    await expect(getVotingState('q1', LEADER)).resolves.toMatchObject({
+      voterStatuses: [
+        { userId: LEADER, displayName: 'Leader', hasVoted: false },
+        { userId: 'u2', displayName: 'Ada', hasVoted: true },
+      ],
+    });
+  });
 });
 
 describe('castVote', () => {
@@ -430,5 +447,34 @@ describe('closeVotingRound', () => {
     });
     expect(result.opened?.id).toBe('q2');
     expect(result.voting.phase).toBe('closed');
+  });
+});
+
+describe('getSessionVoteOutcomes', () => {
+  it('returns anonymous tallies and the stored winner, never voter ids', async () => {
+    roundFindMany.mockResolvedValue([
+      {
+        questionId: 'q1',
+        items: [{ proposalId: 'p1' }, { proposalId: 'p2' }],
+        votes: [
+          { voterId: LEADER, proposalId: 'p1' },
+          { voterId: 'u2', proposalId: 'p1' },
+        ],
+      },
+    ]);
+    answerFindMany.mockResolvedValue([{ questionId: 'q1', winningProposalId: 'p1' }]);
+
+    await expect(getSessionVoteOutcomes('s1')).resolves.toEqual([
+      {
+        questionId: 'q1',
+        proposalIds: ['p1', 'p2'],
+        winnerProposalId: 'p1',
+        tallies: [
+          { proposalId: 'p1', votes: 2, percent: 100 },
+          { proposalId: 'p2', votes: 0, percent: 0 },
+        ],
+        votedCount: 2,
+      },
+    ]);
   });
 });

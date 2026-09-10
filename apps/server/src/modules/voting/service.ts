@@ -9,6 +9,7 @@ import {
   type VotingShortlist,
   type VotingTally,
   type VotingViewerState,
+  type VotingVoterStatus,
 } from '@roundtable/shared';
 
 import { prisma } from '../../db.js';
@@ -160,14 +161,26 @@ export async function getVotingState(
       ? (round.votes.find((vote) => vote.voterId === viewerId)?.proposalId ?? null)
       : null;
 
+  const phase = phaseFor(question?.status, round?.status);
+  const session = question ? await getSession(question.sessionId) : null;
+  const voterStatuses: VotingVoterStatus[] | null =
+    viewerId && session && viewerId === session.leaderId && phase === 'open'
+      ? members.map((member) => ({
+          userId: member.userId,
+          displayName: member.displayName,
+          hasVoted: Boolean(round?.votes.some((vote) => vote.voterId === member.userId)),
+        }))
+      : null;
+
   return {
     questionId,
-    phase: phaseFor(question?.status, round?.status),
+    phase,
     proposalIds,
     tallies,
     votedCount,
     voterCount: members.length,
     myVote,
+    voterStatuses,
   };
 }
 
@@ -476,4 +489,46 @@ export async function closeVotingRound({
     answered,
     opened,
   };
+}
+
+/** Closed-round results for F31. No voter identities — only counts and the stored winner. */
+export interface QuestionVoteOutcome {
+  questionId: string;
+  /** The shortlist that went to a vote — F31 shows these, not the whole board. */
+  proposalIds: string[];
+  winnerProposalId: string | null;
+  tallies: VotingTally[];
+  votedCount: number;
+}
+
+export async function getSessionVoteOutcomes(sessionId: string): Promise<QuestionVoteOutcome[]> {
+  const [rounds, answers] = await Promise.all([
+    prisma.votingRound.findMany({
+      where: { sessionId },
+      include: {
+        items: { orderBy: { proposalId: 'asc' } },
+        votes: true,
+      },
+    }),
+    prisma.answer.findMany({
+      where: { question: { sessionId } },
+      select: { questionId: true, winningProposalId: true },
+    }),
+  ]);
+
+  const winnerByQuestion = new Map(
+    answers.map((row) => [row.questionId, row.winningProposalId] as const),
+  );
+
+  return rounds.map((round) => {
+    const proposalIds = round.items.map((item) => item.proposalId);
+    const { tallies, votedCount } = computeTallies(proposalIds, round.votes);
+    return {
+      questionId: round.questionId,
+      proposalIds,
+      winnerProposalId: winnerByQuestion.get(round.questionId) ?? null,
+      tallies,
+      votedCount,
+    };
+  });
 }

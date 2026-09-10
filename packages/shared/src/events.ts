@@ -11,6 +11,7 @@ import type {
   SessionStatus,
   VotingPublicState,
   VotingViewerState,
+  VotingVoterStatus,
 } from './index.js';
 import type {
   ProposalCreateInput,
@@ -243,9 +244,11 @@ export interface ServerToClientEvents {
   /**
    * Live voting state for the question on screen (F27–F30). Public: tallies
    * and how many people have voted, never who voted for which proposal.
+   * `voterStatuses` is attached only on the leader's socket (F29) so a
+   * participant never receives the nudge list.
    * A client that missed an event is corrected by the next one.
    */
-  votingUpdated(payload: VotingPublicState): void;
+  votingUpdated(payload: VotingPublicState & { voterStatuses?: VotingVoterStatus[] }): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===

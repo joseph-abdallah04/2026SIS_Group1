@@ -21,6 +21,7 @@ export {
   joinSessionByCode,
   leaveSession,
   listSessionMembers,
+  listSessionParticipants,
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,

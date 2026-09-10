@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { emptyVotingState, toPublicVotingState, type VotingViewerState } from '@roundtable/shared';
+import {
+  emptyVotingState,
+  type VotingPublicState,
+  type VotingViewerState,
+  type VotingVoterStatus,
+} from '@roundtable/shared';
 import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
 
 import { api } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
+
+type VotingUpdatedPayload = VotingPublicState & { voterStatuses?: VotingVoterStatus[] };
 
 const WRITE_TIMEOUT_MS = 8000;
 
@@ -55,11 +62,17 @@ export function useVoting(sessionId: string, questionId: string | null) {
   );
 
   const applyPublic = useCallback(
-    (next: ReturnType<typeof toPublicVotingState>) => {
+    (next: VotingUpdatedPayload) => {
       if (next.questionId && questionId && next.questionId !== questionId) return;
       setVoting((prev) => ({
         ...next,
         myVote: prev.questionId === next.questionId ? prev.myVote : null,
+        voterStatuses:
+          next.voterStatuses !== undefined
+            ? next.voterStatuses
+            : prev.questionId === next.questionId
+              ? prev.voterStatuses
+              : null,
       }));
     },
     [questionId],
@@ -99,7 +112,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
       applyViewer(snapshot.voting);
     };
 
-    const onUpdated = (payload: ReturnType<typeof toPublicVotingState>) => {
+    const onUpdated = (payload: VotingUpdatedPayload) => {
       applyPublic(payload);
     };
 
@@ -196,6 +209,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
     votedCount: voting.votedCount,
     voterCount: voting.voterCount,
     myVote: voting.myVote,
+    voterStatuses: voting.voterStatuses,
     error,
     busy,
     toggle,

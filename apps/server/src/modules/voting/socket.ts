@@ -9,11 +9,12 @@ import type { ZodType } from 'zod';
 
 import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket } from '../../realtime/types.js';
-import { emitQuestionPhase } from './sessionsAdapter.js';
+import { emitQuestionPhase, getSession } from './sessionsAdapter.js';
 import {
   castVote,
   clearShortlist,
   closeVotingRound,
+  getVotingState,
   getVotingStateForSession,
   startVotingRound,
   toggleShortlist,
@@ -41,14 +42,32 @@ function emitShortlistUpdated(io: RealtimeServer, sessionId: string, state: Shor
   });
 }
 
-function emitVotingUpdated(io: RealtimeServer, sessionId: string, state: VotingPublicState): void {
-  io.to(sessionRoom(sessionId)).emit('votingUpdated', state);
+async function emitVotingUpdated(
+  io: RealtimeServer,
+  sessionId: string,
+  state: VotingPublicState,
+): Promise<void> {
+  const session = await getSession(sessionId);
+  const leaderRoster =
+    session && state.questionId
+      ? (await getVotingState(state.questionId, session.leaderId)).voterStatuses
+      : null;
+  const sockets = await io.in(sessionRoom(sessionId)).fetchSockets();
+  await Promise.all(
+    sockets.map(async (socket) => {
+      const isLeader = Boolean(session && socket.data.user?.id === session.leaderId);
+      socket.emit(
+        'votingUpdated',
+        isLeader && leaderRoster ? { ...state, voterStatuses: leaderRoster } : state,
+      );
+    }),
+  );
 }
 
 async function broadcastVoting(io: RealtimeServer, sessionId: string, shortlist?: ShortlistState) {
   if (shortlist) emitShortlistUpdated(io, sessionId, shortlist);
   const voting = await getVotingStateForSession(sessionId);
-  emitVotingUpdated(io, sessionId, toPublicVotingState(voting));
+  await emitVotingUpdated(io, sessionId, toPublicVotingState(voting));
 }
 
 function ackFailure(
@@ -125,12 +144,12 @@ export function registerVotingSocketHandlers(io: RealtimeServer, socket: Realtim
       actorId: actor.id,
       proposalId: input.proposalId,
     });
-    emitVotingUpdated(io, actor.sessionId, state);
+    await emitVotingUpdated(io, actor.sessionId, state);
   });
 
   onWriteIntent(socket, 'votingClose', emptyVotingIntentSchema, async (_input, actor) => {
     const result = await closeVotingRound({ sessionId: actor.sessionId, actorId: actor.id });
-    emitVotingUpdated(io, actor.sessionId, result.voting);
+    await emitVotingUpdated(io, actor.sessionId, result.voting);
     emitQuestionPhase(io, actor.sessionId, result.answered);
     if (result.opened) {
       emitQuestionPhase(io, actor.sessionId, result.opened);

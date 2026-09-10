@@ -31,6 +31,7 @@ vi.mock('../modules/voting/index.js', () => ({
     votedCount: 0,
     voterCount: 0,
     myVote: null,
+    voterStatuses: null,
   })),
   registerVotingSocketHandlers: vi.fn(),
 }));

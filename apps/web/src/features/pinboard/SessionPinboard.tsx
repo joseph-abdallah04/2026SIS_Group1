@@ -202,6 +202,7 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
                 isLeader={isLeader}
                 viewerId={viewerId}
                 leaderId={board.leaderId}
+                voterStatuses={voting.voterStatuses}
                 busy={voting.busy}
                 error={voting.error}
                 onVote={(id) => void voting.castVote(id)}

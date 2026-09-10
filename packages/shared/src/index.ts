@@ -221,6 +221,18 @@ export interface VotingPublicState {
 /** Join snapshot / REST read: the public tally plus this viewer's own ballot. */
 export interface VotingViewerState extends VotingPublicState {
   myVote: string | null;
+  /**
+   * F29: who has and has not voted, by name. Leader-only; `null` for everyone
+   * else so a participant's snapshot cannot grow a nudge list.
+   */
+  voterStatuses: VotingVoterStatus[] | null;
+}
+
+/** One member's voted / not-yet status. Never carries which proposal they chose. */
+export interface VotingVoterStatus {
+  userId: string;
+  displayName: string;
+  hasVoted: boolean;
 }
 
 export function emptyVotingState(questionId: string | null = null): VotingViewerState {
@@ -232,15 +244,53 @@ export function emptyVotingState(questionId: string | null = null): VotingViewer
     votedCount: 0,
     voterCount: 0,
     myVote: null,
+    voterStatuses: null,
   };
 }
 
 export function toPublicVotingState(state: VotingViewerState): VotingPublicState {
-  const { myVote: _myVote, ...publicState } = state;
+  const { myVote: _myVote, voterStatuses: _voterStatuses, ...publicState } = state;
   return publicState;
 }
 
 // === summary module ===
+
+/** One person who took part, for the F31 recap. */
+export interface SessionRecapParticipant {
+  userId: string;
+  displayName: string;
+  isLeader: boolean;
+}
+
+/** One agenda item plus its shortlist and, if a vote closed, the anonymous result. */
+export interface SessionRecapQuestion {
+  id: string;
+  position: number;
+  text: string;
+  status: QuestionStatus;
+  proposals: BoardItem[];
+  winnerProposalId: string | null;
+  tallies: VotingTally[];
+  votedCount: number;
+}
+
+/**
+ * F31: everything a participant needs to reconstruct what was decided, without
+ * a live board. Each question carries its shortlist (at most six), not the
+ * whole pinboard. Assembled from session, pinboard, and voting reads — nothing
+ * extra is stored. Named `SessionRecap` so it does not collide with the
+ * dashboard's `SessionSummary` row.
+ */
+export interface SessionRecap {
+  sessionId: string;
+  title: string;
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  leaderId: string;
+  participants: SessionRecapParticipant[];
+  questions: SessionRecapQuestion[];
+}
 
 // === voice module ===
 
