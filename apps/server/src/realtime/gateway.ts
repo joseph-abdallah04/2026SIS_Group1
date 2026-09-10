@@ -7,6 +7,7 @@
 // was waiting on. Nothing in `modules/pinboard/` had to change for that: it
 // only ever relied on `socket.data.user` / `socket.data.sessionId` being
 // trustworthy, which is now true in production too.
+import { isShortlistLocked } from '@roundtable/shared';
 import type { SessionStatePayload } from '@roundtable/shared/events';
 
 import { verifyToken } from '../modules/auth/index.js';
@@ -161,7 +162,7 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
             // both "is this mine" and "am I the leader".
             viewer: user,
             shortlist: voting.proposalIds,
-            shortlistLocked: voting.phase === 'open' || voting.phase === 'closed',
+            shortlistLocked: isShortlistLocked(voting.phase),
             voting,
           };
           socket.emit('sessionState', snapshot);

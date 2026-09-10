@@ -11,22 +11,12 @@ declare module 'express-serve-static-core' {
 
 const BEARER_PREFIX = 'Bearer ';
 
-/**
- * A normal `<a href>` cannot set `Authorization`. The recap PDF route sits
- * this in front of `requireAuth` so a browser navigation can still prove
- * identity via `?token=`. Header wins if both are present. Do not reuse on
- * JSON APIs — query tokens show up in logs and history.
- */
-export function allowQueryBearer(req: Request, _res: Response, next: NextFunction): void {
-  if (!req.headers.authorization) {
-    const token = req.query.token;
-    if (typeof token === 'string' && token.length > 0) {
-      req.headers.authorization = `${BEARER_PREFIX}${token}`;
-    }
-  }
-  next();
-}
-
+// The bearer header is the only accepted proof of identity. There is
+// deliberately no `?token=` fallback for file downloads: a query token is a
+// full seven-day credential written into browser history and every access log
+// on the way, so the client fetches downloads with the header instead (see
+// `api.download` in apps/web/src/lib/api.ts).
+//
 // Real JWT verification (docs/05 §5 deferred item 5 / docs/06 Auth "Also
 // owns"). Checks the `Authorization: Bearer <token>` header against
 // `verifyToken`; on success attaches `req.userId` and calls `next()` so

@@ -1,13 +1,12 @@
 import { Router } from 'express';
 
-import { allowQueryBearer, requireAuth } from '../../middleware/auth.js';
+import { requireAuth } from '../../middleware/auth.js';
 import { getSessionSummary, getSessionSummaryPdf } from './service.js';
 
 export const summaryRoutes = Router();
 
 summaryRoutes.get<{ sessionId: string }>(
   '/:sessionId/summary.pdf',
-  allowQueryBearer,
   requireAuth,
   async (req, res, next) => {
     try {

@@ -2,6 +2,7 @@ import {
   SHORTLIST_MAX,
   SHORTLIST_MIN,
   emptyVotingState,
+  isShortlistLocked,
   orderByVoteOutcome,
   toPublicVotingState,
   voteOutcomeFromTallies,
@@ -223,17 +224,50 @@ export async function getVotingStateForSession(
   return getVotingState(question?.id ?? null, viewerId);
 }
 
+/** Everything one `votingUpdated` fan-out needs, read once. */
+export interface VotingBroadcast {
+  /** Safe for every socket in the room. */
+  publicState: VotingPublicState;
+  /** Who the per-recipient fields below are addressed to. Null if the session is gone. */
+  leaderId: string | null;
+  /** F29's roster, for the leader's sockets only. Null unless the round is open. */
+  voterStatuses: VotingVoterStatus[] | null;
+  /** Each voter's own ballot, by user id — a socket is only ever told its own. */
+  votesByVoter: Map<string, string>;
+}
+
+/**
+ * One read behind a whole broadcast.
+ *
+ * The alternative — building the public state, then building it again per
+ * recipient to find their ballot — would run the same round and member
+ * queries once per socket in the room. This resolves the question, the round
+ * and the leader's roster once, and leaves `socket.ts` to pick the
+ * per-recipient fields out of it.
+ */
+export async function getVotingBroadcast(sessionId: string): Promise<VotingBroadcast> {
+  const question = await getActiveQuestion(sessionId);
+  const session = await getSession(sessionId);
+  // Viewed as the leader so `voterStatuses` is populated when the round is
+  // open; `toPublicVotingState` then drops everything viewer-specific.
+  const state = await getVotingState(question?.id ?? null, session?.leaderId);
+  const round = question ? await loadRound(question.id) : null;
+
+  return {
+    publicState: toPublicVotingState(state),
+    leaderId: session?.leaderId ?? null,
+    voterStatuses: state.voterStatuses,
+    votesByVoter: new Map((round?.votes ?? []).map((vote) => [vote.voterId, vote.proposalId])),
+  };
+}
+
 /**
  * The shortlist for one question, or an empty unlocked list if none exists
  * yet. Used by the join snapshot so a refresh sees the same ticks.
  */
 export async function getShortlistState(questionId: string | null): Promise<ShortlistState> {
   const voting = await getVotingState(questionId);
-  return toShortlist(
-    voting.questionId,
-    voting.proposalIds,
-    voting.phase === 'open' || voting.phase === 'closed',
-  );
+  return toShortlist(voting.questionId, voting.proposalIds, isShortlistLocked(voting.phase));
 }
 
 /** Shortlist for whichever question the board is currently showing. */

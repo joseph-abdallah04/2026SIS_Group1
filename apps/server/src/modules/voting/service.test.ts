@@ -58,6 +58,7 @@ const {
   startVotingRound,
   clearShortlist,
   getShortlistState,
+  getVotingBroadcast,
   getVotingState,
   castVote,
   closeVotingRound,
@@ -652,5 +653,62 @@ describe('expireOpenVotingIfDue', () => {
     const result = await expireOpenVotingIfDue('s1');
     expect(result?.voting.phase).toBe('closed');
     expect(setQuestionPhase).not.toHaveBeenCalled();
+  });
+});
+
+describe('getVotingBroadcast', () => {
+  it('keeps every voter’s ballot out of the shared payload', async () => {
+    roundFindUnique.mockResolvedValue(
+      openRound({
+        votes: [
+          { voterId: LEADER, proposalId: 'p1' },
+          { voterId: 'u2', proposalId: 'p2' },
+        ],
+      }),
+    );
+
+    const broadcast = await getVotingBroadcast('s1');
+
+    expect(broadcast.publicState).not.toHaveProperty('myVote');
+    expect(broadcast.publicState).not.toHaveProperty('voterStatuses');
+    expect(broadcast.publicState).toMatchObject({ phase: 'open', votedCount: 2 });
+  });
+
+  it('reports each voter’s own ballot so a socket is told what was stored', async () => {
+    roundFindUnique.mockResolvedValue(
+      openRound({
+        votes: [
+          { voterId: LEADER, proposalId: 'p1' },
+          { voterId: 'u2', proposalId: 'p2' },
+        ],
+      }),
+    );
+
+    const { votesByVoter } = await getVotingBroadcast('s1');
+
+    expect(votesByVoter.get(LEADER)).toBe('p1');
+    expect(votesByVoter.get('u2')).toBe('p2');
+    expect(votesByVoter.get('someone-who-did-not-vote')).toBeUndefined();
+  });
+
+  it('carries the roster for the leader while the round is open', async () => {
+    roundFindUnique.mockResolvedValue(
+      openRound({ votes: [{ voterId: 'u2', proposalId: 'p2' }] }),
+    );
+
+    const { voterStatuses } = await getVotingBroadcast('s1');
+
+    expect(voterStatuses).toEqual([
+      { userId: LEADER, displayName: 'Leader', hasVoted: false },
+      { userId: 'u2', displayName: 'Ada', hasVoted: true },
+    ]);
+  });
+
+  it('drops the roster once the round is closed', async () => {
+    roundFindUnique.mockResolvedValue(
+      openRound({ status: 'closed', votes: [{ voterId: 'u2', proposalId: 'p2' }] }),
+    );
+
+    await expect(getVotingBroadcast('s1')).resolves.toMatchObject({ voterStatuses: null });
   });
 });

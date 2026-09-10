@@ -11,13 +11,6 @@ const getSessionSummary = vi.fn();
 const getSessionSummaryPdf = vi.fn();
 
 vi.mock('../../middleware/auth.js', () => ({
-  allowQueryBearer: (
-    _req: express.Request,
-    _res: express.Response,
-    next: express.NextFunction,
-  ) => {
-    next();
-  },
   requireAuth: (
     req: express.Request,
     res: express.Response,

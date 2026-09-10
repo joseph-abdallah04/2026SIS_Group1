@@ -22,6 +22,26 @@ import {
 const CARD_W = 900;
 const PAD = 28;
 const FOOTER_H = 48;
+const MIN_ART_H = 360;
+/**
+ * Ceiling on the art area, and so on the raster this produces.
+ *
+ * The art height is derived from stored geometry, which is member-authored
+ * input: a drawing carries its own `viewBox` and a diagram node's `x`/`y` have
+ * no bounds in `diagramNodeSchema`. Without a ceiling, one proposal with a
+ * coordinate of 1e9 would ask resvg for a raster a billion pixels tall the
+ * next time anyone downloads the recap. Clamping only letterboxes the art —
+ * both inner `<svg>`s scale with `xMidYMid meet` — so a legitimate tall
+ * drawing is shown smaller rather than cropped.
+ */
+const MAX_ART_H = 1600;
+
+/** Art height for content of the given aspect, bounded at both ends. */
+function artHeight(artW: number, contentW: number, contentH: number): number {
+  const scaled = Math.round(artW * (contentH / contentW));
+  if (!Number.isFinite(scaled)) return MIN_ART_H;
+  return Math.min(MAX_ART_H, Math.max(MIN_ART_H, scaled));
+}
 const ART_BG = '#F7F7F8';
 const INK = '#080C15';
 const MUTED = '#5A5F68';
@@ -108,7 +128,26 @@ function stickySvg(item: BoardItem, kind: FeaturedKind): string {
   </svg>`;
 }
 
-function drawingInner(svg: string): { markup: string; viewW: number; viewH: number } {
+interface DrawingInner {
+  markup: string;
+  minX: number;
+  minY: number;
+  viewW: number;
+  viewH: number;
+}
+
+/**
+ * Pull the drawable body and the coordinate system out of a stored drawing.
+ *
+ * The stripping below is tidying, not sanitising — a regex cannot reliably
+ * remove behaviour from markup. What makes embedding a member's SVG safe here
+ * is the renderer: resvg is a static rasterizer with no script engine and no
+ * HTTP client, and the result only ever leaves as a PNG inside a PDF, never
+ * as SVG a browser would execute. Anything it cannot parse throws, and
+ * `writeQuestion` falls back to a caption. Do not treat these `replace` calls
+ * as a security boundary or extend them as if they were one.
+ */
+function drawingInner(svg: string): DrawingInner {
   const cleaned = svg
     .trim()
     .replace(/<\?xml[^>]*>/i, '')
@@ -116,29 +155,41 @@ function drawingInner(svg: string): { markup: string; viewW: number; viewH: numb
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/\son\w+="[^"]*"/gi, '');
   const view = /viewBox="([^"]+)"/i.exec(cleaned);
+  let minX = 0;
+  let minY = 0;
   let viewW = DRAWING_VIEWBOX_WIDTH;
   let viewH = DRAWING_VIEWBOX_HEIGHT;
   if (view?.[1]) {
     const parts = view[1].trim().split(/[\s,]+/).map(Number);
-    if (parts.length === 4 && parts.every((n) => Number.isFinite(n) && n !== 0)) {
+    // Only the extents have to be positive; an origin of 0 is the normal case,
+    // which is why this checks what each number means rather than all four
+    // being non-zero.
+    if (
+      parts.length === 4 &&
+      parts.every((n) => Number.isFinite(n)) &&
+      parts[2]! > 0 &&
+      parts[3]! > 0
+    ) {
+      minX = parts[0]!;
+      minY = parts[1]!;
       viewW = parts[2]!;
       viewH = parts[3]!;
     }
   }
   const inner = /<svg\b[^>]*>([\s\S]*)<\/svg>/i.exec(cleaned);
-  return { markup: inner?.[1] ?? cleaned, viewW, viewH };
+  return { markup: inner?.[1] ?? cleaned, minX, minY, viewW, viewH };
 }
 
 function drawingSvg(item: BoardItem, kind: FeaturedKind): string {
   if (item.artifactJson.type !== 'drawing') return '';
   const artW = CARD_W - PAD * 2;
-  const { markup, viewW, viewH } = drawingInner(item.artifactJson.svg);
-  const artH = Math.max(360, Math.round(artW * (viewH / viewW)));
+  const { markup, minX, minY, viewW, viewH } = drawingInner(item.artifactJson.svg);
+  const artH = artHeight(artW, viewW, viewH);
   const height = PAD + artH + FOOTER_H + 12;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, WHITE, kind)}
     <rect x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" rx="12" fill="${ART_BG}"/>
-    <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="0 0 ${viewW} ${viewH}" preserveAspectRatio="xMidYMid meet" fill="none">${markup}</svg>
+    <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="${minX} ${minY} ${viewW} ${viewH}" preserveAspectRatio="xMidYMid meet" fill="none">${markup}</svg>
     ${footer(item.authorName, height - 18)}
   </svg>`;
 }
@@ -191,7 +242,7 @@ function diagramSvg(item: BoardItem, kind: FeaturedKind): string {
     Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + 28;
   const svgHeight =
     Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) + 24;
-  const artH = Math.max(360, Math.round(artW * (svgHeight / svgWidth)));
+  const artH = artHeight(artW, svgWidth, svgHeight);
   const height = PAD + artH + FOOTER_H + 12;
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);

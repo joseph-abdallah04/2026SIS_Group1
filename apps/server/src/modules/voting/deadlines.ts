@@ -31,7 +31,7 @@ async function fireExpiry(sessionId: string): Promise<void> {
     const { broadcastVoteClosed } = await import('./socket.js');
     const result = await expireOpenVotingIfDue(sessionId);
     if (!result || !ioRef) return;
-    await broadcastVoteClosed(ioRef, sessionId, result.voting);
+    await broadcastVoteClosed(ioRef, sessionId);
   } catch (err) {
     console.error(`[voting] failed to expire the ballot for ${sessionId}:`, err);
   }

@@ -47,8 +47,37 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return body as T;
 }
 
+const FILENAME_PATTERN = /filename="([^"]+)"/;
+
+function filenameFrom(disposition: string | null): string | null {
+  return disposition ? (FILENAME_PATTERN.exec(disposition)?.[1] ?? null) : null;
+}
+
+/**
+ * Fetch a file the same way `request` fetches JSON: bearer token in the
+ * header. A plain `<a href>` cannot set `Authorization`, so a download has to
+ * go through fetch — putting the token in the query string instead would copy
+ * a live seven-day credential into browser history and every access log
+ * between here and the server.
+ */
+async function download(path: string): Promise<{ blob: Blob; filename: string | null }> {
+  const token = getToken();
+  const res = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
+    throwIfFailed(res.status, body);
+  }
+  return {
+    blob: await res.blob(),
+    filename: filenameFrom(res.headers.get('Content-Disposition')),
+  };
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  download,
   post: <T>(path: string, data: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(data) }),
   patch: <T>(path: string, data: unknown) =>

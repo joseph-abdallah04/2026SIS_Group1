@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   emptyVotingState,
+  isShortlistLocked,
   type VotingPublicState,
   type VotingViewerState,
   type VotingVoterStatus,
@@ -10,7 +11,10 @@ import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
 import { api } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
 
-type VotingUpdatedPayload = VotingPublicState & { voterStatuses?: VotingVoterStatus[] };
+type VotingUpdatedPayload = VotingPublicState & {
+  voterStatuses?: VotingVoterStatus[];
+  myVote?: string | null;
+};
 
 const WRITE_TIMEOUT_MS = 8000;
 
@@ -66,7 +70,16 @@ export function useVoting(sessionId: string, questionId: string | null) {
       if (next.questionId && questionId && next.questionId !== questionId) return;
       setVoting((prev) => ({
         ...next,
-        myVote: prev.questionId === next.questionId ? prev.myVote : null,
+        // `myVote` and `voterStatuses` are attached per socket, so this
+        // viewer's own ballot arrives here when the server has one for us.
+        // Falling back to the previous value covers a payload from a build
+        // that predates the field; a question change resets both.
+        myVote:
+          next.myVote !== undefined
+            ? next.myVote
+            : prev.questionId === next.questionId
+              ? prev.myVote
+              : null,
         voterStatuses:
           next.voterStatuses !== undefined
             ? next.voterStatuses
@@ -197,13 +210,17 @@ export function useVoting(sessionId: string, questionId: string | null) {
   const castVote = useCallback(
     (proposalId: string) => {
       if (busy) return Promise.resolve();
-      return run(async () => {
-        await writeIntent(
-          (ack) => getSocket().emit('voteCast', { proposalId }, ack),
-          'Could not submit your vote',
-        );
-        setVoting((prev) => ({ ...prev, myVote: proposalId }));
-      }, 'Could not submit your vote');
+      // Nothing is applied locally on success: the ballot the server stored
+      // comes back on `votingUpdated` as this socket's own `myVote`, so the
+      // tick follows what was written rather than what was asked for.
+      return run(
+        () =>
+          writeIntent(
+            (ack) => getSocket().emit('voteCast', { proposalId }, ack),
+            'Could not submit your vote',
+          ),
+        'Could not submit your vote',
+      );
     },
     [busy, run],
   );
@@ -234,7 +251,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
   return {
     phase: voting.phase,
     proposalIds: voting.proposalIds,
-    locked: voting.phase === 'open' || voting.phase === 'closed',
+    locked: isShortlistLocked(voting.phase),
     tallies: voting.tallies,
     votedCount: voting.votedCount,
     voterCount: voting.voterCount,

@@ -1209,6 +1209,14 @@ export async function getSession(sessionId: string): Promise<SessionRef | null> 
 /**
  * Discussion clock for whoever is currently talking, including shortlisting.
  * Hidden once the ballot is open: the voting module owns that overlay's clock.
+ *
+ * The `votingRound` read below is a deliberate exception to docs/02 §2 (a
+ * module reaches another only through its public surface). The dependency runs
+ * voting -> sessions, so importing the voting module here would close a cycle,
+ * and the alternative — having voting own the discussion clock — would put a
+ * sessions-configured timer behind a module that only exists once a ballot
+ * does. Kept to the one column that answers "has the ballot taken over the
+ * screen yet"; anything more belongs on the other side of the boundary.
  */
 export async function getDiscussionTimer(sessionId: string): Promise<SessionTimerSnapshot | null> {
   const session = await prisma.session.findUnique({

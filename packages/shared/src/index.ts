@@ -218,6 +218,17 @@ export interface VotingShortlist {
  */
 export type VotingPhase = 'idle' | 'shortlisting' | 'open' | 'closed';
 
+/**
+ * Whether the shortlist can still be changed. Once ballots exist the ticks are
+ * a record of what people voted on, so they stop being editable.
+ *
+ * One definition, used by the round read, the join snapshot and the board, so
+ * "is it locked" cannot be answered three different ways.
+ */
+export function isShortlistLocked(phase: VotingPhase): boolean {
+  return phase === 'open' || phase === 'closed';
+}
+
 /** Anonymous share of the votes already cast for one shortlisted proposal. */
 export interface VotingTally {
   proposalId: string;

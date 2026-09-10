@@ -1,5 +1,6 @@
 import type { SessionRecap } from '@roundtable/shared';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -78,10 +79,31 @@ describe('SessionEndedPage', () => {
       screen.queryByText(/auto-generated summary of what was decided/i),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to dashboard' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Download Session Summary' })).toHaveAttribute(
-      'href',
-      '/api/sessions/s1/summary.pdf?token=test-jwt',
+    expect(
+      screen.getByRole('button', { name: /Download Session Summary/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('asks for the PDF with the bearer header, never a token in the URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'Content-Disposition': 'attachment; filename="Roadmap-recap.pdf"' }),
+      blob: async () => new Blob(['%PDF-1.4'], { type: 'application/pdf' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: () => {} });
+
+    render(
+      <MemoryRouter>
+        <SessionEndedPage session={SESSION} />
+      </MemoryRouter>,
     );
+    await userEvent.click(screen.getByRole('button', { name: /Download Session Summary/ }));
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/summary.pdf', {
+      headers: { Authorization: 'Bearer test-jwt' },
+    });
+    vi.unstubAllGlobals();
   });
 
   it('keeps the download on the opposite side of Back to dashboard', () => {

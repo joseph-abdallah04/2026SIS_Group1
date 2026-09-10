@@ -254,11 +254,24 @@ export interface ServerToClientEvents {
   /**
    * Live voting state for the question on screen (F27–F30). Public: tallies
    * and how many people have voted, never who voted for which proposal.
-   * `voterStatuses` is attached only on the leader's socket (F29) so a
-   * participant never receives the nudge list.
+   *
+   * Two fields are per-recipient, attached as this event is fanned out socket
+   * by socket rather than broadcast to the room:
+   *
+   * - `voterStatuses` only reaches the leader (F29), so a participant never
+   *   receives the nudge list;
+   * - `myVote` only ever carries the recipient's own ballot, so the client is
+   *   told what the server stored for them instead of assuming its write
+   *   landed — and still learns nothing about anyone else's choice.
+   *
    * A client that missed an event is corrected by the next one.
    */
-  votingUpdated(payload: VotingPublicState & { voterStatuses?: VotingVoterStatus[] }): void;
+  votingUpdated(
+    payload: VotingPublicState & {
+      voterStatuses?: VotingVoterStatus[];
+      myVote?: string | null;
+    },
+  ): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===

@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
 import { signToken } from '../modules/auth/jwt.js';
-import { allowQueryBearer, requireAuth } from './auth.js';
+import { requireAuth } from './auth.js';
 
 function mockReqRes(authorization?: string, query: Request['query'] = {}) {
   const req = { headers: { authorization }, query } as Request;
@@ -38,19 +38,14 @@ describe('requireAuth', () => {
     expect(next).toHaveBeenCalledTimes(1);
     expect(req.userId).toBe('user-42');
   });
-});
 
-describe('allowQueryBearer', () => {
-  it('copies ?token= onto Authorization when the header is missing', () => {
-    const { req, next } = mockReqRes(undefined, { token: 'query-jwt' });
-    allowQueryBearer(req, {} as Response, next);
-    expect(req.headers.authorization).toBe('Bearer query-jwt');
-    expect(next).toHaveBeenCalledTimes(1);
-  });
-
-  it('leaves an existing Authorization header alone', () => {
-    const { req, next } = mockReqRes('Bearer header-jwt', { token: 'query-jwt' });
-    allowQueryBearer(req, {} as Response, next);
-    expect(req.headers.authorization).toBe('Bearer header-jwt');
+  it('ignores a token in the query string — the header is the only proof', () => {
+    const token = signToken({ userId: 'user-42' });
+    const { req, res, status, json, next } = mockReqRes(undefined, { token });
+    requireAuth(req, res, next);
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MISSING_TOKEN' }));
+    expect(next).not.toHaveBeenCalled();
+    expect(req.userId).toBeUndefined();
   });
 });
