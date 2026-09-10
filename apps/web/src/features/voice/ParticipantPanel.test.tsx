@@ -83,9 +83,10 @@ describe('ParticipantPanel', () => {
   });
 
   it('counts the room in the header', () => {
-    renderPanel();
+    const { container } = renderPanel();
 
     expect(screen.getByText(/In the room/)).toHaveTextContent('5');
+    expect(container.querySelector('aside')).toHaveClass('w-64');
   });
 
   it('rings whoever is speaking, and only them', () => {
@@ -164,6 +165,7 @@ describe('ParticipantPanel', () => {
       await user.click(screen.getByRole('button', { name: /Collapse participants/ }));
       const expand = screen.getByRole('button', { name: /Expand participants/ });
       expect(expand).toHaveAccessibleName(/5 people/);
+      expect(screen.getByText(/In the room/)).toHaveTextContent('5');
 
       await user.click(expand);
       expect(screen.getByRole('button', { name: /Collapse participants/ })).toBeInTheDocument();
@@ -208,5 +210,21 @@ describe('ParticipantPanel', () => {
   it('warns that a reconnecting list may be stale', () => {
     renderPanel(room(), 'reconnecting');
     expect(screen.getByText(/may be out of date/)).toBeInTheDocument();
+  });
+
+  it('pins a footer under the roster, and hides it when collapsed', async () => {
+    const user = userEvent.setup();
+    render(
+      <ParticipantPanel
+        participants={room()}
+        status="connected"
+        footer={<p>Join code K7NP-3WQZ</p>}
+      />,
+    );
+
+    expect(screen.getByText('Join code K7NP-3WQZ')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Collapse participants/ }));
+    expect(screen.queryByText('Join code K7NP-3WQZ')).not.toBeInTheDocument();
   });
 });

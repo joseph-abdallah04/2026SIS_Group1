@@ -50,6 +50,7 @@ const EMPTY_BOARD = {
   questionPosition: 0,
   questionStatus: 'discussion' as const,
   items: [],
+  discussionTimer: null,
 };
 
 beforeEach(() => {

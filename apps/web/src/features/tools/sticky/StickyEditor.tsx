@@ -114,7 +114,7 @@ export function StickyEditor() {
               if (submissionError) resetSubmission();
             }}
             placeholder="Capture the idea in one clear note"
-            className="mt-2 h-36 min-h-36 w-full resize-none rounded-lg border border-rt-tertiary bg-rt-surface px-3.5 py-3 text-[14px] leading-relaxed text-rt-ink outline-none transition-colors placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint sm:h-auto"
+            className="mt-2 h-36 min-h-36 w-full resize-none rounded-2xl border border-rt-tertiary bg-rt-surface px-3.5 py-3 text-[14px] leading-relaxed text-rt-ink outline-none transition-colors placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint sm:h-auto"
           />
 
           <fieldset className="mt-5">
@@ -131,7 +131,7 @@ export function StickyEditor() {
                     aria-pressed={selected}
                     title={option[0]?.toUpperCase() + option.slice(1)}
                     onClick={() => setColor(option)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
                     style={{
                       background: optionTheme.bg,
                       borderColor: selected ? '#4D6A74' : optionTheme.border,

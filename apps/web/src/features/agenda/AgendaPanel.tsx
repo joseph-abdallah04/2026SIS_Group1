@@ -1,6 +1,9 @@
-import { useState } from 'react';
-import type { Question, QuestionStatus } from '@roundtable/shared';
+import { useState, type FormEvent } from 'react';
+import { SHORTLIST_MIN, type Question, type QuestionStatus, type VotingPhase } from '@roundtable/shared';
+import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/shared/schemas';
 
+import { BoardRail } from '../../components/BoardRail';
+import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
 
@@ -11,6 +14,15 @@ interface AgendaPanelProps {
   activeQuestionId: string | null;
   /** Only the leader gets the phase controls (F25/F26); everyone sees the list. */
   isLeader: boolean;
+  /** Hides Skip once the ballot is showing the result (F30). */
+  votingPhase?: VotingPhase;
+  /**
+   * Whether the open discussion question has enough proposals to form a
+   * shortlist (`SHORTLIST_MIN`). False disables "Open voting". Omitted when
+   * the board is showing a different question, so the server is the remaining
+   * gate.
+   */
+  hasProposals?: boolean;
 }
 
 /**
@@ -25,19 +37,20 @@ const NEXT_PHASE: Partial<Record<QuestionStatus, { status: QuestionPhaseTarget; 
   {
     pending: { status: 'discussion', label: 'Start discussion' },
     discussion: { status: 'voting', label: 'Open voting' },
-    voting: { status: 'answered', label: 'Mark answered' },
+    // Closing a vote is F30's "End voting" on the ballot, not an agenda
+    // shortcut — "Mark answered" would skip the tally and the overlay.
   };
 
 function isComplete(status: QuestionStatus): boolean {
   return status === 'answered' || status === 'skipped';
 }
 
-function statusLabel(status: QuestionStatus): string | null {
+function statusLabel(status: QuestionStatus, votingPhase?: VotingPhase): string | null {
   switch (status) {
     case 'discussion':
       return 'Discussing';
     case 'voting':
-      return 'Voting';
+      return votingPhase === 'closed' ? 'Results' : 'Voting';
     case 'answered':
       return 'Answered';
     case 'skipped':
@@ -49,7 +62,8 @@ function statusLabel(status: QuestionStatus): string | null {
 
 /**
  * F24: the ordered question list beside the board, with F25/F26's leader
- * controls. The leader can click a finished question to put that question's
+ * controls. The chrome is `BoardRail`, shared with F13's presence list on the
+ * other edge. The leader can click a finished question to put that question's
  * pinboard back on screen without reopening it.
  *
  * Collapse state is local to each participant — the leader collapsing their
@@ -60,6 +74,8 @@ export function AgendaPanel({
   questions,
   activeQuestionId,
   isLeader,
+  votingPhase,
+  hasProposals,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [confirmingSkip, setConfirmingSkip] = useState<string | null>(null);
@@ -69,6 +85,8 @@ export function AgendaPanel({
     error: phaseError,
   } = useSetQuestionPhase(sessionId);
   const { focus, error: focusError } = useFocusQuestion(sessionId);
+  const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
+  const [draft, setDraft] = useState('');
 
   const activeIndex = questions.findIndex((question) => question.id === activeQuestionId);
   const position = activeIndex >= 0 ? `${activeIndex + 1}/${questions.length}` : null;
@@ -77,73 +95,58 @@ export function AgendaPanel({
     (question) => question.status === 'discussion' || question.status === 'voting',
   );
   const firstPending = questions.find((question) => question.status === 'pending');
-  const error = phaseError ?? focusError;
+  const error = phaseError ?? focusError ?? addError;
+  const title = `Agenda ${position ?? ''}`;
+  const canAdd = isLeader && questions.length < SESSION_QUESTION_LIMIT;
 
-  if (collapsed) {
-    return (
-      <aside className="flex w-11 shrink-0 flex-col items-center gap-3 border-r border-rt-tertiary bg-rt-surface-alt py-3">
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          aria-expanded={false}
-          aria-label="Expand agenda"
-          title="Expand agenda"
-          className="text-[13px] font-semibold text-rt-primary-deep hover:opacity-70"
-        >
-          ›
-        </button>
-        <span
-          className="text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase"
-          style={{ writingMode: 'vertical-rl' }}
-        >
-          Agenda {position ?? ''}
-        </span>
-      </aside>
-    );
+  async function onAdd(event: FormEvent) {
+    event.preventDefault();
+    const ok = await addQuestion(draft);
+    if (ok) setDraft('');
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-rt-tertiary bg-rt-surface-alt">
-      <div className="flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">
-        <span className="text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
-          Agenda {position ?? ''}
-        </span>
-        <button
-          type="button"
-          onClick={() => setCollapsed(true)}
-          aria-expanded={true}
-          aria-label="Collapse agenda"
-          title="Collapse agenda"
-          className="text-[13px] font-semibold text-rt-primary-deep hover:opacity-70"
-        >
-          ‹
-        </button>
-      </div>
-
+    <BoardRail
+      side="left"
+      title={title}
+      collapsed={collapsed}
+      onToggle={() => setCollapsed((open) => !open)}
+      expandLabel="Expand agenda"
+      collapseLabel="Collapse agenda"
+    >
       {questions.length === 0 ? (
-        <p className="px-3 py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
+        <p className="py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
       ) : (
-        <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+        <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2">
           {questions.map((question, index) => {
             const isFocused = question.id === activeQuestionId;
-            const label = statusLabel(question.status);
+            const label = statusLabel(question.status, votingPhase);
+            const canSkipVote = question.status !== 'voting' || votingPhase !== 'closed';
             const next = NEXT_PHASE[question.status];
             // Phase controls stay on the question that is actually open, even
             // while the board is looking back at an earlier one. Pending gets
             // "Start discussion" only when nothing is open, on the next one.
+            // Voting still offers Skip (an escape hatch); closing the vote is
+            // the ballot's "End voting", not an agenda "Mark answered".
+            const onThisQuestion = openQuestion
+              ? question.id === openQuestion.id
+              : firstPending !== undefined && question.id === firstPending.id;
+            const stillShortlisting =
+              question.status === 'voting' &&
+              votingPhase !== 'open' &&
+              votingPhase !== 'closed';
             const showControls =
               isLeader &&
-              next !== undefined &&
-              (openQuestion
-                ? question.id === openQuestion.id
-                : firstPending !== undefined && question.id === firstPending.id);
+              onThisQuestion &&
+              (next !== undefined || stillShortlisting || (question.status === 'voting' && canSkipVote));
             const busy = phaseBusyId === question.id;
+            const openVotingBlocked = next?.status === 'voting' && hasProposals === false;
 
             return (
               <li
                 key={question.id}
                 aria-current={isFocused ? 'step' : undefined}
-                className={`rounded-md border px-2.5 py-2 ${
+                className={`rounded-2xl border px-2.5 py-2 ${
                   isFocused
                     ? 'border-rt-secondary bg-white shadow-sm'
                     : 'border-transparent bg-transparent'
@@ -199,48 +202,68 @@ export function AgendaPanel({
                   </span>
                 )}
 
-                {showControls && next && (
+                {showControls && (
                   <div className="mt-2 ml-[18px] flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void setPhase(question.id, next.status)}
-                      disabled={busy}
-                      className="self-start rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
-                    >
-                      {busy ? 'Working…' : next.label}
-                    </button>
-
-                    {confirmingSkip === question.id ? (
-                      <span className="flex items-center gap-2 text-[11px]">
-                        <span className="text-rt-ink-muted">Skip it?</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfirmingSkip(null);
-                            void setPhase(question.id, 'skipped');
-                          }}
-                          disabled={busy}
-                          className="font-semibold text-rt-primary-deep hover:underline"
-                        >
-                          Yes
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmingSkip(null)}
-                          className="text-rt-ink-muted hover:underline"
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    ) : (
+                    {next ? (
                       <button
                         type="button"
-                        onClick={() => setConfirmingSkip(question.id)}
+                        onClick={() => void setPhase(question.id, next.status)}
+                        disabled={busy || openVotingBlocked}
+                        title={
+                          openVotingBlocked
+                            ? `Add at least ${SHORTLIST_MIN} proposals before opening voting`
+                            : undefined
+                        }
+                        className="self-start rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
+                      >
+                        {busy ? 'Working…' : next.label}
+                      </button>
+                    ) : null}
+
+                    {stillShortlisting ? (
+                      <button
+                        type="button"
+                        onClick={() => void setPhase(question.id, 'discussion')}
+                        disabled={busy}
                         className="self-start text-[11px] font-medium text-rt-ink-muted hover:underline"
                       >
-                        Skip question
+                        Back to discussion
                       </button>
-                    )}
+                    ) : null}
+
+                    {canSkipVote ? (
+                      confirmingSkip === question.id ? (
+                        <span className="flex items-center gap-2 text-[11px]">
+                          <span className="text-rt-ink-muted">Skip it?</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmingSkip(null);
+                              void setPhase(question.id, 'skipped');
+                            }}
+                            disabled={busy}
+                            className="font-semibold text-rt-primary-deep hover:underline"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingSkip(null)}
+                            className="text-rt-ink-muted hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingSkip(question.id)}
+                          className="self-start text-[11px] font-medium text-rt-ink-muted hover:underline"
+                        >
+                          Skip question
+                        </button>
+                      )
+                    ) : null}
                   </div>
                 )}
               </li>
@@ -249,19 +272,48 @@ export function AgendaPanel({
         </ol>
       )}
 
+      {canAdd ? (
+        <form
+          onSubmit={(event) => void onAdd(event)}
+          className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2"
+        >
+          <label className="sr-only" htmlFor="agenda-new-question">
+            New question
+          </label>
+          <div className="flex gap-1.5">
+            <input
+              id="agenda-new-question"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Add a question…"
+              maxLength={SESSION_QUESTION_TEXT_MAX}
+              disabled={adding}
+              className="min-h-8 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-2 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={adding || draft.trim().length === 0}
+              className="min-h-8 shrink-0 rounded-full bg-rt-secondary px-2.5 text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-50"
+            >
+              {adding ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       {error && (
-        <p className="shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-red-600">
+        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-red-600">
           {error}
         </p>
       )}
 
       {allDone && (
-        <p className="shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-muted">
+        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-muted">
           {isLeader
             ? 'Every question is done — end the session when you’re ready.'
             : 'Every question is done.'}
         </p>
       )}
-    </aside>
+    </BoardRail>
   );
 }

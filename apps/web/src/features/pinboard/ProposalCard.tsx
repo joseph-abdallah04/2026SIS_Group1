@@ -35,6 +35,8 @@ interface ProposalCardProps {
   isAuthorLeader?: boolean;
   /** Arrived on a live broadcast just now, so it gets a one-off highlight (F15). */
   isNew?: boolean;
+  /** On the leader's voting shortlist (F27). */
+  isShortlisted?: boolean;
 }
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
@@ -110,11 +112,11 @@ function DiagramBody({ item }: { item: BoardItem }) {
 
   return (
     <div
-      className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg bg-rt-surface-alt"
+      className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-xl bg-rt-surface-alt"
       style={{ minHeight: 96 }}
     >
       {nodes.length === 0 ? (
-        <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
+        <div className="m-2 flex h-20 items-center justify-center rounded-xl border border-dashed border-rt-tertiary" />
       ) : (
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
@@ -223,6 +225,7 @@ export function ProposalCard({
   isOwnedByViewer = false,
   isAuthorLeader = false,
   isNew = false,
+  isShortlisted = false,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
@@ -244,7 +247,9 @@ export function ProposalCard({
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
       <article
-        className="flex shrink-0 flex-col overflow-hidden border"
+        className={`flex shrink-0 flex-col overflow-hidden border ${
+          isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''
+        }`}
         style={{
           width: CARD_WIDTH[item.type],
           borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
@@ -272,7 +277,7 @@ export function ProposalCard({
 
         {artifact.type === 'drawing' ? (
           <div
-            className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg"
+            className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-xl"
             style={{ height: 160, background: THUMB_BACKGROUND }}
           >
             {drawingSrc ? (

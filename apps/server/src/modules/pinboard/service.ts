@@ -13,7 +13,7 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
 import { requireMutableProposal, type Actor, type ProposalMutation } from './permissions.js';
-import { getActiveQuestion, getQuestion, getSession } from './sessionsAdapter.js';
+import { getActiveQuestion, getDiscussionTimer, getQuestion, getSession } from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
 // agreed order), its create side (F15: proposals land for everyone at once),
@@ -371,6 +371,8 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
   }
 
   const question = await getActiveQuestion(sessionId);
+  const discussionTimer = await getDiscussionTimer(sessionId);
+
   if (!question) {
     return {
       sessionId,
@@ -381,6 +383,7 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
       questionPosition: null,
       questionStatus: null,
       items: [],
+      discussionTimer,
     };
   }
 
@@ -393,5 +396,6 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
     questionPosition: question.position,
     questionStatus: question.status,
     items: await listProposals(question.id),
+    discussionTimer,
   };
 }

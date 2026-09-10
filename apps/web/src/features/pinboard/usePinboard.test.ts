@@ -1,4 +1,5 @@
 import type { BoardItem, BoardResponse } from '@roundtable/shared';
+import { emptyVotingState } from '@roundtable/shared';
 import type { SessionStatePayload } from '@roundtable/shared/events';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -65,6 +66,7 @@ const REST_BOARD: BoardResponse = {
   questionPosition: 0,
   questionStatus: 'discussion',
   items: [],
+  discussionTimer: null,
 };
 
 function snapshot(overrides: Partial<SessionStatePayload> = {}): SessionStatePayload {
@@ -80,6 +82,10 @@ function snapshot(overrides: Partial<SessionStatePayload> = {}): SessionStatePay
     proposals: [],
     participants: [{ id: 'u1', displayName: 'Alice' }],
     viewer: { id: 'u1', displayName: 'Alice' },
+    shortlist: [],
+    shortlistLocked: false,
+    voting: emptyVotingState('q1'),
+    discussionTimer: null,
     ...overrides,
   };
 }
@@ -202,7 +208,11 @@ describe('usePinboard room wiring', () => {
     });
     expect(get).toHaveBeenCalledTimes(1);
 
-    const nextBoard = { ...REST_BOARD, questionId: 'q2', items: [sticky('q2-item', { questionId: 'q2' })] };
+    const nextBoard = {
+      ...REST_BOARD,
+      questionId: 'q2',
+      items: [sticky('q2-item', { questionId: 'q2' })],
+    };
     get.mockResolvedValue(nextBoard);
 
     act(() => {
@@ -243,9 +253,11 @@ describe('usePinboard write intents', () => {
   };
 
   it('emits proposalCreate and resolves when the server acks ok', async () => {
-    socket.emit.mockImplementation((_event: string, _payload: unknown, ack?: (res: { ok: boolean }) => void) => {
-      ack?.({ ok: true });
-    });
+    socket.emit.mockImplementation(
+      (_event: string, _payload: unknown, ack?: (res: { ok: boolean }) => void) => {
+        ack?.({ ok: true });
+      },
+    );
     const { result } = renderHook(() => usePinboard('s1'));
 
     await act(async () => {
@@ -256,8 +268,16 @@ describe('usePinboard write intents', () => {
 
   it('rejects with the server’s code so the tools can branch on why a write failed', async () => {
     socket.emit.mockImplementation(
-      (_event: string, _payload: unknown, ack?: (res: { ok: boolean; error?: string; code?: string }) => void) => {
-        ack?.({ ok: false, error: 'This session has ended — the board is read-only', code: 'SESSION_NOT_ACTIVE' });
+      (
+        _event: string,
+        _payload: unknown,
+        ack?: (res: { ok: boolean; error?: string; code?: string }) => void,
+      ) => {
+        ack?.({
+          ok: false,
+          error: 'This session has ended — the board is read-only',
+          code: 'SESSION_NOT_ACTIVE',
+        });
       },
     );
     const { result } = renderHook(() => usePinboard('s1'));
@@ -292,9 +312,11 @@ describe('usePinboard write intents', () => {
   });
 
   it('emits proposalDelete for a card the viewer authored', async () => {
-    socket.emit.mockImplementation((_event: string, _payload: unknown, ack?: (res: { ok: boolean }) => void) => {
-      ack?.({ ok: true });
-    });
+    socket.emit.mockImplementation(
+      (_event: string, _payload: unknown, ack?: (res: { ok: boolean }) => void) => {
+        ack?.({ ok: true });
+      },
+    );
     const { result } = renderHook(() => usePinboard('s1'));
 
     await act(async () => {

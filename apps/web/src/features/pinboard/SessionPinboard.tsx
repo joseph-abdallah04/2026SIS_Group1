@@ -1,11 +1,18 @@
 import { useParams } from 'react-router-dom';
-import type { Question } from '@roundtable/shared';
+import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { PhaseTimer } from '../../components/PhaseTimer';
 import { AgendaPanel } from '../agenda/AgendaPanel';
+import { JoinCodeCard } from '../sessions/JoinCodeCard';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
+import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
+import { ShortlistBar } from '../voting/ShortlistBar';
+import { ShortlistPrompt } from '../voting/ShortlistPrompt';
+import { useVoting } from '../voting/useVoting';
+import { VotingBallot } from '../voting/VotingBallot';
 import { MicToggle, ParticipantPanel, VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
@@ -13,7 +20,7 @@ import { usePinboard } from './usePinboard';
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Loading session…</span>
       </header>
@@ -39,9 +46,11 @@ interface SessionPinboardProps {
   isLeader: boolean;
   /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
   questions: Question[];
+  /** Still joinable while the session is live — shown on the participant rail. */
+  joinCode: string | null;
 }
 
-export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
+export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const {
@@ -57,6 +66,8 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     newItemIds,
     viewerId,
   } = usePinboard(sessionId);
+  const voting = useVoting(sessionId, board?.questionId ?? null);
+  const { setPhase, busyQuestionId: phaseBusyId, error: phaseError } = useSetQuestionPhase(sessionId);
   // Entering the session view joins the room; leaving it (or ending the
   // session) unmounts this and disconnects — F11's connect/disconnect points.
   // Called before any early return so the room is not torn down and rebuilt
@@ -130,6 +141,13 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     );
   }
 
+  const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
+  const balloting = voting.phase === 'open' || voting.phase === 'closed';
+  // Server already ordered the shortlist (winner / ties first when closed).
+  const ballotItems = voting.proposalIds
+    .map((id) => board.items.find((item) => item.id === id))
+    .filter((item): item is NonNullable<typeof item> => item !== undefined);
+
   return (
     <CreativeToolsProvider
       isLive={isLive && board.questionStatus === 'discussion'}
@@ -160,12 +178,65 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
           viewerId={viewerId}
           editProposal={editProposal}
           deleteProposal={deleteProposal}
+          shortlist={voting.proposalIds}
+          canToggleShortlist={isLeader && selecting && !voting.locked}
+          onToggleShortlist={voting.toggle}
+          shortlistControl={
+            selecting ? (
+              <ShortlistBar isLeader={isLeader} count={voting.proposalIds.length} />
+            ) : null
+          }
+          boardOverlay={
+            selecting && isLeader ? (
+              <ShortlistPrompt
+                count={voting.proposalIds.length}
+                busy={voting.busy || phaseBusyId === board.questionId}
+                error={voting.error ?? phaseError}
+                onProceed={() => void voting.startVote()}
+                onClear={() => void voting.clear()}
+                onBack={() => {
+                  if (board.questionId) void setPhase(board.questionId, 'discussion');
+                }}
+              />
+            ) : null
+          }
+          ballot={
+            balloting ? (
+              <VotingBallot
+                questionText={board.questionText}
+                items={ballotItems}
+                tallies={voting.tallies}
+                myVote={voting.myVote}
+                votedCount={voting.votedCount}
+                voterCount={voting.voterCount}
+                isLeader={isLeader}
+                viewerId={viewerId}
+                leaderId={board.leaderId}
+                voterStatuses={voting.voterStatuses}
+                winnerProposalId={voting.winnerProposalId}
+                tiedProposalIds={voting.tiedProposalIds}
+                votingEndsAt={voting.votingEndsAt}
+                phase={voting.phase === 'closed' ? 'closed' : 'open'}
+                busy={voting.busy}
+                error={voting.error}
+                onVote={(id) => void voting.castVote(id)}
+                onClose={() => void voting.closeVote()}
+                onContinue={() => void voting.continueVote()}
+              />
+            ) : null
+          }
           agenda={
             <AgendaPanel
               sessionId={sessionId}
               questions={questions}
               activeQuestionId={board.questionId}
               isLeader={isLeader}
+              votingPhase={voting.phase}
+              hasProposals={
+                board.questionStatus === 'discussion'
+                  ? board.items.length >= SHORTLIST_MIN
+                  : undefined
+              }
             />
           }
           micControl={
@@ -179,9 +250,25 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
             />
           }
           participants={
-            <ParticipantPanel participants={voice.participants} status={voice.status} />
+            <ParticipantPanel
+              participants={voice.participants}
+              status={voice.status}
+              footer={joinCode ? <JoinCodeCard code={joinCode} /> : null}
+            />
           }
           reactToProposal={reactToProposal}
+          headerTimer={
+            board.discussionTimer &&
+            (board.questionStatus === 'discussion' ||
+              (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (
+              <PhaseTimer
+                startedAt={board.discussionTimer.startedAt}
+                durationSeconds={board.discussionTimer.durationSeconds}
+                allowOvertime
+                label="Discussion"
+              />
+            ) : null
+          }
         />
         <SessionJoinNotices />
       </main>

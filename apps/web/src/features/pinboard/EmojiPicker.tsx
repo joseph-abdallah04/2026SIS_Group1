@@ -120,7 +120,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
       ref={panelRef}
       role="dialog"
       aria-label="Pick a reaction"
-      className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-rt-tertiary bg-rt-surface shadow-lg"
+      className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-lg"
       style={{ top: position.top, left: position.left, width: PANEL_WIDTH, height: PANEL_HEIGHT }}
     >
       <div className="relative shrink-0 border-b border-rt-tertiary p-1.5">
@@ -138,7 +138,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
           placeholder="Search emoji"
           aria-label="Search emoji"
           autoComplete="off"
-          className="h-[28px] w-full rounded-md bg-rt-surface-alt pr-2.5 pl-8 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
+          className="h-[28px] w-full rounded-full bg-rt-surface-alt pr-2.5 pl-8 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
         />
       </div>
 
@@ -163,7 +163,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
                 setQuery('');
                 setGroupIndex(index);
               }}
-              className={`flex h-[26px] w-[26px] items-center justify-center rounded-md text-[14px] transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
+              className={`flex h-[26px] w-[26px] items-center justify-center rounded-xl text-[14px] transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
                 active ? 'bg-rt-primary-tint' : 'hover:bg-rt-surface-alt'
               }`}
             >
@@ -194,7 +194,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
                   aria-pressed={mine}
                   aria-label={reactionLabel(emoji)}
                   onClick={() => onPick(emoji)}
-                  className={`flex h-[32px] w-[32px] items-center justify-center rounded-md text-[18px] leading-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
+                  className={`flex h-[32px] w-[32px] items-center justify-center rounded-xl text-[18px] leading-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
                     mine ? 'bg-rt-primary-tint' : 'hover:bg-rt-surface-alt'
                   }`}
                 >

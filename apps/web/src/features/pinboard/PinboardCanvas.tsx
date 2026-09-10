@@ -70,6 +70,19 @@ interface PinboardCanvasProps {
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
   deleteProposal: (proposalId: string) => Promise<void>;
   reactToProposal: (proposalId: string, emoji: string) => Promise<void>;
+  /** Ids currently on the F27 shortlist — rings on those cards. */
+  shortlist: string[];
+  /** Leader, voting phase, round not yet locked — checkboxes on cards. */
+  canToggleShortlist: boolean;
+  onToggleShortlist: (id: string) => void;
+  /** F27 header chrome (count / “leader is selecting”). */
+  shortlistControl?: ReactNode;
+  /** Leader shortlist prompt, pinned to the bottom of the board window. */
+  boardOverlay?: ReactNode;
+  /** F28 ballot — covers the board + rails until the leader ends the vote. */
+  ballot?: ReactNode;
+  /** Discussion clock. Hidden by the parent once the ballot overlay is up. */
+  headerTimer?: ReactNode;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -84,10 +97,7 @@ const PHASE_LABELS: Record<QuestionStatus, string> = {
 
 function EmptyBoardPlate() {
   return (
-    <div
-      className="relative w-[400px] overflow-hidden border border-rt-tertiary bg-rt-surface shadow-sm"
-      style={{ borderRadius: '16px' }}
-    >
+    <div className="relative w-[400px] overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-sm">
       <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
         Empty board
       </div>
@@ -103,7 +113,7 @@ function EmptyBoardPlate() {
         <div className="mt-[18px] border-t border-rt-tertiary">
           <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
             <div
-              className="h-[26px] w-[26px] rounded-md border border-[#F1C881]"
+              className="h-[26px] w-[26px] rounded-xl border border-[#F1C881]"
               style={{ background: '#FDF4E5' }}
             />
             <p className="text-[12.5px] font-medium text-rt-ink">
@@ -113,7 +123,7 @@ function EmptyBoardPlate() {
           </div>
           <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
             <div
-              className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-white"
+              className="h-[26px] w-[26px] rounded-xl border border-rt-tertiary bg-white"
               style={{
                 background: 'repeating-linear-gradient(-45deg, #EEF2F4 0 5px, #FFFFFF 5px 10px)',
               }}
@@ -124,7 +134,7 @@ function EmptyBoardPlate() {
             </p>
           </div>
           <div className="flex items-center gap-3 py-2.5">
-            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-cool-tint" />
+            <div className="h-[26px] w-[26px] rounded-xl border border-rt-tertiary bg-rt-cool-tint" />
             <p className="text-[12.5px] font-medium text-rt-ink">
               Diagram
               <span className="font-normal text-rt-ink-faint"> — soft border, box preview</span>
@@ -212,6 +222,13 @@ export function PinboardCanvas({
   editProposal,
   deleteProposal,
   reactToProposal,
+  shortlist,
+  canToggleShortlist,
+  onToggleShortlist,
+  shortlistControl,
+  boardOverlay,
+  ballot,
+  headerTimer,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -225,6 +242,7 @@ export function PinboardCanvas({
   // write is re-checked server-side.
 
   const { openEditorForEdit } = useCreativeTools();
+  const boardOpen = board.questionStatus === 'discussion';
 
   /**
    * Whether a proposal can be reopened in the tool that made it.
@@ -547,7 +565,7 @@ export function PinboardCanvas({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-6 py-3 text-rt-ink">
+      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-3 text-rt-ink">
         <RoundTableLogo />
         <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
           <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
@@ -561,7 +579,9 @@ export function PinboardCanvas({
             </h1>
           )}
         </div>
+        {headerTimer}
         <div className="ml-auto flex items-center gap-2.5">
+          {shortlistControl}
           {micControl}
           <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
@@ -592,7 +612,7 @@ export function PinboardCanvas({
       {/* Agenda left (F24), board centre, participants right (F13) — all above
           the footer, so the toolbar and zoom control keep the full width they
           had. Both rails collapse independently to give the board back. */}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
 
         {/*
@@ -604,7 +624,7 @@ export function PinboardCanvas({
       */}
         <div
           ref={viewportRef}
-          className="relative min-h-0 flex-1 overflow-hidden bg-rt-surface-alt"
+          className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-rt-surface-alt"
           style={{
             // Only promise a grab when one is actually on offer. Showing `grab`
             // everywhere implied the whole board could be dragged, including over
@@ -642,7 +662,7 @@ export function PinboardCanvas({
               coordinate space every participant shares.
             */}
               <div
-                className="relative rounded-lg bg-rt-surface"
+                className="relative rounded-2xl bg-rt-surface"
                 style={{
                   width: BOARD_SIZE.width,
                   height: BOARD_SIZE.height,
@@ -659,15 +679,22 @@ export function PinboardCanvas({
                     isNew={newItemIds.has(item.id)}
                     isOwn={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId === board.leaderId}
-                    onOpenEditor={canReopen(item) ? openEditorForEdit : undefined}
-                    canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
-                    canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
+                    onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
+                    canMove={
+                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                    }
+                    canDelete={
+                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                    }
                     isDragging={draggingId === item.id}
                     dragHandlers={dragHandlers}
                     onEditText={onEditText}
                     onDelete={onDelete}
                     viewerId={viewerId}
-                    onReact={onReact}
+                    onReact={boardOpen ? onReact : undefined}
+                    isShortlisted={shortlist.includes(item.id)}
+                    canToggleShortlist={canToggleShortlist}
+                    onToggleShortlist={onToggleShortlist}
                   />
                 ))}
               </div>
@@ -702,13 +729,30 @@ export function PinboardCanvas({
             isPanning={isPanning}
             onPan={(y) => panTo({ x: pan.x, y })}
           />
+
+          {boardOverlay ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+              {boardOverlay}
+            </div>
+          ) : null}
         </div>
 
         {participants}
+        {ballot}
       </div>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
-        <CreativeToolbar />
+        {boardOpen ? (
+          <CreativeToolbar />
+        ) : board.questionStatus === 'voting' ? (
+          <p className="text-[12px] font-medium text-rt-ink-muted">
+            Proposals are locked while this question is in voting
+          </p>
+        ) : (
+          <p className="text-[12px] font-medium text-rt-ink-muted">
+            This question is closed to new proposals
+          </p>
+        )}
         {writeError ? (
           <p role="status" className="text-[11px] font-medium text-rt-secondary-deep">
             {writeError}

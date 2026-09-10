@@ -7,11 +7,13 @@
 // was waiting on. Nothing in `modules/pinboard/` had to change for that: it
 // only ever relied on `socket.data.user` / `socket.data.sessionId` being
 // trustworthy, which is now true in production too.
+import { isShortlistLocked } from '@roundtable/shared';
 import type { SessionStatePayload } from '@roundtable/shared/events';
 
 import { verifyToken } from '../modules/auth/index.js';
 import { getBoardForSession, registerPinboardSocketHandlers } from '../modules/pinboard/index.js';
 import { getSession, getSessionMemberIdentity } from '../modules/sessions/index.js';
+import { getVotingState, registerVotingSocketHandlers, bindVotingDeadlineIo, recoverVotingDeadlines } from '../modules/voting/index.js';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket, type SocketUser } from './types.js';
 
 /**
@@ -89,6 +91,9 @@ async function emitMemberLeftIfLast(
 }
 
 export function registerRealtimeGateway(io: RealtimeServer): void {
+  bindVotingDeadlineIo(io);
+  void recoverVotingDeadlines();
+
   io.on('connection', (socket) => {
     socket.data.user = null;
     socket.data.sessionId = null;
@@ -143,6 +148,7 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
           // anything left out would render as a placeholder until some other
           // request happened to fill it in.
           const { items, ...meta } = await getBoardForSession(sessionId);
+          const voting = await getVotingState(meta.questionId, user.id);
           const snapshot: SessionStatePayload = {
             ...meta,
             proposals: items,
@@ -155,6 +161,9 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
             // remembered guess. With `leaderId` beside it, one snapshot answers
             // both "is this mine" and "am I the leader".
             viewer: user,
+            shortlist: voting.proposalIds,
+            shortlistLocked: isShortlistLocked(voting.phase),
+            voting,
           };
           socket.emit('sessionState', snapshot);
 
@@ -203,6 +212,7 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
     });
 
     registerPinboardSocketHandlers(io, socket);
+    registerVotingSocketHandlers(io, socket);
 
     socket.on('disconnect', () => {
       const { user, sessionId } = socket.data;

@@ -40,6 +40,7 @@ const BOARD = {
   questionPosition: 0,
   questionStatus: 'discussion',
   items: [],
+  discussionTimer: null,
 };
 
 function createApp() {

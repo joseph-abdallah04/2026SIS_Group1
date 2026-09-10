@@ -6,15 +6,22 @@
 import type {
   BoardItem,
   BoardResponse,
+  Question,
   QuestionStatus,
   ReactionGroup,
   SessionStatus,
+  VotingPublicState,
+  VotingViewerState,
+  VotingVoterStatus,
 } from './index.js';
 import type {
   ProposalCreateInput,
   ProposalDeleteInput,
   ProposalReactInput,
   ProposalUpdateInput,
+  EmptyVotingIntent,
+  ShortlistToggleInput,
+  VoteCastInput,
 } from './schemas.js';
 
 export interface SessionUserPayload {
@@ -58,6 +65,19 @@ export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
    * client that only ever managed a REST load cannot write anyway.
    */
   viewer: SessionUserPayload;
+  /**
+   * F27: the shortlist for the question this snapshot's board is showing.
+   * Empty and unlocked until the leader has picked anything; `locked` once
+   * they start the vote. Always present so a reconnect does not invent ticks.
+   */
+  shortlist: string[];
+  shortlistLocked: boolean;
+  /**
+   * F27–F30: personalised voting state for this socket. `myVote` is this
+   * viewer's ballot only — the public broadcast (`votingUpdated`) never
+   * carries it, so a reconnect is how you learn your own vote after a refresh.
+   */
+  voting: VotingViewerState;
 }
 
 export interface ClientToServerEvents {
@@ -117,6 +137,29 @@ export interface ClientToServerEvents {
    */
   proposalReact(payload: ProposalReactInput, ack?: (res: WriteAck) => void): void;
   // === voting module ===
+  /**
+   * Leader adds or removes one proposal on the shortlist (F27). Identity and
+   * session come from the socket, same as pinboard writes — the payload is
+   * only which card they clicked.
+   */
+  shortlistToggle(payload: ShortlistToggleInput, ack?: (res: WriteAck) => void): void;
+  /** Leader empties the shortlist without starting the vote (F27 cancel). */
+  shortlistClear(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
+  /** Leader locks the shortlist and opens the round (F27 confirm). */
+  votingStart(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
+  /**
+   * Cast or change this member's one vote on the open round (F28). Identity
+   * comes from the socket; the payload is only which shortlisted proposal.
+   */
+  voteCast(payload: VoteCastInput, ack?: (res: WriteAck) => void): void;
+  /**
+   * Leader closes the open round and writes the answer (F30, manual — the
+   * room does not close itself on the last ballot, so people can still change
+   * their vote). The overlay stays up on the result until `votingContinue`.
+   */
+  votingClose(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
+  /** Leader dismisses the in-ballot result and opens the next question. */
+  votingContinue(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===
@@ -167,6 +210,12 @@ export interface ServerToClientEvents {
    * re-read the board the same way they do for `sessionPhase`.
    */
   sessionFocus(payload: { sessionId: string; questionId: string }): void;
+  /**
+   * The leader appended a question to a live agenda (`POST /:id/questions`).
+   * Clients insert this row — they do not invent one locally after the POST,
+   * same rule as `sessionPhase`.
+   */
+  questionAdded(payload: { sessionId: string; question: Question }): void;
 
   // === pinboard module ===
   /**
@@ -196,6 +245,33 @@ export interface ServerToClientEvents {
   }): void;
 
   // === voting module ===
+  /**
+   * The shortlist for one question changed (F27). Carries the whole list, not
+   * a delta, so a client that missed a toggle is corrected by the next one.
+   * `locked` is true once the leader has started the vote.
+   */
+  shortlistUpdated(payload: { questionId: string; proposalIds: string[]; locked: boolean }): void;
+  /**
+   * Live voting state for the question on screen (F27–F30). Public: tallies
+   * and how many people have voted, never who voted for which proposal.
+   *
+   * Two fields are per-recipient, attached as this event is fanned out socket
+   * by socket rather than broadcast to the room:
+   *
+   * - `voterStatuses` only reaches the leader (F29), so a participant never
+   *   receives the nudge list;
+   * - `myVote` only ever carries the recipient's own ballot, so the client is
+   *   told what the server stored for them instead of assuming its write
+   *   landed — and still learns nothing about anyone else's choice.
+   *
+   * A client that missed an event is corrected by the next one.
+   */
+  votingUpdated(
+    payload: VotingPublicState & {
+      voterStatuses?: VotingVoterStatus[];
+      myVote?: string | null;
+    },
+  ): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===
