@@ -321,8 +321,17 @@ export function emptyVotingState(questionId: string | null = null): VotingViewer
 }
 
 export function toPublicVotingState(state: VotingViewerState): VotingPublicState {
-  const { myVote: _myVote, voterStatuses: _voterStatuses, ...publicState } = state;
-  return publicState;
+  return {
+    questionId: state.questionId,
+    phase: state.phase,
+    proposalIds: state.proposalIds,
+    tallies: state.tallies,
+    votedCount: state.votedCount,
+    voterCount: state.voterCount,
+    winnerProposalId: state.winnerProposalId,
+    tiedProposalIds: state.tiedProposalIds,
+    votingEndsAt: state.votingEndsAt,
+  };
 }
 
 // === summary module ===
