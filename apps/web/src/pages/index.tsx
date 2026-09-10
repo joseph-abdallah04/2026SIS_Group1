@@ -68,7 +68,7 @@ function SessionPreview({ session }: { session: SessionSummary }) {
 
   return (
     <div
-      className="relative aspect-[4/3] overflow-hidden rounded-xl bg-rt-surface-alt"
+      className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-rt-surface-alt"
       style={{
         backgroundImage: 'radial-gradient(rgba(8,12,21,0.10) 1px, transparent 1px)',
         backgroundSize: '14px 14px',
@@ -78,7 +78,7 @@ function SessionPreview({ session }: { session: SessionSummary }) {
       {notes.map((note, index) => (
         <span
           key={index}
-          className="absolute h-10 w-10 rounded-sm shadow-sm sm:h-11 sm:w-11"
+          className="absolute h-10 w-10 rounded-xl shadow-sm sm:h-11 sm:w-11"
           style={{
             top: note.top,
             left: note.left,
@@ -240,7 +240,7 @@ export function DashboardPage() {
 
         <JoinByCodeForm />
 
-        <label className="flex min-h-10 items-center gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-3">
+        <label className="flex min-h-10 items-center gap-2 rounded-full border border-rt-tertiary bg-rt-surface px-3">
           <Search aria-hidden size={16} className="shrink-0 text-rt-ink-faint" />
           <span className="sr-only">Search sessions by title</span>
           <input
@@ -259,7 +259,7 @@ export function DashboardPage() {
         )}
 
         {error && (
-          <div className="rounded-lg border border-rt-tertiary bg-rt-surface-alt p-4 text-[13px]">
+          <div className="rounded-2xl border border-rt-tertiary bg-rt-surface-alt p-4 text-[13px]">
             <p className="text-rt-ink-muted">{error}</p>
             <button
               type="button"

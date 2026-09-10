@@ -135,7 +135,7 @@ export function ParticipantPanel({ participants, status, footer }: ParticipantPa
             return (
               <li
                 key={person.identity}
-                className="flex items-center gap-2.5 rounded-md px-2.5 py-2"
+                className="flex items-center gap-2.5 rounded-2xl px-2.5 py-2"
               >
                 <ParticipantBubble
                   initials={person.initials}

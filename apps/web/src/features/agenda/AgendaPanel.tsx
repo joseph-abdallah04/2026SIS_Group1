@@ -146,7 +146,7 @@ export function AgendaPanel({
               <li
                 key={question.id}
                 aria-current={isFocused ? 'step' : undefined}
-                className={`rounded-md border px-2.5 py-2 ${
+                className={`rounded-2xl border px-2.5 py-2 ${
                   isFocused
                     ? 'border-rt-secondary bg-white shadow-sm'
                     : 'border-transparent bg-transparent'
@@ -288,12 +288,12 @@ export function AgendaPanel({
               placeholder="Add a question…"
               maxLength={SESSION_QUESTION_TEXT_MAX}
               disabled={adding}
-              className="min-h-8 min-w-0 flex-1 rounded-md border border-rt-tertiary bg-rt-surface px-2 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary disabled:opacity-60"
+              className="min-h-8 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-2 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-secondary disabled:opacity-60"
             />
             <button
               type="submit"
               disabled={adding || draft.trim().length === 0}
-              className="shrink-0 rounded-md bg-rt-secondary px-2.5 text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-50"
+              className="min-h-8 shrink-0 rounded-full bg-rt-secondary px-2.5 text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-50"
             >
               {adding ? 'Adding…' : 'Add'}
             </button>

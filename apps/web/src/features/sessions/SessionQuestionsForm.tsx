@@ -126,7 +126,7 @@ export function SessionQuestionsForm({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="What is this session about?"
           maxLength={120}
-          className="min-h-10 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
+          className="min-h-10 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
         />
       </div>
 
@@ -144,14 +144,14 @@ export function SessionQuestionsForm({
                 onChange={(e) => updateQuestion(index, e.target.value)}
                 placeholder={`Question ${index + 1}`}
                 maxLength={500}
-                className="min-h-10 flex-1 rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
+                className="min-h-10 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
               />
               <button
                 type="button"
                 onClick={() => moveQuestion(index, -1)}
                 disabled={index === 0}
                 aria-label="Move question up"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
               >
                 ↑
               </button>
@@ -160,7 +160,7 @@ export function SessionQuestionsForm({
                 onClick={() => moveQuestion(index, 1)}
                 disabled={index === questions.length - 1}
                 aria-label="Move question down"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
               >
                 ↓
               </button>
@@ -169,7 +169,7 @@ export function SessionQuestionsForm({
                 onClick={() => removeQuestion(index)}
                 disabled={questions.length === 1}
                 aria-label="Remove question"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-30"
               >
                 ×
               </button>

@@ -112,11 +112,11 @@ function DiagramBody({ item }: { item: BoardItem }) {
 
   return (
     <div
-      className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg bg-rt-surface-alt"
+      className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-xl bg-rt-surface-alt"
       style={{ minHeight: 96 }}
     >
       {nodes.length === 0 ? (
-        <div className="m-2 flex h-20 items-center justify-center rounded-md border border-dashed border-rt-tertiary" />
+        <div className="m-2 flex h-20 items-center justify-center rounded-xl border border-dashed border-rt-tertiary" />
       ) : (
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
@@ -277,7 +277,7 @@ export function ProposalCard({
 
         {artifact.type === 'drawing' ? (
           <div
-            className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-lg"
+            className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-xl"
             style={{ height: 160, background: THUMB_BACKGROUND }}
           >
             {drawingSrc ? (

@@ -97,10 +97,7 @@ const PHASE_LABELS: Record<QuestionStatus, string> = {
 
 function EmptyBoardPlate() {
   return (
-    <div
-      className="relative w-[400px] overflow-hidden border border-rt-tertiary bg-rt-surface shadow-sm"
-      style={{ borderRadius: '16px' }}
-    >
+    <div className="relative w-[400px] overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-sm">
       <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
         Empty board
       </div>
@@ -116,7 +113,7 @@ function EmptyBoardPlate() {
         <div className="mt-[18px] border-t border-rt-tertiary">
           <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
             <div
-              className="h-[26px] w-[26px] rounded-md border border-[#F1C881]"
+              className="h-[26px] w-[26px] rounded-xl border border-[#F1C881]"
               style={{ background: '#FDF4E5' }}
             />
             <p className="text-[12.5px] font-medium text-rt-ink">
@@ -126,7 +123,7 @@ function EmptyBoardPlate() {
           </div>
           <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
             <div
-              className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-white"
+              className="h-[26px] w-[26px] rounded-xl border border-rt-tertiary bg-white"
               style={{
                 background: 'repeating-linear-gradient(-45deg, #EEF2F4 0 5px, #FFFFFF 5px 10px)',
               }}
@@ -137,7 +134,7 @@ function EmptyBoardPlate() {
             </p>
           </div>
           <div className="flex items-center gap-3 py-2.5">
-            <div className="h-[26px] w-[26px] rounded-md border border-rt-tertiary bg-rt-cool-tint" />
+            <div className="h-[26px] w-[26px] rounded-xl border border-rt-tertiary bg-rt-cool-tint" />
             <p className="text-[12.5px] font-medium text-rt-ink">
               Diagram
               <span className="font-normal text-rt-ink-faint"> — soft border, box preview</span>
@@ -665,7 +662,7 @@ export function PinboardCanvas({
               coordinate space every participant shares.
             */}
               <div
-                className="relative rounded-lg bg-rt-surface"
+                className="relative rounded-2xl bg-rt-surface"
                 style={{
                   width: BOARD_SIZE.width,
                   height: BOARD_SIZE.height,

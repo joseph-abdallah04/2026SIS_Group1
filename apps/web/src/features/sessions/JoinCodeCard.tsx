@@ -37,7 +37,7 @@ export function JoinCodeCard({ code }: JoinCodeCardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-rt-secondary/20 bg-white px-2.5 py-2 shadow-sm">
+    <div className="rounded-2xl border border-rt-secondary/20 bg-white px-2.5 py-2 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
           Join code

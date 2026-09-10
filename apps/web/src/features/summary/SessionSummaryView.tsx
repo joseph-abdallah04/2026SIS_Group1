@@ -39,7 +39,7 @@ function QuestionRecap({
   const tied = new Set(question.tiedProposalIds);
 
   return (
-    <section className="rounded-lg border border-rt-tertiary bg-rt-surface px-4 py-4">
+    <section className="rounded-2xl border border-rt-tertiary bg-rt-surface px-4 py-4">
       <header className="flex items-baseline justify-between gap-3">
         <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-rt-ink">
           <span className="mr-2 text-[11px] font-semibold text-rt-ink-faint">{index + 1}</span>
@@ -140,7 +140,7 @@ export function SessionSummaryView({
           {summary.participants.map((member) => (
             <li
               key={member.userId}
-              className="flex items-baseline justify-between gap-3 rounded-lg border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
+              className="flex items-baseline justify-between gap-3 rounded-2xl border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
             >
               <span className="text-rt-ink">{member.displayName}</span>
               {member.isLeader ? (

@@ -147,7 +147,7 @@ export function VotingBallot({
         role="dialog"
         aria-modal="true"
         aria-labelledby="voting-ballot-title"
-        className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-rt-tertiary bg-rt-surface shadow-lg"
+        className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-lg"
       >
         <header className="shrink-0 border-b border-rt-tertiary px-5 py-4">
           <div className="flex items-start justify-between gap-4">

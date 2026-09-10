@@ -94,7 +94,7 @@ export function JoinSessionPage() {
         )}
 
         {unknownCode && (
-          <div className="flex w-full flex-col gap-4 rounded-lg border border-rt-tertiary bg-rt-surface p-5 text-center shadow-sm">
+          <div className="flex w-full flex-col gap-4 rounded-2xl border border-rt-tertiary bg-rt-surface p-5 text-center shadow-sm">
             <div>
               <h1 className="text-[16px] font-semibold tracking-[-0.01em]">{UNKNOWN_JOIN_TITLE}</h1>
               <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">
@@ -110,7 +110,7 @@ export function JoinSessionPage() {
         )}
 
         {error && !unknownCode && (
-          <div className="flex w-full flex-col gap-4 rounded-lg border border-rt-tertiary bg-rt-surface p-5 text-center shadow-sm">
+          <div className="flex w-full flex-col gap-4 rounded-2xl border border-rt-tertiary bg-rt-surface p-5 text-center shadow-sm">
             <p className="text-[13px] leading-relaxed text-rt-ink-muted">{error}</p>
             <Link to="/dashboard">
               <Button type="button" className="w-full">
@@ -121,7 +121,7 @@ export function JoinSessionPage() {
         )}
 
         {preview && !unknownCode && (
-          <div className="flex w-full flex-col gap-4 rounded-lg border border-rt-tertiary bg-rt-surface-alt p-5 text-center">
+          <div className="flex w-full flex-col gap-4 rounded-2xl border border-rt-tertiary bg-rt-surface-alt p-5 text-center">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-rt-ink-faint">
                 You're about to join

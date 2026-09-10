@@ -119,12 +119,11 @@ export function VoiceNotice(props: VoiceNoticeProps) {
     <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center px-4">
       <div
         role="status"
-        className={`pointer-events-auto flex max-w-[560px] items-center gap-3 border px-3.5 py-2.5 shadow-sm ${
+        className={`pointer-events-auto flex max-w-[560px] items-center gap-3 rounded-2xl border px-3.5 py-2.5 shadow-sm ${
           attention
             ? 'border-rt-secondary-tint bg-rt-secondary-wash'
             : 'border-rt-tertiary bg-rt-surface'
         }`}
-        style={{ borderRadius: '12px' }}
       >
         <span
           className={`shrink-0 text-[9px] font-semibold tracking-[0.16em] uppercase ${
@@ -138,8 +137,7 @@ export function VoiceNotice(props: VoiceNoticeProps) {
           <button
             type="button"
             onClick={() => void notice.action?.run()}
-            className="ml-1 shrink-0 bg-rt-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
-            style={{ borderRadius: '8px' }}
+            className="ml-1 shrink-0 rounded-full bg-rt-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-primary"
           >
             {notice.action.label}
           </button>

@@ -59,7 +59,7 @@ export function TimerDurationFields({
       <div
         role="group"
         aria-labelledby={`${id}-label`}
-        className="flex overflow-hidden rounded-lg border border-rt-tertiary bg-rt-surface"
+        className="flex overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface"
       >
         <UnitSpinner
           id={`${id}-hours`}
@@ -182,7 +182,7 @@ function UnitSpinner({
         aria-label={`Increase ${label}`}
         disabled={!canUp}
         onClick={() => stepBy(1)}
-        className="flex h-7 w-full items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-25"
+        className="flex h-7 w-full items-center justify-center rounded-full text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-25"
       >
         <ChevronUp className="h-3.5 w-3.5" strokeWidth={2.25} />
       </button>
@@ -205,14 +205,14 @@ function UnitSpinner({
         onChange={(e) => setDraft(e.target.value.replace(/\D/g, '').slice(0, 2))}
         onBlur={(e) => apply(e.currentTarget.value)}
         onKeyDown={onKeyDown}
-        className="w-full bg-transparent py-0.5 text-center text-[17px] font-semibold tabular-nums text-rt-ink outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-rt-secondary"
+        className="w-full bg-transparent py-0.5 text-center text-[17px] font-semibold tabular-nums text-rt-ink outline-none focus-visible:rounded-xl focus-visible:ring-2 focus-visible:ring-rt-secondary"
       />
       <button
         type="button"
         aria-label={`Decrease ${label}`}
         disabled={!canDown}
         onClick={() => stepBy(-1)}
-        className="flex h-7 w-full items-center justify-center rounded-md text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-25"
+        className="flex h-7 w-full items-center justify-center rounded-full text-rt-ink-muted hover:bg-rt-primary-tint disabled:opacity-25"
       >
         <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.25} />
       </button>

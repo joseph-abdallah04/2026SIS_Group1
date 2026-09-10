@@ -330,7 +330,7 @@ function PresetButton({
       aria-pressed={active}
       disabled={disabled}
       onClick={onSelect}
-      className={`min-h-8 flex-1 rounded-lg border px-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
+      className={`min-h-8 flex-1 rounded-full border px-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
         active
           ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
           : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:bg-rt-surface-alt'
@@ -1351,7 +1351,7 @@ export function DiagramEditor() {
                   disabled={disabled}
                   aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
                   title={`Click to place a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}, or drag it onto the canvas`}
-                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-2xl border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <ShapeIcon aria-hidden="true" size={16} />
                   {DIAGRAM_SHAPE_LABELS[shape]}
@@ -1614,7 +1614,7 @@ export function DiagramEditor() {
           {connectionMode ? (
             <p
               role="status"
-              className="mt-2 rounded-lg bg-rt-primary-tint px-3 py-2 text-[11px] leading-relaxed text-rt-primary-deep"
+              className="mt-2 rounded-2xl bg-rt-primary-tint px-3 py-2 text-[11px] leading-relaxed text-rt-primary-deep"
             >
               {connectionSourceId
                 ? `Choose a destination for ${selectedNodeById(nodes, connectionSourceId)?.label ?? 'this element'}.`
@@ -1625,7 +1625,7 @@ export function DiagramEditor() {
 
         {containerAwaitingDelete ? (
           <section
-            className="mt-4 rounded-lg border border-rt-secondary bg-rt-secondary-wash p-3"
+            className="mt-4 rounded-2xl border border-rt-secondary bg-rt-secondary-wash p-3"
             aria-label="Delete container"
           >
             <p role="alert" className="text-[12px] leading-relaxed text-rt-secondary-deep">
@@ -1703,7 +1703,7 @@ export function DiagramEditor() {
                   event.currentTarget.blur();
                 }
               }}
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
+              className="mt-1.5 h-10 w-full rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
             />
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {selectedNode.label.length}/{DIAGRAM_LABEL_LIMIT}
@@ -1801,7 +1801,7 @@ export function DiagramEditor() {
                 }
               }}
               placeholder="e.g. sends request"
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
+              className="mt-1.5 h-10 w-full rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
             />
             <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
               {(selectedEdge.label ?? '').length}/{DIAGRAM_EDGE_LABEL_LIMIT}
@@ -1861,7 +1861,7 @@ export function DiagramEditor() {
       </aside>
 
       <section className="relative flex min-h-0 items-center justify-center overflow-auto p-3 sm:p-6">
-        <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">
+        <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-full border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">
           <IconButton
             label="Zoom out"
             title="Zoom out (Ctrl + scroll)"
@@ -1912,7 +1912,7 @@ export function DiagramEditor() {
           aria-label="Diagram canvas"
           tabIndex={0}
           viewBox={diagramViewBoxAttribute(view)}
-          className={`w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
+          className={`w-full shrink-0 touch-none rounded-2xl border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
           style={{
             maxWidth: `min(1200px, calc((100dvh - ${DIAGRAM_VERTICAL_CHROME_REM}rem) * ${DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT}))`,
             aspectRatio: `${DIAGRAM_CANVAS_WIDTH} / ${DIAGRAM_CANVAS_HEIGHT}`,

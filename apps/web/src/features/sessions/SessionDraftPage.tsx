@@ -61,7 +61,7 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
           {session.questions.map((question, index) => (
             <li
               key={question.id}
-              className="flex items-baseline gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
+              className="flex items-baseline gap-2 rounded-2xl border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
             >
               <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
               <span className="text-rt-ink">{question.text}</span>

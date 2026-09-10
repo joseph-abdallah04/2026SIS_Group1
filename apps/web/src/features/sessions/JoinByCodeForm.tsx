@@ -43,7 +43,7 @@ export function JoinByCodeForm() {
     <>
       <form
         onSubmit={(event) => void handleSubmit(event)}
-        className="flex flex-col gap-3 rounded-lg bg-rt-secondary-wash px-4 py-4"
+        className="flex flex-col gap-3 rounded-2xl bg-rt-secondary-wash px-4 py-4"
       >
         <p className="text-[13px] font-semibold text-rt-ink">Join a session</p>
         <div className="flex items-center gap-2">
@@ -52,7 +52,7 @@ export function JoinByCodeForm() {
             value={code}
             onChange={(event) => setCode(event.target.value)}
             placeholder="Have a code? e.g. K7NP-3WQZ"
-            className="min-h-10 flex-1 rounded-lg border border-transparent bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:ring-offset-2 focus-visible:ring-offset-rt-secondary-wash"
+            className="min-h-10 flex-1 rounded-full border border-transparent bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:ring-offset-2 focus-visible:ring-offset-rt-secondary-wash"
           />
           <Button
             type="submit"
