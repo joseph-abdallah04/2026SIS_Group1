@@ -7,7 +7,7 @@ import { AgendaPanel } from '../agenda/AgendaPanel';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
-import { VoiceNotice, useVoiceRoom } from '../voice';
+import { MicToggle, ParticipantPanel, VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -66,6 +66,10 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   // Called before any early return so the room is not torn down and rebuilt
   // every time the board flips between loading, error and loaded.
   const voice = useVoiceRoom(sessionId);
+  // The room's own name for us, minted into the token server-side — the only
+  // name F12's toggle can show that is guaranteed to match what the rest of the
+  // room sees beside our audio.
+  const selfName = voice.participants.find((p) => p.isLocal)?.name ?? null;
 
   //
   // ─────────────────────────────────────────────────────────────
@@ -228,6 +232,19 @@ function toggleShortlist(id: string) {
               activeQuestionId={board.questionId}
               isLeader={isLeaderFinal}
             />
+          }
+          micControl={
+            <MicToggle
+              name={selfName}
+              micEnabled={voice.micEnabled}
+              micStatus={voice.micStatus}
+              status={voice.status}
+              busy={voice.micBusy}
+              toggle={voice.toggleMic}
+            />
+          }
+          participants={
+            <ParticipantPanel participants={voice.participants} status={voice.status} />
           }
           reactToProposal={reactToProposal}
         />

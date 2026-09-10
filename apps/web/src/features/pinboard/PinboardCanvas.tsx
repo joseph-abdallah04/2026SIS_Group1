@@ -51,6 +51,18 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
   /**
+   * F12's mute toggle, for the header. A node for the same reason `agenda` is:
+   * the board does not know what a LiveKit room is, and should not start
+   * knowing in order to give voice somewhere prominent to sit.
+   */
+  micControl?: ReactNode;
+  /**
+   * F13's participant rail, on the right of the board. A node for the same
+   * reason `agenda` is: the board owns the three-column split the rail sits
+   * inside, but not what a LiveKit roster is.
+   */
+  participants?: ReactNode;
+  /**
    * Who the server believes this client is, or null before the join snapshot.
    * Author-only affordances key off this; the server re-checks regardless (F16).
    */
@@ -198,6 +210,8 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  micControl,
+  participants,
   viewerId,
   editProposal,
   deleteProposal,
@@ -555,6 +569,7 @@ export function PinboardCanvas({
           )}
         </div>
         <div className="ml-auto flex items-center gap-2.5">
+          {micControl}
           <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
           </span>
@@ -581,8 +596,9 @@ export function PinboardCanvas({
         </div>
       </header>
 
-      {/* The agenda sits beside the board and above the footer, so the toolbar
-          and zoom control keep the full width they had. */}
+      {/* Agenda left (F24), board centre, participants right (F13) — all above
+          the footer, so the toolbar and zoom control keep the full width they
+          had. Both rails collapse independently to give the board back. */}
       <div className="flex min-h-0 flex-1">
         {agenda}
 
@@ -698,6 +714,8 @@ export function PinboardCanvas({
             onPan={(y) => panTo({ x: pan.x, y })}
           />
         </div>
+
+        {participants}
       </div>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
