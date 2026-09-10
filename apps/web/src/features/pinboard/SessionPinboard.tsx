@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Question } from '@roundtable/shared';
 
@@ -7,12 +6,13 @@ import { AgendaPanel } from '../agenda/AgendaPanel';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
+import { ShortlistBar } from '../voting/ShortlistBar';
+import { ShortlistPrompt } from '../voting/ShortlistPrompt';
+import { useVoting } from '../voting/useVoting';
+import { VotingBallot } from '../voting/VotingBallot';
 import { MicToggle, ParticipantPanel, VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
-
-import { useSessionStore } from '../../lib/sessionStore';
-import { api } from '../../lib/api';
 
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
@@ -35,19 +35,19 @@ function BoardFrame({ children }: { children: React.ReactNode }) {
 }
 
 interface SessionPinboardProps {
+  /**
+   * Decides which of the two exits the header offers: "Leave session" for a
+   * member (F07), "End session" for the leader (F32). Required, not
+   * defaulted — guessing would silently drop someone's only way out.
+   */
   isLeader: boolean;
+  /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
   questions: Question[];
 }
 
 export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
-
-  //
-  // ─────────────────────────────────────────────────────────────
-  //   PINBOARD FETCH + LOCAL STATE
-  // ─────────────────────────────────────────────────────────────
-  //
   const {
     board,
     loading,
@@ -59,8 +59,9 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
     reactToProposal,
     isLive,
     newItemIds,
-    viewerId: viewerIdFromPinboard,
+    viewerId,
   } = usePinboard(sessionId);
+  const voting = useVoting(sessionId, board?.questionId ?? null);
   // Entering the session view joins the room; leaving it (or ending the
   // session) unmounts this and disconnects — F11's connect/disconnect points.
   // Called before any early return so the room is not torn down and rebuilt
@@ -71,61 +72,6 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
   // room sees beside our audio.
   const selfName = voice.participants.find((p) => p.isLocal)?.name ?? null;
 
-  //
-  // ─────────────────────────────────────────────────────────────
-  //   GLOBAL SESSION STORE (REALTIME SNAPSHOT)
-  // ─────────────────────────────────────────────────────────────
-  //
-  const shortlist = useSessionStore((s) => s.shortlist);
-  const viewerId = useSessionStore((s) => s.viewerId);
-  const leaderId = useSessionStore((s) => s.leaderId);
-  const status = useSessionStore((s) => s.status);
-
-  const isLeaderFromStore = viewerId === leaderId;
-  const isLeaderFinal = isLeader || isLeaderFromStore;
-  const votingLocked = status === 'voting';
-
-  //
-  // ─────────────────────────────────────────────────────────────
-  //   LOCAL SHORTLIST STATE (LEADER ONLY)
-  // ─────────────────────────────────────────────────────────────
-  //
-  const [localShortlist, setLocalShortlist] = useState<string[]>(shortlist);
-
-  useEffect(() => {
-    setLocalShortlist(shortlist);
-  }, [shortlist]);
-
-function toggleShortlist(id: string) {
-  if (!isLeaderFinal || votingLocked) return;
-
-  setLocalShortlist((prev) => {
-    const updated = prev.includes(id)
-      ? prev.filter((x) => x !== id)
-      : [...prev, id];
-
-    if (window.socket) {
-      window.socket.emit("shortlist_updated", {
-        sessionId,
-        shortlist: updated
-      });
-    }
-
-    return updated;
-  });
-}
-
-  async function saveShortlist() {
-    await api.post(`/api/sessions/${sessionId}/shortlist`, {
-      proposalIds: localShortlist,
-    });
-  }
-
-  //
-  // ─────────────────────────────────────────────────────────────
-  //   EXISTING PINBOARD LOADING STATES
-  // ─────────────────────────────────────────────────────────────
-  //
   if (!sessionId) {
     return (
       <main className="flex h-screen items-center justify-center bg-rt-surface">
@@ -142,6 +88,8 @@ function toggleShortlist(id: string) {
     );
   }
 
+  // Only when there is nothing to show: if the REST load failed but the socket
+  // snapshot produced a board, the board is what the user wants to see.
   if (error && !board) {
     return (
       <BoardFrame>
@@ -187,11 +135,12 @@ function toggleShortlist(id: string) {
     );
   }
 
-  //
-  // ─────────────────────────────────────────────────────────────
-  //   MAIN PINBOARD RENDER
-  // ─────────────────────────────────────────────────────────────
-  //
+  const selecting = board.questionStatus === 'voting' && voting.phase !== 'open';
+  const balloting = voting.phase === 'open';
+  const ballotItems = voting.proposalIds
+    .map((id) => board.items.find((item) => item.id === id))
+    .filter((item): item is NonNullable<typeof item> => item !== undefined);
+
   return (
     <CreativeToolsProvider
       isLive={isLive && board.questionStatus === 'discussion'}
@@ -218,19 +167,54 @@ function toggleShortlist(id: string) {
           board={board}
           isLive={isLive}
           newItemIds={newItemIds}
-          isLeader={isLeaderFinal}
-          viewerId={viewerIdFromPinboard}
+          isLeader={isLeader}
+          viewerId={viewerId}
           editProposal={editProposal}
           deleteProposal={deleteProposal}
-          shortlist={localShortlist}
-          onToggleShortlist={toggleShortlist}
-          shortlistLocked={votingLocked}
+          shortlist={voting.proposalIds}
+          canToggleShortlist={isLeader && selecting && !voting.locked}
+          onToggleShortlist={voting.toggle}
+          shortlistControl={
+            selecting ? (
+              <ShortlistBar isLeader={isLeader} count={voting.proposalIds.length} />
+            ) : null
+          }
+          boardOverlay={
+            selecting && isLeader ? (
+              <ShortlistPrompt
+                count={voting.proposalIds.length}
+                busy={voting.busy}
+                error={voting.error}
+                onProceed={() => void voting.startVote()}
+                onClear={() => void voting.clear()}
+              />
+            ) : null
+          }
+          ballot={
+            balloting ? (
+              <VotingBallot
+                questionText={board.questionText}
+                items={ballotItems}
+                tallies={voting.tallies}
+                myVote={voting.myVote}
+                votedCount={voting.votedCount}
+                voterCount={voting.voterCount}
+                isLeader={isLeader}
+                viewerId={viewerId}
+                leaderId={board.leaderId}
+                busy={voting.busy}
+                error={voting.error}
+                onVote={(id) => void voting.castVote(id)}
+                onClose={() => void voting.closeVote()}
+              />
+            ) : null
+          }
           agenda={
             <AgendaPanel
               sessionId={sessionId}
               questions={questions}
               activeQuestionId={board.questionId}
-              isLeader={isLeaderFinal}
+              isLeader={isLeader}
             />
           }
           micControl={
@@ -248,21 +232,8 @@ function toggleShortlist(id: string) {
           }
           reactToProposal={reactToProposal}
         />
-
-        {/* Leader-only shortlist save button */}
-        {isLeaderFinal && !votingLocked && (
-          <button
-            type="button"
-            onClick={saveShortlist}
-            className="absolute bottom-20 right-9 rounded-full bg-rt-secondary px-4 py-2 text-[13px] font-semibold text-rt-ink hover:bg-rt-secondary-deep"
-          >
-            Proceed To Vote
-          </button>
-        )}
-
         <SessionJoinNotices />
       </main>
-
       <CreativeStudio />
     </CreativeToolsProvider>
   );

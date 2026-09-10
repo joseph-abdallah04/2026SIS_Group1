@@ -54,13 +54,12 @@ interface PositionedProposalProps {
    * the viewer has already pressed. Null until the board is joined.
    */
   viewerId: string | null;
-  /** Toggle one of this viewer's reactions on this proposal (F18). */
-  onReact: (item: BoardItem, emoji: string) => Promise<void>;
+  /** Toggle one of this viewer's reactions on this proposal (F18). Absent once the board is frozen. */
+  onReact?: (item: BoardItem, emoji: string) => Promise<void>;
   /** Whether this proposal is on the leader's voting shortlist (F27). */
   isShortlisted: boolean;
-  /** True once voting has started and the shortlist can no longer change. */
-  shortlistLocked: boolean;
-  isLeader: boolean;
+  /** Leader may add/remove this card while the shortlist is still open. */
+  canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
 }
 
@@ -270,8 +269,7 @@ export function PositionedProposal({
   viewerId,
   onReact,
   isShortlisted,
-  shortlistLocked,
-  isLeader,
+  canToggleShortlist,
   onToggleShortlist,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
@@ -283,7 +281,8 @@ export function PositionedProposal({
   // it would be heavier than the change. Anything else reopens in the tool that
   // made it, which is the only place its shape can be manipulated.
   const editsInline = isOwn && item.artifactJson.type === 'sticky';
-  const canEdit = isOwn && (editsInline || onOpenEditor !== undefined);
+  const boardFrozen = !canMove && !canDelete && onOpenEditor === undefined;
+  const canEdit = isOwn && !boardFrozen && (editsInline || onOpenEditor !== undefined);
   const draggable = canMove && !editing;
 
   const confirmRemove = () => {
@@ -335,8 +334,7 @@ export function PositionedProposal({
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
     >
-
-      {isLeader && !shortlistLocked ? (
+      {canToggleShortlist ? (
         <button
           type="button"
           onPointerDown={(event) => event.stopPropagation()}
@@ -390,11 +388,13 @@ export function PositionedProposal({
             isShortlisted={isShortlisted}
           />
 
-          <ReactionRow
-            reactions={item.reactions}
-            viewerId={viewerId}
-            onReact={(emoji) => onReact(item, emoji)}
-          />
+          {onReact ? (
+            <ReactionRow
+              reactions={item.reactions}
+              viewerId={viewerId}
+              onReact={(emoji) => onReact(item, emoji)}
+            />
+          ) : null}
 
           {canEdit || canDelete ? (
             <OwnerControls

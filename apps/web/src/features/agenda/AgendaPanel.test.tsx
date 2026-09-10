@@ -113,7 +113,6 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
   it.each([
     ['pending', 'Start discussion', 'discussion'],
     ['discussion', 'Open voting', 'voting'],
-    ['voting', 'Mark answered', 'answered'],
   ] as const)('offers the next step from %s and sends it', async (status, label, sent) => {
     renderPanel({ questions: [question(0, status)], activeQuestionId: 'q1' });
 
@@ -123,6 +122,13 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
       questionId: 'q1',
       status: sent,
     });
+  });
+
+  it('does not offer Mark answered during voting — ending the vote does that', () => {
+    renderPanel({ questions: [question(0, 'voting')], activeQuestionId: 'q1' });
+
+    expect(screen.queryByRole('button', { name: 'Mark answered' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skip question' })).toBeInTheDocument();
   });
 
   // The status arrives on the `sessionPhase` broadcast, so a panel that

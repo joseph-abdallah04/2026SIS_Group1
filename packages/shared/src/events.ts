@@ -9,12 +9,17 @@ import type {
   QuestionStatus,
   ReactionGroup,
   SessionStatus,
+  VotingPublicState,
+  VotingViewerState,
 } from './index.js';
 import type {
   ProposalCreateInput,
   ProposalDeleteInput,
   ProposalReactInput,
   ProposalUpdateInput,
+  EmptyVotingIntent,
+  ShortlistToggleInput,
+  VoteCastInput,
 } from './schemas.js';
 
 export interface SessionUserPayload {
@@ -58,8 +63,19 @@ export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
    * client that only ever managed a REST load cannot write anyway.
    */
   viewer: SessionUserPayload;
-  /** Leader-selected voting shortlist (F27). Absent until that flow has run. */
-  shortlist?: string[];
+  /**
+   * F27: the shortlist for the question this snapshot's board is showing.
+   * Empty and unlocked until the leader has picked anything; `locked` once
+   * they start the vote. Always present so a reconnect does not invent ticks.
+   */
+  shortlist: string[];
+  shortlistLocked: boolean;
+  /**
+   * F27–F30: personalised voting state for this socket. `myVote` is this
+   * viewer's ballot only — the public broadcast (`votingUpdated`) never
+   * carries it, so a reconnect is how you learn your own vote after a refresh.
+   */
+  voting: VotingViewerState;
 }
 
 export interface ClientToServerEvents {
@@ -119,13 +135,26 @@ export interface ClientToServerEvents {
    */
   proposalReact(payload: ProposalReactInput, ack?: (res: WriteAck) => void): void;
   // === voting module ===
-  /** Leader updates the voting shortlist for the session (F27). */
-  shortlist_updated(
-    payload: { sessionId: string; shortlist: string[] },
-    ack?: (res: WriteAck) => void,
-  ): void;
-  shortlist_locked(payload: { sessionId: string }): void;
-  voting_started(payload: { sessionId: string }): void;
+  /**
+   * Leader adds or removes one proposal on the shortlist (F27). Identity and
+   * session come from the socket, same as pinboard writes — the payload is
+   * only which card they clicked.
+   */
+  shortlistToggle(payload: ShortlistToggleInput, ack?: (res: WriteAck) => void): void;
+  /** Leader empties the shortlist without starting the vote (F27 cancel). */
+  shortlistClear(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
+  /** Leader locks the shortlist and opens the round (F27 confirm). */
+  votingStart(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
+  /**
+   * Cast or change this member's one vote on the open round (F28). Identity
+   * comes from the socket; the payload is only which shortlisted proposal.
+   */
+  voteCast(payload: VoteCastInput, ack?: (res: WriteAck) => void): void;
+  /**
+   * Leader closes the open round, writes the answer, and advances the agenda
+   * (F30, manual — the room does not wait for every ballot).
+   */
+  votingClose(payload: EmptyVotingIntent, ack?: (res: WriteAck) => void): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===
@@ -205,9 +234,18 @@ export interface ServerToClientEvents {
   }): void;
 
   // === voting module ===
-  shortlist_updated(shortlist: string[]): void;
-  shortlist_locked(): void;
-  voting_started(): void;
+  /**
+   * The shortlist for one question changed (F27). Carries the whole list, not
+   * a delta, so a client that missed a toggle is corrected by the next one.
+   * `locked` is true once the leader has started the vote.
+   */
+  shortlistUpdated(payload: { questionId: string; proposalIds: string[]; locked: boolean }): void;
+  /**
+   * Live voting state for the question on screen (F27–F30). Public: tallies
+   * and how many people have voted, never who voted for which proposal.
+   * A client that missed an event is corrected by the next one.
+   */
+  votingUpdated(payload: VotingPublicState): void;
   // === summary module ===
   // === voice module ===
   // === assistant module ===

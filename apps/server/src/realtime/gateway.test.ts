@@ -22,6 +22,18 @@ vi.mock('../modules/pinboard/index.js', () => ({
   registerPinboardSocketHandlers: vi.fn(),
 }));
 vi.mock('../modules/sessions/index.js', () => ({ getSession, getSessionMemberIdentity }));
+vi.mock('../modules/voting/index.js', () => ({
+  getVotingState: vi.fn(async () => ({
+    questionId: null,
+    phase: 'idle',
+    proposalIds: [],
+    tallies: [],
+    votedCount: 0,
+    voterCount: 0,
+    myVote: null,
+  })),
+  registerVotingSocketHandlers: vi.fn(),
+}));
 
 const { registerRealtimeGateway } = await import('./gateway.js');
 

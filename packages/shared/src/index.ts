@@ -174,6 +174,72 @@ export interface BoardResponse {
 
 // === voting module ===
 
+/** Smallest shortlist the leader may lock in (F27). */
+export const SHORTLIST_MIN = 2;
+/** Largest shortlist the leader may lock in (F27). */
+export const SHORTLIST_MAX = 6;
+
+/** The question currently on screen, the ids on its shortlist, and whether voting has started. */
+export interface VotingShortlist {
+  questionId: string | null;
+  proposalIds: string[];
+  locked: boolean;
+}
+
+/**
+ * Where a question's vote currently sits.
+ *
+ * `idle` — this question is not in voting (discussion, pending, finished).
+ * `shortlisting` — the leader is picking which proposals go on the ballot (F27).
+ * `open` — everyone is voting; the panel stays up until the leader closes it (F28).
+ * `closed` — the round has been tallied (F30).
+ */
+export type VotingPhase = 'idle' | 'shortlisting' | 'open' | 'closed';
+
+/** Anonymous share of the votes already cast for one shortlisted proposal. */
+export interface VotingTally {
+  proposalId: string;
+  votes: number;
+  /** 0–100, share of votes *cast* (not of people still to vote). 0 if nobody has voted. */
+  percent: number;
+}
+
+/**
+ * Room-wide voting state. Safe to broadcast: it never names who voted for what.
+ * `votedCount` / `voterCount` is "how many of the people currently in the
+ * session have submitted a ballot", not a list of names (F29 is that list).
+ */
+export interface VotingPublicState {
+  questionId: string | null;
+  phase: VotingPhase;
+  proposalIds: string[];
+  tallies: VotingTally[];
+  votedCount: number;
+  voterCount: number;
+}
+
+/** Join snapshot / REST read: the public tally plus this viewer's own ballot. */
+export interface VotingViewerState extends VotingPublicState {
+  myVote: string | null;
+}
+
+export function emptyVotingState(questionId: string | null = null): VotingViewerState {
+  return {
+    questionId,
+    phase: 'idle',
+    proposalIds: [],
+    tallies: [],
+    votedCount: 0,
+    voterCount: 0,
+    myVote: null,
+  };
+}
+
+export function toPublicVotingState(state: VotingViewerState): VotingPublicState {
+  const { myVote: _myVote, ...publicState } = state;
+  return publicState;
+}
+
 // === summary module ===
 
 // === voice module ===

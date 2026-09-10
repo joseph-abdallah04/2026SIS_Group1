@@ -517,3 +517,22 @@ export const proposalReactSchema = z.object({
 });
 
 export type ProposalReactInput = z.infer<typeof proposalReactSchema>;
+
+// === voting module ===
+
+export const shortlistToggleSchema = z.object({
+  proposalId: z.string().min(1),
+});
+
+export type ShortlistToggleInput = z.infer<typeof shortlistToggleSchema>;
+
+/** Empty body: session and leader come from the socket, not the payload. */
+export const emptyVotingIntentSchema = z.object({});
+
+export type EmptyVotingIntent = z.infer<typeof emptyVotingIntentSchema>;
+
+export const voteCastSchema = z.object({
+  proposalId: z.string().min(1),
+});
+
+export type VoteCastInput = z.infer<typeof voteCastSchema>;

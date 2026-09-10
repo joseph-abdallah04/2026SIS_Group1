@@ -29,6 +29,7 @@ model User {
   llmConfig          UserLLMConfig?
   proposals          Proposal[]
   reactions          ProposalReaction[]
+  votes              Vote[]
 
   @@map("users")
 }
@@ -79,9 +80,9 @@ model Session {
   // starts, then by phase changes and by an explicit focus.
   currentQuestionId String?
 
-  questions Question[]
-  members   SessionMember[]
-  shortlist SessionShortlist[]
+  questions    Question[]
+  members      SessionMember[]
+  votingRounds VotingRound[]
 
   @@index([leaderId])
   @@map("sessions")
@@ -96,7 +97,9 @@ model Question {
   status    QuestionStatus @default(pending)
   createdAt DateTime       @default(now())
 
-  proposals Proposal[]
+  proposals   Proposal[]
+  votingRound VotingRound?
+  answer      Answer?
 
   // Index (not unique) on (sessionId, position): reordering questions needs
   // two rows to briefly share a position mid-swap. Ordering correctness is
@@ -159,8 +162,9 @@ model Proposal {
   createdAt         DateTime  @default(now())
   deletedAt         DateTime?
   reactions         ProposalReaction[]
-
-  shortlist SessionShortlist[]
+  shortlistItems    VotingShortlistItem[]
+  votes             Vote[]
+  winningAnswers    Answer[]            @relation("WinningProposal")
 
   @@index([questionId, createdAt])
   @@map("proposals")
@@ -196,17 +200,72 @@ model ProposalReaction {
 // (tools owner adds artifact storage here if server-persisted)
 
 // === voting + summary module ===
-// (voting/summary owner adds vote + summary tables here)
+// One round per question. `shortlisting` is F27 (leader picking); `open` is
+// F28 (ballots in); `closed` is F30 (tally done). Vote rows land in F28.
 
-model SessionShortlist {
-  id          String   @id @default(cuid())
-  sessionId   String
-  proposalId  String
+enum VotingRoundStatus {
+  shortlisting
+  open
+  closed
+}
 
-  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+model VotingRound {
+  id         String            @id @default(cuid())
+  sessionId  String
+  session    Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId String            @unique
+  question   Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  status     VotingRoundStatus @default(shortlisting)
+  createdAt  DateTime          @default(now())
+  closedAt   DateTime?
+  items      VotingShortlistItem[]
+  votes      Vote[]
 
-  @@map("session_shortlist")
+  @@index([sessionId])
+  @@map("voting_rounds")
+}
+
+// One ballot per member per round (F28). Unique on (round, voter) so changing
+// your mind overwrites rather than double-counting. The row names the
+// proposal, not the person, in any public tally — identity stays on the server.
+model Vote {
+  id         String      @id @default(cuid())
+  roundId    String
+  round      VotingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  voterId    String
+  voter      User        @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  proposalId String
+  proposal   Proposal    @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@unique([roundId, voterId])
+  @@index([roundId, proposalId])
+  @@map("votes")
+}
+
+// F30: the proposal that won this question, written when the leader closes
+// the round. `winningProposalId` is null when the round closed with no votes.
+model Answer {
+  id                String    @id @default(cuid())
+  questionId        String    @unique
+  question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  winningProposalId String?
+  winningProposal   Proposal? @relation("WinningProposal", fields: [winningProposalId], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+
+  @@map("answers")
+}
+
+model VotingShortlistItem {
+  id         String      @id @default(cuid())
+  roundId    String
+  round      VotingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  proposalId String
+  proposal   Proposal    @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, proposalId])
+  @@map("voting_shortlist_items")
 }
 
 

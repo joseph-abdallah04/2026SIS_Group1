@@ -27,7 +27,6 @@ export {
   setQuestionPhase,
   startSession,
   updateSessionDraft,
-  updateSessionShortlist,
 } from './service.js';
 export type {
   QuestionRef,

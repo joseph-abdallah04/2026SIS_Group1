@@ -42,7 +42,6 @@ function handshakeAuth(): Record<string, string> {
 export function getSocket(): RoundTableSocket {
   if (!socket) {
     socket = io('/', { auth: handshakeAuth(), autoConnect: true });
-    window.socket = socket;
   }
   return socket;
 }
@@ -53,7 +52,6 @@ export function disconnectSocket(): void {
   pendingLeaves.clear();
   socket?.disconnect();
   socket = null;
-  window.socket = undefined;
 }
 
 /**

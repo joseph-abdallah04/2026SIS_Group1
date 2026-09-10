@@ -70,10 +70,17 @@ interface PinboardCanvasProps {
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
   deleteProposal: (proposalId: string) => Promise<void>;
   reactToProposal: (proposalId: string, emoji: string) => Promise<void>;
-  /* F27 */
+  /** Ids currently on the F27 shortlist — rings on those cards. */
   shortlist: string[];
+  /** Leader, voting phase, round not yet locked — checkboxes on cards. */
+  canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
-  shortlistLocked: boolean;
+  /** F27 header chrome (count / “leader is selecting”). */
+  shortlistControl?: ReactNode;
+  /** Leader shortlist prompt, pinned to the bottom of the board window. */
+  boardOverlay?: ReactNode;
+  /** F28 ballot — covers the board + rails until the leader ends the vote. */
+  ballot?: ReactNode;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -217,8 +224,11 @@ export function PinboardCanvas({
   deleteProposal,
   reactToProposal,
   shortlist,
+  canToggleShortlist,
   onToggleShortlist,
-  shortlistLocked,
+  shortlistControl,
+  boardOverlay,
+  ballot,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -232,6 +242,7 @@ export function PinboardCanvas({
   // write is re-checked server-side.
 
   const { openEditorForEdit } = useCreativeTools();
+  const boardOpen = board.questionStatus === 'discussion';
 
   /**
    * Whether a proposal can be reopened in the tool that made it.
@@ -569,6 +580,7 @@ export function PinboardCanvas({
           )}
         </div>
         <div className="ml-auto flex items-center gap-2.5">
+          {shortlistControl}
           {micControl}
           <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
             {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
@@ -599,7 +611,7 @@ export function PinboardCanvas({
       {/* Agenda left (F24), board centre, participants right (F13) — all above
           the footer, so the toolbar and zoom control keep the full width they
           had. Both rails collapse independently to give the board back. */}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {agenda}
 
         {/*
@@ -666,18 +678,21 @@ export function PinboardCanvas({
                     isNew={newItemIds.has(item.id)}
                     isOwn={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId === board.leaderId}
-                    onOpenEditor={canReopen(item) ? openEditorForEdit : undefined}
-                    canMove={(viewerId !== null && item.authorId === viewerId) || isLeader}
-                    canDelete={(viewerId !== null && item.authorId === viewerId) || isLeader}
+                    onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
+                    canMove={
+                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                    }
+                    canDelete={
+                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                    }
                     isDragging={draggingId === item.id}
                     dragHandlers={dragHandlers}
                     onEditText={onEditText}
                     onDelete={onDelete}
                     viewerId={viewerId}
-                    onReact={onReact}
+                    onReact={boardOpen ? onReact : undefined}
                     isShortlisted={shortlist.includes(item.id)}
-                    shortlistLocked={shortlistLocked}
-                    isLeader={isLeader}
+                    canToggleShortlist={canToggleShortlist}
                     onToggleShortlist={onToggleShortlist}
                   />
                 ))}
@@ -713,13 +728,30 @@ export function PinboardCanvas({
             isPanning={isPanning}
             onPan={(y) => panTo({ x: pan.x, y })}
           />
+
+          {boardOverlay ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+              {boardOverlay}
+            </div>
+          ) : null}
         </div>
 
         {participants}
+        {ballot}
       </div>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
-        <CreativeToolbar />
+        {boardOpen ? (
+          <CreativeToolbar />
+        ) : board.questionStatus === 'voting' ? (
+          <p className="text-[12px] font-medium text-rt-ink-muted">
+            Proposals are locked while this question is in voting
+          </p>
+        ) : (
+          <p className="text-[12px] font-medium text-rt-ink-muted">
+            This question is closed to new proposals
+          </p>
+        )}
         {writeError ? (
           <p role="status" className="text-[11px] font-medium text-rt-secondary-deep">
             {writeError}

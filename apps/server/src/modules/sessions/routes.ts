@@ -31,7 +31,6 @@ import {
   setQuestionPhase,
   startSession,
   updateSessionDraft,
-  updateSessionShortlist,   // F27 import
 } from './service.js';
 
 /**
@@ -277,26 +276,6 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       next(err);
     }
   });
-
-  // F27: shortlist update
-  sessionsRoutes.post<{ id: string }>('/:id/shortlist', requireAuth, async (req, res, next) => {
-  try {
-    const leaderId = req.userId!;
-    const { proposalIds } = req.body;
-
-    const session = await updateSessionShortlist({
-      sessionId: req.params.id,
-      leaderId,
-      proposalIds,
-    });
-
-  io.to(sessionRoom(req.params.id)).emit('shortlist_updated', proposalIds);
-
-    res.json(session);
-  } catch (err) {
-    next(err);
-  }
-});
 
   return sessionsRoutes;
 }

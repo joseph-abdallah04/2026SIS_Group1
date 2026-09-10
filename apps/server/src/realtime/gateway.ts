@@ -12,6 +12,7 @@ import type { SessionStatePayload } from '@roundtable/shared/events';
 import { verifyToken } from '../modules/auth/index.js';
 import { getBoardForSession, registerPinboardSocketHandlers } from '../modules/pinboard/index.js';
 import { getSession, getSessionMemberIdentity } from '../modules/sessions/index.js';
+import { getVotingState, registerVotingSocketHandlers } from '../modules/voting/index.js';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket, type SocketUser } from './types.js';
 
 /**
@@ -143,6 +144,7 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
           // anything left out would render as a placeholder until some other
           // request happened to fill it in.
           const { items, ...meta } = await getBoardForSession(sessionId);
+          const voting = await getVotingState(meta.questionId, user.id);
           const snapshot: SessionStatePayload = {
             ...meta,
             proposals: items,
@@ -155,6 +157,9 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
             // remembered guess. With `leaderId` beside it, one snapshot answers
             // both "is this mine" and "am I the leader".
             viewer: user,
+            shortlist: voting.proposalIds,
+            shortlistLocked: voting.phase === 'open' || voting.phase === 'closed',
+            voting,
           };
           socket.emit('sessionState', snapshot);
 
@@ -203,17 +208,7 @@ export function registerRealtimeGateway(io: RealtimeServer): void {
     });
 
     registerPinboardSocketHandlers(io, socket);
-
-    // F27: live shortlist / voting broadcasts for the session room.
-    socket.on('shortlist_updated', ({ sessionId, shortlist }) => {
-      io.to(sessionRoom(sessionId)).emit('shortlist_updated', shortlist);
-    });
-    socket.on('shortlist_locked', ({ sessionId }) => {
-      io.to(sessionRoom(sessionId)).emit('shortlist_locked');
-    });
-    socket.on('voting_started', ({ sessionId }) => {
-      io.to(sessionRoom(sessionId)).emit('voting_started');
-    });
+    registerVotingSocketHandlers(io, socket);
 
     socket.on('disconnect', () => {
       const { user, sessionId } = socket.data;

@@ -25,7 +25,8 @@ const NEXT_PHASE: Partial<Record<QuestionStatus, { status: QuestionPhaseTarget; 
   {
     pending: { status: 'discussion', label: 'Start discussion' },
     discussion: { status: 'voting', label: 'Open voting' },
-    voting: { status: 'answered', label: 'Mark answered' },
+    // Closing a vote is F30's "End voting" on the ballot, not an agenda
+    // shortcut — "Mark answered" would skip the tally and the overlay.
   };
 
 function isComplete(status: QuestionStatus): boolean {
@@ -131,12 +132,13 @@ export function AgendaPanel({
             // Phase controls stay on the question that is actually open, even
             // while the board is looking back at an earlier one. Pending gets
             // "Start discussion" only when nothing is open, on the next one.
+            // Voting still offers Skip (an escape hatch); closing the vote is
+            // the ballot's "End voting", not an agenda "Mark answered".
+            const onThisQuestion = openQuestion
+              ? question.id === openQuestion.id
+              : firstPending !== undefined && question.id === firstPending.id;
             const showControls =
-              isLeader &&
-              next !== undefined &&
-              (openQuestion
-                ? question.id === openQuestion.id
-                : firstPending !== undefined && question.id === firstPending.id);
+              isLeader && onThisQuestion && (next !== undefined || question.status === 'voting');
             const busy = phaseBusyId === question.id;
 
             return (
@@ -199,16 +201,18 @@ export function AgendaPanel({
                   </span>
                 )}
 
-                {showControls && next && (
+                {showControls && (
                   <div className="mt-2 ml-[18px] flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void setPhase(question.id, next.status)}
-                      disabled={busy}
-                      className="self-start rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
-                    >
-                      {busy ? 'Working…' : next.label}
-                    </button>
+                    {next ? (
+                      <button
+                        type="button"
+                        onClick={() => void setPhase(question.id, next.status)}
+                        disabled={busy}
+                        className="self-start rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink hover:bg-rt-secondary-deep hover:text-white disabled:opacity-60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
+                      >
+                        {busy ? 'Working…' : next.label}
+                      </button>
+                    ) : null}
 
                     {confirmingSkip === question.id ? (
                       <span className="flex items-center gap-2 text-[11px]">

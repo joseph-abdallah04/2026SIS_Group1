@@ -12,6 +12,7 @@ import { authRoutes, usersRoutes } from './modules/auth/index.js';
 import { pinboardRoutes } from './modules/pinboard/index.js';
 import { createSessionsRoutes } from './modules/sessions/index.js';
 import { voiceRoutes } from './modules/voice/index.js';
+import { votingRoutes } from './modules/voting/index.js';
 import { registerRealtimeGateway } from './realtime/gateway.js';
 import type { RealtimeServer } from './realtime/types.js';
 
@@ -45,6 +46,7 @@ app.use('/api/sessions', pinboardRoutes);
 // Both routers mount on the same prefix and own disjoint sub-paths
 // (docs/06 §6): pinboard has `:id/proposals*`, voice has `:id/livekit-token`.
 app.use('/api/sessions', voiceRoutes);
+app.use('/api/sessions', votingRoutes);
 
 app.use(errorHandler);
 
