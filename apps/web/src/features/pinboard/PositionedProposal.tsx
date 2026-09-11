@@ -8,6 +8,7 @@ import { ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
 import {
   CARD_INK,
+  CARD_RADIUS,
   CARD_WIDTH,
   REACTION_HOVER_FILL,
   REACTION_ON_BORDER,
@@ -323,10 +324,12 @@ export function PositionedProposal({
   // confirmation (F17) — for the author and the moderating leader alike.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // Paper or panel: the difference decides the corner every highlight follows.
+  const isSticky = item.artifactJson.type === 'sticky';
   // A sticky is edited in place — it is one field, and a full-screen editor for
   // it would be heavier than the change. Anything else reopens in the tool that
   // made it, which is the only place its shape can be manipulated.
-  const editsInline = isOwn && item.artifactJson.type === 'sticky';
+  const editsInline = isOwn && isSticky;
   const boardFrozen = !canMove && !canDelete && onOpenEditor === undefined;
   const canEdit = isOwn && !boardFrozen && (editsInline || onOpenEditor !== undefined);
   const draggable = canMove && !editing;
@@ -357,7 +360,9 @@ export function PositionedProposal({
       data-card-draggable={draggable ? 'true' : undefined}
       style={{
         left: position.x,
-        borderRadius: STICKY_RADIUS,
+        // The shortlist ring is drawn on this wrapper, so it has to follow the
+        // card's own corner: square on a sticky, rounded on every panel.
+        borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
         top: position.y,
         // A card being dragged, or edited, belongs above its neighbours.
         zIndex: isDragging ? 30 : editing ? 20 : 1,
@@ -398,13 +403,18 @@ export function PositionedProposal({
             event.stopPropagation();
             onToggleShortlist(item.id);
           }}
-          className={`absolute top-0 left-0 z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+          className={`absolute z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
             isShortlisted
               ? 'border-rt-secondary bg-rt-secondary text-white'
               : 'border-rt-secondary bg-white text-rt-secondary'
           }`}
           style={{
-            // Sit on the corner: half on the card, half off it.
+            // Centred on the corner point of the shortlist outline itself.
+            // A sticky's outline turns a square corner just outside the card,
+            // so that point is at -1. A panel's is an arc, and its corner is
+            // the 45-degree point on it, which sits about 4px inside the box.
+            top: isSticky ? -1 : 4,
+            left: isSticky ? -1 : 4,
             transform: 'translate(-50%, -50%)',
             cursor: 'pointer',
           }}
