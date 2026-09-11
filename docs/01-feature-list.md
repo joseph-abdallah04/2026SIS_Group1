@@ -43,7 +43,8 @@ Features are numbered (`F##`) so tickets on the Kanban board can reference them.
 | F15 | Proposals appear for everyone in real time when submitted | Sub-second propagation                                                   |
 | F16 | Author CRUD over own proposals (move, edit, delete)       | Only the author can modify/delete their proposal; changes broadcast live |
 | F17 | Leader can remove any proposal (moderation)               | Optional safeguard                                                       |
-| F18 | Reactions on proposals (emoji-style)                      | Toggle-on/toggle-off per user per emoji; counts visible to all           |
+| F18 | Reactions on proposals (emoji-style)                      | One per person per proposal; counts visible to all                       |
+| F38 | Reuse your own earlier proposal on a later question       | Copies rather than moves; recorded like an extension (F23)               |
 
 ## 6. Proposal Tools — module: `tools` (UI) + `pinboard` (persistence)
 

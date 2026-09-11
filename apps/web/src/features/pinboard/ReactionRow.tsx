@@ -76,7 +76,7 @@ function ReactionChip({
               '--rt-chip-edge': REACTION_ON_BORDER,
             } as React.CSSProperties)
       }
-      className={`inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+      className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
         mine
           ? 'text-rt-ink'
           : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'
@@ -176,7 +176,11 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
     // Anchored by the top and pulled up by half a chip, so the first line
     // straddles the border and any further line grows downward.
     <div
-      className="absolute top-full left-3 -mt-2.5 flex flex-wrap items-center gap-1"
+      // The row itself is transparent to the pointer, and each chip takes it
+      // back. A row that wraps grows down over whatever card is below, and the
+      // gaps between chips are most of that area: without this, a second line
+      // would quietly swallow clicks on a neighbour it does not even cover.
+      className="pointer-events-none absolute top-full left-3 -mt-2.5 flex flex-wrap items-center gap-1"
       // The card's width less the left inset and a matching gap on the right,
       // so a wrapped row sits inside the card's footprint.
       style={{ maxWidth: width - 24 }}
@@ -203,7 +207,7 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
             '--rt-chip-edge': REACTION_ON_BORDER,
           } as React.CSSProperties
         }
-        className={`inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,border-color,opacity] hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover) hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+        className={`pointer-events-auto inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,border-color,opacity] hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover) hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
           pickerAnchor
             ? 'opacity-100'
             : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'

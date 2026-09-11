@@ -27,7 +27,7 @@
 | --- | --------------------- | ------------------------------ | ---------------- | ---------------------- | -------------------------------------- |
 | 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33     | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
 | 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
-| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18          | `pinboard/`            | `Proposal`, `Reaction`                 |
+| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18, F38     | `pinboard/`            | `Proposal`, `Reaction`                 |
 | 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
 | 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32          | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
 | 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | _(none — LiveKit-managed)_             |
@@ -192,8 +192,8 @@ The socket server currently accepts any connection and only logs connect/disconn
 
 ## Pinboard Core Owner
 
-**Features:** F14–F18  
-**Responsibility:** Proposal CRUD, reactions, canvas real-time sync, right-click context menu
+**Features:** F14–F18, F38  
+**Responsibility:** Proposal CRUD, reactions, reuse of your own earlier proposals, canvas real-time sync, right-click context menu
 
 ### Code ownership
 
@@ -207,7 +207,7 @@ Frontend: apps/web/src/features/pinboard/
 ### Database tables
 
 ```
-Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
+Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
 ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
 
@@ -784,7 +784,7 @@ Examples:
 
 1. **Auth + Profile** — F01–F03, F33
 2. **Session Lifecycle** — F04–F10, F24–F26
-3. **Pinboard Core** — F14–F18
+3. **Pinboard Core** — F14–F18, F38
 4. **Creative Tools** — F19–F22, F23
 5. **Voting + Summary** — F27–F32
 6. **Voice** — F11–F13

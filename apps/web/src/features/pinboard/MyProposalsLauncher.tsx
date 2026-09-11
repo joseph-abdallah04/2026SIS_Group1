@@ -69,13 +69,22 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
   const hasReusable = (data?.groups ?? []).some(
     (group) => !group.isCurrent && group.items.length > 0,
   );
-  const disabled = !hasReusable || !canPropose;
+  /**
+   * A list that never arrived is not an empty list. Leaving the button dead
+   * after a failed first read would say "nothing to reuse" when the truth is
+   * that nobody knows yet, and the panel it refuses to open is the only place
+   * the reason is written. So a failure keeps the button live.
+   */
+  const loadFailed = error !== null && data === null;
+  const disabled = !canPropose || (!hasReusable && !loadFailed);
 
-  const reason = !hasReusable
-    ? 'Nothing to reuse yet. What you propose now can be reused on later questions'
-    : !canPropose
-      ? 'The board is not taking proposals right now'
-      : 'Reuse something you proposed earlier';
+  const reason = !canPropose
+    ? 'The board is not taking proposals right now'
+    : loadFailed
+      ? 'Your earlier proposals could not be loaded'
+      : !hasReusable
+        ? 'Nothing to reuse yet. What you propose now can be reused on later questions'
+        : 'Reuse something you proposed earlier';
 
   return (
     <div ref={wrapper} className="relative">
