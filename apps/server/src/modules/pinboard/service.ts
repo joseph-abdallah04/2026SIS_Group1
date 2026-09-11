@@ -17,6 +17,7 @@ import { ApiError } from '../../middleware/error.js';
 import { requireMutableProposal, type Actor, type ProposalMutation } from './permissions.js';
 import {
   getActiveQuestion,
+  getDiscussionTimer,
   getQuestion,
   getSession,
   getSessionWithQuestions,
@@ -478,6 +479,8 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
   }
 
   const question = await getActiveQuestion(sessionId);
+  const discussionTimer = await getDiscussionTimer(sessionId);
+
   if (!question) {
     return {
       sessionId,
@@ -488,6 +491,7 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
       questionPosition: null,
       questionStatus: null,
       items: [],
+      discussionTimer,
     };
   }
 
@@ -500,5 +504,6 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
     questionPosition: question.position,
     questionStatus: question.status,
     items: await listProposals(question.id),
+    discussionTimer,
   };
 }

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  addSessionQuestionSchema,
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
@@ -12,8 +13,10 @@ import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
 import {
   assertSessionMember,
+  addSessionQuestion,
   createSession,
   deleteSession,
+  emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
@@ -33,27 +36,14 @@ import {
   updateSessionDraft,
 } from './service.js';
 
-// Every route here is behind `requireAuth`, which verifies the bearer token and
-// sets `req.userId` (apps/server/src/middleware/auth.ts). It is never optional
-// and never varies by environment: "who is asking" decides who leads a session,
-// whose draft may be edited, who may move the agenda and whose name joins a
-// room, so a request that cannot answer it has nothing to fall back on.
-//
-// `req.userId!` below is safe for exactly that reason — `requireAuth` either
-// set it or never called the handler.
-
 /**
- * A factory, not a module-level `Router`, because F09's `POST /:id/start`
- * needs to broadcast on `io` after it succeeds — the same `io` instance
- * `registerRealtimeGateway` gets, not a second one. `index.ts` creates `io`
- * once at startup and passes it here; nothing else in this file depends on
- * it, so every other handler reads exactly as it did before this became a
- * function.
+ * A factory, not a module-level Router, because F09's POST /:id/start
+ * needs to broadcast on `io` after it succeeds.
  */
 export function createSessionsRoutes(io: RealtimeServer): Router {
   const sessionsRoutes = Router();
 
-  // F04: title + ordered questions, created as `draft` with no join code.
+  // F04: create draft session
   sessionsRoutes.post('/', requireAuth, async (req, res, next) => {
     try {
       const parsed = createSessionSchema.safeParse(req.body);
@@ -73,7 +63,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // The dashboard's list: sessions this user leads or has joined.
+  // Dashboard list
   sessionsRoutes.get('/', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;
@@ -84,12 +74,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // Registered ahead of `/code/:code` and `/:id/open` below on purpose — this is
-  // safe, not a routing bug: Express's `/:id` only matches a single path
-  // segment (no `/`), so a two-segment request like `GET /code/K7NP-3WQZ` can
-  // never reach this handler no matter the registration order. Only a
-  // one-segment path with `id` literally equal to `'code'` would, and that has
-  // nothing to do with the code lookup below.
+  // Get session with agenda
   sessionsRoutes.get<{ id: string }>('/:id', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;
@@ -97,9 +82,6 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       if (!session) {
         throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
       }
-      // Members only: the questions are the agenda, and a session id is a
-      // shareable URL fragment rather than a secret. Checked after the 404 so
-      // a real member of a deleted session still gets "not found".
       await assertSessionMember(session.id, userId);
       res.json(session);
     } catch (err) {
@@ -107,10 +89,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F05: replace a draft's title + question list wholesale. Leader-only,
-  // draft-only — `updateSessionDraft` throws INVALID_TRANSITION once the
-  // session has left draft, so there is no separate "is it still editable"
-  // check here.
+  // F05: update draft
   sessionsRoutes.patch<{ id: string }>('/:id', requireAuth, async (req, res, next) => {
     try {
       const parsed = updateSessionSchema.safeParse(req.body);
@@ -134,9 +113,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // Draft: leader destroys the row (F05). Ended: any member hides it on
-  // their own dashboard. The confirm dialog is the extra step, not the
-  // server. Live sessions must be ended first.
+  // Delete draft or hide ended session
   sessionsRoutes.delete<{ id: string }>('/:id', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;
@@ -147,8 +124,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F06: draft -> lobby. Leader-only; mints the code that makes the session
-  // joinable. Idempotent — re-opening an already-lobby session just returns it.
+  // F06: open session for joining
   sessionsRoutes.post<{ id: string }>('/:id/open', requireAuth, async (req, res, next) => {
     try {
       const leaderId = req.userId!;
@@ -159,8 +135,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F09: lobby -> active. Leader-only; broadcasts `sessionStarted` to the
-  // room so every waiting client transitions together, without polling.
+  // F09: start session
   sessionsRoutes.post<{ id: string }>('/:id/start', requireAuth, async (req, res, next) => {
     try {
       const leaderId = req.userId!;
@@ -172,11 +147,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F25/F26: the leader drives the agenda — one question at a time through
-  // discussion -> voting -> answered, or straight to skipped. REST for the
-  // same reason start and end are (docs/02 §5): one place decides whether the
-  // transition is legal and returns an error the button can show, and the
-  // resulting fact is broadcast so every agenda panel and board follows.
+  // F25/F26: change question phase
   sessionsRoutes.post<{ id: string }>('/:id/phase', requireAuth, async (req, res, next) => {
     try {
       const parsed = setQuestionPhaseSchema.safeParse(req.body);
@@ -202,9 +173,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // Point the board at a question without changing its status, so the room
-  // can look back at an answered pinboard. Same leader-only REST + broadcast
-  // pattern as phase changes.
+  // Focus question
   sessionsRoutes.post<{ id: string }>('/:id/focus', requireAuth, async (req, res, next) => {
     try {
       const parsed = focusQuestionSchema.safeParse(req.body);
@@ -229,9 +198,32 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F32: lobby/active -> ended. Leader-only, irreversible (the confirmation
-  // is the client's job), and broadcasts `sessionEnded` so nobody is left on a
-  // board that has stopped accepting writes.
+  // Append a pending question to a live agenda. Leader-only; the client
+  // sends the text and waits for `questionAdded` like it does for phase.
+  sessionsRoutes.post<{ id: string }>('/:id/questions', requireAuth, async (req, res, next) => {
+    try {
+      const parsed = addSessionQuestionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ApiError(
+          400,
+          parsed.error.issues[0]?.message ?? 'Invalid question',
+          'VALIDATION_ERROR',
+        );
+      }
+
+      const question = await addSessionQuestion({
+        sessionId: req.params.id,
+        leaderId: req.userId!,
+        text: parsed.data.text,
+      });
+      emitQuestionAdded(io, question);
+      res.status(201).json(question);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // F32: end session
   sessionsRoutes.post<{ id: string }>('/:id/end', requireAuth, async (req, res, next) => {
     try {
       const leaderId = req.userId!;
@@ -243,23 +235,13 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // F07: explicit leave — a member's own row, never the leader's (see
-  // `leaveSession`'s LEADER_CANNOT_LEAVE). Idempotent: leaving twice, or
-  // leaving a session you were never in, is a 204, not an error.
+  // F07: leave session
   sessionsRoutes.post<{ id: string }>('/:id/leave', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;
-      // Identity before the leave stamps `leftAt` — afterwards they are no
-      // longer a current member and `getSessionMemberIdentity` would miss them.
       const identity = await getSessionMemberIdentity(req.params.id, userId);
       await leaveSession({ sessionId: req.params.id, userId });
 
-      // Presence is socket-room state. Leaving via REST used to leave their
-      // socket in the room until the tab closed, so "Here now" kept showing
-      // them. Pull every socket for this user out of the room and announce
-      // the leave immediately. Clearing `sessionId` on those sockets is what
-      // stops the gateway's `disconnect` handler from emitting `memberLeft`
-      // a second time when the client then drops the socket.
       if (identity) {
         const room = sessionRoom(req.params.id);
         const sockets = await io.in(room).fetchSockets();
@@ -278,8 +260,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // The join page's preview, before committing to join — resolves a pasted or
-  // linked code without side effects.
+  // Resolve code preview
   sessionsRoutes.get<{ code: string }>('/code/:code', requireAuth, async (req, res, next) => {
     try {
       const preview = await resolveSessionByCode(req.params.code);
@@ -292,8 +273,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // Resolves the code, adds the caller as a member (upsert — joining twice is a
-  // no-op), and hands back the id to route into the waiting room.
+  // Join session
   sessionsRoutes.post('/join', requireAuth, async (req, res, next) => {
     try {
       const parsed = joinSessionSchema.safeParse(req.body);
@@ -313,8 +293,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // The waiting room's initial render, before live presence events arrive.
-  // Members only — this is a list of other people's display names.
+  // Members list
   sessionsRoutes.get<{ id: string }>('/:id/members', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;

@@ -37,7 +37,7 @@ export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 export const CARD_INK = '#080C15';
 /** Edge for cards with no colour of their own; a sticky uses its theme's. */
 export const CARD_BORDER = '#CFCFCF';
-export const CARD_RADIUS = '12px';
+export const CARD_RADIUS = '16px';
 export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21,0.04)';
 
 /** Soft accent for the leader mark in a card's footer. */

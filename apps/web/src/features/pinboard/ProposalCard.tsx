@@ -38,6 +38,8 @@ interface ProposalCardProps {
   isAuthorLeader?: boolean;
   /** Arrived on a live broadcast just now, so it gets a one-off highlight (F15). */
   isNew?: boolean;
+  /** On the leader's voting shortlist (F27). */
+  isShortlisted?: boolean;
 }
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
@@ -262,6 +264,7 @@ export function ProposalCard({
   isOwnedByViewer = false,
   isAuthorLeader = false,
   isNew = false,
+  isShortlisted = false,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
@@ -286,7 +289,9 @@ export function ProposalCard({
           footprint that does not grow with its contents. Everything else is a
           panel, so it keeps its border and its rounded edge. */}
       <article
-        className={`flex shrink-0 flex-col overflow-hidden ${isSticky ? '' : 'border'}`}
+        className={`flex shrink-0 flex-col overflow-hidden ${isSticky ? '' : 'border'} ${
+          isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''
+        }`}
         style={{
           width: CARD_WIDTH[item.type],
           ...(isSticky ? { height: STICKY_SIZE } : {}),

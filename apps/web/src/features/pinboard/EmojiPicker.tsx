@@ -121,7 +121,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
       ref={panelRef}
       role="dialog"
       aria-label="Pick a reaction"
-      className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-rt-tertiary bg-rt-surface shadow-lg"
+      className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-lg"
       style={{ top: position.top, left: position.left, width: PANEL_WIDTH, height: PANEL_HEIGHT }}
     >
       <div className="relative shrink-0 border-b border-rt-tertiary p-1.5">
@@ -139,7 +139,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
           placeholder="Search emoji"
           aria-label="Search emoji"
           autoComplete="off"
-          className="h-[28px] w-full rounded-md bg-rt-surface-alt pr-2.5 pl-8 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
+          className="h-[28px] w-full rounded-full bg-rt-surface-alt pr-2.5 pl-8 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
         />
       </div>
 
@@ -167,7 +167,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
               // Marked in the same slate the pressed emoji use, so one panel
               // does not carry two different ideas of "selected".
               style={active ? { background: REACTION_ON_FILL } : undefined}
-              className={`flex h-[26px] w-[26px] items-center justify-center rounded-md text-[14px] transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
+              className={`flex h-[26px] w-[26px] items-center justify-center rounded-xl text-[14px] transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
                 active ? '' : 'hover:bg-rt-surface-alt'
               }`}
             >
@@ -201,7 +201,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
                   // Marked in the same slate the chips use, so what is pressed
                   // here and what is pressed on a card read as one state.
                   style={mine ? { background: REACTION_ON_FILL } : undefined}
-                  className={`flex h-[32px] w-[32px] items-center justify-center rounded-md text-[18px] leading-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
+                  className={`flex h-[32px] w-[32px] items-center justify-center rounded-xl text-[18px] leading-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
                     mine ? '' : 'hover:bg-rt-surface-alt'
                   }`}
                 >

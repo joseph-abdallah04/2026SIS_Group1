@@ -14,6 +14,7 @@ vi.mock('./sessionsAdapter.js', () => ({
   getQuestion: vi.fn(),
   getActiveQuestion: vi.fn(),
   getSession: vi.fn(),
+  getDiscussionTimer: vi.fn(),
 }));
 
 const { prisma } = await import('../../db.js');
@@ -62,7 +63,14 @@ beforeEach(() => {
   findUnique.mockResolvedValue(row() as never);
   update.mockResolvedValue(row() as never);
   question.mockResolvedValue(questionRef());
-  session.mockResolvedValue({ id: 's1', title: 'Demo', status: 'active', leaderId: 'leader-1' });
+  session.mockResolvedValue({
+    id: 's1',
+    title: 'Demo',
+    status: 'active',
+    leaderId: 'leader-1',
+    discussionTimerSeconds: null,
+    votingTimerSeconds: null,
+  });
 });
 
 describe('requireMutableProposal', () => {

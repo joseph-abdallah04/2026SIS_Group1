@@ -7,6 +7,7 @@
 export type { QuestionRef, SessionRef } from '../sessions/index.js';
 export {
   getActiveQuestion,
+  getDiscussionTimer,
   getQuestion,
   getSession,
   getSessionWithQuestions,

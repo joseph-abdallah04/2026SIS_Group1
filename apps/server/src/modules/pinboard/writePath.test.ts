@@ -14,6 +14,7 @@ vi.mock('./sessionsAdapter.js', () => ({
   getQuestion: vi.fn(),
   getActiveQuestion: vi.fn(),
   getSession: vi.fn(),
+  getDiscussionTimer: vi.fn(),
 }));
 
 const { prisma } = await import('../../db.js');
@@ -59,7 +60,14 @@ function createdRow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   question.mockResolvedValue(questionRef('discussion'));
-  session.mockResolvedValue({ id: 's1', title: 'Session', status: 'active', leaderId: 'leader-1' });
+  session.mockResolvedValue({
+    id: 's1',
+    title: 'Session',
+    status: 'active',
+    leaderId: 'leader-1',
+    discussionTimerSeconds: null,
+    votingTimerSeconds: null,
+  });
   create.mockResolvedValue(createdRow() as never);
 });
 
@@ -111,6 +119,8 @@ describe('createProposal', () => {
       title: 'Session',
       status: 'ended',
       leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
     });
     await expect(
       createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
@@ -121,7 +131,14 @@ describe('createProposal', () => {
   it.each(['draft', 'lobby'] as const)(
     'refuses to write while the session is %s',
     async (status) => {
-      session.mockResolvedValue({ id: 's1', title: 'Session', status, leaderId: 'leader-1' });
+      session.mockResolvedValue({
+        id: 's1',
+        title: 'Session',
+        status,
+        leaderId: 'leader-1',
+        discussionTimerSeconds: null,
+        votingTimerSeconds: null,
+      });
       await expect(
         createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
       ).rejects.toThrow(/not live/);

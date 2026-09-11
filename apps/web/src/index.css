@@ -221,7 +221,7 @@ body {
   z-index: 21;
   width: max-content;
   max-width: 10rem;
-  border-radius: 0.375rem;
+  border-radius: 0.75rem;
   background: var(--color-rt-ink);
   padding: 0.2rem 0.45rem;
   font-size: 11px;
@@ -367,5 +367,26 @@ body {
      Only the pulse stops. */
   .rt-voice-seat[data-speaking='true']::after {
     animation: none;
+  }
+}
+
+@keyframes rt-timer-flash {
+  0%,
+  100% {
+    color: var(--color-rt-ink);
+  }
+  50% {
+    color: #b42318;
+  }
+}
+
+.rt-timer-flash {
+  animation: rt-timer-flash 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-timer-flash {
+    animation: none;
+    color: #b42318;
   }
 }

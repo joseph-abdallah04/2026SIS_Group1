@@ -11,6 +11,12 @@ declare module 'express-serve-static-core' {
 
 const BEARER_PREFIX = 'Bearer ';
 
+// The bearer header is the only accepted proof of identity. There is
+// deliberately no `?token=` fallback for file downloads: a query token is a
+// full seven-day credential written into browser history and every access log
+// on the way, so the client fetches downloads with the header instead (see
+// `api.download` in apps/web/src/lib/api.ts).
+//
 // Real JWT verification (docs/05 §5 deferred item 5 / docs/06 Auth "Also
 // owns"). Checks the `Authorization: Bearer <token>` header against
 // `verifyToken`; on success attaches `req.userId` and calls `next()` so

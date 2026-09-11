@@ -74,7 +74,7 @@ export function SessionCardActions({
             event.stopPropagation();
             setMenuOpen((open) => !open);
           }}
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-rt-ink shadow-sm ring-1 ring-black/10 hover:bg-rt-surface-alt focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-rt-ink shadow-sm ring-1 ring-black/10 hover:bg-rt-surface-alt focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
         >
           <MoreHorizontal size={16} aria-hidden />
         </button>
@@ -84,7 +84,7 @@ export function SessionCardActions({
             id={menuId}
             role="menu"
             aria-label={`Actions for ${title}`}
-            className="absolute top-full right-0 mt-1 min-w-[8.5rem] rounded-lg border border-rt-tertiary bg-white py-1 shadow-lg"
+            className="absolute top-full right-0 mt-1 min-w-[8.5rem] overflow-hidden rounded-2xl border border-rt-tertiary bg-white py-1 shadow-lg"
           >
             {isDraft && (
               <Link

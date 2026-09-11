@@ -23,6 +23,10 @@ export interface Session {
   // Set once, on lobby -> active (F09).
   startedAt: Date | null;
   endedAt: Date | null;
+  /** Seconds, or null when the session has no discussion clock. */
+  discussionTimerSeconds: number | null;
+  /** Seconds, or null when the session has no voting clock. */
+  votingTimerSeconds: number | null;
 }
 
 /** Row shape for the dashboard's session list (F04/F07). */
@@ -191,6 +195,18 @@ export interface AuthoredProposalsResponse {
   groups: AuthoredProposalGroup[];
 }
 
+/**
+ * A countdown anchored to a server timestamp. Clients display remaining time
+ * from `startedAt + durationSeconds`; they never decide when a phase ends.
+ */
+export interface SessionTimerSnapshot {
+  startedAt: string;
+  durationSeconds: number;
+}
+
+/** Last ten seconds of a countdown flash red so the room can see it running out. */
+export const TIMER_FLASH_SECONDS = 10;
+
 export interface BoardResponse {
   sessionId: string;
   sessionTitle: string;
@@ -205,11 +221,230 @@ export interface BoardResponse {
   questionPosition: number | null;
   questionStatus: QuestionStatus | null;
   items: BoardItem[];
+  /**
+   * Discussion clock for the open question. Present during discussion and
+   * shortlisting; null once the ballot is open, when no timer was configured,
+   * or when nothing is being discussed.
+   */
+  discussionTimer: SessionTimerSnapshot | null;
 }
 
 // === voting module ===
 
+/** Smallest shortlist the leader may lock in (F27). */
+export const SHORTLIST_MIN = 2;
+/** Largest shortlist the leader may lock in (F27). */
+export const SHORTLIST_MAX = 6;
+
+/** The question currently on screen, the ids on its shortlist, and whether voting has started. */
+export interface VotingShortlist {
+  questionId: string | null;
+  proposalIds: string[];
+  locked: boolean;
+}
+
+/**
+ * Where a question's vote currently sits.
+ *
+ * `idle` — this question is not in voting (discussion, pending, finished).
+ * `shortlisting` — the leader is picking which proposals go on the ballot (F27).
+ * `open` — everyone is voting; the panel stays up until the leader closes it (F28).
+ * `closed` — the round has been tallied (F30).
+ */
+export type VotingPhase = 'idle' | 'shortlisting' | 'open' | 'closed';
+
+/**
+ * Whether the shortlist can still be changed. Once ballots exist the ticks are
+ * a record of what people voted on, so they stop being editable.
+ *
+ * One definition, used by the round read, the join snapshot and the board, so
+ * "is it locked" cannot be answered three different ways.
+ */
+export function isShortlistLocked(phase: VotingPhase): boolean {
+  return phase === 'open' || phase === 'closed';
+}
+
+/** Anonymous share of the votes already cast for one shortlisted proposal. */
+export interface VotingTally {
+  proposalId: string;
+  votes: number;
+  /** 0–100, share of votes *cast* (not of people still to vote). 0 if nobody has voted. */
+  percent: number;
+}
+
+/** Who won, or who is tied, from anonymous tallies. A tie has no single winner. */
+export interface VoteOutcome {
+  winnerProposalId: string | null;
+  tiedProposalIds: string[];
+}
+
+/**
+ * Most votes wins. Equal top scores stay a tie — recency is not a quality signal.
+ * No votes means no winner and no tie.
+ */
+export function voteOutcomeFromTallies(tallies: readonly VotingTally[]): VoteOutcome {
+  let max = 0;
+  for (const row of tallies) {
+    if (row.votes > max) max = row.votes;
+  }
+  if (max === 0) return { winnerProposalId: null, tiedProposalIds: [] };
+  const top = tallies.filter((row) => row.votes === max).map((row) => row.proposalId);
+  if (top.length === 1) {
+    return { winnerProposalId: top[0] ?? null, tiedProposalIds: [] };
+  }
+  return { winnerProposalId: null, tiedProposalIds: top };
+}
+
+/** Winner (or every tied proposal) first, then the rest of the shortlist. */
+export function orderByVoteOutcome<T extends { id: string }>(
+  items: readonly T[],
+  outcome: VoteOutcome,
+): T[] {
+  const featured = new Set(
+    outcome.winnerProposalId ? [outcome.winnerProposalId] : outcome.tiedProposalIds,
+  );
+  if (featured.size === 0) return [...items];
+  return [
+    ...items.filter((item) => featured.has(item.id)),
+    ...items.filter((item) => !featured.has(item.id)),
+  ];
+}
+
+/**
+ * Room-wide voting state. Safe to broadcast: it never names who voted for what.
+ * `votedCount` / `voterCount` is "how many of the people currently in the
+ * session have submitted a ballot", not a list of names (F29 is that list).
+ */
+export interface VotingPublicState {
+  questionId: string | null;
+  phase: VotingPhase;
+  proposalIds: string[];
+  tallies: VotingTally[];
+  votedCount: number;
+  voterCount: number;
+  /** Set by the server when the round is closed. Null while voting is still open. */
+  winnerProposalId: string | null;
+  /** Set by the server when the top score is shared. Empty while voting is open. */
+  tiedProposalIds: string[];
+  /**
+   * When the open ballot will auto-close, as UTC ISO. Null if this session
+   * has no voting timer, or the round is not open.
+   */
+  votingEndsAt: string | null;
+}
+
+/** Join snapshot / REST read: the public tally plus this viewer's own ballot. */
+export interface VotingViewerState extends VotingPublicState {
+  myVote: string | null;
+  /**
+   * F29: who has and has not voted, by name. Leader-only; `null` for everyone
+   * else so a participant's snapshot cannot grow a nudge list.
+   */
+  voterStatuses: VotingVoterStatus[] | null;
+}
+
+/** One member's voted / not-yet status. Never carries which proposal they chose. */
+export interface VotingVoterStatus {
+  userId: string;
+  displayName: string;
+  hasVoted: boolean;
+}
+
+export function emptyVotingState(questionId: string | null = null): VotingViewerState {
+  return {
+    questionId,
+    phase: 'idle',
+    proposalIds: [],
+    tallies: [],
+    votedCount: 0,
+    voterCount: 0,
+    winnerProposalId: null,
+    tiedProposalIds: [],
+    votingEndsAt: null,
+    myVote: null,
+    voterStatuses: null,
+  };
+}
+
+export function toPublicVotingState(state: VotingViewerState): VotingPublicState {
+  return {
+    questionId: state.questionId,
+    phase: state.phase,
+    proposalIds: state.proposalIds,
+    tallies: state.tallies,
+    votedCount: state.votedCount,
+    voterCount: state.voterCount,
+    winnerProposalId: state.winnerProposalId,
+    tiedProposalIds: state.tiedProposalIds,
+    votingEndsAt: state.votingEndsAt,
+  };
+}
+
 // === summary module ===
+
+/** One person who took part, for the F31 recap. */
+export interface SessionRecapParticipant {
+  userId: string;
+  displayName: string;
+  isLeader: boolean;
+}
+
+/** One agenda item plus its shortlist and, if a vote closed, the anonymous result. */
+export interface SessionRecapQuestion {
+  id: string;
+  position: number;
+  text: string;
+  status: QuestionStatus;
+  proposals: BoardItem[];
+  winnerProposalId: string | null;
+  tiedProposalIds: string[];
+  tallies: VotingTally[];
+  votedCount: number;
+}
+
+/**
+ * F31: everything a participant needs to reconstruct what was decided, without
+ * a live board. Each question carries its shortlist (at most six), not the
+ * whole pinboard. Assembled from session, pinboard, and voting reads — nothing
+ * extra is stored. Named `SessionRecap` so it does not collide with the
+ * dashboard's `SessionSummary` row.
+ */
+export interface SessionRecap {
+  sessionId: string;
+  title: string;
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  leaderId: string;
+  participants: SessionRecapParticipant[];
+  questions: SessionRecapQuestion[];
+}
+
+/**
+ * Past-tense label for the recap (screen and PDF). A question left in
+ * `voting` with a shortlist or result still reads as answered once the
+ * session is over.
+ */
+export function recapQuestionStatusLabel(question: SessionRecapQuestion): string {
+  if (
+    question.status === 'voting' &&
+    (question.winnerProposalId ||
+      question.tiedProposalIds.length > 0 ||
+      question.proposals.length > 0)
+  ) {
+    return 'Answered';
+  }
+  switch (question.status) {
+    case 'pending':
+    case 'discussion':
+    case 'voting':
+      return 'Not reached';
+    case 'answered':
+      return 'Answered';
+    case 'skipped':
+      return 'Skipped';
+  }
+}
 
 // === voice module ===
 

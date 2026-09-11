@@ -64,8 +64,13 @@ interface PositionedProposalProps {
    * the viewer has already pressed. Null until the board is joined.
    */
   viewerId: string | null;
-  /** Toggle one of this viewer's reactions on this proposal (F18). */
-  onReact: (item: BoardItem, emoji: string) => Promise<void>;
+  /** Toggle one of this viewer's reactions on this proposal (F18). Absent once the board is frozen. */
+  onReact?: (item: BoardItem, emoji: string) => Promise<void>;
+  /** Whether this proposal is on the leader's voting shortlist (F27). */
+  isShortlisted: boolean;
+  /** Leader may add/remove this card while the shortlist is still open. */
+  canToggleShortlist: boolean;
+  onToggleShortlist: (id: string) => void;
 }
 
 /**
@@ -309,6 +314,9 @@ export function PositionedProposal({
   onDelete,
   viewerId,
   onReact,
+  isShortlisted,
+  canToggleShortlist,
+  onToggleShortlist,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
   // Removal is destructive and cannot be undone, so it always passes through a
@@ -319,7 +327,8 @@ export function PositionedProposal({
   // it would be heavier than the change. Anything else reopens in the tool that
   // made it, which is the only place its shape can be manipulated.
   const editsInline = isOwn && item.artifactJson.type === 'sticky';
-  const canEdit = isOwn && (editsInline || onOpenEditor !== undefined);
+  const boardFrozen = !canMove && !canDelete && onOpenEditor === undefined;
+  const canEdit = isOwn && !boardFrozen && (editsInline || onOpenEditor !== undefined);
   const draggable = canMove && !editing;
 
   const confirmRemove = () => {
@@ -338,7 +347,9 @@ export function PositionedProposal({
 
   return (
     <div
-      className="group absolute"
+      className={`group absolute ${
+        isShortlisted ? 'ring-2 ring-rt-secondary bg-rt-secondary-wash' : ''
+      }`}
       // Tells the canvas to leave this pointer gesture alone: dragging a card
       // you may move must not also pan the board underneath it. A card you may
       // not move carries no flag, so dragging it pans, which is what every
@@ -346,6 +357,7 @@ export function PositionedProposal({
       data-card-draggable={draggable ? 'true' : undefined}
       style={{
         left: position.x,
+        borderRadius: STICKY_RADIUS,
         top: position.y,
         // A card being dragged, or edited, belongs above its neighbours.
         zIndex: isDragging ? 30 : editing ? 20 : 1,
@@ -353,8 +365,9 @@ export function PositionedProposal({
         // promise that grabbing is the only thing a card does, when clicking it
         // also reaches its Edit and Remove controls — and it would put a hand
         // over most of a busy board. The cursor changes once a drag is actually
-        // under way, which is the moment it means something.
-        cursor: isDragging ? 'grabbing' : 'default',
+        // under way, which is the moment it means something. During shortlisting
+        // the card itself is the control, so a pointer is accurate.
+        cursor: isDragging ? 'grabbing' : canToggleShortlist ? 'pointer' : 'default',
         // Without this the browser claims touch drags for scrolling first.
         touchAction: draggable ? 'none' : undefined,
         // Text inside a card must not become a selection while dragging it.
@@ -367,7 +380,51 @@ export function PositionedProposal({
       onPointerMove={draggable ? dragHandlers.onPointerMove : undefined}
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
+      onClick={
+        canToggleShortlist
+          ? (event) => {
+              // The corner tick is its own button and already toggles.
+              if ((event.target as HTMLElement).closest('button')) return;
+              onToggleShortlist(item.id);
+            }
+          : undefined
+      }
     >
+      {canToggleShortlist ? (
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleShortlist(item.id);
+          }}
+          className={`absolute top-0 left-0 z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+            isShortlisted
+              ? 'border-rt-secondary bg-rt-secondary text-white'
+              : 'border-rt-secondary bg-white text-rt-secondary'
+          }`}
+          style={{
+            // Sit on the corner: half on the card, half off it.
+            transform: 'translate(-50%, -50%)',
+            cursor: 'pointer',
+          }}
+          aria-label={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
+        >
+          {isShortlisted ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-3 w-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          ) : null}
+        </button>
+      ) : null}
+
       {editing && item.artifactJson.type === 'sticky' ? (
         <StickyTextEditor
           artifact={item.artifactJson}
@@ -385,14 +442,17 @@ export function PositionedProposal({
             isNew={isNew}
             isOwnedByViewer={isOwn}
             isAuthorLeader={isAuthorLeader}
+            isShortlisted={isShortlisted}
           />
 
-          <ReactionRow
-            reactions={item.reactions}
-            viewerId={viewerId}
-            onReact={(emoji) => onReact(item, emoji)}
-            width={CARD_WIDTH[item.type]}
-          />
+          {onReact ? (
+            <ReactionRow
+              reactions={item.reactions}
+              viewerId={viewerId}
+              onReact={(emoji) => onReact(item, emoji)}
+              width={CARD_WIDTH[item.type]}
+            />
+          ) : null}
 
           {canEdit || canDelete ? (
             <OwnerControls

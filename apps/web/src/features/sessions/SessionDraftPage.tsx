@@ -40,7 +40,7 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-primary px-6 py-[13px] text-rt-ink">
+      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Session setup</span>
         <Link
@@ -61,7 +61,7 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
           {session.questions.map((question, index) => (
             <li
               key={question.id}
-              className="flex items-baseline gap-2 rounded-lg border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
+              className="flex items-baseline gap-2 rounded-2xl border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
             >
               <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
               <span className="text-rt-ink">{question.text}</span>

@@ -118,11 +118,21 @@ export function usePinboard(sessionId: string) {
    * back to a placeholder title or a missing question.
    */
   const applySnapshot = useCallback(
-    ({ proposals, viewer, ...meta }: SessionStatePayload) => {
-      if (meta.sessionId !== sessionId) return;
+    (snapshot: SessionStatePayload) => {
+      if (snapshot.sessionId !== sessionId) return;
       setError(null);
-      setViewerId(viewer.id);
-      setBoard({ ...meta, items: [...proposals].sort(compareBoardItems) });
+      setViewerId(snapshot.viewer.id);
+      setBoard({
+        sessionId: snapshot.sessionId,
+        sessionTitle: snapshot.sessionTitle,
+        leaderId: snapshot.leaderId,
+        questionId: snapshot.questionId,
+        questionText: snapshot.questionText,
+        questionPosition: snapshot.questionPosition,
+        questionStatus: snapshot.questionStatus,
+        items: [...snapshot.proposals].sort(compareBoardItems),
+        discussionTimer: snapshot.discussionTimer,
+      });
     },
     [sessionId],
   );
