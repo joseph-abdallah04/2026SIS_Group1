@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   DIAGRAM_LABEL_INK,
   diagramEdgeDash,
@@ -23,6 +24,8 @@ import {
   CARD_WIDTH,
   OWNED_INK,
   STICKY_RADIUS,
+  STICKY_SHADOW,
+  STICKY_SIZE,
   STICKY_THEMES,
   THUMB_BACKGROUND,
 } from './pinboardTokens';
@@ -50,7 +53,12 @@ function formatTime(iso: string): string {
 
 /**
  * Who wrote this and when, along the bottom of the card: author left, time
- * pushed to the right edge.
+ * pushed to the right edge, and "edited" after it once the words have changed.
+ *
+ * The mark is about the content, not the row: dragging a card across the board
+ * leaves no trace on it, because nothing anyone reads has changed. Hovering
+ * gives the time of the edit, which is the question the mark prompts and the
+ * only reason to keep the timestamp of the original beside it.
  *
  * The bottom inset matches the sides at twelve pixels, so the byline sits in
  * an evenly spaced corner. That also happens to be exactly what the reaction
@@ -72,7 +80,7 @@ function CardFoot({
   isAuthorLeader: boolean;
 }) {
   return (
-    <footer className="flex items-center justify-between gap-2 px-3 pt-0.5 pb-3 text-[11px] text-rt-ink-faint">
+    <footer className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint">
       <span className="min-w-0 truncate font-medium text-rt-ink-muted">
         {isOwnedByViewer ? 'You' : item.authorName}
         {/* Never beside "You": the mark is there to say whose cards belong to the
@@ -83,10 +91,43 @@ function CardFoot({
           </span>
         ) : null}
       </span>
-      <time dateTime={item.createdAt} className="shrink-0">
-        {formatTime(item.createdAt)}
-      </time>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <time dateTime={item.createdAt}>{formatTime(item.createdAt)}</time>
+        {item.editedAt ? (
+          // Set a little smaller than the time rather than run on after it
+          // with a separator: that difference is enough to keep the two apart,
+          // and the mark should sit quietly beside the byline rather than
+          // compete with it.
+          <span title={`Edited at ${formatTime(item.editedAt)}`} className="text-[10px]">
+            Edited
+          </span>
+        ) : null}
+      </span>
     </footer>
+  );
+}
+
+/**
+ * The plate a drawing or a diagram is shown on.
+ *
+ * Full width across the top of the card, not a panel floating inside one. An
+ * inset plate within a bordered card puts two frames around the same artwork,
+ * and the card then reads as a box with a picture in it rather than a picture
+ * with a byline underneath. The card's own `overflow-hidden` rounds the top
+ * corners for it.
+ *
+ * A fixed four-by-three area rather than one that follows the content, so a
+ * row of cards lines up and a sparse diagram does not sit in a box a third the
+ * height of its neighbour's.
+ */
+function CardMedia({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="relative w-full overflow-hidden border-b"
+      style={{ aspectRatio: '4 / 3', background: THUMB_BACKGROUND, borderColor: CARD_BORDER }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -111,17 +152,15 @@ function DiagramBody({ item }: { item: BoardItem }) {
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);
 
   return (
-    <div
-      className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-xl bg-rt-surface-alt"
-      style={{ minHeight: 96 }}
-    >
+    <CardMedia>
       {nodes.length === 0 ? (
-        <div className="m-2 flex h-20 items-center justify-center rounded-xl border border-dashed border-rt-tertiary" />
+        <div className="absolute inset-3 rounded-md border border-dashed border-rt-tertiary" />
       ) : (
+        // Inset from the plate's edges so a shape at the diagram's boundary is
+        // not drawn hard against the card's own edge.
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="h-full w-full"
-          style={{ minHeight: 96 }}
+          className="absolute inset-0 h-full w-full p-2.5"
         >
           <defs>
             {arrowColors.map((color) => (
@@ -216,7 +255,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
           })}
         </svg>
       )}
-    </div>
+    </CardMedia>
   );
 }
 
@@ -246,23 +285,28 @@ export function ProposalCard({
       className={isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
+      {/* A sticky is bare paper: no outline, square corners, and a square
+          footprint that does not grow with its contents. Everything else is a
+          panel, so it keeps its border and its rounded edge. */}
       <article
-        className={`flex shrink-0 flex-col overflow-hidden border ${
+        className={`flex shrink-0 flex-col overflow-hidden ${isSticky ? '' : 'border'} ${
           isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''
         }`}
         style={{
           width: CARD_WIDTH[item.type],
+          ...(isSticky ? { height: STICKY_SIZE } : {}),
           borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
-          borderColor: theme ? theme.border : CARD_BORDER,
+          ...(isSticky ? {} : { borderColor: theme ? theme.border : CARD_BORDER }),
           background: theme ? theme.bg : '#FFFFFF',
-          boxShadow: CARD_SHADOW,
+          boxShadow: isSticky ? STICKY_SHADOW : CARD_SHADOW,
         }}
       >
         {artifact.type === 'sticky' ? (
+          // Fills whatever the square leaves above the byline, so a short note
+          // sits at the top of the paper rather than centred in it.
           <p
-            className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
+            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
             style={{
-              minHeight: 112,
               padding: '14px 14px 6px',
               // Shared with the editor's preview, so a note that had to shrink
               // to fit while you were writing it looks the same on the board.
@@ -276,10 +320,7 @@ export function ProposalCard({
         {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}
 
         {artifact.type === 'drawing' ? (
-          <div
-            className="mx-2.5 mt-2.5 mb-1 overflow-hidden rounded-xl"
-            style={{ height: 160, background: THUMB_BACKGROUND }}
-          >
+          <CardMedia>
             {drawingSrc ? (
               <img
                 src={drawingSrc}
@@ -287,10 +328,10 @@ export function ProposalCard({
                 loading="lazy"
                 // Images are natively draggable, which would hijack a card drag.
                 draggable={false}
-                className="block h-full w-full object-contain"
+                className="absolute inset-0 h-full w-full object-contain p-2.5"
               />
             ) : null}
-          </div>
+          </CardMedia>
         ) : null}
         <CardFoot item={item} isOwnedByViewer={isOwnedByViewer} isAuthorLeader={isAuthorLeader} />
       </article>

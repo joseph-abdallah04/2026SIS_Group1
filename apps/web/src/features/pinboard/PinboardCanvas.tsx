@@ -51,6 +51,13 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
   /**
+   * F38's way to put one of your earlier proposals on the board, rendered in
+   * the footer beside the creative tools. A node for the same reason `agenda`
+   * is: what goes in it is fetched and wired by the page, and this component
+   * stays the thing that lays a board out.
+   */
+  myProposals?: ReactNode;
+  /**
    * F12's mute toggle, for the header. A node for the same reason `agenda` is:
    * the board does not know what a LiveKit room is, and should not start
    * knowing in order to give voice somewhere prominent to sit.
@@ -216,6 +223,7 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  myProposals,
   micControl,
   participants,
   viewerId,
@@ -342,12 +350,18 @@ export function PinboardCanvas({
    * happens about the top-left corner: the further from that corner you were
    * looking, the further your subject travels. Anchoring is what makes zoom
    * feel like moving a magnifier over the board rather than resizing a page.
+   *
+   * A press moves exactly one stop. The ladder is fine enough that this is the
+   * smoothest zoom available without inventing scales between its rungs, which
+   * is the point of having laid it out that closely.
    */
   const stepZoom = useCallback(
     (direction: 'in' | 'out', anchor: Point) => {
       const idx = ZOOM_LEVELS.indexOf(zoom);
       const floor = ZOOM_LEVELS.indexOf(minZoom);
-      const clamped = Math.min(Math.max(direction === 'in' ? idx - 1 : idx + 1, 0), floor);
+      // Levels descend, so walking towards index 0 magnifies.
+      const step = direction === 'in' ? idx - 1 : idx + 1;
+      const clamped = Math.min(Math.max(step, 0), floor);
       const next = ZOOM_LEVELS[clamped];
       if (!next || next === zoom) return;
 
@@ -731,7 +745,7 @@ export function PinboardCanvas({
           />
 
           {boardOverlay ? (
-            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+            <div className="pointer-events-none absolute inset-x-0 bottom-[22px] z-20 flex justify-center">
               {boardOverlay}
             </div>
           ) : null}
@@ -743,7 +757,14 @@ export function PinboardCanvas({
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
         {boardOpen ? (
-          <CreativeToolbar />
+          <>
+            <CreativeToolbar />
+            {/* Beside the tools that start from blank, because reusing an
+                earlier proposal produces the same thing they do. It belongs
+                inside this branch for the same reason they do: with the board
+                closed there is nothing to reuse onto. */}
+            {myProposals}
+          </>
         ) : board.questionStatus === 'voting' ? (
           <p className="text-[12px] font-medium text-rt-ink-muted">
             Proposals are locked while this question is in voting

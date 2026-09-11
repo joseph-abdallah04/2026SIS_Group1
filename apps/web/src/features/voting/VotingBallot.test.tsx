@@ -17,6 +17,7 @@ function sticky(id: string, text: string): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    editedAt: null,
     extendsProposalId: null,
     reactions: [],
   };
@@ -36,6 +37,7 @@ function drawing(id: string): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    editedAt: null,
     extendsProposalId: null,
     reactions: [],
   };
@@ -56,6 +58,7 @@ function diagram(id: string): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    editedAt: null,
     extendsProposalId: null,
     reactions: [],
   };

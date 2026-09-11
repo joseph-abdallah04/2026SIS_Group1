@@ -378,6 +378,7 @@ export function DiagramEditor() {
   const {
     closeTool,
     extensionSource,
+    isReusingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -1326,7 +1327,9 @@ export function DiagramEditor() {
       <aside className="border-b border-rt-tertiary bg-rt-surface p-4 select-none md:min-h-0 md:overflow-y-auto md:border-r md:border-b-0 md:p-5">
         {extensionSource ? (
           <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-            Extending {extensionSource.authorName}&apos;s diagram
+            {isReusingOwn
+              ? 'Reusing your diagram'
+              : `Extending ${extensionSource.authorName}'s diagram`}
           </div>
         ) : null}
 

@@ -5,4 +5,10 @@
 // `pinboard/` changes, and `QuestionRef`/`SessionRef` are re-exported because
 // `permissions.ts` types against them.
 export type { QuestionRef, SessionRef } from '../sessions/index.js';
-export { getActiveQuestion, getDiscussionTimer, getQuestion, getSession } from '../sessions/index.js';
+export {
+  getActiveQuestion,
+  getDiscussionTimer,
+  getQuestion,
+  getSession,
+  getSessionWithQuestions,
+} from '../sessions/index.js';

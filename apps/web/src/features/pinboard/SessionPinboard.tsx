@@ -5,6 +5,7 @@ import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { PhaseTimer } from '../../components/PhaseTimer';
 import { AgendaPanel } from '../agenda/AgendaPanel';
 import { JoinCodeCard } from '../sessions/JoinCodeCard';
+import { MyProposalsLauncher } from './MyProposalsLauncher';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
 import { CreativeStudio } from '../tools/CreativeStudio';
@@ -141,6 +142,21 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
     );
   }
 
+  // Plain expressions rather than memos: everything above this point can
+  // return early, and a hook here would run on some renders and not others.
+  const acceptsProposals = isLive && board.questionStatus === 'discussion';
+
+  // What makes the "my proposals" list stale: the board moving to a different
+  // question, and this member adding, removing or rewording something on it.
+  // Other people's cards are left out because the list never shows them.
+  const myProposalsRevision = [
+    board.questionId ?? 'none',
+    board.items
+      .filter((item) => item.authorId === viewerId)
+      .map((item) => `${item.id}${item.editedAt ?? ''}`)
+      .join(','),
+  ].join('|');
+
   const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
   const balloting = voting.phase === 'open' || voting.phase === 'closed';
   // Server already ordered the shortlist (winner / ties first when closed).
@@ -150,7 +166,8 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
 
   return (
     <CreativeToolsProvider
-      isLive={isLive && board.questionStatus === 'discussion'}
+      isLive={acceptsProposals}
+      viewerId={viewerId}
       proposals={board.items}
       propose={propose}
       editProposal={editProposal}
@@ -237,6 +254,13 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                   ? board.items.length >= SHORTLIST_MIN
                   : undefined
               }
+            />
+          }
+          myProposals={
+            <MyProposalsLauncher
+              sessionId={sessionId}
+              revision={myProposalsRevision}
+              canPropose={acceptsProposals}
             />
           }
           micControl={

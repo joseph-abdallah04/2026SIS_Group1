@@ -7,7 +7,12 @@ import { QUICK_REACTIONS, type QuestionStatus } from '@roundtable/shared';
 vi.mock('../../db.js', () => ({
   prisma: {
     proposal: { findUnique: vi.fn() },
-    proposalReaction: { deleteMany: vi.fn(), create: vi.fn(), findMany: vi.fn() },
+    proposalReaction: {
+      deleteMany: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      upsert: vi.fn(),
+    },
   },
 }));
 
@@ -26,7 +31,8 @@ const { registerPinboardSocketHandlers } = await import('./socket.js');
 
 const findUnique = vi.mocked(prisma.proposal.findUnique);
 const deleteMany = vi.mocked(prisma.proposalReaction.deleteMany);
-const create = vi.mocked(prisma.proposalReaction.create);
+const findMine = vi.mocked(prisma.proposalReaction.findUnique);
+const upsert = vi.mocked(prisma.proposalReaction.upsert);
 const findMany = vi.mocked(prisma.proposalReaction.findMany);
 const question = vi.mocked(getQuestion);
 const session = vi.mocked(getSession);
@@ -69,7 +75,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   findUnique.mockResolvedValue(row() as never);
   deleteMany.mockResolvedValue({ count: 0 } as never);
-  create.mockResolvedValue({} as never);
+  findMine.mockResolvedValue(null as never);
+  upsert.mockResolvedValue({} as never);
   findMany.mockResolvedValue([] as never);
   question.mockResolvedValue(questionRef());
   session.mockResolvedValue({
@@ -125,17 +132,17 @@ describe('who may react', () => {
 });
 
 describe('toggleReaction', () => {
-  it('adds the reaction when this person has not left it', async () => {
+  it('leaves a reaction when this person has none', async () => {
     findMany.mockResolvedValue([{ emoji: THUMB, userId: 'u2' }] as never);
 
     const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB });
 
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: { proposalId: 'p1', userId: 'u2', emoji: THUMB },
+    expect(upsert).toHaveBeenCalledWith({
+      where: { proposalId_userId: { proposalId: 'p1', userId: 'u2' } },
+      create: { proposalId: 'p1', userId: 'u2', emoji: THUMB },
+      update: { emoji: THUMB },
     });
-    expect(create).toHaveBeenCalledWith({
-      data: { proposalId: 'p1', userId: 'u2', emoji: THUMB },
-    });
+    expect(deleteMany).not.toHaveBeenCalled();
     expect(result).toEqual({
       proposalId: 'p1',
       questionId: 'q1',
@@ -143,32 +150,45 @@ describe('toggleReaction', () => {
     });
   });
 
-  // Toggling off is a removal and nothing else: re-adding here is exactly what
-  // would make a second press look like it did nothing.
-  it('takes it back when they already left it, without adding another', async () => {
-    deleteMany.mockResolvedValue({ count: 1 } as never);
+  // Pressing what you already left takes it back, and nothing replaces it.
+  it('takes back the reaction they already left', async () => {
+    findMine.mockResolvedValue({ emoji: THUMB } as never);
 
     const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB });
 
-    expect(create).not.toHaveBeenCalled();
+    expect(deleteMany).toHaveBeenCalledWith({ where: { proposalId: 'p1', userId: 'u2' } });
+    expect(upsert).not.toHaveBeenCalled();
     expect(result.reactions).toEqual([]);
+  });
+
+  // One reaction per person per proposal: a second emoji moves yours rather
+  // than joining it, because you do not feel two ways about one idea.
+  it('moves the reaction when they press a different emoji', async () => {
+    findMine.mockResolvedValue({ emoji: THUMB } as never);
+    findMany.mockResolvedValue([{ emoji: HEART, userId: 'u2' }] as never);
+
+    const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: HEART });
+
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(upsert.mock.calls[0]?.[0]).toMatchObject({ update: { emoji: HEART } });
+    expect(result.reactions).toEqual([{ emoji: HEART, userIds: ['u2'] }]);
   });
 
   // Pressing a chip ten times must not count ten: each press either removes
   // the row or puts it back, so the count only ever moves between 0 and 1.
   it('lands on after an odd number of presses and off after an even one', async () => {
-    let stored = false;
+    let stored: string | null = null;
+    findMine.mockImplementation((async () => (stored ? { emoji: stored } : null)) as never);
     deleteMany.mockImplementation((async () => {
-      const had = stored;
-      stored = false;
-      return { count: had ? 1 : 0 };
+      stored = null;
+      return { count: 1 };
     }) as never);
-    create.mockImplementation((async () => {
-      stored = true;
+    upsert.mockImplementation((async () => {
+      stored = HEART ?? null;
       return {};
     }) as never);
     findMany.mockImplementation((async () =>
-      stored ? [{ emoji: HEART, userId: 'u2' }] : []) as never);
+      stored ? [{ emoji: stored, userId: 'u2' }] : []) as never);
 
     for (let press = 1; press <= 5; press += 1) {
       const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: HEART });
@@ -176,11 +196,11 @@ describe('toggleReaction', () => {
     }
   });
 
-  // Two of one person's own tabs pressing at once: the index refuses the
-  // second insert, and the reaction is on, which is what both presses asked
+  // Two of this person's own tabs pressing at once: the index refuses the
+  // second write, and they have a reaction, which is what both presses asked
   // for.
-  it('accepts a create that lost a race with an identical one', async () => {
-    create.mockRejectedValue(uniqueViolation());
+  it('accepts a write that lost a race with an identical one', async () => {
+    upsert.mockRejectedValue(uniqueViolation());
     findMany.mockResolvedValue([{ emoji: THUMB, userId: 'u2' }] as never);
 
     await expect(
@@ -189,7 +209,7 @@ describe('toggleReaction', () => {
   });
 
   it('still reports a write that failed for any other reason', async () => {
-    create.mockRejectedValue(new Error('connection lost'));
+    upsert.mockRejectedValue(new Error('connection lost'));
 
     await expect(toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB })).rejects.toThrow(
       /connection lost/,
@@ -202,7 +222,7 @@ describe('toggleReaction', () => {
     await expect(toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB })).rejects.toThrow(
       /the board is closed/,
     );
-    expect(create).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
     expect(deleteMany).not.toHaveBeenCalled();
   });
 });
@@ -311,8 +331,8 @@ describe('proposalReact handler', () => {
     const { react } = register({ user: { id: 'u2' }, sessionId: 's1' });
 
     expect(await react({ id: 'p1', emoji: PARTY })).toMatchObject({ ok: true });
-    expect(create).toHaveBeenCalledWith({
-      data: { proposalId: 'p1', userId: 'u2', emoji: PARTY },
+    expect(upsert.mock.calls[0]?.[0]).toMatchObject({
+      create: { proposalId: 'p1', userId: 'u2', emoji: PARTY },
     });
   });
 
@@ -330,7 +350,7 @@ describe('proposalReact handler', () => {
       ok: false,
       code: 'INVALID_PROPOSAL',
     });
-    expect(create).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('acks the writer and broadcasts the new state to the whole room', async () => {
@@ -353,8 +373,8 @@ describe('proposalReact handler', () => {
 
     await react({ id: 'p1', emoji: THUMB, userId: 'someone-else' });
 
-    expect(create).toHaveBeenCalledWith({
-      data: { proposalId: 'p1', userId: 'u2', emoji: THUMB },
+    expect(upsert.mock.calls[0]?.[0]).toMatchObject({
+      create: { proposalId: 'p1', userId: 'u2', emoji: THUMB },
     });
   });
 

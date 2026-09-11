@@ -135,6 +135,12 @@ export interface BoardItem {
   x: number;
   y: number;
   createdAt: string;
+  /**
+   * When this proposal's content was last rewritten, or null if it never has
+   * been (F16). Moving a card does not set it: the board shows "edited" to say
+   * the words changed, not that somebody dragged it.
+   */
+  editedAt: string | null;
   extendsProposalId: string | null;
   /**
    * Emoji reactions left on this proposal (F18), only for emoji somebody has
@@ -158,6 +164,35 @@ export function compareBoardItems(a: BoardItem, b: BoardItem): number {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
   if (a.id === b.id) return 0;
   return a.id < b.id ? -1 : 1;
+}
+
+/**
+ * One question's worth of a member's own proposals (F38).
+ *
+ * Grouped by question rather than returned flat, because the point of the list
+ * is to find something you said while a different question was on the board,
+ * and a proposal means little without the question it was answering.
+ */
+export interface AuthoredProposalGroup {
+  questionId: string;
+  questionText: string;
+  questionPosition: number;
+  questionStatus: QuestionStatus;
+  /**
+   * This is the question the board is showing. Proposals here are already on
+   * the current board, so they are listed for context but cannot be reused
+   * onto it.
+   */
+  isCurrent: boolean;
+  items: BoardItem[];
+}
+
+/** Everything this member has proposed in one session (F38), newest first. */
+export interface AuthoredProposalsResponse {
+  sessionId: string;
+  /** Null when no question is open, in which case nothing can be reused. */
+  currentQuestionId: string | null;
+  groups: AuthoredProposalGroup[];
 }
 
 /**

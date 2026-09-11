@@ -14,6 +14,7 @@ function item(artifactJson: BoardItem['artifactJson']): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-01T01:10:00.000Z',
+    editedAt: null,
     extendsProposalId: null,
     reactions: [],
   };

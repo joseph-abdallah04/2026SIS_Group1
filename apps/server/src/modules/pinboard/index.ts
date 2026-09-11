@@ -8,6 +8,7 @@ export {
   createProposal,
   deleteProposal,
   getBoardForSession,
+  listAuthoredProposals,
   listProposals,
   toggleReaction,
   updateProposal,

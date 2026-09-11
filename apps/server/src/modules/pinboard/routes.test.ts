@@ -9,13 +9,10 @@ import { errorHandler } from '../../middleware/error.js';
 
 const assertSessionMember = vi.fn();
 const getBoardForSession = vi.fn();
+const listAuthoredProposals = vi.fn();
 
 vi.mock('../../middleware/auth.js', () => ({
-  requireAuth: (
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction,
-  ) => {
+  requireAuth: (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const userId = req.headers['x-test-user-id'];
     if (typeof userId !== 'string' || !userId) {
       res.status(401).json({ error: 'Missing authentication token', code: 'MISSING_TOKEN' });
@@ -27,7 +24,7 @@ vi.mock('../../middleware/auth.js', () => ({
 }));
 
 vi.mock('../sessions/index.js', () => ({ assertSessionMember }));
-vi.mock('./service.js', () => ({ getBoardForSession }));
+vi.mock('./service.js', () => ({ getBoardForSession, listAuthoredProposals }));
 
 const { pinboardRoutes } = await import('./routes.js');
 
@@ -41,6 +38,20 @@ const BOARD = {
   questionStatus: 'discussion',
   items: [],
   discussionTimer: null,
+};
+
+const MINE = {
+  currentQuestionId: 'q1',
+  groups: [
+    {
+      questionId: 'q0',
+      questionText: 'What slowed us down?',
+      questionPosition: 0,
+      questionStatus: 'answered',
+      isCurrent: false,
+      items: [],
+    },
+  ],
 };
 
 function createApp() {
@@ -80,6 +91,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   assertSessionMember.mockResolvedValue(undefined);
   getBoardForSession.mockResolvedValue(BOARD);
+  listAuthoredProposals.mockResolvedValue(MINE);
 });
 
 describe('GET /api/sessions/:sessionId/proposals membership', () => {
@@ -107,5 +119,45 @@ describe('GET /api/sessions/:sessionId/proposals membership', () => {
     expect(res.body).toEqual(BOARD);
     expect(assertSessionMember).toHaveBeenCalledWith('s1', 'u1');
     expect(getBoardForSession).toHaveBeenCalledWith('s1');
+  });
+});
+
+// The reuse list is member-scoped for the same reason the board is, and it is
+// a second route rather than a filter on the first, so the gate has to be
+// proven here too: a route that forgets it would still pass every board test.
+describe('GET /api/sessions/:sessionId/proposals/mine membership', () => {
+  const MINE_PATH = '/api/sessions/s1/proposals/mine';
+
+  it('401s when the caller has no identity', async () => {
+    const res = await request({ userId: '', path: MINE_PATH });
+    expect(res.status).toBe(401);
+    expect(assertSessionMember).not.toHaveBeenCalled();
+    expect(listAuthoredProposals).not.toHaveBeenCalled();
+  });
+
+  it('403s a stranger and never reads their history', async () => {
+    assertSessionMember.mockRejectedValue(
+      new ApiError(403, 'You are not a member of this session', 'NOT_SESSION_MEMBER'),
+    );
+    const res = await request({ userId: 'stranger', path: MINE_PATH });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: 'NOT_SESSION_MEMBER' });
+    expect(assertSessionMember).toHaveBeenCalledWith('s1', 'stranger');
+    expect(listAuthoredProposals).not.toHaveBeenCalled();
+  });
+
+  it('returns the list once both gates pass', async () => {
+    const res = await request({ path: MINE_PATH });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(MINE);
+    expect(assertSessionMember).toHaveBeenCalledWith('s1', 'u1');
+  });
+
+  // Whose history this is comes from the token, so asking for somebody else's
+  // by naming them returns your own rather than theirs.
+  it('reads the author from the token, not from the query', async () => {
+    const res = await request({ path: `${MINE_PATH}?authorId=someone-else` });
+    expect(res.status).toBe(200);
+    expect(listAuthoredProposals).toHaveBeenCalledWith({ sessionId: 's1', authorId: 'u1' });
   });
 });

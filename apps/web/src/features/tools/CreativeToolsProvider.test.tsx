@@ -26,6 +26,7 @@ function Harness({
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
       <CreativeToolsProvider
+        viewerId={null}
         isLive={isLive}
         proposals={proposals}
         propose={propose}
@@ -148,6 +149,7 @@ describe('creative sticky flow', () => {
       x: 32,
       y: 32,
       createdAt: '2026-09-02T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };
@@ -155,6 +157,7 @@ describe('creative sticky flow', () => {
     render(
       <MemoryRouter initialEntries={['/sessions/demo']}>
         <CreativeToolsProvider
+          viewerId={null}
           isLive
           proposals={[parent]}
           propose={propose}

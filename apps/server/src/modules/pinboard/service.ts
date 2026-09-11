@@ -1,5 +1,7 @@
 import {
   isEmoji,
+  type AuthoredProposalGroup,
+  type AuthoredProposalsResponse,
   type BoardItem,
   type BoardResponse,
   type ReactionGroup,
@@ -13,7 +15,13 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
 import { requireMutableProposal, type Actor, type ProposalMutation } from './permissions.js';
-import { getActiveQuestion, getDiscussionTimer, getQuestion, getSession } from './sessionsAdapter.js';
+import {
+  getActiveQuestion,
+  getDiscussionTimer,
+  getQuestion,
+  getSession,
+  getSessionWithQuestions,
+} from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
 // agreed order), its create side (F15: proposals land for everyone at once),
@@ -85,6 +93,7 @@ export function toBoardItem(row: ProposalRow): BoardItem {
     x: row.x,
     y: row.y,
     createdAt: row.createdAt.toISOString(),
+    editedAt: row.editedAt?.toISOString() ?? null,
     extendsProposalId: row.extendsProposalId,
     reactions: toReactionGroups(row.reactions),
   };
@@ -156,14 +165,25 @@ export async function createProposal({
   }
 
   if (input.extendsProposalId) {
+    // Scoped to the session rather than to this question. Extending (F23)
+    // always names something on the board in front of you, but reusing your
+    // own earlier work (F38) names something from a question that has since
+    // closed, and both arrive here as the same write. The session is still the
+    // boundary: a proposal from somebody else's session stays unreachable, and
+    // reporting it the same way as a deleted one keeps that from being a way
+    // to test whether an id exists.
     const parent = await prisma.proposal.findFirst({
-      where: { id: input.extendsProposalId, questionId, deletedAt: null },
+      where: {
+        id: input.extendsProposalId,
+        deletedAt: null,
+        question: { sessionId: question.sessionId },
+      },
       select: { id: true },
     });
     if (!parent) {
       throw new ApiError(
         400,
-        'Cannot extend a proposal that is not on this board',
+        'Cannot build on a proposal that is not in this session',
         'INVALID_EXTENDS',
       );
     }
@@ -248,8 +268,14 @@ export async function updateProposal({
   const updated = await prisma.proposal.update({
     where: { id: proposalId },
     data: {
+      // `editedAt` moves with the artifact and only with it. A payload that
+      // carries coordinates alone is a move, and a move leaves no trace on the
+      // card beyond its new position.
       ...(input.artifactJson
-        ? { artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue }
+        ? {
+            artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
+            editedAt: new Date(),
+          }
         : {}),
       ...(input.x === undefined ? {} : { x: input.x }),
       ...(input.y === undefined ? {} : { y: input.y }),
@@ -313,19 +339,23 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * Add or take back one person's emoji reaction (F18).
+ * Set, change or take back one person's reaction (F18).
  *
- * The direction is decided here, from what is stored, rather than by the
- * client saying "add" or "remove". A client that has fallen behind would
+ * A person has one reaction per proposal, so this has three outcomes rather
+ * than two. Pressing the chip you already left takes it back. Pressing a
+ * different one moves your reaction to it, because a reaction says how you
+ * feel about an idea and you do not feel two ways at once. Pressing when you
+ * have none leaves one.
+ *
+ * Which of the three happens is decided here, from what is stored, rather than
+ * by the client saying "add" or "remove". A client that has fallen behind would
  * otherwise ask to remove a reaction it no longer has, or add one it already
  * left, and the board would end up reflecting the order intents happened to
- * arrive in instead of how many times the chip was pressed.
+ * arrive in instead of what was actually pressed.
  *
- * Double-counting is impossible by construction: one row per person, per
- * emoji, per proposal is a unique index, so the tenth press of a chip can
- * neither insert a second row nor remove one that was never there. A press
- * that races itself across two tabs lands on "reacted", which is what was
- * asked for both times.
+ * Double-counting is impossible by construction: one row per person per
+ * proposal is a unique index, so the tenth press of a chip can neither insert a
+ * second row nor remove one that was never there.
  *
  * Returns the proposal's whole reaction state, not a delta, so the broadcast
  * corrects any client that missed an earlier one.
@@ -342,17 +372,27 @@ export async function toggleReaction({
 }): Promise<{ proposalId: string; questionId: string; reactions: ReactionGroup[] }> {
   const { row } = await loadForMutation(proposalId, actor, 'react');
 
-  const { count } = await prisma.proposalReaction.deleteMany({
-    where: { proposalId, userId: actor.id, emoji },
+  const mine = await prisma.proposalReaction.findUnique({
+    where: { proposalId_userId: { proposalId, userId: actor.id } },
+    select: { emoji: true },
   });
 
-  if (count === 0) {
+  if (mine?.emoji === emoji) {
+    // Pressing what you already left takes it back.
+    await prisma.proposalReaction.deleteMany({ where: { proposalId, userId: actor.id } });
+  } else {
     try {
-      await prisma.proposalReaction.create({ data: { proposalId, userId: actor.id, emoji } });
+      // Whether this is your first reaction or a change of mind, the row that
+      // has to exist afterwards is the same one, so one write covers both.
+      await prisma.proposalReaction.upsert({
+        where: { proposalId_userId: { proposalId, userId: actor.id } },
+        create: { proposalId, userId: actor.id, emoji },
+        update: { emoji },
+      });
     } catch (err) {
-      // Two of this person's own clients pressed the same chip at once. The
-      // unique index refused the second, and the reaction is on, which is
-      // exactly what both presses asked for. Anything else is a real failure.
+      // Two of this person's own clients pressed at once and the index refused
+      // the second insert. They have a reaction, which is what both presses
+      // asked for. Anything else is a real failure.
       if (!isUniqueViolation(err)) throw err;
     }
   }
@@ -362,6 +402,74 @@ export async function toggleReaction({
     questionId: row.questionId,
     reactions: await listReactions(proposalId),
   };
+}
+
+/**
+ * Everything one member has proposed across a whole session (F38).
+ *
+ * The board read returns one question at a time, because that is what a board
+ * is. This crosses that boundary on purpose: the point is to find something
+ * you proposed while a different question was up, so it has to see the
+ * questions the board has moved past.
+ *
+ * Scoped to a single author by the caller, never by a filter the client sends.
+ * A member may see their own history; whether anyone may see somebody else's
+ * is a different question, and this is not the endpoint that answers it.
+ *
+ * Questions come back newest first, which is the order they are useful in: the
+ * thing you proposed a minute ago is far likelier to be worth reusing than the
+ * one from the top of the agenda. Empty questions are dropped rather than
+ * listed as headings with nothing under them.
+ */
+export async function listAuthoredProposals({
+  sessionId,
+  authorId,
+}: {
+  sessionId: string;
+  authorId: string;
+}): Promise<AuthoredProposalsResponse> {
+  const session = await getSessionWithQuestions(sessionId);
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+
+  const active = await getActiveQuestion(sessionId);
+  const questionIds = session.questions.map((question) => question.id);
+
+  const rows = questionIds.length
+    ? await prisma.proposal.findMany({
+        where: { questionId: { in: questionIds }, authorId, deletedAt: null },
+        include: BOARD_ITEM_INCLUDE,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      })
+    : [];
+
+  const byQuestion = new Map<string, BoardItem[]>();
+  for (const row of rows) {
+    const item = toBoardItem(row);
+    const bucket = byQuestion.get(item.questionId);
+    if (bucket) bucket.push(item);
+    else byQuestion.set(item.questionId, [item]);
+  }
+
+  const groups: AuthoredProposalGroup[] = [...session.questions]
+    .sort((a, b) => b.position - a.position)
+    .flatMap((question) => {
+      const items = byQuestion.get(question.id);
+      if (!items) return [];
+      return [
+        {
+          questionId: question.id,
+          questionText: question.text,
+          questionPosition: question.position,
+          questionStatus: question.status,
+          isCurrent: question.id === active?.id,
+          items,
+        },
+      ];
+    });
+
+  return { sessionId, currentQuestionId: active?.id ?? null, groups };
 }
 
 export async function getBoardForSession(sessionId: string): Promise<BoardResponse> {

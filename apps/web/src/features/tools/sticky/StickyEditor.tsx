@@ -4,9 +4,10 @@ import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
 import {
-  CARD_SHADOW,
   CARD_WIDTH,
   STICKY_RADIUS,
+  STICKY_SHADOW,
+  STICKY_SIZE,
   STICKY_THEMES,
 } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
@@ -19,6 +20,7 @@ export function StickyEditor() {
   const {
     closeTool,
     extensionSource,
+    isReusingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -85,7 +87,9 @@ export function StickyEditor() {
         >
           {extensionSource ? (
             <div className="mb-5 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-              Extending {extensionSource.authorName}&apos;s sticky
+              {isReusingOwn
+                ? 'Reusing your sticky'
+                : `Extending ${extensionSource.authorName}'s sticky`}
             </div>
           ) : null}
 
@@ -181,19 +185,18 @@ export function StickyEditor() {
           Board preview
         </div>
         <article
-          className="flex shrink-0 flex-col overflow-hidden border"
+          className="flex shrink-0 flex-col overflow-hidden"
           style={{
             width: CARD_WIDTH.sticky,
+            height: STICKY_SIZE,
             borderRadius: STICKY_RADIUS,
-            borderColor: theme.border,
             background: theme.bg,
-            boxShadow: CARD_SHADOW,
+            boxShadow: STICKY_SHADOW,
           }}
         >
           <p
-            className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
+            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
             style={{
-              minHeight: 112,
               padding: '14px 14px 6px',
               fontSize: typography.fontSize,
               lineHeight: typography.lineHeight,

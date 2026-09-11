@@ -26,6 +26,7 @@ export function CreativeToolsWorkbench() {
         x: input.x,
         y: input.y,
         createdAt: new Date().toISOString(),
+        editedAt: null,
         extendsProposalId: input.extendsProposalId ?? null,
         reactions: [],
       },
@@ -35,6 +36,7 @@ export function CreativeToolsWorkbench() {
   return (
     <CreativeToolsProvider
       isLive
+      viewerId="current-developer"
       proposals={proposals}
       propose={propose}
       editProposal={async () => {}}

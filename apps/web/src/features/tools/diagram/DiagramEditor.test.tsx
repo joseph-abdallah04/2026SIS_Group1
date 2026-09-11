@@ -29,7 +29,13 @@ function Harness({
 }) {
   return (
     <MemoryRouter initialEntries={['/sessions/demo']}>
-      <CreativeToolsProvider isLive proposals={[]} propose={propose} editProposal={async () => {}}>
+      <CreativeToolsProvider
+        viewerId={null}
+        isLive
+        proposals={[]}
+        propose={propose}
+        editProposal={async () => {}}
+      >
         <CreativeToolbar />
         {children}
         <CreativeStudio />
@@ -85,6 +91,7 @@ function connectedFixture(): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-03T00:00:00.000Z',
+    editedAt: null,
     extendsProposalId: null,
     reactions: [],
   };
@@ -380,6 +387,7 @@ describe('diagram editor', () => {
       x: 0,
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };
@@ -490,6 +498,7 @@ describe('diagram editor', () => {
       x: 0,
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };
@@ -642,6 +651,7 @@ describe('diagram editor', () => {
       x: 0,
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };
@@ -1047,6 +1057,7 @@ describe('diagram resize and style', () => {
       x: 0,
       y: 0,
       createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };
@@ -1612,6 +1623,7 @@ describe('diagram routing and graph-aware arrange', () => {
       x: 0,
       y: 0,
       createdAt: '2026-09-04T00:00:00.000Z',
+      editedAt: null,
       extendsProposalId: null,
       reactions: [],
     };

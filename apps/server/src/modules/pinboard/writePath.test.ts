@@ -161,22 +161,42 @@ describe('createProposal', () => {
       expect(proposal.extendsProposalId).toBe('parent-1');
     });
 
-    it('rejects a parent on another board or already deleted', async () => {
+    it('rejects a parent from another session or already deleted', async () => {
       findFirst.mockResolvedValue(null);
       await expect(
         createProposal({ questionId: 'q1', authorId: 'u1', input: extending }),
-      ).rejects.toThrow(/not on this board/);
+      ).rejects.toThrow(/not in this session/);
       expect(create).not.toHaveBeenCalled();
     });
 
-    it('scopes the parent lookup to this question and non-deleted rows', async () => {
+    // Scoped to the session, not to this question: extending (F23) names
+    // something on the board in front of you, while reusing your own earlier
+    // work (F38) names something from a question that has since closed, and
+    // both arrive here as the same write.
+    it('scopes the parent lookup to this session and non-deleted rows', async () => {
       findFirst.mockResolvedValue({ id: 'parent-1' } as never);
       await createProposal({ questionId: 'q1', authorId: 'u1', input: extending });
       expect(findFirst.mock.calls[0]?.[0]?.where).toMatchObject({
         id: 'parent-1',
-        questionId: 'q1',
         deletedAt: null,
+        question: { sessionId: 's1' },
       });
+    });
+
+    it('accepts a parent from an earlier question of the same session', async () => {
+      findFirst.mockResolvedValue({ id: 'parent-1' } as never);
+      create.mockResolvedValue(createdRow({ extendsProposalId: 'parent-1' }) as never);
+
+      const proposal = await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: extending,
+      });
+
+      // The lookup never mentions the question the parent was proposed to, so
+      // an older one is as reachable as one on the current board.
+      expect(findFirst.mock.calls[0]?.[0]?.where).not.toHaveProperty('questionId');
+      expect(proposal.extendsProposalId).toBe('parent-1');
     });
   });
 });

@@ -27,7 +27,7 @@
 | --- | --------------------- | ------------------------------ | ---------------- | ---------------------- | -------------------------------------- |
 | 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33     | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
 | 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
-| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18          | `pinboard/`            | `Proposal`, `Reaction`                 |
+| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18, F38     | `pinboard/`            | `Proposal`, `Reaction`                 |
 | 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
 | 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32          | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
 | 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | _(none — LiveKit-managed)_             |
@@ -192,8 +192,8 @@ The socket server currently accepts any connection and only logs connect/disconn
 
 ## Pinboard Core Owner
 
-**Features:** F14–F18  
-**Responsibility:** Proposal CRUD, reactions, canvas real-time sync, right-click context menu
+**Features:** F14–F18, F38  
+**Responsibility:** Proposal CRUD, reactions, reuse of your own earlier proposals, canvas real-time sync, right-click context menu
 
 ### Code ownership
 
@@ -207,8 +207,8 @@ Frontend: apps/web/src/features/pinboard/
 ### Database tables
 
 ```
-Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
-ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId, emoji)
+Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
+ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
 
 ### Socket events
@@ -266,7 +266,7 @@ reaction lands in the same place on every board.
 
 - Proposal artifacts are **editable by their author only** (F16); other users build on them via the separate "Extend" flow (F23), which creates a new proposal owned by that user
 - `extendsProposalId` links child proposals to parents; never delete parent if child exists
-- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
+- One reaction per person per proposal, enforced by a unique constraint on (proposalId, userId). Pressing the emoji you already left removes it; pressing a different one moves yours to it. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
 - Reactions are held to the same phase lock as every other board write: they move only while the question is in `discussion`. They are not votes (F27–F31), and a tally moving beside a live ballot would be read as one
 
 ---
@@ -784,7 +784,7 @@ Examples:
 
 1. **Auth + Profile** — F01–F03, F33
 2. **Session Lifecycle** — F04–F10, F24–F26
-3. **Pinboard Core** — F14–F18
+3. **Pinboard Core** — F14–F18, F38
 4. **Creative Tools** — F19–F22, F23
 5. **Voting + Summary** — F27–F32
 6. **Voice** — F11–F13
