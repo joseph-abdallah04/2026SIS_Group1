@@ -745,7 +745,7 @@ export function PinboardCanvas({
           />
 
           {boardOverlay ? (
-            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+            <div className="pointer-events-none absolute inset-x-0 bottom-[22px] z-20 flex justify-center">
               {boardOverlay}
             </div>
           ) : null}
