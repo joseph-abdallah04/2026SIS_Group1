@@ -9,6 +9,9 @@ import { useProposalSubmission } from './useProposalSubmission';
 
 interface CreativeToolsProviderProps {
   children: ReactNode;
+  sessionId: string;
+  /** The question the board is on; a draft is kept per question. */
+  questionId: string;
   isLive: boolean;
   proposals: readonly BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
@@ -17,6 +20,8 @@ interface CreativeToolsProviderProps {
 
 export function CreativeToolsProvider({
   children,
+  sessionId,
+  questionId,
   isLive,
   proposals,
   propose,
@@ -93,6 +98,7 @@ export function CreativeToolsProvider({
     <CreativeToolsContext.Provider
       value={{
         activeTool,
+        draftScope: { sessionId, questionId },
         extensionSource,
         editSource,
         isLive,

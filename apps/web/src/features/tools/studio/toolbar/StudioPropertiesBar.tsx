@@ -100,16 +100,52 @@ export function StudioPropertiesBar({
 
   // Measured after paint, because where it goes depends on how wide it turned
   // out — and how wide it is depends on which controls this selection offers.
+  //
+  /**
+   * How big the bar turned out, watched rather than re-checked every render.
+   *
+   * Measuring on every render is a loop waiting to happen, and it happened: the
+   * measurement feeds the position, the position is a render, the render
+   * measures again. While the studio is opening or closing the bar has no
+   * layout box at all, so the readings alternated between its real size and
+   * zero and never settled — React gives up at that point and takes the page
+   * down with it, which is the white screen.
+   *
+   * An observer only speaks when the element actually changes size, so there is
+   * no cycle to enter. A reading of zero is ignored either way: an element that
+   * is not laid out has not become small.
+   *
+   * None of this could show up under jsdom, where every box is zero and the
+   * first measurement is therefore also the last.
+   */
   useLayoutEffect(() => {
     const element = barRef.current;
     if (!element) return;
-    const bounds = element.getBoundingClientRect();
-    setSize((current) =>
-      current.measured && current.width === bounds.width && current.height === bounds.height
-        ? current
-        : { width: bounds.width, height: bounds.height, measured: true },
-    );
-  });
+
+    const measure = () => {
+      const bounds = element.getBoundingClientRect();
+      const width = Math.round(bounds.width);
+      const height = Math.round(bounds.height);
+      setSize((current) => {
+        // A later reading of nothing is the bar having no layout box — mid-open
+        // or mid-close — rather than the bar having shrunk, so the last known
+        // size stands. The *first* reading is kept whatever it is: until one is
+        // taken the bar stays hidden, and a surface that measures everything at
+        // zero would otherwise hide it for good.
+        if (current.measured && width === 0 && height === 0) return current;
+        if (current.measured && current.width === width && current.height === height) {
+          return current;
+        }
+        return { width, height, measured: true };
+      });
+    };
+
+    measure();
+    if (typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const groups = groupProperties(properties);
   const showAlignment = selectionSize > 1;

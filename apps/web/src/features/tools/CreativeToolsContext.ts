@@ -7,6 +7,11 @@ export type ProposalSubmissionStatus = 'idle' | 'submitting' | 'success';
 
 export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
+  /**
+   * Which board this editor belongs to, so an unfinished canvas can be kept
+   * against it. A draft made for one question must never open on another.
+   */
+  draftScope: { sessionId: string; questionId: string };
   extensionSource: BoardItem | null;
   /**
    * The proposal being rewritten in place, as opposed to copied. Editing keeps

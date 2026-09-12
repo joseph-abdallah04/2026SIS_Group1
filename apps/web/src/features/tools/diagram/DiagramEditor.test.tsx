@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
@@ -128,6 +128,19 @@ async function typeNodeLabel(
   fireEvent.blur(input);
 }
 
+/** One freehand stroke across the canvas. */
+function drawStrokeOn(
+  canvas: Element,
+  pointerId: number,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+) {
+  fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: from.x, clientY: from.y });
+  fireEvent.pointerMove(canvas, { pointerId, clientX: (from.x + to.x) / 2, clientY: to.y });
+  fireEvent.pointerMove(canvas, { pointerId, clientX: to.x, clientY: to.y });
+  fireEvent.pointerUp(canvas, { pointerId, clientX: to.x, clientY: to.y });
+}
+
 /** Two quick presses on a cell open it, the way the canvas detects them. */
 function doublePressCell(cell: Element, canvas: Element, pointerId: number) {
   fireEvent.pointerDown(cell, { button: 0, pointerId, clientX: 400, clientY: 290 });
@@ -170,13 +183,23 @@ async function arrangeDiagram(user: ReturnType<typeof userEvent.setup>) {
 function Harness({
   children,
   propose,
+  questionId = 'question-1',
 }: {
   children?: React.ReactNode;
   propose: (input: ProposalCreateInput) => Promise<void>;
+  /** Drafts are kept per question, so a test can open the tool on another. */
+  questionId?: string;
 }) {
   return (
     <MemoryRouter initialEntries={['/sessions/demo']}>
-      <CreativeToolsProvider isLive proposals={[]} propose={propose} editProposal={async () => {}}>
+      <CreativeToolsProvider
+        sessionId="session-1"
+        questionId={questionId}
+        isLive
+        proposals={[]}
+        propose={propose}
+        editProposal={async () => {}}
+      >
         <CreativeToolbar />
         {children}
         <CreativeStudio />
@@ -562,7 +585,7 @@ describe('diagram editor', () => {
       </Harness>,
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
-    await openMore(user);
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Client' }));
     await user.click(screen.getByRole('button', { name: 'Delete selection' }));
     expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
 
@@ -584,8 +607,35 @@ describe('diagram editor', () => {
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    expect(confirm).toHaveBeenCalledWith('Discard your unsaved diagram changes?');
+    // Cancel is the only exit that destroys anything now, so it is the only one
+    // that asks — and declining leaves the canvas exactly as it was.
+    expect(confirm).toHaveBeenCalledWith('Discard this canvas?');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
+    ).toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  it('keeps a closed canvas rather than asking about it', async () => {
+    // Closing is no longer destructive: the draft is kept, so the old question
+    // — discard your unsaved changes? — had no truthful answer left.
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, 'confirm');
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
+    expect(confirm).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /^Studio$/ }));
+    expect(
+      screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
+    ).toBeInTheDocument();
     confirm.mockRestore();
   });
 
@@ -836,7 +886,7 @@ describe('diagram editor', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
 
-    await openMore(user);
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Client' }));
     await user.click(screen.getByRole('button', { name: 'Delete selection' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
@@ -1144,7 +1194,8 @@ describe('diagram viewport and productivity', () => {
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
     const canvas = screen.getByRole('application', { name: 'Studio canvas' });
 
-    // The first node is selected on open; copy just that one.
+    // Nothing is selected on open, so pick the one endpoint to copy.
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Client' }));
     fireEvent.keyDown(canvas, { key: 'c', ctrlKey: true });
     fireEvent.keyDown(canvas, { key: 'v', ctrlKey: true });
 
@@ -4258,6 +4309,97 @@ describe('tool shortcuts on the canvas', () => {
     // Ctrl+V is paste, and paste with an empty clipboard leaves the board alone.
     await user.keyboard('{Control>}v{/Control}');
     expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('keeping an unfinished canvas', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  /** Closes the studio the way the header does, and opens it again. */
+  async function reopen(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
+    await user.click(screen.getByRole('button', { name: /^Studio$/ }));
+  }
+
+  it('brings the canvas back after the tool is closed and reopened', async () => {
+    // Everything here lives in memory until it is proposed, and a canvas is
+    // minutes of work. Closing the tool used to lose all of it.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 81, 'Kept');
+    await reopen(user);
+
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Kept' })).toBeInTheDocument();
+  });
+
+  it('brings back the sketch and the tables too, not only the shapes', async () => {
+    // Keeping half a canvas would be its own way of losing work.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    drawStrokeOn(canvas, 810, { x: 200, y: 200 }, { x: 300, y: 260 });
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 812, clientX: 480, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 812, clientX: 480, clientY: 300 });
+
+    await reopen(user);
+
+    expect(screen.getByTestId('ink-stroke')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
+  });
+
+  it('lets go of it once the work is on the board', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    // The confirmation screen has its own way back, beside the header's.
+    await user.click(screen.getAllByRole('button', { name: 'Back to pinboard' })[0]!);
+    await user.click(screen.getByRole('button', { name: /^Studio$/ }));
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
+  });
+
+  it('lets go of it when the canvas is emptied again', async () => {
+    // Undoing back to nothing is not an unfinished canvas, so there is nothing
+    // to come back to.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    await reopen(user);
+
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
+  });
+
+  it('keeps a draft out of the way of a different question', async () => {
+    // Kept per session and per question: a canvas started on one is not offered
+    // on the next.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} questionId="question-2" />);
+    await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
+
+    cleanup();
+    render(<Harness propose={propose()} questionId="question-9" />);
+    await userEvent.setup().click(screen.getByRole('button', { name: /^Studio$/ }));
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
   });
 });
 

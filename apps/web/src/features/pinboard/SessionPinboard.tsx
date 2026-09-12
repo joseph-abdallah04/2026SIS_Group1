@@ -128,6 +128,8 @@ export function SessionPinboard({ isLeader, questions }: SessionPinboardProps) {
 
   return (
     <CreativeToolsProvider
+      sessionId={sessionId}
+      questionId={board.questionId ?? ''}
       isLive={isLive && board.questionStatus === 'discussion'}
       proposals={board.items}
       propose={propose}

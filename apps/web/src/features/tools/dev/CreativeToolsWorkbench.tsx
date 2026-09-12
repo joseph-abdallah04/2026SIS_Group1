@@ -34,6 +34,8 @@ export function CreativeToolsWorkbench() {
 
   return (
     <CreativeToolsProvider
+      sessionId="session-1"
+      questionId="question-1"
       isLive
       proposals={proposals}
       propose={propose}

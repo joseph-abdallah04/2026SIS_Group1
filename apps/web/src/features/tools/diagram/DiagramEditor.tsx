@@ -59,6 +59,7 @@ import type {
   DiagramEdge,
   DiagramFontSizePreset,
   DiagramNode,
+  DiagramArtifact,
   DiagramNodeShape,
   DiagramNodeSize,
   DiagramStrokeKey,
@@ -192,6 +193,8 @@ import { StudioToolRail } from '../studio/toolbar/StudioToolRail';
 import {
   createInkId,
   dataToInk,
+  fitInkStroke,
+  inkToData,
   eraseInkAtPoint,
   eraserRadiusForView,
   type StudioInkStroke,
@@ -267,6 +270,13 @@ import {
 } from '../studio/studioArrange';
 import { Popover } from '../../../components/ui/Popover';
 import { Tooltip } from '../../../components/ui/Tooltip';
+import {
+  clearStudioDraft,
+  isDraftWorthKeeping,
+  readStudioDraft,
+  writeStudioDraft,
+  type StudioDraftScope,
+} from '../studio/studioDraft';
 import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 
@@ -837,6 +847,7 @@ function nodeOrigins(
 export function DiagramEditor() {
   const {
     closeTool,
+    draftScope,
     extensionSource,
     editSource,
     isLive,
@@ -850,15 +861,33 @@ export function DiagramEditor() {
   const sourceProposal = editSource ?? extensionSource;
   const sourceArtifact =
     sourceProposal?.artifactJson.type === 'diagram' ? sourceProposal.artifactJson : null;
+  /**
+   * What this canvas is, for the purpose of keeping a draft. Composing,
+   * extending and editing are three different pieces of work from one tool, so
+   * each keeps its own — and an edit's belongs to the proposal it rewrites.
+   */
+  const draftKeyScope: StudioDraftScope = {
+    ...draftScope,
+    mode: editSource ? 'edit' : extensionSource ? 'extend' : 'compose',
+    sourceId: sourceProposal?.id ?? null,
+  };
+  const draftStorage = typeof window === 'undefined' ? undefined : window.sessionStorage;
+
   const initialSnapshotRef = useRef<DiagramSnapshot | null>(null);
   if (!initialSnapshotRef.current) {
+    // A kept draft is what was last on this canvas, so it wins over the source
+    // it was started from — the source is already in it.
+    const draft = readStudioDraft(draftStorage, draftKeyScope);
+    const from = draft ?? sourceArtifact;
     initialSnapshotRef.current = {
-      nodes: (sourceArtifact?.nodes ?? []).map((node) => ({ ...node })),
-      edges: (sourceArtifact?.edges ?? []).map((edge) => ({ ...edge })),
-      // Extending a studio canvas has to bring its sketch and its ordering with
-      // it: prefilling only the shapes would quietly drop half the artifact.
-      ...(sourceArtifact?.ink?.length ? { ink: dataToInk(sourceArtifact.ink) } : {}),
-      ...(sourceArtifact?.z?.length ? { z: [...sourceArtifact.z] } : {}),
+      nodes: (from?.nodes ?? []).map((node) => ({ ...node })),
+      edges: (from?.edges ?? []).map((edge) => ({ ...edge })),
+      // Prefilling only the shapes would quietly drop half the artifact, which
+      // is as true of a restored draft as of an extended canvas.
+      ...(from?.ink?.length ? { ink: dataToInk(from.ink) } : {}),
+      ...(from?.paths?.length ? { paths: from.paths.map((path) => ({ ...path })) } : {}),
+      ...(from?.tables?.length ? { tables: from.tables.map((table) => ({ ...table })) } : {}),
+      ...(from?.z?.length ? { z: [...from.z] } : {}),
     };
   }
   const history = useDiagramHistory(initialSnapshotRef.current);
@@ -866,7 +895,7 @@ export function DiagramEditor() {
   const ink = history.snapshot.ink ?? [];
   const paths = history.snapshot.paths ?? [];
   const paintOrder = studioPaintOrder(history.snapshot);
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => (nodes[0] ? [nodes[0].id] : []));
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
   const [connectionMode, setConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
@@ -1093,13 +1122,14 @@ export function DiagramEditor() {
   });
 
   useEffect(() => {
-    const shouldClose = () =>
-      !history.isDirty ||
-      submissionStatus === 'success' ||
-      window.confirm('Discard your unsaved diagram changes?');
-    setCloseGuard(shouldClose);
+    // Closing keeps the canvas now, so there is nothing to warn about: the
+    // question this used to ask — discard your unsaved changes? — has no
+    // truthful answer when the changes are not going anywhere.
+    setCloseGuard(() => true);
 
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      // The draft lives with the tab, so closing the tab is the one exit that
+      // still loses it.
       if (!history.isDirty || submissionStatus === 'success') return;
       event.preventDefault();
       event.returnValue = '';
@@ -3542,6 +3572,36 @@ export function DiagramEditor() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const graph = history.snapshot;
+    const draft: DiagramArtifact = {
+      type: 'diagram',
+      nodes: graph.nodes,
+      edges: graph.edges,
+      ...(graph.ink?.length ? { ink: inkToData(graph.ink) } : {}),
+      ...(graph.paths?.length ? { paths: graph.paths } : {}),
+      ...(graph.tables?.length ? { tables: graph.tables } : {}),
+      ...(graph.z?.length ? { z: graph.z } : {}),
+    };
+
+    // An empty canvas is not a draft. Clearing rather than storing it is what
+    // lets someone throw a canvas away and have it stay thrown away.
+    if (isDraftWorthKeeping(draft)) writeStudioDraft(draftStorage, draftKeyScope, draft);
+    else clearStudioDraft(draftStorage, draftKeyScope);
+  }, [history.snapshot]);
+
+  /**
+   * Throws the canvas away, as opposed to leaving it for later.
+   *
+   * Closing the studio keeps everything, so this is the only way out that
+   * destroys anything — which is why it is the only one that asks.
+   */
+  function discardCanvas() {
+    if (history.isDirty && !window.confirm('Discard this canvas?')) return;
+    clearStudioDraft(draftStorage, draftKeyScope);
+    closeTool();
+  }
+
   /** Puts down whatever is being carried, without placing it. */
   function cancelPlacement() {
     setPendingTable(null);
@@ -3593,7 +3653,10 @@ export function DiagramEditor() {
    * name is painted underneath what it does.
    */
   function finishStroke() {
-    const stroke = activeStrokeRef.current;
+    const raw = activeStrokeRef.current;
+    // Trimmed as it is put down, so nothing downstream has to cope with a
+    // stroke the artifact cannot hold.
+    const stroke = raw ? fitInkStroke(raw) : null;
     activeStrokeRef.current = null;
     setActiveStroke(null);
     if (!stroke) return;
@@ -4343,7 +4406,9 @@ export function DiagramEditor() {
     }
 
     setValidationError(null);
-    await submitArtifact(prepared.artifact);
+    const sent = await submitArtifact(prepared.artifact);
+    // The work is on the board now, so the copy held against losing it is done.
+    if (sent) clearStudioDraft(draftStorage, draftKeyScope);
   }
 
   if (submissionStatus === 'success') {
@@ -5277,11 +5342,16 @@ export function DiagramEditor() {
 
   return (
     <form
-      className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-rows-[minmax(0,1fr)_auto] md:overflow-hidden"
+      // Not clipped on a wide screen: this box starts at the header's lower
+      // edge, and the bar's panels open upward — so anything that had to reach
+      // past the top of the canvas was cut off here and looked like it was
+      // behind the header. The dialog around it still stops the page scrolling.
+      // The narrow layout stacks and does need to scroll.
+      className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-rows-[minmax(0,1fr)_auto] md:overflow-visible"
       onKeyDown={onFormKeyDown}
       onSubmit={(event) => void onSubmit(event)}
     >
-      <section ref={canvasFrameRef} className="relative min-h-0 overflow-hidden">
+      <section ref={canvasFrameRef} className="relative min-h-0">
         <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1 sm:top-4 sm:right-4">
           {extensionSource ? (
             <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
@@ -5699,7 +5769,7 @@ export function DiagramEditor() {
             </p>
           )}
         </div>
-        <Button variant="secondary" onClick={closeTool}>
+        <Button variant="secondary" onClick={discardCanvas}>
           Cancel
         </Button>
         <Button

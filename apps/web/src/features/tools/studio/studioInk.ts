@@ -6,8 +6,10 @@
 // the eraser, and turning a screen-space eraser into scene units.
 
 import {
+  DIAGRAM_INK_POINT_LIMIT,
   inkStrokeWidth,
   packInkPoints,
+  simplifyStrokePoints,
   strokePointsTouch,
   unpackDrawingPoints,
   type DiagramStrokeKey,
@@ -41,6 +43,45 @@ export function createInkId(): string {
 }
 
 /** Editor strokes as stored: simplified once, then packed. */
+/**
+ * The most points a stroke may carry. The contract's cap counts packed numbers,
+ * two per drawn point.
+ */
+const MAX_STROKE_POINTS = Math.floor(DIAGRAM_INK_POINT_LIMIT / 2);
+
+/**
+ * A finished stroke, trimmed to something the artifact can actually hold.
+ *
+ * A pointer reports a position every few milliseconds, so a long unhurried
+ * stroke arrives with thousands of points — far past the cap, and a stroke over
+ * the cap is refused by the write path and dropped by the read path. Neither
+ * failure says anything useful: proposing just stops working, and a saved
+ * canvas comes back without its drawing.
+ *
+ * Simplified first, which is what the drawing tool has always done to its own
+ * strokes and is invisible at this tolerance. Simplification has no ceiling of
+ * its own, though — a genuinely intricate scribble stays intricate — so an
+ * even thinning follows for the stroke that is still too long. Losing every
+ * other point of an enormous stroke is a change nobody can see; losing the
+ * whole stroke is not.
+ */
+export function fitInkStroke(stroke: StudioInkStroke): StudioInkStroke {
+  const simplified = simplifyStrokePoints(stroke.points);
+  if (simplified.length <= MAX_STROKE_POINTS) return { ...stroke, points: simplified };
+
+  const step = simplified.length / MAX_STROKE_POINTS;
+  const thinned: StrokePoint[] = [];
+  for (let index = 0; thinned.length < MAX_STROKE_POINTS - 1; index += 1) {
+    const point = simplified[Math.floor(index * step)];
+    if (!point) break;
+    thinned.push(point);
+  }
+  // The last point is kept whatever the arithmetic says: a stroke that stops
+  // short of where the pointer was lifted reads as a different stroke.
+  thinned.push(simplified[simplified.length - 1]!);
+  return { ...stroke, points: thinned };
+}
+
 export function inkToData(strokes: readonly StudioInkStroke[]): InkElement[] {
   return strokes
     .filter((stroke) => stroke.points.length > 0)

@@ -109,6 +109,35 @@ describe('the properties bar', () => {
     );
   });
 
+  it('watches its own size instead of re-checking it every render', () => {
+    // Measuring on every render is a loop waiting to happen, and it happened:
+    // the measurement feeds the position, the position is a render, the render
+    // measures again. In a browser the readings alternated between the bar's
+    // real size and zero — while the studio opens or closes it has no layout
+    // box — and never settled, which took the whole page down. jsdom reports
+    // zero for everything, so only the shape of the fix can be asserted here:
+    // one observer, watching the bar.
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(element: Element) {
+          observed.push(element);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+
+    try {
+      renderBar();
+      expect(observed).toHaveLength(1);
+      expect(observed[0]).toBe(screen.getByRole('toolbar', { name: 'Selection properties' }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('settles in rather than appearing', () => {
     renderBar();
     expect(screen.getByRole('toolbar')).toHaveClass('rt-studio-rise');
