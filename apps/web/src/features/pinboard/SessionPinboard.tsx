@@ -14,7 +14,7 @@ import { ShortlistBar } from '../voting/ShortlistBar';
 import { ShortlistPrompt } from '../voting/ShortlistPrompt';
 import { useVoting } from '../voting/useVoting';
 import { VotingBallot } from '../voting/VotingBallot';
-import { MicToggle, ParticipantPanel, VoiceNotice, useVoiceRoom } from '../voice';
+import { MicToggle, ParticipantCluster, VoiceNotice, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -68,7 +68,11 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
     viewerId,
   } = usePinboard(sessionId);
   const voting = useVoting(sessionId, board?.questionId ?? null);
-  const { setPhase, busyQuestionId: phaseBusyId, error: phaseError } = useSetQuestionPhase(sessionId);
+  const {
+    setPhase,
+    busyQuestionId: phaseBusyId,
+    error: phaseError,
+  } = useSetQuestionPhase(sessionId);
   // Entering the session view joins the room; leaving it (or ending the
   // session) unmounts this and disconnects — F11's connect/disconnect points.
   // Called before any early return so the room is not torn down and rebuilt
@@ -274,12 +278,9 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
             />
           }
           participants={
-            <ParticipantPanel
-              participants={voice.participants}
-              status={voice.status}
-              footer={joinCode ? <JoinCodeCard code={joinCode} /> : null}
-            />
+            <ParticipantCluster participants={voice.participants} status={voice.status} />
           }
+          joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
           reactToProposal={reactToProposal}
           headerTimer={
             board.discussionTimer &&
