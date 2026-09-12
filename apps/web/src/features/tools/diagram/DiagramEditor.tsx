@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type DragEvent,
@@ -26,7 +27,6 @@ import {
   Link2,
   LoaderCircle,
   LayoutTemplate,
-  Maximize2,
   Minus,
   MoveHorizontal,
   PaintBucket,
@@ -64,12 +64,14 @@ import type {
   DiagramStrokeKey,
   DiagramStrokeStyle,
   DiagramStrokeWidthPreset,
+  DiagramTextAlign,
   TableCellAlign,
 } from '@roundtable/shared';
 import {
   DIAGRAM_FILL_COLORS,
   DIAGRAM_FILL_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
+  DIAGRAM_TEXT_ALIGNS,
   DIAGRAM_LABEL_INK,
   DIAGRAM_STROKE_COLORS,
   DIAGRAM_STROKE_KEYS,
@@ -83,6 +85,7 @@ import {
   diagramEdgeToPointGeometry,
   diagramNodeFill,
   diagramNodeLabelLayout,
+  diagramNodeLabelStyle,
   diagramNodeSize,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
@@ -173,8 +176,8 @@ import {
   DIAGRAM_DEFAULT_VIEW,
   DIAGRAM_ZOOM_STEP,
   diagramViewBoxAttribute,
+  expandViewToAspect,
   diagramViewZoom,
-  fitDiagramView,
   isDefaultDiagramView,
   panDiagramView,
   zoomDiagramView,
@@ -183,6 +186,7 @@ import {
 import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
 import { StudioPropertiesBar } from '../studio/toolbar/StudioPropertiesBar';
+import { STUDIO_LAYER } from '../studio/studioLayers';
 import { StudioShortcutSheet } from '../studio/toolbar/StudioShortcutSheet';
 import { StudioToolRail } from '../studio/toolbar/StudioToolRail';
 import {
@@ -304,6 +308,8 @@ interface PanSession {
   pointerId: number;
   startClient: DiagramPoint;
   startView: DiagramView;
+  /** What was on screen when the drag began; sets what a pixel is worth. */
+  startRendered: DiagramView;
 }
 
 interface MarqueeSession {
@@ -403,6 +409,9 @@ const CELL_ALIGN_ICONS: Record<TableCellAlign, LucideIcon> = {
   center: AlignCenter,
   right: AlignRight,
 };
+
+const CHROME_ROUND_BUTTON =
+  'flex h-6 w-6 items-center justify-center rounded-full text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 max-sm:h-9 max-sm:w-9';
 
 const BAR_CONTROL =
   'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
@@ -658,8 +667,6 @@ function centredOnCursor(point: DiagramPoint, size: DiagramNodeSize): DiagramPoi
   return { x: point.x - size.width / 2, y: point.y - size.height / 2 };
 }
 
-const DIAGRAM_VERTICAL_CHROME_REM = 14;
-
 // A node's native dblclick never arrives: dragging needs `preventDefault()` on
 // pointerdown (which suppresses the compatibility mouse events dblclick is built
 // from) and the canvas holds pointer capture during the press (which retargets
@@ -872,6 +879,7 @@ export function DiagramEditor() {
   // Which of the properties bar's controls has its choices open.
   const [openBarMenu, setOpenBarMenu] = useState<string | null>(null);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
+  const shortcutTriggerRef = useRef<HTMLButtonElement>(null);
   // Which shape the palette armed. Only meaningful under the `shape` tool.
   const [pendingShape, setPendingShape] = useState<DiagramNodeShape>('box');
   // A table or a starter frame that has been picked up but not put down. Both
@@ -986,6 +994,15 @@ export function DiagramEditor() {
   const edgeLabelStartRef = useRef<DiagramSnapshot | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
+  // The shape of the surface, watched rather than assumed: the canvas fills the
+  // window, so it changes with the window.
+  const [canvasAspect, setCanvasAspect] = useState(DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT);
+  // What is actually drawn. Wider or taller than the view being manipulated, by
+  // exactly the difference between the view's shape and the surface's, so the
+  // space around the sheet is visible instead of letterboxed away.
+  const renderedView = expandViewToAspect(view, canvasAspect);
+  const renderedViewRef = useRef(renderedView);
+  renderedViewRef.current = renderedView;
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
   const selectedNode = selectedNodeById(nodes, selectedId);
@@ -1049,6 +1066,32 @@ export function DiagramEditor() {
       ? placeNodePosition(centredOnCursor(ghostCursor, ghost.size), ghost.size, snapEnabled)
       : { x: 0, y: 0 };
 
+  /**
+   * Escape puts down whatever is being carried, from wherever the key is
+   * pressed.
+   *
+   * Listened for on the document rather than on the canvas: a shape is armed by
+   * pressing a button on the rail, which is where focus stays, so a handler that
+   * waited for canvas focus would never run — which is exactly what happened.
+   * Bubble phase, so an open popover still gets first refusal on the key and
+   * closes itself before anything is put down.
+   */
+  useEffect(() => {
+    if (!ghost) return;
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      // Not while something is being typed into: Escape belongs to the field.
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      event.preventDefault();
+      cancelPlacement();
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  });
+
   useEffect(() => {
     const shouldClose = () =>
       !history.isDirty ||
@@ -1110,11 +1153,19 @@ export function DiagramEditor() {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const bounds = canvas.getBoundingClientRect();
-    return clientPointToDiagramPoint(
+    const point = clientPointToDiagramPoint(
       { x: event.clientX, y: event.clientY },
       { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
-      viewRef.current,
+      renderedViewRef.current,
     );
+    // Held on the sheet. The canvas reaches the window now, so a press can land
+    // well outside the drawing surface, and nothing may be made out there —
+    // clamping here covers every tool at once rather than each one separately.
+    // Panning is unaffected: it works from raw client deltas, not from this.
+    return {
+      x: Math.min(Math.max(point.x, 0), DIAGRAM_CANVAS_WIDTH),
+      y: Math.min(Math.max(point.y, 0), DIAGRAM_CANVAS_HEIGHT),
+    };
   }
 
   /**
@@ -1282,6 +1333,9 @@ export function DiagramEditor() {
     strokeStyle?: DiagramStrokeStyle;
     fillColor?: DiagramFillKey | null;
     fontSizePreset?: DiagramFontSizePreset;
+    labelBold?: boolean;
+    labelColor?: DiagramStrokeKey;
+    labelAlign?: DiagramTextAlign;
   }) {
     clearError();
     const graph = history.snapshotRef.current;
@@ -1314,6 +1368,9 @@ export function DiagramEditor() {
               ...node,
               ...strokeKeys,
               ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
+              ...(style.labelBold === undefined ? {} : { labelBold: style.labelBold }),
+              ...(style.labelColor ? { labelColor: style.labelColor } : {}),
+              ...(style.labelAlign ? { labelAlign: style.labelAlign } : {}),
             })
           : node,
       ),
@@ -1527,6 +1584,33 @@ export function DiagramEditor() {
           replaceTable(styleCellRange(selectedTable, cellStyleTarget, style), selectedTable.id);
         }
 
+        const bold = selectedTable ? cellsAllBold : Boolean(selectedNode?.labelBold);
+        const align: DiagramTextAlign = selectedTable
+          ? (tableCellAt(
+              selectedTable,
+              cellStyleTarget?.focus.row ?? 0,
+              cellStyleTarget?.focus.col ?? 0,
+            )?.align ?? 'center')
+          : (selectedNode?.labelAlign ?? 'center');
+
+        function setBold(next: boolean) {
+          if (selectedTable) styleCells({ bold: next });
+          else applySelectionStyle({ labelBold: next });
+        }
+
+        function setAlign(next: DiagramTextAlign) {
+          if (selectedTable && cellStyleTarget) {
+            replaceTable(alignCellRange(selectedTable, cellStyleTarget, next), selectedTable.id);
+            return;
+          }
+          applySelectionStyle({ labelAlign: next });
+        }
+
+        function setTextColor(next: DiagramStrokeKey) {
+          if (selectedTable) styleCells({ color: next });
+          else applySelectionStyle({ labelColor: next });
+        }
+
         const size = selectedTable
           ? (tableCellAt(
               selectedTable,
@@ -1565,53 +1649,41 @@ export function DiagramEditor() {
                   ))}
                 </ToolStripGroup>
 
-                {selectedTable ? (
-                  <ToolStripGroup label="Text weight" row>
-                    <PresetButton
-                      label={<Bold aria-hidden="true" size={15} />}
-                      name="Bold cell text"
-                      active={cellsAllBold}
-                      disabled={isSubmitting}
-                      onSelect={() => styleCells({ bold: !cellsAllBold })}
-                    />
-                  </ToolStripGroup>
-                ) : null}
-
-                {selectedTable ? (
-                  <ToolStripGroup label="Text alignment" row>
-                    {TABLE_CELL_ALIGNS.map((align) => {
-                      const AlignIcon: LucideIcon = CELL_ALIGN_ICONS[align];
-                      return (
-                        <PresetButton
-                          key={align}
-                          label={<AlignIcon aria-hidden="true" size={15} />}
-                          name={`Align ${align}`}
-                          active={false}
-                          disabled={isSubmitting}
-                          onSelect={() => {
-                            if (!selectedTable || !cellStyleTarget) return;
-                            replaceTable(
-                              alignCellRange(selectedTable, cellStyleTarget, align),
-                              selectedTable.id,
-                            );
-                          }}
-                        />
-                      );
-                    })}
-                  </ToolStripGroup>
-                ) : null}
-
-                {selectedTable ? (
-                  <ColorChoices
-                    row
-                    itemName="cell text"
-                    keys={QUICK_STROKE_KEYS}
-                    colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
-                    activeKey={null}
+                <ToolStripGroup label="Text weight" row>
+                  <PresetButton
+                    label={<Bold aria-hidden="true" size={15} />}
+                    name="Bold cell text"
+                    active={bold}
                     disabled={isSubmitting}
-                    onSelect={(key) => styleCells({ color: key })}
+                    onSelect={() => setBold(!bold)}
                   />
-                ) : null}
+                </ToolStripGroup>
+
+                <ToolStripGroup label="Text alignment" row>
+                  {DIAGRAM_TEXT_ALIGNS.map((option) => {
+                    const AlignIcon: LucideIcon = CELL_ALIGN_ICONS[option];
+                    return (
+                      <PresetButton
+                        key={option}
+                        label={<AlignIcon aria-hidden="true" size={15} />}
+                        name={`Align ${option}`}
+                        active={align === option}
+                        disabled={isSubmitting}
+                        onSelect={() => setAlign(option)}
+                      />
+                    );
+                  })}
+                </ToolStripGroup>
+
+                <ColorChoices
+                  row
+                  itemName="cell text"
+                  keys={QUICK_STROKE_KEYS}
+                  colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
+                  activeKey={selectedTable ? null : (selectedNode?.labelColor ?? null)}
+                  disabled={isSubmitting}
+                  onSelect={setTextColor}
+                />
               </div>
             )}
           </BarMenu>
@@ -1666,7 +1738,7 @@ export function DiagramEditor() {
     return diagramRectToClientRect(
       { x: left, y: top, width: right - left, height: bottom - top },
       surfaceBounds(),
-      view,
+      renderedView,
     );
   }
 
@@ -1931,16 +2003,15 @@ export function DiagramEditor() {
     setView((current) => zoomDiagramView(current, factor));
   }
 
-  function fitView() {
-    setView(fitDiagramView(history.snapshotRef.current.nodes));
-  }
-
   function resetView() {
     setView(DIAGRAM_DEFAULT_VIEW);
   }
 
   function onNodePointerDown(event: PointerEvent<SVGGElement>, node: DiagramNode) {
     if (event.button !== 0 || dragRef.current || isSubmitting) return;
+    // A press with a tool armed belongs to the tool. Left unhandled rather than
+    // swallowed, so it reaches the canvas and starts the mark it was meant to.
+    if (canvasTool !== 'select' && !connectionMode) return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -2174,7 +2245,7 @@ export function DiagramEditor() {
 
   /** Scene-unit close target, scaled so it stays a constant size on screen. */
   function closeTolerance() {
-    return PATH_CLOSE_TOLERANCE / diagramViewZoom(viewRef.current);
+    return PATH_CLOSE_TOLERANCE / diagramViewZoom(renderedViewRef.current);
   }
 
   function clearPathDraft() {
@@ -2560,6 +2631,9 @@ export function DiagramEditor() {
   ) {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Belt to the `pointer-events` brace: with a tool armed the elements do not
+    // take presses at all, and nothing should move one by another route either.
+    if (canvasTool !== 'select') return;
     canvas.setPointerCapture(event.pointerId);
 
     // Grabbing something already in the selection drags the whole selection;
@@ -3439,6 +3513,43 @@ export function DiagramEditor() {
     );
   }
 
+  /**
+   * Watch the shape of the surface, so the drawn view follows the window.
+   *
+   * Measured on every render as well as on resize: a resize observer catches
+   * the window changing, but not the first layout, and not a surface whose size
+   * comes from somewhere the observer never hears about.
+   */
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const next = bounds.width / bounds.height;
+    setCanvasAspect((current) => (Math.abs(current - next) < 1e-3 ? current : next));
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(() => {
+      const bounds = canvas.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) return;
+      const next = bounds.width / bounds.height;
+      setCanvasAspect((current) => (Math.abs(current - next) < 1e-3 ? current : next));
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+
+  /** Puts down whatever is being carried, without placing it. */
+  function cancelPlacement() {
+    setPendingTable(null);
+    setPendingTemplate(null);
+    setGhostCursor(null);
+    setCanvasTool('select');
+  }
+
   function surfaceBounds() {
     const canvas = canvasRef.current;
     if (!canvas) return { left: 0, top: 0, width: 0, height: 0 };
@@ -3494,7 +3605,7 @@ export function DiagramEditor() {
   function eraseAt(event: PointerEvent<SVGSVGElement>) {
     const graph = history.snapshotRef.current;
     const current = graph.ink ?? [];
-    const radius = eraserRadiusForView(viewRef.current, surfaceBounds());
+    const radius = eraserRadiusForView(renderedViewRef.current, surfaceBounds());
     const remaining = eraseInkAtPoint(current, surfacePoint(event), radius);
     if (remaining.length === current.length) return;
 
@@ -3524,6 +3635,7 @@ export function DiagramEditor() {
         pointerId: event.pointerId,
         startClient: { x: event.clientX, y: event.clientY },
         startView: viewRef.current,
+        startRendered: renderedViewRef.current,
       };
       setIsPanning(true);
       canvas.setPointerCapture(event.pointerId);
@@ -3646,8 +3758,8 @@ export function DiagramEditor() {
     if (bounds.width <= 0 || bounds.height <= 0) return true;
     setView(
       panDiagramView(pan.startView, {
-        x: ((event.clientX - pan.startClient.x) / bounds.width) * pan.startView.width,
-        y: ((event.clientY - pan.startClient.y) / bounds.height) * pan.startView.height,
+        x: ((event.clientX - pan.startClient.x) / bounds.width) * pan.startRendered.width,
+        y: ((event.clientY - pan.startClient.y) / bounds.height) * pan.startRendered.height,
       }),
     );
     return true;
@@ -4042,6 +4154,10 @@ export function DiagramEditor() {
     }
 
     if (event.key === 'Escape') {
+      // Carrying something is handled above the canvas, by `cancelPlacement`:
+      // arming a tool from the rail leaves focus on the rail, so a handler that
+      // needs canvas focus would never see the key.
+
       // One step out at a time: leave the element first, drop it second.
       if (pathEditing || tableEditing) {
         event.preventDefault();
@@ -4934,6 +5050,7 @@ export function DiagramEditor() {
     // layout still needs a string to measure, and the hint it measures is what
     // a selected empty element shows in place of a label.
     const hasLabel = node.label.trim().length > 0;
+    const labelStyle = diagramNodeLabelStyle(node, effectiveDiagramNodeSize(node).width);
     const labelLayout = diagramNodeLabelLayout({
       ...node,
       label: hasLabel ? node.label : NODE_LABEL_PLACEHOLDER,
@@ -5068,21 +5185,21 @@ export function DiagramEditor() {
           </foreignObject>
         ) : (
           <text
-            textAnchor="middle"
-            fill={DIAGRAM_LABEL_INK}
+            textAnchor={labelStyle.anchor}
+            fill={labelStyle.fill}
             // The hint is only offered to whoever has the element selected;
             // showing it on every empty element would read as content.
             opacity={hasLabel ? 1 : selected ? 0.35 : 0}
             style={{
               fontSize: `${labelLayout.fontSize}px`,
               fontFamily: 'Inter, system-ui, sans-serif',
-              fontWeight: shape === 'text' ? 600 : 500,
+              fontWeight: labelStyle.fontWeight,
             }}
           >
             {labelLayout.lines.map((line, index) => (
               <tspan
                 key={line + String(index)}
-                x={size.width / 2}
+                x={labelStyle.x}
                 y={labelLayout.firstBaselineY + index * labelLayout.lineHeight}
               >
                 {line}
@@ -5164,22 +5281,14 @@ export function DiagramEditor() {
       onKeyDown={onFormKeyDown}
       onSubmit={(event) => void onSubmit(event)}
     >
-      <section
-        ref={canvasFrameRef}
-        className="relative flex min-h-0 items-center justify-center overflow-auto p-3 sm:p-6"
-      >
+      <section ref={canvasFrameRef} className="relative min-h-0 overflow-hidden">
         <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1 sm:top-4 sm:right-4">
           {extensionSource ? (
             <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
               Extending {extensionSource.authorName}&apos;s diagram
             </div>
           ) : null}
-          <p className="rounded-lg border border-rt-tertiary bg-rt-surface px-2 py-1 text-[11px] text-rt-ink-faint">
-            {nodes.length}/{DIAGRAM_NODE_LIMIT} elements
-          </p>
         </div>
-
-        <StudioShortcutSheet open={shortcutSheetOpen} onClose={() => setShortcutSheetOpen(false)} />
 
         {containerAwaitingDelete ? renderContainerDeletePrompt() : null}
 
@@ -5202,10 +5311,6 @@ export function DiagramEditor() {
           tool={canvasTool}
           onToolChange={selectCanvasTool}
           disabled={isSubmitting}
-          canUndo={history.canUndo}
-          canRedo={history.canRedo}
-          onUndo={undoDiagram}
-          onRedo={redoDiagram}
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid((current) => !current)}
           snapEnabled={snapEnabled}
@@ -5216,52 +5321,57 @@ export function DiagramEditor() {
           tableOptions={renderTableOptions}
           templateOptions={renderTemplateOptions}
           arrangeOptions={renderArrangeOptions}
-          onShowShortcuts={() => setShortcutSheetOpen(true)}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
+          onUndo={undoDiagram}
+          onRedo={redoDiagram}
         />
 
-        <div className="absolute top-4 right-4 z-10 flex select-none items-center gap-1 rounded-lg border border-rt-tertiary bg-rt-surface/95 p-1 shadow-sm sm:top-7 sm:right-7">
-          <IconButton
-            label="Zoom out"
-            title="Zoom out (Ctrl + scroll)"
-            className="h-8 w-8 border-transparent"
-            disabled={zoomPercent <= 100}
-            onClick={() => zoomBy(1 / DIAGRAM_ZOOM_STEP)}
-          >
-            <ZoomOut aria-hidden="true" size={15} />
-          </IconButton>
-          <span
-            className="min-w-13 text-center text-[11px] font-semibold tabular-nums text-rt-ink-muted"
-            aria-live="polite"
-          >
-            {zoomPercent}%
+        {/* Navigation and help, top right: out of the way of the tools on the
+            left and of the docked strip along the bottom of a small screen. */}
+        <div className="pointer-events-none absolute top-3 right-3 z-20 flex items-center gap-1.5 select-none sm:top-4 sm:right-4">
+          <div className="rt-studio-rise pointer-events-auto flex items-center gap-0.5 rounded-full border border-rt-tertiary bg-rt-surface p-0.5 shadow-[0_4px_18px_rgba(8,12,21,0.12)]">
+            {(
+              [
+                ['Zoom out', ZoomOut, () => zoomBy(1 / DIAGRAM_ZOOM_STEP), zoomPercent <= 100],
+                ['Zoom in', ZoomIn, () => zoomBy(DIAGRAM_ZOOM_STEP), zoomPercent >= 400],
+                ['Reset view', RotateCcw, resetView, isDefaultDiagramView(view)],
+              ] as const
+            ).map(([label, Icon, onClick, isDisabled]) => (
+              <Tooltip key={label} label={label} placement="bottom">
+                <button
+                  type="button"
+                  aria-label={label}
+                  disabled={isDisabled}
+                  onClick={onClick}
+                  className={CHROME_ROUND_BUTTON}
+                >
+                  <Icon aria-hidden="true" size={14} />
+                </button>
+              </Tooltip>
+            ))}
+          </div>
+
+          {/* Round, and on its own: help is not one of the tools. */}
+          <span className={`relative inline-flex ${shortcutSheetOpen ? STUDIO_LAYER.open : ''}`}>
+            <Tooltip label="Keyboard shortcuts" shortcut="?" placement="bottom">
+              <button
+                ref={shortcutTriggerRef}
+                type="button"
+                aria-label="Keyboard shortcuts"
+                aria-expanded={shortcutSheetOpen}
+                onClick={() => setShortcutSheetOpen((current) => !current)}
+                className="rt-studio-rise pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-rt-tertiary bg-rt-surface text-[12px] font-semibold text-rt-ink-muted shadow-[0_4px_18px_rgba(8,12,21,0.12)] transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none max-sm:h-10 max-sm:w-10"
+              >
+                ?
+              </button>
+            </Tooltip>
+            <StudioShortcutSheet
+              open={shortcutSheetOpen}
+              onClose={() => setShortcutSheetOpen(false)}
+              triggerRef={shortcutTriggerRef}
+            />
           </span>
-          <IconButton
-            label="Zoom in"
-            title="Zoom in (Ctrl + scroll)"
-            className="h-8 w-8 border-transparent"
-            disabled={zoomPercent >= 400}
-            onClick={() => zoomBy(DIAGRAM_ZOOM_STEP)}
-          >
-            <ZoomIn aria-hidden="true" size={15} />
-          </IconButton>
-          <IconButton
-            label="Fit diagram to view"
-            title="Fit to content"
-            className="h-8 w-8 border-transparent"
-            disabled={nodes.length === 0}
-            onClick={fitView}
-          >
-            <Maximize2 aria-hidden="true" size={15} />
-          </IconButton>
-          <IconButton
-            label="Reset view"
-            title="Reset view to 100%"
-            className="h-8 w-8 border-transparent"
-            disabled={isDefaultDiagramView(view)}
-            onClick={resetView}
-          >
-            <RotateCcw aria-hidden="true" size={15} />
-          </IconButton>
         </div>
 
         <svg
@@ -5269,12 +5379,11 @@ export function DiagramEditor() {
           role="application"
           aria-label="Studio canvas"
           tabIndex={0}
-          viewBox={diagramViewBoxAttribute(view)}
-          className={`w-full shrink-0 touch-none rounded-lg border border-rt-tertiary bg-white shadow-[0_8px_30px_rgba(8,12,21,0.10)] select-none focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
-          style={{
-            maxWidth: `min(1200px, calc((100dvh - ${DIAGRAM_VERTICAL_CHROME_REM}rem) * ${DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT}))`,
-            aspectRatio: `${DIAGRAM_CANVAS_WIDTH} / ${DIAGRAM_CANVAS_HEIGHT}`,
-          }}
+          viewBox={diagramViewBoxAttribute(renderedView)}
+          // Edge to edge. The sheet keeps its own proportions inside — SVG
+          // scales the view to fit and centres the remainder, which is why every
+          // conversion between screen and scene goes through `diagramSurfaceFit`.
+          className={`h-full w-full touch-none bg-white select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
           onPointerDown={onCanvasPointerDown}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
@@ -5333,6 +5442,28 @@ export function DiagramEditor() {
               </marker>
             ))}
           </defs>
+          {/* Everything outside the sheet is off the drawing surface, so it is
+              painted as surround rather than as more canvas. */}
+          <rect
+            aria-hidden="true"
+            x={renderedView.x}
+            y={renderedView.y}
+            width={renderedView.width}
+            height={renderedView.height}
+            fill="#EEF2F4"
+          />
+          <rect
+            aria-hidden="true"
+            data-testid="diagram-sheet"
+            x={0}
+            y={0}
+            width={DIAGRAM_CANVAS_WIDTH}
+            height={DIAGRAM_CANVAS_HEIGHT}
+            fill="#FFFFFF"
+            stroke="#C6D2D7"
+            strokeWidth={1}
+          />
+
           {showGrid ? (
             <rect
               data-testid="diagram-grid"
@@ -5345,28 +5476,34 @@ export function DiagramEditor() {
           ) : null}
 
           {/* One ordered pass: `z` can put ink above or below any shape, so
-              edges, nodes and ink cannot be drawn in three fixed layers. */}
-          {paintOrder.map((ref) => {
-            if (ref.kind === 'edge') {
-              const index = edgeIndexByKey.get(ref.key);
-              const edge = index === undefined ? undefined : edges[index];
-              return edge && index !== undefined ? renderEdge(edge, index) : null;
-            }
-            if (ref.kind === 'ink') {
-              const stroke = inkById.get(ref.key);
-              return stroke ? renderInk(stroke) : null;
-            }
-            if (ref.kind === 'path') {
-              const path = pathById.get(ref.key);
-              return path ? renderPath(path) : null;
-            }
-            if (ref.kind === 'table') {
-              const table = tableById.get(ref.key);
-              return table ? renderTable(table) : null;
-            }
-            const node = nodeById.get(ref.key);
-            return node ? renderNode(node) : null;
-          })}
+              edges, nodes and ink cannot be drawn in three fixed layers.
+
+              Deaf to the pointer unless the select tool is armed: a press with
+              the pen or the brush is the start of a mark, not a change of
+              selection, wherever on the board it happens to land. */}
+          <g pointerEvents={canvasTool === 'select' ? undefined : 'none'}>
+            {paintOrder.map((ref) => {
+              if (ref.kind === 'edge') {
+                const index = edgeIndexByKey.get(ref.key);
+                const edge = index === undefined ? undefined : edges[index];
+                return edge && index !== undefined ? renderEdge(edge, index) : null;
+              }
+              if (ref.kind === 'ink') {
+                const stroke = inkById.get(ref.key);
+                return stroke ? renderInk(stroke) : null;
+              }
+              if (ref.kind === 'path') {
+                const path = pathById.get(ref.key);
+                return path ? renderPath(path) : null;
+              }
+              if (ref.kind === 'table') {
+                const table = tableById.get(ref.key);
+                return table ? renderTable(table) : null;
+              }
+              const node = nodeById.get(ref.key);
+              return node ? renderNode(node) : null;
+            })}
+          </g>
 
           {activeStroke ? renderInk(activeStroke) : null}
 
@@ -5447,10 +5584,10 @@ export function DiagramEditor() {
                   table, which keep their own labels for their own double-press. */}
               <rect
                 aria-hidden="true"
-                x={view.x}
-                y={view.y}
-                width={view.width}
-                height={view.height}
+                x={renderedView.x}
+                y={renderedView.y}
+                width={renderedView.width}
+                height={renderedView.height}
                 fill="transparent"
               />
               {ghostCursor ? (

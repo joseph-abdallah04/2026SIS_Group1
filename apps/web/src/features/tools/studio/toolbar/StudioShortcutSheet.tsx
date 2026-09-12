@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { type RefObject } from 'react';
 
+import { Popover } from '../../../../components/ui/Popover';
 import { STUDIO_SHORTCUTS } from '../studioShortcuts';
 
 /**
@@ -28,13 +28,15 @@ const CANVAS_KEYS: { keys: string; description: string }[] = [
 interface StudioShortcutSheetProps {
   open: boolean;
   onClose: () => void;
+  /** The `?` button it hangs off; focus goes back there when it closes. */
+  triggerRef: RefObject<HTMLElement | null>;
 }
 
 function Row({ keys, description }: { keys: string; description: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-1">
-      <span className="text-[12px] text-rt-ink-muted">{description}</span>
-      <kbd className="shrink-0 rounded border border-rt-tertiary bg-rt-surface-alt px-1.5 py-0.5 font-sans text-[11px] text-rt-ink">
+    <div className="flex items-center justify-between gap-4 py-0.5">
+      <span className="text-[11px] text-rt-ink-muted">{description}</span>
+      <kbd className="shrink-0 rounded border border-rt-tertiary bg-rt-surface-alt px-1 py-px font-sans text-[10px] text-rt-ink">
         {keys}
       </kbd>
     </div>
@@ -49,52 +51,24 @@ function Row({ keys, description }: { keys: string; description: string }) {
  * that: one place that says what every key does, reachable by pressing `?` and
  * by a button, because a shortcut you can only discover with a shortcut is not
  * discoverable.
+ *
+ * A panel hanging off its own button rather than a modal over the canvas: it is
+ * a reference to glance at while working, and dimming the whole board to read
+ * one line of it is out of proportion to that.
  */
-export function StudioShortcutSheet({ open, onClose }: StudioShortcutSheetProps) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    closeRef.current?.focus();
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      onClose();
-    }
-
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
+export function StudioShortcutSheet({ open, onClose, triggerRef }: StudioShortcutSheetProps) {
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Keyboard shortcuts"
-      className="rt-studio-fade pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-rt-ink/25 p-4"
-      onPointerDown={(event) => {
-        // Only a press on the backdrop itself closes it.
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <Popover
+      open={open}
+      onClose={onClose}
+      label="Keyboard shortcuts"
+      // Below the button, which now lives in the top-right corner: opening
+      // upward would put the panel off the top of the canvas.
+      placement="bottom-end"
+      triggerRef={triggerRef}
     >
-      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-xl border border-rt-tertiary bg-rt-surface p-4 shadow-[0_12px_40px_rgba(8,12,21,0.24)]">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-[13px] font-semibold text-rt-ink">Keyboard shortcuts</h2>
-          <button
-            ref={closeRef}
-            type="button"
-            aria-label="Close shortcuts"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-rt-tertiary text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none"
-          >
-            <X aria-hidden="true" size={16} />
-          </button>
-        </div>
-
-        <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+      <div className="max-h-[60vh] w-64 overflow-y-auto px-1 py-0.5">
+        <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
           Tools
         </p>
         <div className="mt-1">
@@ -103,7 +77,7 @@ export function StudioShortcutSheet({ open, onClose }: StudioShortcutSheetProps)
           ))}
         </div>
 
-        <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
+        <p className="mt-2 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
           Canvas
         </p>
         <div className="mt-1">
@@ -112,6 +86,6 @@ export function StudioShortcutSheet({ open, onClose }: StudioShortcutSheetProps)
           ))}
         </div>
       </div>
-    </div>
+    </Popover>
   );
 }

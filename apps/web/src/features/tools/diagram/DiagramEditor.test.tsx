@@ -395,7 +395,7 @@ describe('diagram editor', () => {
     expect(
       screen.queryByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
   });
 
   it('focuses the label editor on a real two-press double-click', async () => {
@@ -639,7 +639,7 @@ describe('diagram editor', () => {
 
     await first.user.click(screen.getByRole('button', { name: /^Studio$/ }));
 
-    expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
   });
 
   it('prefills an extended diagram and preserves its inherited edges', async () => {
@@ -676,7 +676,7 @@ describe('diagram editor', () => {
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
 
     expect(screen.getByText("Extending Alice's diagram")).toBeInTheDocument();
-    expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /rectangle:/ })).toHaveLength(2);
     await clickInRailMenu(user, 'Shapes', 'Add ellipse');
     await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
@@ -943,24 +943,13 @@ describe('diagram viewport and productivity', () => {
     expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
 
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    // The viewBox is the zoom level; the percentage that used to echo it back
+    // was the least-reached thing in the busiest corner.
     expect(canvas).toHaveAttribute('viewBox', '96 60 768 480');
-    expect(screen.getByText('125%')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Reset view' }));
     expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
-  });
-
-  it('fits the diagram to its content and stops at the zoom ceiling', async () => {
-    render(<Harness propose={propose()} />);
-    const { user, canvas } = await openDiagram();
-    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-
-    await user.click(screen.getByRole('button', { name: 'Fit diagram to view' }));
-
-    expect(canvas).toHaveAttribute('viewBox', '0 0 240 150');
-    expect(screen.getByText('400%')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeDisabled();
   });
 
   it('pans with Space and drag without touching the diagram', async () => {
@@ -1012,7 +1001,7 @@ describe('diagram viewport and productivity', () => {
     });
 
     expect(screen.queryByRole('button', { name: /^Box:/ })).not.toBeInTheDocument();
-    expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
   });
 
   it('sweeps a marquee across the canvas and aligns what it caught', async () => {
@@ -1109,7 +1098,7 @@ describe('diagram viewport and productivity', () => {
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
     fireEvent.keyDown(canvas, { key: 'Delete' });
 
-    expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
     expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
@@ -1727,7 +1716,7 @@ describe('diagram shapes and container groups', () => {
 
       expect(screen.getByRole('alert')).toHaveTextContent('This container holds 1 element');
       // Nothing is removed until the question is answered.
-      expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /rectangle:/ })).toHaveLength(2);
     });
 
     it('keeps the contents and lifts them out when asked to', async () => {
@@ -1742,7 +1731,7 @@ describe('diagram shapes and container groups', () => {
       expect(
         screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
       ).toBeInTheDocument();
-      expect(screen.getByText('1/100 elements')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /rectangle:/ })).toHaveLength(1);
     });
 
     it('removes the whole group when asked to, in one undo step', async () => {
@@ -1750,10 +1739,10 @@ describe('diagram shapes and container groups', () => {
       const { user } = await groupedThenDelete();
 
       await user.click(screen.getByRole('button', { name: /Delete contents/ }));
-      expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+      expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
 
       await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
-      expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /rectangle:/ })).toHaveLength(2);
       expect(
         screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
       ).toBeInTheDocument();
@@ -1765,7 +1754,7 @@ describe('diagram shapes and container groups', () => {
 
       await user.click(screen.getByRole('button', { name: 'Cancel deleting the container' }));
 
-      expect(screen.getByText('2/100 elements')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /rectangle:/ })).toHaveLength(2);
     });
 
     it('deletes an empty container without asking', async () => {
@@ -1776,7 +1765,7 @@ describe('diagram shapes and container groups', () => {
       await openMore(user);
       await user.click(screen.getByRole('button', { name: 'Delete selection' }));
 
-      expect(screen.getByText('0/100 elements')).toBeInTheDocument();
+      expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
@@ -4272,6 +4261,200 @@ describe('tool shortcuts on the canvas', () => {
   });
 });
 
+describe('the edge of the sheet', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('keeps a stroke on the sheet however far outside it the pointer goes', async () => {
+    // The canvas reaches the window now, so a press can land well off the
+    // drawing surface. Nothing may be made out there.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 990, clientX: -400, clientY: -300 });
+    fireEvent.pointerMove(canvas, { pointerId: 990, clientX: 2000, clientY: 1800 });
+    fireEvent.pointerUp(canvas, { pointerId: 990, clientX: 2000, clientY: 1800 });
+
+    const stroke = screen.getByTestId('ink-stroke').getAttribute('d') ?? '';
+    const numbers = [...stroke.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+    expect(numbers.length).toBeGreaterThan(0);
+    expect(Math.min(...numbers)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...numbers)).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+  });
+
+  it('shows room around the sheet on a surface wider than it', async () => {
+    // The view takes the difference in shape rather than letterboxing it, so a
+    // wide window shows space either side of the sheet instead of dead margin.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram({ width: 1600, height: 600 });
+    // The surface is mocked after the first paint, so give it one more render
+    // to measure on.
+    await user.click(screen.getByRole('button', { name: 'Show grid' }));
+
+    const [x, , width] = (canvas.getAttribute('viewBox') ?? '').split(' ').map(Number);
+    expect(width).toBeGreaterThan(DIAGRAM_CANVAS_WIDTH);
+    // Centred on the sheet: the same amount of room on each side.
+    expect(x).toBeLessThan(0);
+    expect(x! + width!).toBeGreaterThan(DIAGRAM_CANVAS_WIDTH);
+  });
+
+  it('still refuses to make anything in that room', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram({ width: 1600, height: 600 });
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    // Well into the surround, left of the sheet's own edge.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 997, clientX: 10, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 997, clientX: 40, clientY: 320 });
+    fireEvent.pointerUp(canvas, { pointerId: 997, clientX: 40, clientY: 320 });
+
+    const stroke = screen.getByTestId('ink-stroke').getAttribute('d') ?? '';
+    const numbers = [...stroke.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+    expect(Math.min(...numbers)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('draws the sheet, so its edge is visible on a full-bleed canvas', async () => {
+    render(<Harness propose={propose()} />);
+    await openDiagram();
+    expect(screen.getByTestId('diagram-sheet')).toHaveAttribute(
+      'width',
+      String(DIAGRAM_CANVAS_WIDTH),
+    );
+  });
+});
+
+describe('what a press means with a tool armed', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('draws over a shape rather than selecting it', async () => {
+    // A press with the brush is the start of a mark, not a change of selection,
+    // wherever on the board it happens to land.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+
+    fireEvent.pointerDown(shape, { button: 0, pointerId: 991, clientX: 200, clientY: 160 });
+    fireEvent.pointerMove(canvas, { pointerId: 991, clientX: 260, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 991, clientX: 260, clientY: 200 });
+
+    expect(screen.getByTestId('ink-stroke')).toBeInTheDocument();
+    expect(shape).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('takes the first pen anchor on top of a shape', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+
+    fireEvent.pointerDown(shape, { button: 0, pointerId: 993, clientX: 200, clientY: 160 });
+    fireEvent.pointerUp(canvas, { pointerId: 993, clientX: 200, clientY: 160 });
+
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+    expect(shape).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('still selects it once the select tool is back', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+
+    const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    fireEvent.pointerDown(shape, { button: 0, pointerId: 995, clientX: 200, clientY: 160 });
+    fireEvent.pointerUp(canvas, { pointerId: 995, clientX: 200, clientY: 160 });
+    expect(shape).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('putting down what is being carried', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it.each([
+    [
+      'a shape',
+      async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.click(screen.getByRole('button', { name: 'Shapes' }));
+        await user.click(screen.getByRole('button', { name: 'Add ellipse' }));
+      },
+    ],
+    [
+      'a text element',
+      async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.click(screen.getByRole('button', { name: 'Text' }));
+      },
+    ],
+    [
+      'a table',
+      async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.click(screen.getByRole('button', { name: 'Table' }));
+        await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+      },
+    ],
+    [
+      'a starter frame',
+      async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.click(screen.getByRole('button', { name: 'Templates' }));
+        await user.click(screen.getByRole('button', { name: 'Retro' }));
+      },
+    ],
+  ])('drops %s on Escape and hands the canvas back', async (_name, arm) => {
+    // Escape is how anyone backs out of anything. Carrying something is the
+    // outermost thing to be in the middle of, so it is the first thing put down.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await arm(user);
+    fireEvent.pointerMove(canvas, { pointerId: 980, clientX: 400, clientY: 300 });
+    expect(screen.getByTestId('placement-ghost')).toBeInTheDocument();
+
+    // Deliberately not focusing the canvas first: arming a tool leaves focus on
+    // the rail button that armed it, which is where Escape is actually pressed.
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByTestId('placement-ghost')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('places nothing on the way out', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Shapes' }));
+    await user.click(screen.getByRole('button', { name: 'Add ellipse' }));
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('button', { name: 'Ellipse: Unlabelled' })).toBeNull();
+  });
+});
+
 describe('formatting text', () => {
   function propose() {
     return vi.fn(async (input: ProposalCreateInput) => {
@@ -4279,9 +4462,7 @@ describe('formatting text', () => {
     });
   }
 
-  it('offers a shape only what its label can carry, without greying the rest out', async () => {
-    // A shape's label carries a size and nothing else. Showing bold, colour and
-    // alignment disabled says "not yet", which is not what is going on.
+  it('gives a shape the same text settings a table has', async () => {
     const user = userEvent.setup();
     render(<Harness propose={propose()} />);
     const { canvas } = await openDiagram();
@@ -4292,8 +4473,58 @@ describe('formatting text', () => {
 
     await user.click(screen.getByRole('button', { name: 'Format text' }));
     expect(screen.getByRole('button', { name: 'large text' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Bold cell text' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Align left' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Bold cell text' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Align left' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'rose cell text' })).toBeEnabled();
+  });
+
+  it("styles a shape's label and proposes it through the real contract", async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { canvas } = await openDiagram();
+    const user = userEvent.setup();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 95, 'Idea');
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+    await user.click(screen.getByRole('button', { name: 'Align left' }));
+    await user.click(screen.getByRole('button', { name: 'rose cell text' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const input = send.mock.calls[0]?.[0];
+    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
+    const artifact = input?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({
+      labelBold: true,
+      labelAlign: 'left',
+      labelColor: 'rose',
+    });
+  });
+
+  it('unbolds a label that is already bold', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 97, 'Idea');
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    const boldButton = screen.getByRole('button', { name: 'Bold cell text' });
+    await user.click(boldButton);
+    expect(boldButton).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+    expect(screen.getByRole('button', { name: 'Bold cell text' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 
   it('proposes the extra-large size through the real contract', async () => {

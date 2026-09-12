@@ -8,6 +8,7 @@ import {
 } from './diagramModel';
 import {
   DIAGRAM_DEFAULT_VIEW,
+  expandViewToAspect,
   DIAGRAM_MAX_ZOOM,
   DIAGRAM_MIN_ZOOM,
   clampDiagramView,
@@ -107,5 +108,52 @@ describe('diagram view', () => {
     expect(clientPointToDiagramPoint({ x: 480, y: 300 }, bounds, view)).toEqual(CENTER);
     // ...but the top-left corner now shows the middle of the sheet, not (0, 0).
     expect(clientPointToDiagramPoint({ x: 0, y: 0 }, bounds, view)).toEqual({ x: 240, y: 150 });
+  });
+});
+
+describe('fitting the view to the surface it is drawn on', () => {
+  const sheet = { x: 0, y: 0, width: 960, height: 600 };
+
+  it('leaves a view that already matches the surface alone', () => {
+    expect(expandViewToAspect(sheet, 960 / 600)).toEqual(sheet);
+  });
+
+  it('widens for a wide window, keeping the middle where it was', () => {
+    const wide = expandViewToAspect(sheet, 2);
+    expect(wide.height).toBe(600);
+    expect(wide.width).toBe(1200);
+    // Centred: the same amount of new space appears on each side.
+    expect(wide.x).toBe(-120);
+    expect(wide.x + wide.width).toBe(1080);
+  });
+
+  it('heightens for a tall one', () => {
+    const tall = expandViewToAspect(sheet, 1);
+    expect(tall.width).toBe(960);
+    expect(tall.height).toBe(960);
+    expect(tall.y).toBe(-180);
+  });
+
+  it('only ever grows, so nothing already visible is cropped away', () => {
+    for (const aspect of [0.4, 1, 1.6, 2.5, 6]) {
+      const grown = expandViewToAspect(sheet, aspect);
+      expect(grown.width).toBeGreaterThanOrEqual(sheet.width);
+      expect(grown.height).toBeGreaterThanOrEqual(sheet.height);
+      expect(grown.x).toBeLessThanOrEqual(sheet.x);
+      expect(grown.y).toBeLessThanOrEqual(sheet.y);
+    }
+  });
+
+  it('keeps a zoomed view zoomed', () => {
+    // Presentation only: the scale the view was at is the scale it stays at.
+    const zoomed = { x: 96, y: 60, width: 768, height: 480 };
+    const grown = expandViewToAspect(zoomed, 2);
+    expect(grown.height).toBe(zoomed.height);
+    expect(grown.y).toBe(zoomed.y);
+  });
+
+  it('declines a surface it cannot measure', () => {
+    expect(expandViewToAspect(sheet, 0)).toEqual(sheet);
+    expect(expandViewToAspect(sheet, Number.NaN)).toEqual(sheet);
   });
 });

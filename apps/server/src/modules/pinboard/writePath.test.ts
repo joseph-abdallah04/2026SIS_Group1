@@ -269,6 +269,21 @@ describe('proposalCreate handler', () => {
       ).toMatchObject({ ok: true });
     });
 
+    it('accepts a styled label, and refuses an alignment it does not have', async () => {
+      // v4.1 label styling. Additive and all optional, so the boundary has to
+      // take a node with it and one without — and still refuse a value outside
+      // the three the contract names.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(diagram({ labelBold: true, labelColor: 'rose', labelAlign: 'left' })),
+      ).toMatchObject({ ok: true });
+
+      expect(await propose(diagram({ labelAlign: 'justify' }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+    });
+
     it('rejects a node carrying only one of width and height', async () => {
       const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
       expect(await propose(diagram({ width: 200 }))).toMatchObject({

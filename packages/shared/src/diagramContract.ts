@@ -166,6 +166,13 @@ export type DiagramStrokeKey =
   'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink';
 export type DiagramStrokeWidthPreset = 'thin' | 'regular' | 'thick';
 export type DiagramFontSizePreset = 'small' | 'medium' | 'large' | 'xlarge';
+
+/**
+ * Where a label sits across its element. The same three a table cell offers —
+ * text is text, and having a shape's label align differently to a cell's would
+ * be a distinction with no reason behind it.
+ */
+export type DiagramTextAlign = 'left' | 'center' | 'right';
 export type DiagramStrokeStyle = 'solid' | 'dashed' | 'dotted';
 
 export const DIAGRAM_FILL_KEYS = [
@@ -206,6 +213,12 @@ export const DIAGRAM_FONT_SIZE_PRESETS = [
   'large',
   'xlarge',
 ] as const satisfies readonly DiagramFontSizePreset[];
+
+export const DIAGRAM_TEXT_ALIGNS = [
+  'left',
+  'center',
+  'right',
+] as const satisfies readonly DiagramTextAlign[];
 
 export const DIAGRAM_STROKE_STYLES = [
   'solid',
@@ -272,6 +285,28 @@ export const DIAGRAM_FONT_SIZES: Record<DiagramFontSizePreset, number> = {
 };
 
 export const DIAGRAM_LEGACY_FONT_SIZE = DIAGRAM_FONT_SIZES.medium;
+
+/**
+ * How a node's label is painted, so the editor and the board card cannot drift.
+ *
+ * `anchor` and `x` travel together: SVG aligns text by moving the anchor point,
+ * not by giving it a box, so the two are one decision and are made here once.
+ */
+export function diagramNodeLabelStyle(
+  node: Pick<DiagramNode, 'labelBold' | 'labelColor' | 'labelAlign' | 'shape'>,
+  width: number,
+  inset = 6,
+): { fill: string; fontWeight: number; anchor: 'start' | 'middle' | 'end'; x: number } {
+  const align = node.labelAlign ?? 'center';
+  return {
+    fill: node.labelColor ? DIAGRAM_STROKE_COLORS[node.labelColor] : DIAGRAM_LABEL_INK,
+    // A text element has always been drawn heavier than a label inside a shape;
+    // asking for bold raises either of them the same amount.
+    fontWeight: node.labelBold ? 700 : node.shape === 'text' ? 600 : 500,
+    anchor: align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle',
+    x: align === 'left' ? inset : align === 'right' ? width - inset : width / 2,
+  };
+}
 
 // Shape-derived fills predate v2 and are identical in the editor and the board
 // card, so the fallback lives here rather than in either surface.
@@ -626,6 +661,15 @@ export interface DiagramNode {
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
   fontSizePreset?: DiagramFontSizePreset;
+  /**
+   * Label styling. Named apart from the element's own `strokeColor` and friends:
+   * a shape's outline and the words inside it are two different things to paint,
+   * and one field that meant both would be ambiguous the first time someone
+   * wanted a dark label on a pale border.
+   */
+  labelBold?: boolean;
+  labelColor?: DiagramStrokeKey;
+  labelAlign?: DiagramTextAlign;
 }
 
 export type DiagramParentedNode = Pick<DiagramNode, 'id' | 'parentId'>;

@@ -23,10 +23,6 @@ function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {
   const props = {
     tool: 'select' as RailTool,
     onToolChange: vi.fn(),
-    canUndo: true,
-    canRedo: true,
-    onUndo: vi.fn(),
-    onRedo: vi.fn(),
     showGrid: true,
     onToggleGrid: vi.fn(),
     snapEnabled: true,
@@ -41,7 +37,10 @@ function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {
     ),
     templateOptions: () => <button type="button">Flow</button>,
     arrangeOptions: () => <button type="button">Arrange now</button>,
-    onShowShortcuts: vi.fn(),
+    canUndo: true,
+    canRedo: true,
+    onUndo: vi.fn(),
+    onRedo: vi.fn(),
     ...overrides,
   };
   // The rail is controlled: which tool is armed comes back in as a prop, and
@@ -117,30 +116,17 @@ describe('the tool rail', () => {
     expect(screen.getByRole('button', { name: 'Text' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('separates tools, history and canvas settings into their own groups', () => {
-    // Three clusters rather than one long rail, so undo can be found without
-    // reading past every tool.
+  it('separates tools, canvas settings and history into their own groups', () => {
+    // History shares the rail's column rather than floating in the corner on
+    // its own — two absolutely-positioned columns down the same edge only stay
+    // apart while the window is tall enough, and they were not — but it is held
+    // at the far end of it, away from the tools and their settings.
     renderRail();
     expect(screen.getAllByRole('toolbar').map((bar) => bar.getAttribute('aria-label'))).toEqual([
       'Studio tools',
-      'History',
       'Canvas',
+      'History',
     ]);
-  });
-
-  it('disables undo and redo when there is no history to step through', () => {
-    renderRail({ canUndo: false, canRedo: false });
-    expect(screen.getByRole('button', { name: 'Undo diagram change' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Redo diagram change' })).toBeDisabled();
-  });
-
-  it('steps through history', async () => {
-    const user = userEvent.setup();
-    const props = renderRail();
-    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
-    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
-    expect(props.onUndo).toHaveBeenCalledTimes(1);
-    expect(props.onRedo).toHaveBeenCalledTimes(1);
   });
 
   it('shows the state of the canvas toggles', async () => {
@@ -156,6 +142,21 @@ describe('the tool rail', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
     expect(props.onToggleSnap).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables history when there is nothing to step through', () => {
+    renderRail({ canUndo: false, canRedo: false });
+    expect(screen.getByRole('button', { name: 'Undo diagram change' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Redo diagram change' })).toBeDisabled();
+  });
+
+  it('steps through history', async () => {
+    const user = userEvent.setup();
+    const props = renderRail();
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
+    expect(props.onUndo).toHaveBeenCalledTimes(1);
+    expect(props.onRedo).toHaveBeenCalledTimes(1);
   });
 
   it('locks the tools while a proposal is in flight, but not the canvas toggles', () => {
@@ -318,6 +319,18 @@ describe('on a small screen', () => {
     vi.unstubAllGlobals();
   });
 
+  it('lays history flat even in a column, since a stepper pair reads sideways', () => {
+    renderRail();
+    expect(screen.getByRole('toolbar', { name: 'History' })).toHaveAttribute(
+      'aria-orientation',
+      'horizontal',
+    );
+    expect(screen.getByRole('toolbar', { name: 'Studio tools' })).toHaveAttribute(
+      'aria-orientation',
+      'vertical',
+    );
+  });
+
   it('lies along the bottom, and turns its arrow keys with it', async () => {
     // A column down the left of a 320px canvas takes a third of the drawing
     // surface with it.
@@ -386,14 +399,11 @@ describe('reaching the rail from the keyboard', () => {
     expect(screen.getByRole('button', { name: 'Select' })).toHaveFocus();
   });
 
-  it('skips a tool that cannot be used', async () => {
-    // Undo is disabled with no history; arrowing onto it would be a dead stop.
-    const user = userEvent.setup();
-    renderRail({ canUndo: false });
-    const history = screen.getByRole('toolbar', { name: 'History' });
-    const first = history.querySelector<HTMLButtonElement>('button[tabindex="0"]');
-    expect(first).toHaveAttribute('aria-label', 'Redo diagram change');
-    void user;
+  it('skips a tool that cannot be used', () => {
+    // Every tool is disabled mid-submit; arrowing onto one would be a dead stop.
+    renderRail({ disabled: true });
+    const tools = screen.getByRole('toolbar', { name: 'Studio tools' });
+    expect(tools.querySelector('button[tabindex="0"]')).toBeNull();
   });
 });
 

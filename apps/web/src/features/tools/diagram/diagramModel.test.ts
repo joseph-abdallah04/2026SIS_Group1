@@ -20,6 +20,7 @@ import {
   draggedSelectionRoots,
   alignNodes,
   clientPointToDiagramPoint,
+  diagramRectToClientRect,
   copyDiagramFragment,
   createNodeId,
   deleteNode,
@@ -162,6 +163,27 @@ describe('diagram node model', () => {
     expect(
       clientPointToDiagramPoint({ x: 500, y: 320 }, { left: 20, top: 20, width: 960, height: 600 }),
     ).toEqual({ x: 480, y: 300 });
+  });
+
+  it('accounts for the margin a full-bleed canvas leaves around the scene', () => {
+    // The canvas fills the window, so its shape rarely matches the scene's: SVG
+    // scales the view to fit and centres the remainder. Ignoring that margin
+    // puts every click a constant distance from where it was made.
+    const wide = { left: 0, top: 0, width: 1600, height: 600 };
+    // 1600x600 around a 960x600 scene: uniform scale of 1, 320px of margin each
+    // side, so the middle of the surface is still the middle of the sheet.
+    expect(clientPointToDiagramPoint({ x: 800, y: 300 }, wide)).toEqual({ x: 480, y: 300 });
+    expect(clientPointToDiagramPoint({ x: 320, y: 0 }, wide)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('puts a rectangle back where the canvas actually draws it', () => {
+    // The properties bar hangs off this, so it has to agree with the forward
+    // conversion or the bar lands beside the selection instead of over it.
+    const wide = { left: 0, top: 0, width: 1600, height: 600 };
+    const point = clientPointToDiagramPoint({ x: 900, y: 200 }, wide);
+    const back = diagramRectToClientRect({ ...point, width: 0, height: 0 }, wide);
+    expect(back.x).toBeCloseTo(900);
+    expect(back.y).toBeCloseTo(200);
   });
 
   it('deletes only the targeted node', () => {

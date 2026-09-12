@@ -10,13 +10,13 @@ import {
   Shapes,
   Table,
   Type,
-  Keyboard,
   Undo2,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
 import { Popover } from '../../../../components/ui/Popover';
+import { STUDIO_LAYER } from '../studioLayers';
 import { useMediaQuery } from '../../../../components/ui/useMediaQuery';
 import { useRovingToolbar } from '../../../../components/ui/useRovingToolbar';
 import { Tooltip } from '../../../../components/ui/Tooltip';
@@ -87,10 +87,6 @@ interface StudioToolRailProps {
   tool: RailTool;
   onToolChange: (tool: RailTool) => void;
   disabled?: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  onUndo: () => void;
-  onRedo: () => void;
   showGrid: boolean;
   onToggleGrid: () => void;
   snapEnabled: boolean;
@@ -111,11 +107,18 @@ interface StudioToolRailProps {
    * a tool: it acts on everything at once and nothing has to be selected first.
    */
   arrangeOptions: (close: () => void) => ReactNode;
-  /** Opens the shortcut sheet; a shortcut nobody can find is not one. */
-  onShowShortcuts: () => void;
+  /**
+   * History. Back on the rail rather than floating in the corner on its own:
+   * two absolutely-positioned columns down the same edge only stay apart while
+   * the window is tall enough, and they were not.
+   */
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
-const RAIL_BUTTON = `flex h-9 w-9 items-center justify-center max-sm:h-11 max-sm:w-11 rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const RAIL_BUTTON = `flex h-8 w-8 items-center justify-center max-sm:h-11 max-sm:w-11 rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
 const RAIL_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
 const RAIL_IDLE =
   'border-transparent bg-transparent text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink';
@@ -137,7 +140,9 @@ function RailGroup({
       role="toolbar"
       aria-orientation={orientation}
       aria-label={label}
-      className="rt-studio-rise flex shrink-0 gap-1 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)] sm:flex-col"
+      className={`rt-studio-rise flex w-fit shrink-0 gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)] ${
+        orientation === 'vertical' ? 'flex-col' : ''
+      }`}
     >
       {children}
     </div>
@@ -208,10 +213,6 @@ export function StudioToolRail({
   tool,
   onToolChange,
   disabled = false,
-  canUndo,
-  canRedo,
-  onUndo,
-  onRedo,
   showGrid,
   onToggleGrid,
   snapEnabled,
@@ -222,7 +223,10 @@ export function StudioToolRail({
   tableOptions,
   templateOptions,
   arrangeOptions,
-  onShowShortcuts,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: StudioToolRailProps) {
   const [openMenu, setOpenMenu] = useState<RailSlot | null>(null);
   // Which button to hand focus back to when the panel closes. A single mutable
@@ -236,6 +240,9 @@ export function StudioToolRail({
   // no arrow at all.
   const docked = useMediaQuery('(max-width: 639px)');
   const orientation: 'horizontal' | 'vertical' = docked ? 'horizontal' : 'vertical';
+  // Raised while one of its panels is open, so the panel is never covered by a
+  // toolbar that happens to render later.
+  const layer = openMenu ? STUDIO_LAYER.open : STUDIO_LAYER.chrome;
 
   function closeMenu() {
     setOpenMenu(null);
@@ -306,8 +313,11 @@ export function StudioToolRail({
     <div
       className={
         docked
-          ? 'pointer-events-none absolute inset-x-2 bottom-2 z-20 flex gap-2 overflow-x-auto'
-          : 'pointer-events-none absolute top-3 left-3 z-20 flex flex-col gap-2 sm:top-4 sm:left-4'
+          ? `pointer-events-none absolute inset-x-2 bottom-2 flex gap-2 overflow-x-auto ${layer}`
+          : // `items-start`, so each group is as wide as its own buttons. Stretched
+            // to the column's width, a narrow group's panel would open from the
+            // far edge of the widest one and float away from the rail.
+            `pointer-events-none absolute inset-y-3 left-3 flex flex-col items-start gap-2 sm:inset-y-4 sm:left-4 ${layer}`
       }
     >
       <div className="pointer-events-auto relative">
@@ -392,8 +402,31 @@ export function StudioToolRail({
         {openMenu && MENU_ANCHOR[openMenu] === 'rail' ? renderMenu(docked ? 'top' : 'right') : null}
       </div>
 
-      <div className="pointer-events-auto">
-        <RailGroup label="History" orientation={orientation}>
+      <div className="pointer-events-auto relative">
+        <RailGroup label="Canvas" orientation={orientation}>
+          <RailButton label="Show grid" Icon={Grid3x3} active={showGrid} onClick={onToggleGrid} />
+          <RailButton
+            label="Snap to grid"
+            Icon={Magnet}
+            active={snapEnabled}
+            onClick={onToggleSnap}
+          />
+          <RailButton
+            label="Arrange"
+            Icon={Workflow}
+            active={openMenu === 'arrange'}
+            disabled={disabled}
+            {...menuButton('arrange')}
+            onClick={() => toggleMenu('arrange')}
+          />
+        </RailGroup>
+      </div>
+
+      {/* Held at the far end of the same column the tools are in, so the two can
+          never land on top of each other however short the window gets — and
+          laid flat, because two stepper buttons read as a pair side by side. */}
+      <div className={`pointer-events-auto ${docked ? '' : 'mt-auto'}`}>
+        <RailGroup label="History" orientation="horizontal">
           <RailButton
             label="Undo diagram change"
             shortcut="Ctrl+Z"
@@ -407,32 +440,6 @@ export function StudioToolRail({
             Icon={Redo2}
             disabled={!canRedo || disabled}
             onClick={onRedo}
-          />
-        </RailGroup>
-      </div>
-
-      <div className="pointer-events-auto relative">
-        <RailGroup label="Canvas" orientation={orientation}>
-          <RailButton label="Show grid" Icon={Grid3x3} active={showGrid} onClick={onToggleGrid} />
-          <RailButton
-            label="Snap to grid"
-            Icon={Magnet}
-            active={snapEnabled}
-            onClick={onToggleSnap}
-          />
-          <RailButton
-            label="Keyboard shortcuts"
-            shortcut="?"
-            Icon={Keyboard}
-            onClick={onShowShortcuts}
-          />
-          <RailButton
-            label="Arrange"
-            Icon={Workflow}
-            active={openMenu === 'arrange'}
-            disabled={disabled}
-            {...menuButton('arrange')}
-            onClick={() => toggleMenu('arrange')}
           />
         </RailGroup>
       </div>

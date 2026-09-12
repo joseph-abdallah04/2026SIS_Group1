@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-type PopoverPlacement = 'right' | 'right-center' | 'top' | 'top-center' | 'bottom';
+type PopoverPlacement =
+  'right' | 'right-center' | 'top' | 'top-center' | 'top-end' | 'bottom' | 'bottom-end';
 
 const PLACEMENT_CLASSES: Record<PopoverPlacement, string> = {
   right: 'left-full top-0 ml-2',
@@ -9,7 +10,13 @@ const PLACEMENT_CLASSES: Record<PopoverPlacement, string> = {
   top: 'bottom-full left-0 mb-2',
   // Held over the middle of its anchor rather than its left edge.
   'top-center': 'bottom-full left-1/2 mb-2 -translate-x-1/2',
+  // Right edges aligned: for an anchor already against the edge of the canvas,
+  // where centring would push the panel off it.
+  'top-end': 'right-0 bottom-full mb-2',
   bottom: 'top-full left-0 mt-2',
+  // Right edges aligned, below: for an anchor in the top-right corner, where
+  // opening upward would put the panel off the top of the canvas.
+  'bottom-end': 'top-full right-0 mt-2',
 };
 
 interface PopoverProps {

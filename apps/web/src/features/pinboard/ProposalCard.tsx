@@ -1,11 +1,11 @@
 import {
-  DIAGRAM_LABEL_INK,
   diagramEdgeDash,
   diagramEdgeRoutes,
   diagramEdgeStroke,
   diagramEdgeStrokeWidth,
   diagramNodeFill,
   diagramNodeLabelLayout,
+  diagramNodeLabelStyle,
   diagramEdgeKey,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
@@ -298,6 +298,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
     const shape = node.shape ?? 'box';
     const size = effectiveDiagramNodeSize(node);
     const label = diagramNodeLabelLayout(node);
+    const labelStyle = diagramNodeLabelStyle(node, size.width);
 
     return (
       <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
@@ -311,18 +312,20 @@ function DiagramBody({ item }: { item: BoardItem }) {
           containerDashArray="4 3"
         />
         <text
-          textAnchor="middle"
-          fill={DIAGRAM_LABEL_INK}
+          textAnchor={labelStyle.anchor}
+          fill={labelStyle.fill}
           style={{
             fontSize: `${label.fontSize}px`,
             fontFamily: 'Inter, system-ui, sans-serif',
-            fontWeight: shape === 'text' ? 600 : 400,
+            // The card has always drawn labels a shade lighter than the editor;
+            // bold is the one weight both surfaces agree on exactly.
+            fontWeight: node.labelBold ? labelStyle.fontWeight : shape === 'text' ? 600 : 400,
           }}
         >
           {label.lines.map((line, lineIndex) => (
             <tspan
               key={line + String(lineIndex)}
-              x={size.width / 2}
+              x={labelStyle.x}
               y={label.firstBaselineY + lineIndex * label.lineHeight}
             >
               {line}

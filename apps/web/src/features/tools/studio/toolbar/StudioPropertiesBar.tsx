@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 
 import { Popover } from '../../../../components/ui/Popover';
+import { STUDIO_LAYER } from '../studioLayers';
 import { useMediaQuery } from '../../../../components/ui/useMediaQuery';
 import { useRovingToolbar } from '../../../../components/ui/useRovingToolbar';
 import { Tooltip } from '../../../../components/ui/Tooltip';
@@ -124,7 +125,7 @@ export function StudioPropertiesBar({
       aria-orientation="horizontal"
       aria-label="Selection properties"
       data-side={docked ? 'docked' : placed.side}
-      className={`rt-studio-rise pointer-events-auto absolute z-20 flex items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)] ${
+      className={`rt-studio-rise pointer-events-auto absolute ${alignOpen ? STUDIO_LAYER.open : STUDIO_LAYER.selection} flex items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)] ${
         docked ? 'overflow-x-auto' : 'w-max'
       }`}
       style={{

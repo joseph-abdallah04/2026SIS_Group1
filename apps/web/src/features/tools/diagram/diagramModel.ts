@@ -190,15 +190,39 @@ export function placeNodePosition(
 
 // `viewBox` is the currently visible slice of the sheet, so screen coordinates
 // stay correct under zoom and pan.
+/**
+ * How the scene is laid into the surface.
+ *
+ * The canvas fills the window, and the scene has a shape of its own, so the two
+ * rarely match: SVG scales the view uniformly to fit and centres what is left
+ * over. Every conversion between the two spaces has to account for that margin,
+ * and gets it from here rather than working it out again.
+ */
+export function diagramSurfaceFit(
+  bounds: DiagramSurfaceBounds,
+  viewBox: DiagramRect,
+): { scale: number; offsetX: number; offsetY: number } {
+  if (bounds.width <= 0 || bounds.height <= 0 || viewBox.width <= 0 || viewBox.height <= 0) {
+    return { scale: 1, offsetX: 0, offsetY: 0 };
+  }
+  const scale = Math.min(bounds.width / viewBox.width, bounds.height / viewBox.height);
+  return {
+    scale,
+    offsetX: (bounds.width - viewBox.width * scale) / 2,
+    offsetY: (bounds.height - viewBox.height * scale) / 2,
+  };
+}
+
 export function clientPointToDiagramPoint(
   clientPoint: DiagramPoint,
   bounds: DiagramSurfaceBounds,
   viewBox: DiagramRect = DIAGRAM_FULL_VIEW_BOX,
 ): DiagramPoint {
   if (bounds.width <= 0 || bounds.height <= 0) return { x: viewBox.x, y: viewBox.y };
+  const { scale, offsetX, offsetY } = diagramSurfaceFit(bounds, viewBox);
   return {
-    x: viewBox.x + ((clientPoint.x - bounds.left) / bounds.width) * viewBox.width,
-    y: viewBox.y + ((clientPoint.y - bounds.top) / bounds.height) * viewBox.height,
+    x: viewBox.x + (clientPoint.x - bounds.left - offsetX) / scale,
+    y: viewBox.y + (clientPoint.y - bounds.top - offsetY) / scale,
   };
 }
 
@@ -212,13 +236,12 @@ export function diagramRectToClientRect(
   viewBox: DiagramRect = DIAGRAM_FULL_VIEW_BOX,
 ): DiagramRect {
   if (viewBox.width <= 0 || viewBox.height <= 0) return { x: 0, y: 0, width: 0, height: 0 };
-  const scaleX = bounds.width / viewBox.width;
-  const scaleY = bounds.height / viewBox.height;
+  const { scale, offsetX, offsetY } = diagramSurfaceFit(bounds, viewBox);
   return {
-    x: bounds.left + (rect.x - viewBox.x) * scaleX,
-    y: bounds.top + (rect.y - viewBox.y) * scaleY,
-    width: rect.width * scaleX,
-    height: rect.height * scaleY,
+    x: bounds.left + offsetX + (rect.x - viewBox.x) * scale,
+    y: bounds.top + offsetY + (rect.y - viewBox.y) * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
   };
 }
 

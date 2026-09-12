@@ -12,6 +12,7 @@ import {
   DIAGRAM_FILL_KEYS,
   DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
+  DIAGRAM_TEXT_ALIGNS,
   DIAGRAM_MAX_NODE_HEIGHT,
   DIAGRAM_MAX_NODE_WIDTH,
   DIAGRAM_MIN_NODE_HEIGHT,
@@ -209,6 +210,11 @@ export const diagramNodeSchema = z.object({
   strokeColor: diagramStrokeKeySchema.optional(),
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
   fontSizePreset: diagramFontSizePresetSchema.optional(),
+  // Label styling, all optional: a node written before it existed still parses,
+  // and reads as the plain centred label it has always been.
+  labelBold: z.boolean().optional(),
+  labelColor: diagramStrokeKeySchema.optional(),
+  labelAlign: z.enum(DIAGRAM_TEXT_ALIGNS).optional(),
 });
 
 export const diagramEdgeSchema = z.object({
