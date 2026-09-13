@@ -48,14 +48,19 @@ export function JoinCodeCard({ code }: JoinCodeCardProps) {
         Join code
       </span>
       {/* Sized to the code rather than to the container: a `w-full` field in a
-          flex row would stretch the footer's whole right-hand group. */}
+          flex row would stretch the footer's whole right-hand group. The width
+          has to carry the tracking as well as the glyphs — `ch` measures the
+          advance of one character and knows nothing about `tracking`, so a
+          bare `9ch` leaves the 9-character code ~0.54em short and an input
+          clips the overflow rather than growing, cutting off the last
+          character. */}
       <input
         ref={inputRef}
         readOnly
         value={code}
         aria-label="Join code"
         onFocus={(e) => e.currentTarget.select()}
-        className="w-[9ch] bg-transparent font-mono text-[12.5px] tracking-[0.06em] text-rt-ink outline-none"
+        className="w-[calc(9ch_+_0.6em)] bg-transparent font-mono text-[12.5px] tracking-[0.06em] text-rt-ink outline-none"
       />
       <button
         type="button"
