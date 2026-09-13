@@ -120,6 +120,9 @@ vi.mock('./voiceApi', () => ({
 // `FakeRoom` is initialised.
 const { DisconnectReason, RoomEvent } = await import('livekit-client');
 const { useVoiceRoom } = await import('./useVoiceRoom');
+const { ApiClientError } = await import('../../lib/api');
+const { fetchVoiceToken } = await import('./voiceApi');
+const tokenFetch = vi.mocked(fetchVoiceToken);
 
 /** Mount the hook and wait for the join to settle. */
 async function joinRoom() {
@@ -300,5 +303,66 @@ describe('useVoiceRoom mute (F12)', () => {
     await waitFor(() => expect(view.result.current.micStatus).toBe('blocked'));
 
     expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBeNull();
+  });
+});
+
+/**
+ * The one backoff delay worth waiting out in real time: if a rejected connect
+ * scheduled a retry, `RECONNECT_DELAYS_MS[0]` (500ms) has fired by now.
+ */
+const PAST_FIRST_RETRY_MS = 800;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('useVoiceRoom when the server has no LiveKit credentials', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    FakeRoom.last = null;
+    acquireError = null;
+    tokenFetch.mockClear();
+  });
+
+  afterEach(() => {
+    tokenFetch.mockReset();
+    tokenFetch.mockResolvedValue({
+      token: 'jwt',
+      url: 'wss://example.invalid',
+      identity: 'user-1',
+      roomName: 'session-session-1',
+      expiresInSeconds: 900,
+    });
+  });
+
+  it('stops at `unavailable` instead of retrying a server that has no voice', async () => {
+    tokenFetch.mockRejectedValue(
+      new ApiClientError(503, 'Voice is not configured on this server', 'VOICE_NOT_CONFIGURED'),
+    );
+
+    const view = renderHook(() => useVoiceRoom('session-1'));
+    await waitFor(() => expect(view.result.current.status).toBe('unavailable'));
+
+    // Nothing renders in this state, so there is no message to carry.
+    expect(view.result.current.error).toBeNull();
+
+    // The point of the status: asked once, never again. Retrying would repeat
+    // the same 503 and end on the generic "Lost the voice connection", which
+    // offers a Reconnect button that cannot work.
+    await wait(PAST_FIRST_RETRY_MS);
+    expect(tokenFetch).toHaveBeenCalledTimes(1);
+    expect(view.result.current.status).toBe('unavailable');
+  });
+
+  it('still retries a 503 that is not the voice-not-configured code', async () => {
+    // A load balancer or a mid-deploy restart. Usually not even JSON, so no
+    // `code` survives — and retrying is the right answer. This is the test
+    // that stops the check being "simplified" to `err.status === 503`.
+    tokenFetch.mockRejectedValue(new ApiClientError(503, 'Service Unavailable'));
+
+    const view = renderHook(() => useVoiceRoom('session-1'));
+
+    await waitFor(() => expect(tokenFetch.mock.calls.length).toBeGreaterThan(1), {
+      timeout: 4_000,
+    });
+    expect(view.result.current.status).not.toBe('unavailable');
   });
 });

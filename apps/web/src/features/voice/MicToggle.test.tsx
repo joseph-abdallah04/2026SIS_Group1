@@ -146,4 +146,13 @@ describe('MicToggle', () => {
     expect(button).toBeEnabled();
     expect(button).toHaveAttribute('title', expect.stringContaining('site settings'));
   });
+
+  it('renders nothing when the server has no voice', () => {
+    // A permanently greyed button explains nothing; there is no microphone to
+    // offer on a deployment without LiveKit credentials.
+    const { container } = render(<MicToggle {...liveProps()} status="unavailable" />);
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
 });

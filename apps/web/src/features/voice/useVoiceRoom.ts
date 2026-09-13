@@ -19,7 +19,20 @@ import { fetchVoiceToken } from './voiceApi';
  * and "the SDK is negotiating" are the same thing to a user, and `failed` here
  * means we gave up, which no single SDK state expresses.
  */
-export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
+export type VoiceStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
+  /**
+   * This deployment has no LiveKit credentials, so there is no room to join
+   * and there will not be one until the server is reconfigured. Distinct from
+   * `failed`, which means "something that exists was lost and you can retry
+   * into it" — retrying this just repeats the same 503. Every piece of voice
+   * UI renders nothing in this state rather than offering a dead Reconnect.
+   */
+  | 'unavailable';
 
 /**
  * The microphone, tracked separately from the connection on purpose: voice is
@@ -372,6 +385,20 @@ export function useVoiceRoom(sessionId: string) {
         }
       } catch (err) {
         if (cancelled) return;
+
+        // Not a blip and not a permission problem: the server has no LiveKit
+        // credentials. Keyed on the code rather than the 503 itself — a bare
+        // 503 is a load balancer or a mid-deploy restart, where retrying is
+        // right. Without this, `scheduleReconnect` fetches the same 503 five
+        // more times and then overwrites this with "Lost the voice
+        // connection", which is how a server that never had voice ends up
+        // offering a Reconnect button that cannot work.
+        if (err instanceof ApiClientError && err.code === 'VOICE_NOT_CONFIGURED') {
+          setStatus('unavailable');
+          // Nothing renders in this state, so there is no message to carry.
+          setError(null);
+          return;
+        }
 
         // A refusal is an answer, not a blip: retrying a 403 just repeats it.
         if (err instanceof ApiClientError && err.status >= 400 && err.status < 500) {
