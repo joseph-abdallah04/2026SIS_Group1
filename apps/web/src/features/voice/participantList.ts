@@ -65,3 +65,74 @@ export function seatParticipants(
 export function presenceLabel(count: number): string {
   return count === 1 ? '1 person' : `${count} people`;
 }
+
+/**
+ * Split the room into the bubbles the header shows and the rest behind its
+ * overflow (F13.2).
+ *
+ * The header has room for a handful of people, and cutting the list at that
+ * handful would sooner or later hide whoever is talking — which is the one
+ * thing a presence indicator exists to report. (The rail solved this by never
+ * truncating at all; a header cannot scroll, so it needs this instead.) So a
+ * speaker who falls outside the window is *promoted* into it.
+ *
+ * Promotion takes slots, not the whole order: a speaker replaces the seat that
+ * will be least missed — from the back — so the other bubbles keep the
+ * positions the viewer has already learned. Two seats are never given up:
+ * anyone already speaking, and you. Your own bubble vanishing to make room for
+ * someone else is a worse surprise than not seeing that someone. Where several
+ * speakers are promoted at once they still land in room order, so the visible
+ * row reads the same way the full list does.
+ *
+ * When everyone visible is speaking there is nothing left to displace, so a
+ * further speaker stays hidden and the caller's overflow control is left to say
+ * so. Deterministic for a given room, speaking set and limit, so every client
+ * resolves it the same way.
+ */
+export function splitForHeader(
+  seats: readonly ParticipantSeat[],
+  speaking: ReadonlySet<string>,
+  limit: number,
+): { visible: readonly ParticipantSeat[]; hidden: readonly ParticipantSeat[] } {
+  if (limit <= 0) return { visible: [], hidden: seats };
+  if (seats.length <= limit) return { visible: seats, hidden: [] };
+
+  const head = seats.slice(0, limit);
+  const overflowed = seats.slice(limit);
+  const waiting = overflowed.filter((seat) => speaking.has(seat.identity));
+  if (waiting.length === 0) return { visible: head, hidden: overflowed };
+
+  const visible = [...head];
+  const evicted: ParticipantSeat[] = [];
+
+  // Which slots may be given up, least-missed first — so back to front, and
+  // never a seat that is speaking or is you.
+  const spare: number[] = [];
+  for (let i = visible.length - 1; i >= 0; i -= 1) {
+    const seat = visible[i];
+    if (!seat || seat.isLocal || speaking.has(seat.identity)) continue;
+    spare.push(i);
+  }
+
+  // Fill those slots low-to-high with the waiting speakers in room order, so
+  // promoted bubbles read in the same order as everything else. Taking them in
+  // the order they were found would seat the later speaker further left.
+  const slots = spare.slice(0, waiting.length).sort((a, b) => a - b);
+  slots.forEach((slot, index) => {
+    const speaker = waiting[index];
+    const leaving = visible[slot];
+    if (!speaker || !leaving) return;
+    visible[slot] = speaker;
+    evicted.push(leaving);
+  });
+
+  // Whoever is not on show, back in the room's own order, so the overflow
+  // panel reads the same way the list always does.
+  const shown = new Set(visible.map((seat) => seat.identity));
+  const rank = new Map(seats.map((seat, index) => [seat.identity, index]));
+  const hidden = [...overflowed, ...evicted]
+    .filter((seat) => !shown.has(seat.identity))
+    .sort((a, b) => (rank.get(a.identity) ?? 0) - (rank.get(b.identity) ?? 0));
+
+  return { visible, hidden };
+}
