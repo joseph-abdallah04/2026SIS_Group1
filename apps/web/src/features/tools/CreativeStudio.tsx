@@ -14,7 +14,11 @@ export function CreativeStudio() {
   // over the board rather than in a room of its own: leaving the board to
   // write a sentence costs more than the sentence. It brings its own dialog,
   // and its own header, because it has no studio chrome to hang one on.
-  if (activeTool === 'sticky') return <StickyEditor />;
+  // Keyed by what it opened on, so moving from one source to another is a new
+  // popup with its own note rather than the last one's text under a new label.
+  if (activeTool === 'sticky') {
+    return <StickyEditor key={editSource?.id ?? extensionSource?.id ?? 'new'} />;
+  }
 
   // Reuse (F38) and Extend (F23) share one write path, so the source alone
   // says which is happening, and this title is the only label the drawing

@@ -171,6 +171,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
   return (
     <CreativeToolsProvider
       isLive={acceptsProposals}
+      sessionId={sessionId}
       viewerId={viewerId}
       proposals={board.items}
       propose={propose}

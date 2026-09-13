@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -6,6 +7,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { LoaderCircle, X } from 'lucide-react';
 import type { StickyColor } from '@roundtable/shared';
 
@@ -13,6 +15,7 @@ import { Button } from '../../../components/ui/Button';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
+import { clearStickyDraft, readStickyDraft, writeStickyDraft } from './stickyDraft';
 import { stickyFits } from './stickyPresentation';
 import { useNoteAutoGrow } from './useNoteAutoGrow';
 
@@ -24,6 +27,26 @@ const POPUP_MAX_WIDTH_PX = 520;
 const FOOTER_GAP_PX = 12;
 /** Kept clear of the window's edge when the toolbar sits near it. */
 const EDGE_PX = 16;
+/** How long the popup takes to fade out; the same as `.rt-sticky-popup-fade`. */
+const EXIT_MS = 150;
+/** The toolbar button for the tool that is already open. */
+const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
+
+/**
+ * Whether closing fades. Not for anyone who has asked for less motion, and not
+ * where there is no way to ask, which is only ever an environment with no
+ * rendering at all: there, a close that waited on an animation would wait on
+ * nothing.
+ */
+function closingFades(): boolean {
+  return (
+    typeof window.matchMedia === 'function' &&
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+/** With no toolbar to rest on, as in the tools workbench: the middle of the window. */
+const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
 
 /**
  * Where the popup goes: resting just above the board's footer, centred on it.
@@ -35,7 +58,7 @@ const EDGE_PX = 16;
  *
  * Anchored by the bottom, so a note that grows grows upward, away from the
  * toolbar, instead of down over it. Null when there is no toolbar on screen, as
- * in the tools workbench, and the popup centres itself as a dialog does.
+ * in the tools workbench, and the popup sits in the middle of the window.
  */
 function placeAboveFooter(): CSSProperties | null {
   const toolbar = document.querySelector<HTMLElement>('[data-creative-toolbar]');
@@ -69,6 +92,10 @@ function placeAboveFooter(): CSSProperties | null {
  * There is no preview, because the popup is the preview. It is the same paper
  * the board uses — the same colours, the same square corners, the same shadow
  * falling below it — so what you are writing on is what lands.
+ *
+ * It behaves like the other popovers on the board rather than like a dialog.
+ * Nothing behind it is locked or dimmed, a press anywhere else closes it, and
+ * whatever was written is kept, so closing it to look at something is free.
  */
 export function StickyEditor() {
   const {
@@ -78,22 +105,47 @@ export function StickyEditor() {
     editSource,
     isLive,
     resetSubmission,
+    stickyDraftKey,
     submissionError,
     submissionStatus,
     submitArtifact,
   } = useCreativeTools();
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  // Read while rendering, before the note takes focus, so this is whatever
+  // opened the popup: the toolbar button, or a card's Extend.
+  const [opener] = useState(() => document.activeElement);
   // Editing rewrites this proposal; extending starts a new one from it.
   const sourceProposal = editSource ?? extensionSource;
   const sourceArtifact =
     sourceProposal?.artifactJson.type === 'sticky' ? sourceProposal.artifactJson : null;
-  const [text, setText] = useState(sourceArtifact?.text ?? '');
-  const [color, setColor] = useState<StickyColor>(sourceArtifact?.color ?? 'yellow');
+  /**
+   * Only a new sticky is a draft. Editing and extending both open on a
+   * proposal that already exists, so there is nothing to lose by closing them,
+   * and letting them read or write the draft would put one note's words into
+   * another.
+   *
+   * Decided once, when the popup opens. Closing an extension clears its source
+   * a render before the popup itself goes, and a key worked out afresh in that
+   * render would take the extension for a new sticky and save its words over
+   * the draft.
+   */
+  const [draftKey] = useState(() => (editSource || extensionSource ? null : stickyDraftKey));
+  const [saved] = useState(() => (draftKey ? readStickyDraft(draftKey) : null));
+  const [text, setText] = useState(sourceArtifact?.text ?? saved?.text ?? '');
+  const [color, setColor] = useState<StickyColor>(
+    sourceArtifact?.color ?? saved?.color ?? 'yellow',
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
   // The last keystroke was refused because the note had filled the largest
   // sticky, which the character count alone would not show.
   const [paperFull, setPaperFull] = useState(false);
+
+  // Saved as it is typed, colour included, so closing the popup by any route
+  // — a press outside it, Escape, the close button, a refresh — keeps the note.
+  useEffect(() => {
+    if (draftKey) writeStickyDraft(draftKey, { text, color });
+  }, [draftKey, text, color]);
   const theme = STICKY_THEMES[color];
   const [placement, setPlacement] = useState(placeAboveFooter);
 
@@ -107,18 +159,6 @@ export function StickyEditor() {
   // into a box that hides its own first line.
   useNoteAutoGrow(noteRef, text);
 
-  // `showModal` is what puts this in the top layer, so it is above the canvas
-  // and its transform rather than positioned inside them, and what traps focus
-  // and makes Escape reach `onCancel`.
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog || dialog.open) return;
-    dialog.showModal();
-    return () => {
-      if (dialog.open) dialog.close();
-    };
-  }, []);
-
   /**
    * Nothing to acknowledge. The sticky lands on the board directly behind this
    * popup, so a receipt would cover the one thing that proves it worked. The
@@ -128,9 +168,89 @@ export function StickyEditor() {
   useEffect(() => {
     closeRef.current = closeTool;
   });
+
+  /**
+   * Every close from here fades out first, then closes.
+   *
+   * The popup is removed the moment the tool closes, so there is nothing left
+   * to animate unless the close itself waits. While it fades it takes no more
+   * presses, so a second click on the board lands on the board.
+   *
+   * The wait is a timer rather than the end of the animation, so it closes on
+   * time even where the animation never runs, and it is cancelled if the popup
+   * goes first — opening another tool mid-fade removes it straight away, and a
+   * close arriving after that would shut the tool just opened.
+   */
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const exitTimer = useRef<number | null>(null);
+
+  const beginClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (!closingFades()) {
+      closeRef.current();
+      return;
+    }
+    setClosing(true);
+    exitTimer.current = window.setTimeout(() => closeRef.current(), EXIT_MS);
+  }, []);
+
+  // Changed its mind: the open tool's own button, pressed mid-fade.
+  const cancelClose = useCallback(() => {
+    if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
+    exitTimer.current = null;
+    closingRef.current = false;
+    setClosing(false);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (submissionStatus === 'success') closeRef.current();
-  }, [submissionStatus]);
+    if (submissionStatus === 'success') beginClose();
+  }, [submissionStatus, beginClose]);
+
+  /**
+   * A press anywhere outside the popup closes it, and still does whatever it
+   * was a press on: a card is still picked up, another tool still opens. The
+   * note is already saved, so nothing is lost by it.
+   *
+   * Listened for on the way down rather than on click, so the popup is gone
+   * before a drag that starts outside it gets going.
+   */
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target || panelRef.current?.contains(target)) return;
+      // The toolbar button for the tool already open. Pressing it again would
+      // close the popup and open it straight back, flashing the note away and
+      // losing the cursor, for no change at all — and pressed while the popup
+      // is fading, it is somebody asking for it back.
+      if (target.closest(OPEN_TOOL_BUTTON)) {
+        if (closingRef.current) cancelClose();
+        return;
+      }
+      beginClose();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [beginClose, cancelClose]);
+
+  /**
+   * Closing from inside the popup, by Escape or the close button, puts focus
+   * back on whatever opened it. Without a dialog to do that, somebody on the
+   * keyboard would be left with focus on nothing. A press outside does not:
+   * focus belongs to whatever was pressed.
+   */
+  function dismiss() {
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    beginClose();
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -141,7 +261,11 @@ export function StickyEditor() {
     }
 
     setValidationError(null);
-    await submitArtifact({ type: 'sticky', text: prepared.text, color });
+    const proposed = await submitArtifact({ type: 'sticky', text: prepared.text, color });
+    // Cleared once it has landed, here rather than when the popup closes: the
+    // popup can be closed while the proposal is still on its way, and a note
+    // already on the board should not come back as a draft next time.
+    if (proposed && draftKey) clearStickyDraft(draftKey);
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -160,24 +284,27 @@ export function StickyEditor() {
         : `Extending ${extensionSource.authorName}'s sticky`
       : 'New sticky';
 
-  return (
-    <dialog
-      ref={dialogRef}
+  // Portalled to the body, like the board's other popovers, so the canvas's
+  // scale transform is not its containing block and it is placed against the
+  // window it was measured in.
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="dialog"
       aria-labelledby="sticky-composer-label"
-      // No dimming. The popup is a note held just above the toolbar, and the
-      // board behind it is what somebody is writing in answer to, so it stays
-      // exactly as bright as it was. Still modal: Escape closes it, focus
-      // stays in it, and a stray click on the board cannot drag a card out
-      // from under a half-written note.
-      className={`${placement ? 'm-0' : 'm-auto'} overflow-visible border-0 bg-transparent p-0 text-rt-ink backdrop:bg-transparent`}
-      style={placement ?? undefined}
-      onCancel={(event) => {
+      className={`fixed z-40 text-rt-ink ${closing ? 'pointer-events-none' : ''}`}
+      style={placement ?? CENTRED}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
         event.preventDefault();
-        closeTool();
+        dismiss();
       }}
     >
+      {/* The rise is on the paper, not on the panel around it: the panel is
+          what is positioned, and in the workbench that position is itself a
+          transform, which an animated one would overwrite. */}
       <form
-        className="p-6"
+        className={`${closing ? 'rt-sticky-popup-fade' : 'rt-sticky-popup-rise'} p-6`}
         // Bare paper, exactly as it will sit on the board: no outline, square
         // corners, and the shadow that falls below it.
         style={{
@@ -199,7 +326,7 @@ export function StickyEditor() {
           <button
             type="button"
             aria-label="Close"
-            onClick={closeTool}
+            onClick={dismiss}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rt-ink/20 text-rt-ink/70 transition-colors hover:bg-rt-ink/8 hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
           >
             <X aria-hidden="true" size={15} strokeWidth={2.4} />
@@ -290,6 +417,7 @@ export function StickyEditor() {
           </Button>
         </div>
       </form>
-    </dialog>
+    </div>,
+    document.body,
   );
 }

@@ -4,12 +4,15 @@ import type { BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { CreativeToolsContext } from './CreativeToolsContext';
+import { draftKeyFor } from './sticky/stickyDraft';
 import { parseToolKind, type ToolKind } from './toolRegistry';
 import { useProposalSubmission } from './useProposalSubmission';
 
 interface CreativeToolsProviderProps {
   children: ReactNode;
   isLive: boolean;
+  /** Which session the tools are writing into, so a draft stays with it. */
+  sessionId?: string;
   /** Who is looking, so the editors can tell reuse from extending (F38). */
   viewerId: string | null;
   proposals: readonly BoardItem[];
@@ -20,6 +23,7 @@ interface CreativeToolsProviderProps {
 export function CreativeToolsProvider({
   children,
   isLive,
+  sessionId,
   viewerId,
   proposals,
   propose,
@@ -100,6 +104,7 @@ export function CreativeToolsProvider({
         isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,
         isLive,
+        stickyDraftKey: sessionId && viewerId ? draftKeyFor(sessionId, viewerId) : null,
         submissionStatus: submission.status,
         submissionError: submission.error,
         openTool,
