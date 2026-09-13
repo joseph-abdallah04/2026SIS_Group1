@@ -11,7 +11,7 @@ import { CreativeToolsContext } from '../tools/CreativeToolsContext';
 import { ArtifactCard } from './ArtifactCard';
 import { ToolActivity } from './ToolActivity';
 import type { AssistantChat } from './useAssistantChat';
-import { usePanelGeometry, type ResizeCorner } from './usePanelGeometry';
+import { usePanelGeometry, type ResizeHandle } from './usePanelGeometry';
 
 const SUGGESTIONS = [
   'Give me 5 sticky notes for this question',
@@ -94,8 +94,6 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
       role="dialog"
       aria-label="AI assistant"
     >
-      <ResizeGrips onStart={startResize} />
-
       <header
         className={`flex items-center gap-2 border-b border-rt-primary-tint px-4 py-3 ${
           dragging ? 'cursor-grabbing' : 'cursor-grab'
@@ -232,35 +230,61 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
           )}
         </div>
       </div>
+
+      <ResizeHandles onStart={startResize} />
     </aside>
   );
 }
 
 /**
- * Corner grips. All four, because the panel can be dragged anywhere: once it is not in the
- * bottom-right corner any more, "the only handle is on the corner nearest the screen edge"
- * becomes an arbitrary restriction.
+ * Eight resize targets: the four sides and the four corners.
+ *
+ * Rendered as the LAST children of the panel on purpose. They used to come first, which meant
+ * the header and the composer painted over three of the four — only the top-left corner, which
+ * happens to sit on the header's own grab area, was reachable. Painting order is the fix;
+ * `z-20` is belt and braces.
+ *
+ * Sides are deliberately thin. The transcript's scrollbar runs down the right edge, and a fat
+ * handle there would swallow it.
  */
-function ResizeGrips({
+function ResizeHandles({
   onStart,
 }: {
-  onStart: (corner: ResizeCorner) => (event: PointerEvent<HTMLElement>) => void;
+  onStart: (handle: ResizeHandle) => (event: PointerEvent<HTMLElement>) => void;
 }) {
-  const corners: Array<{ corner: ResizeCorner; className: string; label: string }> = [
-    { corner: 'nw', className: 'top-0 left-0 cursor-nwse-resize', label: 'top left' },
-    { corner: 'ne', className: 'top-0 right-0 cursor-nesw-resize', label: 'top right' },
-    { corner: 'sw', className: 'bottom-0 left-0 cursor-nesw-resize', label: 'bottom left' },
-    { corner: 'se', className: 'bottom-0 right-0 cursor-nwse-resize', label: 'bottom right' },
+  // Corners after sides, so a corner wins where the two overlap.
+  const handles: Array<{ handle: ResizeHandle; className: string; label: string }> = [
+    { handle: 'n', className: 'top-0 right-0 left-0 h-1 cursor-ns-resize', label: 'top edge' },
+    {
+      handle: 's',
+      className: 'right-0 bottom-0 left-0 h-1 cursor-ns-resize',
+      label: 'bottom edge',
+    },
+    { handle: 'w', className: 'top-0 bottom-0 left-0 w-1 cursor-ew-resize', label: 'left edge' },
+    { handle: 'e', className: 'top-0 right-0 bottom-0 w-1 cursor-ew-resize', label: 'right edge' },
+    { handle: 'nw', className: 'top-0 left-0 size-3.5 cursor-nwse-resize', label: 'top left' },
+    { handle: 'ne', className: 'top-0 right-0 size-3.5 cursor-nesw-resize', label: 'top right' },
+    {
+      handle: 'sw',
+      className: 'bottom-0 left-0 size-3.5 cursor-nesw-resize',
+      label: 'bottom left',
+    },
+    {
+      handle: 'se',
+      className: 'right-0 bottom-0 size-3.5 cursor-nwse-resize',
+      label: 'bottom right',
+    },
   ];
+
   return (
     <>
-      {corners.map(({ corner, className, label }) => (
+      {handles.map(({ handle, className, label }) => (
         <div
-          key={corner}
-          onPointerDown={onStart(corner)}
+          key={handle}
+          onPointerDown={onStart(handle)}
           aria-hidden="true"
           title={`Drag to resize (${label})`}
-          className={`absolute z-10 size-4 ${className}`}
+          className={`absolute z-20 ${className}`}
         />
       ))}
     </>

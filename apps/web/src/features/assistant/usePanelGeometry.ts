@@ -18,7 +18,8 @@ export interface PanelGeometry {
   height: number;
 }
 
-export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
+/** Every side and every corner. A side changes one dimension; a corner changes both. */
+export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
 
 export const MIN_WIDTH = 320;
 export const MIN_HEIGHT = 260;
@@ -75,15 +76,16 @@ export function clampGeometry(
 }
 
 /**
- * One corner drag.
+ * One resize drag, from any side or corner.
  *
- * The edges the corner does *not* own stay exactly where they are — that is what stops the
+ * The edges the handle does *not* own stay exactly where they are. That is what stops the
  * panel creeping across the screen while you resize it, and what makes shrinking past the
- * minimum stop dead rather than pushing the opposite edge along.
+ * minimum stop dead rather than pushing the opposite edge along. A side handle leaves the
+ * other axis completely untouched, so dragging the top edge cannot nudge the width.
  */
 export function resizeFrom(
   start: PanelGeometry,
-  corner: ResizeCorner,
+  handle: ResizeHandle,
   pointerX: number,
   pointerY: number,
 ): PanelGeometry {
@@ -91,16 +93,16 @@ export function resizeFrom(
   const bottom = start.y + start.height;
   let { x, y, width, height } = start;
 
-  if (corner === 'ne' || corner === 'se') {
+  if (handle.includes('e')) {
     width = Math.max(MIN_WIDTH, pointerX - start.x);
-  } else {
+  } else if (handle.includes('w')) {
     width = Math.max(MIN_WIDTH, right - pointerX);
     x = right - width;
   }
 
-  if (corner === 'sw' || corner === 'se') {
+  if (handle.includes('s')) {
     height = Math.max(MIN_HEIGHT, pointerY - start.y);
-  } else {
+  } else if (handle.includes('n')) {
     height = Math.max(MIN_HEIGHT, bottom - pointerY);
     y = bottom - height;
   }
@@ -140,7 +142,7 @@ function write(geometry: PanelGeometry): void {
 
 type Gesture =
   | { kind: 'move'; pointerId: number; offsetX: number; offsetY: number }
-  | { kind: 'resize'; pointerId: number; corner: ResizeCorner; start: PanelGeometry };
+  | { kind: 'resize'; pointerId: number; handle: ResizeHandle; start: PanelGeometry };
 
 /**
  * `localStorage`, not `sessionStorage` like the transcript: where you like your panel is a
@@ -180,7 +182,7 @@ export function usePanelGeometry() {
       const next =
         active.kind === 'move'
           ? { ...current, x: pointerX - active.offsetX, y: pointerY - active.offsetY }
-          : resizeFrom(active.start, active.corner, pointerX, pointerY);
+          : resizeFrom(active.start, active.handle, pointerX, pointerY);
       return clampGeometry(next, window.innerWidth, window.innerHeight);
     });
   }, []);
@@ -210,10 +212,10 @@ export function usePanelGeometry() {
   );
 
   const startResize = useCallback(
-    (corner: ResizeCorner) => (event: PointerEvent<HTMLElement>) => {
+    (handle: ResizeHandle) => (event: PointerEvent<HTMLElement>) => {
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
-      gesture.current = { kind: 'resize', pointerId: event.pointerId, corner, start: geometry };
+      gesture.current = { kind: 'resize', pointerId: event.pointerId, handle, start: geometry };
       setDragging(true);
     },
     [geometry],

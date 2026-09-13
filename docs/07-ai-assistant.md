@@ -9,8 +9,11 @@ Every participant gets a private ideation buddy in a floating bubble at the bott
 session. Opening it swaps the bubble for the panel — the two are never on screen together. The
 panel's own X, or Escape, closes it and brings the bubble back with focus on it.
 
-**The panel is movable and resizable**: drag the header to move it, drag any corner to resize,
-double-click the header to put it back. Position and size are remembered in `localStorage`
+**The panel is movable and resizable**: drag the header to move it, drag any of the four sides
+or four corners to resize, double-click the header to put it back. The handles are the panel's
+last children on purpose — when they came first, the header and composer painted over three of
+the four and only the top-left corner was reachable. Sides are deliberately thin so they do not
+swallow the transcript's scrollbar. Position and size are remembered in `localStorage`
 (a lasting preference, unlike the transcript, which is per-tab) and re-clamped whenever the
 window changes, so a panel can never end up somewhere it cannot be grabbed. It ships sitting
 bottom-right at a height that clears the board header — the fixed height it had before ran
