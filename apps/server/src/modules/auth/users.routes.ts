@@ -19,7 +19,7 @@ usersRoutes.patch('/me', requireAuth, validateBody(updateProfileSchema), async (
   }
 });
 
-// F33: DELETE /api/users/me — same "never trust a client-supplied id"
+// DELETE /api/users/me — same "never trust a client-supplied id"
 // pattern as every other route here, `req.userId` only, never a param/body
 // id. The password is re-checked in `deleteAccount` itself, not here — this
 // is just wiring, no auth logic belongs at the route layer.

@@ -4,6 +4,7 @@
 import { randomInt } from 'node:crypto';
 
 import {
+  DELETED_USER_DISPLAY_NAME,
   normalizeSessionCode,
   SHORTLIST_MIN,
   type Question,
@@ -264,6 +265,50 @@ export async function deleteSession({ sessionId, userId }: DeleteSessionArgs): P
       await tx.session.delete({ where: { id: sessionId } });
     }
   });
+}
+
+export interface LiveSessionRef {
+  id: string;
+  title: string;
+}
+
+/**
+ * Whether this user currently leads or belongs to (as a not-yet-left member
+ * of) any lobby/active session — the same fact `assertNotInAnotherLiveSession`
+ * above enforces for join/create/open, exposed as a read for other modules.
+ *
+ * Auth's account deletion calls this to refuse deleting a user out from
+ * under a session that is still live: the leader is always also a
+ * `SessionMember` with `leftAt: null` (F07 — a leader cannot leave, only
+ * end), so this single membership check catches leading and merely
+ * belonging to a live session alike.
+ */
+export async function findLiveSessionForUser(userId: string): Promise<LiveSessionRef | null> {
+  return prisma.session.findFirst({
+    where: {
+      status: { in: ['lobby', 'active'] },
+      members: { some: { userId, leftAt: null } },
+    },
+    select: { id: true, title: true },
+  });
+}
+
+/**
+ * Removes every draft this user leads, as part of deleting their account.
+ * A draft has exactly one member — its own leader (`createSession` adds them
+ * at creation, and a draft mints no join code for anyone else to use before
+ * `lobby`) — so unlike an ended session, there is no other member's history
+ * here to preserve; leaving the row behind leaderless would just be an
+ * orphan nobody can ever reach or clean up.
+ *
+ * Takes the caller's transaction handle so this runs atomically with the
+ * user row actually being deleted.
+ */
+export async function deleteDraftSessionsForUser(
+  userId: string,
+  client: PrismaLike = prisma,
+): Promise<void> {
+  await client.session.deleteMany({ where: { leaderId: userId, status: 'draft' } });
 }
 
 /** Duck-typed rather than importing Prisma's error class: the `.code` is the
@@ -913,7 +958,7 @@ export interface SessionPreview {
   id: string;
   title: string;
   status: Session['status'];
-  // Null if the leader's account has since been deleted (F33) — not
+  // Null if the leader's account has since been deleted — not
   // guarded against here, since account deletion is intentionally allowed
   // even while a session someone leads is still joinable.
   leaderId: string | null;
@@ -999,7 +1044,10 @@ export async function joinSessionByCode({
 }
 
 export interface SessionMemberRow {
-  userId: string;
+  // Null if this member's account has since been deleted — the row (and
+  // this history entry) survives regardless; see `SessionMember.userId`'s
+  // schema comment.
+  userId: string | null;
   displayName: string;
   joinedAt: Date;
 }
@@ -1018,7 +1066,7 @@ export async function listSessionMembers(sessionId: string): Promise<SessionMemb
 
   return rows.map((row) => ({
     userId: row.userId,
-    displayName: row.user.displayName,
+    displayName: row.user?.displayName ?? DELETED_USER_DISPLAY_NAME,
     joinedAt: row.joinedAt,
   }));
 }
@@ -1037,7 +1085,7 @@ export async function listSessionParticipants(sessionId: string): Promise<Sessio
 
   return rows.map((row) => ({
     userId: row.userId,
-    displayName: row.user.displayName,
+    displayName: row.user?.displayName ?? DELETED_USER_DISPLAY_NAME,
     joinedAt: row.joinedAt,
   }));
 }
@@ -1157,7 +1205,7 @@ export interface SessionRef {
   id: string;
   title: string;
   status: Session['status'];
-  // Null if the leader's account has since been deleted (F33) — every
+  // Null if the leader's account has since been deleted — every
   // `=== actor.id` comparison against this elsewhere just stops matching
   // anyone, which is the correct degrade (no one is "the leader" anymore).
   leaderId: string | null;

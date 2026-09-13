@@ -15,7 +15,7 @@ const LABEL_CLASSES =
   'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
 
 /**
- * F33. The typed-confirmation gate is the password field itself — the
+ * Account deletion. The typed-confirmation gate is the password field itself — the
  * button stays disabled until it's non-empty — plus a second, explicit
  * ConfirmDialog step before anything irreversible actually fires, same
  * pattern as ending/leaving a live session elsewhere in this app.
@@ -50,7 +50,9 @@ function DeleteAccountSection() {
     <div className="mt-10 border-t border-dashed border-rt-tertiary pt-6">
       <h2 className="text-sm font-semibold text-red-600">Delete account</h2>
       <p className="mt-1 max-w-xl text-sm text-rt-ink-muted">
-        Permanently deletes your account. This cannot be undone.
+        Permanently deletes your account. Sessions you led and proposals you posted stay in
+        place, credited to "Deleted user". You'll need to end or leave any session you're
+        currently in first. This cannot be undone.
       </p>
 
       <label className="mt-4 flex max-w-xs flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted">
@@ -92,7 +94,8 @@ function DeleteAccountSection() {
           onCancel={() => setConfirming(false)}
         >
           <p>
-            This permanently deletes your account and logs you out immediately. This cannot be
+            This permanently deletes your account and logs you out immediately. Sessions you led
+            and proposals you posted stay in place, credited to "Deleted user". This cannot be
             undone.
           </p>
         </ConfirmDialog>

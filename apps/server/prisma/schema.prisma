@@ -124,8 +124,14 @@ model SessionMember {
   id        String   @id @default(cuid())
   sessionId String
   session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Nullable: deleting a user account severs this reference (SetNull)
+  // instead of deleting the row. This table is history (docs/02 §4) —
+  // the summary and the vote denominator both count everyone who took
+  // part, so losing the row on account deletion would rewrite the past
+  // for every other member of every session this user was ever in, not
+  // just the ones the deleted user could see.
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   joinedAt  DateTime @default(now())
   // Set by F07's explicit "Leave session". A soft delete, because docs/02 §4
   // makes this table history — the summary and the vote denominator both count
@@ -257,8 +263,13 @@ model Vote {
   id         String      @id @default(cuid())
   roundId    String
   round      VotingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
-  voterId    String
-  voter      User        @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  // Nullable: deleting a user severs this reference (SetNull) rather than
+  // deleting the ballot itself. F31's recap tallies a round from whatever
+  // Vote rows exist — cascading this away on account deletion would quietly
+  // change a closed round's declared winner after the fact (a 2-1 becoming
+  // a tie), for everyone else who was in that vote, not just the deleted user.
+  voterId    String?
+  voter      User?       @relation(fields: [voterId], references: [id], onDelete: SetNull)
   proposalId String
   proposal   Proposal    @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   createdAt  DateTime    @default(now())

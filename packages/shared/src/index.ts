@@ -18,7 +18,7 @@ export interface Session {
   code: string | null;
   title: string;
   // Null means the account that led this session has since been deleted
-  // (F33) — the session itself is untouched, it just no longer names a
+  // — the session itself is untouched, it just no longer names a
   // leader. Every session is created with one; this never means "unassigned".
   leaderId: string | null;
   status: SessionStatus;
@@ -127,7 +127,7 @@ import type { ReactionGroup } from './reactionContract.js';
 
 export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
 
-// F33: shown as `authorName` wherever a proposal's author account has been
+// Shown as `authorName` wherever a proposal's author account has been
 // deleted (`authorId` is null). One constant so every place that might ever
 // render it — today just the pinboard, potentially recaps/summaries later —
 // shows the exact same string rather than each inventing its own wording.
@@ -137,7 +137,7 @@ export const DELETED_USER_DISPLAY_NAME = 'Deleted user';
 export interface BoardItem {
   id: string;
   questionId: string;
-  // Null once the author's account has been deleted (F33) — the proposal
+  // Null once the author's account has been deleted — the proposal
   // survives, `authorName` becomes DELETED_USER_DISPLAY_NAME.
   authorId: string | null;
   authorName: string;
@@ -225,7 +225,7 @@ export interface BoardResponse {
    * The session's leader. Clients compare it against their own id to decide
    * whether to offer the leader's board-tidying affordances; the server checks
    * the same thing again on every write. Null if that account has since been
-   * deleted (F33) — nobody's board-tidying affordances render then.
+   * deleted — nobody's board-tidying affordances render then.
    */
   leaderId: string | null;
   questionId: string | null;
@@ -357,7 +357,9 @@ export interface VotingViewerState extends VotingPublicState {
 
 /** One member's voted / not-yet status. Never carries which proposal they chose. */
 export interface VotingVoterStatus {
-  userId: string;
+  // Null if this member's account has since been deleted — their
+  // SessionMember row, and this status entry, survive regardless.
+  userId: string | null;
   displayName: string;
   hasVoted: boolean;
 }
@@ -396,7 +398,8 @@ export function toPublicVotingState(state: VotingViewerState): VotingPublicState
 
 /** One person who took part, for the F31 recap. */
 export interface SessionRecapParticipant {
-  userId: string;
+  // Null if this member's account has since been deleted.
+  userId: string | null;
   displayName: string;
   isLeader: boolean;
 }
@@ -427,7 +430,7 @@ export interface SessionRecap {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  // Null if the leader's account has since been deleted (F33).
+  // Null if the leader's account has since been deleted.
   leaderId: string | null;
   participants: SessionRecapParticipant[];
   questions: SessionRecapQuestion[];

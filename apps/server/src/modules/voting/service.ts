@@ -36,10 +36,13 @@ type RoundWithBallots = {
   status: 'shortlisting' | 'open' | 'closed';
   openedAt: Date | null;
   items: { proposalId: string }[];
-  votes: { voterId: string; proposalId: string }[];
+  // voterId is null once that voter's account has been deleted — the ballot
+  // itself survives (Vote.voterId is SetNull, not cascaded), so a closed
+  // round's tally and declared winner never change after the fact.
+  votes: { voterId: string | null; proposalId: string }[];
 };
 
-async function requireLiveLeader(sessionId: string, userId: string | null) {
+async function requireActiveSession(sessionId: string) {
   const session = await getSession(sessionId);
   if (!session) {
     throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
@@ -53,6 +56,17 @@ async function requireLiveLeader(sessionId: string, userId: string | null) {
       'SESSION_NOT_ACTIVE',
     );
   }
+  return session;
+}
+
+// Deliberately `string`, not `string | null`: a leaderless session (the
+// leader's account was deleted) must never satisfy this check. Widening it
+// to accept null would make `null !== null` pass, treating a null actor as
+// the leader — the one caller with no real actor (`expireOpenVotingIfDue`'s
+// deadline expiry) calls `requireActiveSession` directly instead, skipping
+// the leader check rather than exploiting a coincidence in it.
+async function requireLiveLeader(sessionId: string, userId: string) {
+  const session = await requireActiveSession(sessionId);
   if (session.leaderId !== userId) {
     throw new ApiError(403, 'Only the session leader can do that', 'NOT_SESSION_LEADER');
   }
@@ -232,8 +246,13 @@ export interface VotingBroadcast {
   leaderId: string | null;
   /** F29's roster, for the leader's sockets only. Null unless the round is open. */
   voterStatuses: VotingVoterStatus[] | null;
-  /** Each voter's own ballot, by user id — a socket is only ever told its own. */
-  votesByVoter: Map<string, string>;
+  /**
+   * Each voter's own ballot, by user id — a socket is only ever told its
+   * own. A `null` key means a since-deleted voter's ballot — unreachable by
+   * any real request's own userId, so it just sits in the map contributing
+   * to the tally without ever being handed to anyone as "their" vote.
+   */
+  votesByVoter: Map<string | null, string>;
 }
 
 /**
@@ -491,11 +510,19 @@ export async function closeVotingRound({
   sessionId: string;
   // Nullable only because the deadline-expiry path (`expireOpenVotingIfDue`)
   // passes the session's own `leaderId` through as the actor closing it —
-  // which is itself nullable once that account has been deleted (F33). Every
+  // which is itself nullable once that account has been deleted. Every
   // real, user-initiated caller still passes a real authenticated actorId.
   actorId: string | null;
 }): Promise<CloseVotingResult> {
-  await requireLiveLeader(sessionId, actorId);
+  // A null actorId means there is no leader left to check against (the
+  // deadline expiry path, below) — verify the session is still live and
+  // skip the leader check entirely, rather than letting `requireLiveLeader`
+  // treat a null actor as a match for a null `leaderId`.
+  if (actorId === null) {
+    await requireActiveSession(sessionId);
+  } else {
+    await requireLiveLeader(sessionId, actorId);
+  }
   const question = await requireVotingQuestion(sessionId);
 
   const round = await loadRound(question.id);

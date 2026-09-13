@@ -52,7 +52,7 @@ export interface WriteAck {
 export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
   status: SessionStatus;
-  // Null if the leader's account has since been deleted (F33).
+  // Null if the leader's account has since been deleted.
   leaderId: string | null;
   participants: SessionUserPayload[];
   /**

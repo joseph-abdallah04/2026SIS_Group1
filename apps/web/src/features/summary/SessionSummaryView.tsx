@@ -86,7 +86,7 @@ function QuestionRecap({
                   <ProposalCard
                     item={item}
                     isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
-                    isAuthorLeader={item.authorId === leaderId}
+                    isAuthorLeader={item.authorId != null && item.authorId === leaderId}
                   />
                 </div>
                 {tally ? (

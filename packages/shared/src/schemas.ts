@@ -72,7 +72,7 @@ export const updateProfileSchema = z.object({
   displayName: z.string().trim().min(1).max(50),
 });
 
-// F33: the typed-confirmation step is the password field itself — the
+// Account deletion: the typed-confirmation step is the password field itself — the
 // button stays disabled client-side until it's non-empty, and the server
 // re-checks it against the account's real passwordHash before deleting
 // anything, so a stale/unlocked tab isn't enough on its own.

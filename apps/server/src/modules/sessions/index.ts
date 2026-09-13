@@ -6,6 +6,7 @@ export {
   assertSessionMember,
   addSessionQuestion,
   createSession,
+  deleteDraftSessionsForUser,
   deleteSession,
   emitQuestionAdded,
   emitQuestionFocus,
@@ -20,6 +21,7 @@ export {
   getSession,
   getSessionMemberIdentity,
   getSessionWithQuestions,
+  findLiveSessionForUser,
   focusQuestion,
   joinSessionByCode,
   leaveSession,
@@ -33,6 +35,7 @@ export {
   updateSessionDraft,
 } from './service.js';
 export type {
+  LiveSessionRef,
   QuestionRef,
   SessionMemberIdentity,
   SessionMemberRow,
