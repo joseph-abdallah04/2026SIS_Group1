@@ -74,6 +74,8 @@ class FakeRoom {
   localParticipant = new FakeLocalParticipant();
   remoteParticipants = new Map<string, never>();
   canPlaybackAudio = true;
+  /** What `isVoiceRoomConnected` reads to decide a room can be picked up. */
+  state = 'disconnected';
   private handlers = new Map<string, Set<(...args: unknown[]) => void>>();
 
   constructor() {
@@ -95,8 +97,12 @@ class FakeRoom {
     for (const handler of this.handlers.get(event) ?? []) handler(...args);
   }
 
-  async connect(): Promise<void> {}
-  async disconnect(): Promise<void> {}
+  async connect(): Promise<void> {
+    this.state = 'connected';
+  }
+  async disconnect(): Promise<void> {
+    this.state = 'disconnected';
+  }
   async startAudio(): Promise<void> {}
 }
 
@@ -121,6 +127,7 @@ vi.mock('./voiceApi', () => ({
 const { DisconnectReason, RoomEvent } = await import('livekit-client');
 const { useVoiceRoom } = await import('./useVoiceRoom');
 const { ApiClientError } = await import('../../lib/api');
+const { disconnectAllVoiceRooms } = await import('./roomRegistry');
 const { fetchVoiceToken } = await import('./voiceApi');
 const tokenFetch = vi.mocked(fetchVoiceToken);
 
@@ -133,6 +140,10 @@ async function joinRoom() {
 
 describe('useVoiceRoom mute (F12)', () => {
   beforeEach(() => {
+    // The registry outlives a component by design, which means it also
+    // outlives a test: without this, the next mount of 'session-1' would pick
+    // up the previous test's room instead of building its own.
+    disconnectAllVoiceRooms();
     localStorage.clear();
     FakeRoom.last = null;
     acquireError = null;
@@ -179,6 +190,11 @@ describe('useVoiceRoom mute (F12)', () => {
       await first.result.current.toggleMic();
     });
     first.unmount();
+    // A refresh, not a remount. Unmounting alone no longer ends the call —
+    // the registry holds the room briefly so lobby -> board keeps it — so the
+    // page going away has to be said explicitly for this to be the reload it
+    // claims to be.
+    disconnectAllVoiceRooms();
 
     const second = await joinRoom();
 
@@ -316,6 +332,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('useVoiceRoom when the server has no LiveKit credentials', () => {
   beforeEach(() => {
+    disconnectAllVoiceRooms();
     localStorage.clear();
     FakeRoom.last = null;
     acquireError = null;
@@ -364,5 +381,54 @@ describe('useVoiceRoom when the server has no LiveKit credentials', () => {
       timeout: 4_000,
     });
     expect(view.result.current.status).not.toBe('unavailable');
+  });
+});
+
+describe('useVoiceRoom across the lobby -> board handover', () => {
+  beforeEach(() => {
+    disconnectAllVoiceRooms();
+    localStorage.clear();
+    FakeRoom.last = null;
+    acquireError = null;
+    tokenFetch.mockClear();
+  });
+
+  afterEach(() => {
+    disconnectAllVoiceRooms();
+  });
+
+  it('picks the same call back up rather than rejoining it', async () => {
+    const lobby = await joinRoom();
+    const room = FakeRoom.last;
+    expect(tokenFetch).toHaveBeenCalledTimes(1);
+
+    // What `reload()` does between the waiting room and the board: the lobby
+    // unmounts, a blank render happens, then the board mounts for the same
+    // session. Previously that meant disconnect, new token, renegotiation —
+    // dead air at the exact moment the session starts.
+    lobby.unmount();
+    const board = await joinRoom();
+
+    expect(board.result.current.status).toBe('connected');
+    // The saving: no second token, and the same room throughout.
+    expect(tokenFetch).toHaveBeenCalledTimes(1);
+    expect(FakeRoom.last).toBe(room);
+    expect(room?.state).toBe('connected');
+  });
+
+  it('still knows who you are without re-fetching a token', async () => {
+    const lobby = await joinRoom();
+    await waitFor(() => expect(lobby.result.current.micEnabled).toBe(true));
+    lobby.unmount();
+
+    const board = await joinRoom();
+    await act(async () => {
+      await board.result.current.toggleMic();
+    });
+
+    // The identity came from the registry, not a fresh token — and it is the
+    // key the mute preference is stored under, so a wrong one would silently
+    // write to the wrong session.
+    expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBe('1');
   });
 });

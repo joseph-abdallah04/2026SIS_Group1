@@ -10,6 +10,12 @@ import {
 
 import { ApiClientError } from '../../lib/api';
 import { readMicMuted, writeMicMuted } from './micPreference';
+import {
+  acquireVoiceRoom,
+  isVoiceRoomConnected,
+  releaseVoiceRoom,
+  rememberVoiceIdentity,
+} from './roomRegistry';
 import { fetchVoiceToken } from './voiceApi';
 
 /**
@@ -255,29 +261,16 @@ export function useVoiceRoom(sessionId: string) {
   useEffect(() => {
     if (!sessionId) return;
 
-    // A Room per effect run. Reusing one across StrictMode's double-mount (or a
-    // route change) means reconnecting an object that is mid-teardown, which
-    // surfaces as a phantom participant that never leaves.
-    const room = new Room({
-      // Audio only (F11): no adaptive stream or dynacast, both video concerns.
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    // The room outlives this effect, so that lobby -> board keeps one
+    // connection rather than dropping audio at the moment the session starts.
+    // The registry never hands back a room that is mid-teardown — reconnecting
+    // one surfaces as a phantom participant that never leaves.
+    const { room, audioContainer, reused, identity: knownIdentity } = acquireVoiceRoom(sessionId);
     roomRef.current = room;
+    if (knownIdentity) identityRef.current = knownIdentity;
 
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-
-    // Remote audio needs an element in the document to actually play. Kept in a
-    // hidden container the hook owns, so no caller has to remember to render
-    // one — forgetting it is a silent "nobody can hear anyone" bug.
-    const audioContainer = document.createElement('div');
-    audioContainer.style.display = 'none';
-    audioContainer.setAttribute('data-rt-voice-audio', sessionId);
-    document.body.appendChild(audioContainer);
 
     const syncParticipants = () => {
       if (cancelled) return;
@@ -343,6 +336,7 @@ export function useVoiceRoom(sessionId: string) {
         const { url, token, identity } = await fetchVoiceToken(sessionId);
         if (cancelled) return;
         identityRef.current = identity;
+        rememberVoiceIdentity(sessionId, identity);
 
         await room.connect(url, token);
         if (cancelled) {
@@ -436,16 +430,30 @@ export function useVoiceRoom(sessionId: string) {
       .on(RoomEvent.Disconnected, onDisconnected)
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!room.canPlaybackAudio));
 
-    void connect();
+    if (reused && isVoiceRoomConnected(room)) {
+      // Already in the room — picked back up rather than rejoined. Resyncing
+      // from the room is the whole saving: no token, no negotiation, no gap.
+      // Remote tracks are still attached to the container the registry kept,
+      // so sound never stopped.
+      attemptRef.current = 0;
+      setStatus('connected');
+      setError(null);
+      syncParticipants();
+    } else {
+      void connect();
+    }
 
     return () => {
       cancelled = true;
       clearTimeout(reconnectTimer);
+      // Only this hook ever attaches listeners, so clearing them all is safe;
+      // the room itself stays with the registry.
       room.removeAllListeners();
       // Leaving the view leaves the call (F11 — "disconnect cleanly on
-      // leave/end"), which also stops the mic indicator in the browser tab.
-      void room.disconnect();
-      audioContainer.remove();
+      // leave/end"). The microphone closes now, which is what stops the tab's
+      // recording indicator; the connection is dropped after a short grace
+      // window, so a remount for this same session keeps it (roomRegistry.ts).
+      releaseVoiceRoom(sessionId);
       roomRef.current = null;
       if (permissionStatusRef.current) permissionStatusRef.current.onchange = null;
       permissionStatusRef.current = null;
