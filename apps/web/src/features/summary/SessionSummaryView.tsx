@@ -33,7 +33,7 @@ function QuestionRecap({
   question: SessionRecapQuestion;
   index: number;
   viewerId: string | null;
-  leaderId: string;
+  leaderId: string | null;
 }) {
   const winnerId = question.winnerProposalId;
   const tied = new Set(question.tiedProposalIds);

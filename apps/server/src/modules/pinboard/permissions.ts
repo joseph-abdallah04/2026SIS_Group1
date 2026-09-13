@@ -8,7 +8,10 @@ import type { QuestionRef } from './sessionsAdapter.js';
 /** The parts of a proposal that decide whether it may be changed. */
 export interface MutableProposal {
   id: string;
-  authorId: string;
+  // Null once the author's account has been deleted (F33) — `isAuthor` below
+  // then never matches anyone, so only leader-moderation (move/delete) can
+  // still touch the proposal.
+  authorId: string | null;
   deletedAt: Date | null;
 }
 

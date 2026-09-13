@@ -65,8 +65,13 @@ model Session {
   // still allows at most one *live* session per code.
   code      String?       @unique // short join code, e.g. "K7NP-3WQZ"
   title     String
-  leaderId  String
-  leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])
+  // Nullable: deleting a user account severs this reference (SetNull) rather
+  // than blocking the deletion or cascading the session away — a session's
+  // history (its members, questions, proposals, votes) is not the deleted
+  // user's to take with them. NULL means "led by a since-deleted account",
+  // not "unassigned" — every session is created with a leader.
+  leaderId  String?
+  leader    User?         @relation("SessionLeader", fields: [leaderId], references: [id], onDelete: SetNull)
   status    SessionStatus @default(lobby)
   createdAt DateTime      @default(now())
   // Set once, on lobby -> active (F09). Distinct from `createdAt` (when the
@@ -155,8 +160,11 @@ model Proposal {
   id                String    @id @default(cuid())
   questionId        String
   question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  authorId          String
-  author            User      @relation(fields: [authorId], references: [id])
+  // Nullable for the same reason as Session.leaderId: deleting the author's
+  // account severs this reference rather than deleting a proposal other
+  // people may have reacted to, voted on, or extended.
+  authorId          String?
+  author            User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
   type              ProposalType
   artifactJson      Json
   // Where this proposal sits on the board. Shared: everyone sees it in the

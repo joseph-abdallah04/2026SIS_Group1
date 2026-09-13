@@ -17,7 +17,10 @@ export interface Session {
   // null while draft or ended — only lobby/active sessions hold a code.
   code: string | null;
   title: string;
-  leaderId: string;
+  // Null means the account that led this session has since been deleted
+  // (F33) — the session itself is untouched, it just no longer names a
+  // leader. Every session is created with one; this never means "unassigned".
+  leaderId: string | null;
   status: SessionStatus;
   createdAt: Date;
   // Set once, on lobby -> active (F09).
@@ -124,11 +127,19 @@ import type { ReactionGroup } from './reactionContract.js';
 
 export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
 
+// F33: shown as `authorName` wherever a proposal's author account has been
+// deleted (`authorId` is null). One constant so every place that might ever
+// render it — today just the pinboard, potentially recaps/summaries later —
+// shows the exact same string rather than each inventing its own wording.
+export const DELETED_USER_DISPLAY_NAME = 'Deleted user';
+
 /** API shape for a pinboard item returned by GET /api/sessions/:id/proposals */
 export interface BoardItem {
   id: string;
   questionId: string;
-  authorId: string;
+  // Null once the author's account has been deleted (F33) — the proposal
+  // survives, `authorName` becomes DELETED_USER_DISPLAY_NAME.
+  authorId: string | null;
   authorName: string;
   type: ProposalType;
   artifactJson: ArtifactJson;
@@ -213,9 +224,10 @@ export interface BoardResponse {
   /**
    * The session's leader. Clients compare it against their own id to decide
    * whether to offer the leader's board-tidying affordances; the server checks
-   * the same thing again on every write.
+   * the same thing again on every write. Null if that account has since been
+   * deleted (F33) — nobody's board-tidying affordances render then.
    */
-  leaderId: string;
+  leaderId: string | null;
   questionId: string | null;
   questionText: string | null;
   questionPosition: number | null;
@@ -415,7 +427,8 @@ export interface SessionRecap {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  leaderId: string;
+  // Null if the leader's account has since been deleted (F33).
+  leaderId: string | null;
   participants: SessionRecapParticipant[];
   questions: SessionRecapQuestion[];
 }

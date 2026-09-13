@@ -913,7 +913,10 @@ export interface SessionPreview {
   id: string;
   title: string;
   status: Session['status'];
-  leaderId: string;
+  // Null if the leader's account has since been deleted (F33) — not
+  // guarded against here, since account deletion is intentionally allowed
+  // even while a session someone leads is still joinable.
+  leaderId: string | null;
   questionCount: number;
 }
 
@@ -1154,7 +1157,10 @@ export interface SessionRef {
   id: string;
   title: string;
   status: Session['status'];
-  leaderId: string;
+  // Null if the leader's account has since been deleted (F33) — every
+  // `=== actor.id` comparison against this elsewhere just stops matching
+  // anyone, which is the correct degrade (no one is "the leader" anymore).
+  leaderId: string | null;
   discussionTimerSeconds: number | null;
   votingTimerSeconds: number | null;
 }

@@ -130,6 +130,40 @@ export function getCurrentUser(req: Request): Promise<User | null> {
   return getUserById(req.userId);
 }
 
+/**
+ * Permanently deletes the requesting user's own row (F33). `userId` comes
+ * from `requireAuth`'s verified token, same as every other function in this
+ * file — there is no code path that lets a request name a different user.
+ *
+ * Requires the current password as a fresh proof of intent, distinct from
+ * the session token itself: a token alone just means "some tab is logged
+ * in," and this is irreversible. Deliberately its own message/code rather
+ * than reusing `login`'s INVALID_CREDENTIALS — there's no enumeration
+ * concern here (identity is already established by the token), so nothing
+ * is gained by being vague about which check failed.
+ *
+ * What happens to this user's *content* is a schema-level decision, not
+ * something this function orchestrates: `Session.leaderId` and
+ * `Proposal.authorId` are nullable with `onDelete: SetNull`, so a session
+ * this user led or a proposal they authored survives with that reference
+ * cleared — other members'/participants' history, reactions, and votes on
+ * it are untouched. Everything scoped only to this user (SessionMember,
+ * ProposalReaction, Vote, UserLLMConfig) cascades away with the row.
+ */
+export async function deleteAccount(userId: string, password: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordMatches) {
+    throw new ApiError(401, 'Incorrect password', 'INVALID_PASSWORD');
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+}
+
 export async function updateDisplayName(
   userId: string,
   displayName: UpdateProfileInput['displayName'],

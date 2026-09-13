@@ -39,7 +39,7 @@ type RoundWithBallots = {
   votes: { voterId: string; proposalId: string }[];
 };
 
-async function requireLiveLeader(sessionId: string, userId: string) {
+async function requireLiveLeader(sessionId: string, userId: string | null) {
   const session = await getSession(sessionId);
   if (!session) {
     throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
@@ -250,7 +250,7 @@ export async function getVotingBroadcast(sessionId: string): Promise<VotingBroad
   const session = await getSession(sessionId);
   // Viewed as the leader so `voterStatuses` is populated when the round is
   // open; `toPublicVotingState` then drops everything viewer-specific.
-  const state = await getVotingState(question?.id ?? null, session?.leaderId);
+  const state = await getVotingState(question?.id ?? null, session?.leaderId ?? undefined);
   const round = question ? await loadRound(question.id) : null;
 
   return {
@@ -489,7 +489,11 @@ export async function closeVotingRound({
   actorId,
 }: {
   sessionId: string;
-  actorId: string;
+  // Nullable only because the deadline-expiry path (`expireOpenVotingIfDue`)
+  // passes the session's own `leaderId` through as the actor closing it —
+  // which is itself nullable once that account has been deleted (F33). Every
+  // real, user-initiated caller still passes a real authenticated actorId.
+  actorId: string | null;
 }): Promise<CloseVotingResult> {
   await requireLiveLeader(sessionId, actorId);
   const question = await requireVotingQuestion(sessionId);

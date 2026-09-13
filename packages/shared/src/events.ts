@@ -52,7 +52,8 @@ export interface WriteAck {
 export interface SessionStatePayload extends Omit<BoardResponse, 'items'> {
   proposals: BoardItem[];
   status: SessionStatus;
-  leaderId: string;
+  // Null if the leader's account has since been deleted (F33).
+  leaderId: string | null;
   participants: SessionUserPayload[];
   /**
    * Who the server believes this socket is. The client renders author-only

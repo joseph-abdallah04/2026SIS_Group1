@@ -16,7 +16,7 @@ interface VotingBallotProps {
   phase: Extract<VotingPhase, 'open' | 'closed'>;
   isLeader: boolean;
   viewerId: string | null;
-  leaderId: string;
+  leaderId: string | null;
   voterStatuses: VotingVoterStatus[] | null;
   winnerProposalId: string | null;
   tiedProposalIds: string[];
