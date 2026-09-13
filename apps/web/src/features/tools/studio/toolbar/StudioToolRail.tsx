@@ -27,7 +27,7 @@ import { Tooltip } from '../../../../components/ui/Tooltip';
  * can be rendered and tested on its own.
  */
 export type RailTool =
-  'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template';
+  'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template' | 'arrow';
 
 /** Which rail button a tool lights up. Erase lives inside Freehand. */
 type RailSlot =
@@ -45,6 +45,8 @@ const SLOT_FOR_TOOL: Record<RailTool, RailSlot> = {
   // A shape or frame picked up from a palette keeps that palette lit while it
   // is being carried.
   shape: 'shapes',
+  // An arrow is drawn from the shapes group too, beside the line.
+  arrow: 'shapes',
   template: 'templates',
 };
 

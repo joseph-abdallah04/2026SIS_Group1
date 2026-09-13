@@ -34,7 +34,62 @@ const everything = {
   inkIds: ['ink-1'],
   pathIds: ['path-1'],
   tableIds: ['table-1'],
+  arrowIds: [],
 };
+
+describe('arrows in a fragment', () => {
+  const arrow = {
+    id: 'arrow-1',
+    from: { x: 10, y: 10 },
+    to: { x: 60, y: 60, elementId: 'n1' },
+  };
+  const withArrow = { ...scene, arrows: [arrow] };
+  const both = { ...everything, arrowIds: ['arrow-1'] };
+
+  it('repoints a copied arrow at the copied shape', () => {
+    // Copying a shape and the arrow pointing at it has to give an arrow
+    // pointing at the *new* shape. Left bound to the original, one of the two
+    // would move and the other would not.
+    const pasted = pasteStudioFragment(withArrow, copyStudioFragment(withArrow, both), {
+      x: 40,
+      y: 40,
+    });
+    if (!pasted.ok) throw new Error(pasted.error);
+    const copy = pasted.arrows.at(-1)!;
+    expect(copy.id).not.toBe('arrow-1');
+    expect(copy.to.elementId).not.toBe('n1');
+    expect(pasted.nodes.map((node) => node.id)).toContain(copy.to.elementId);
+  });
+
+  it('drops a binding to something left behind', () => {
+    // The shape stayed where it was, so binding the copy to it would tie the
+    // two together. The point survives, so the arrow still has its shape.
+    const arrowOnly = {
+      ...everything,
+      nodeIds: [],
+      inkIds: [],
+      pathIds: [],
+      tableIds: [],
+      arrowIds: ['arrow-1'],
+    };
+    const pasted = pasteStudioFragment(withArrow, copyStudioFragment(withArrow, arrowOnly), {
+      x: 40,
+      y: 40,
+    });
+    if (!pasted.ok) throw new Error(pasted.error);
+    const copy = pasted.arrows.at(-1)!;
+    expect(copy.to.elementId).toBeUndefined();
+    expect(copy.to).toEqual({ x: 100, y: 100 });
+  });
+
+  it('counts an arrow on its own as something worth pasting', () => {
+    const fragment = copyStudioFragment(withArrow, {
+      ...EMPTY_STUDIO_SELECTION,
+      arrowIds: ['arrow-1'],
+    });
+    expect(isFragmentEmpty(fragment)).toBe(false);
+  });
+});
 
 describe('copying', () => {
   it('takes every selected kind', () => {

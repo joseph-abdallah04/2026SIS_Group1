@@ -107,6 +107,7 @@ export function isDraftWorthKeeping(artifact: DiagramArtifact): boolean {
     artifact.nodes.length > 0 ||
     (artifact.ink?.length ?? 0) > 0 ||
     (artifact.paths?.length ?? 0) > 0 ||
-    (artifact.tables?.length ?? 0) > 0
+    (artifact.tables?.length ?? 0) > 0 ||
+    (artifact.arrows?.length ?? 0) > 0
   );
 }

@@ -5,9 +5,17 @@
 // selection expects to catch all of them — so each kind needs a bounding box
 // and the sweep needs to ask about all four.
 
-import { tableSize, type PathElement, type TableElement } from '@roundtable/shared';
+import {
+  arrowBounds,
+  arrowGeometry,
+  tableSize,
+  type ArrowElement,
+  type PathElement,
+  type TableElement,
+} from '@roundtable/shared';
 
 import { nodeIdsInRect, type DiagramRect } from '../diagram/diagramModel';
+import { arrowTargetLookup } from './studioArrowTargets';
 import type { StudioInkStroke } from './studioInk';
 import type { DiagramNode } from '@roundtable/shared';
 
@@ -17,6 +25,7 @@ export interface StudioSelection {
   inkIds: string[];
   pathIds: string[];
   tableIds: string[];
+  arrowIds: string[];
 }
 
 export const EMPTY_STUDIO_SELECTION: StudioSelection = {
@@ -24,6 +33,7 @@ export const EMPTY_STUDIO_SELECTION: StudioSelection = {
   inkIds: [],
   pathIds: [],
   tableIds: [],
+  arrowIds: [],
 };
 
 export function isSelectionEmpty(selection: StudioSelection): boolean {
@@ -31,7 +41,8 @@ export function isSelectionEmpty(selection: StudioSelection): boolean {
     selection.nodeIds.length === 0 &&
     selection.inkIds.length === 0 &&
     selection.pathIds.length === 0 &&
-    selection.tableIds.length === 0
+    selection.tableIds.length === 0 &&
+    selection.arrowIds.length === 0
   );
 }
 
@@ -40,7 +51,8 @@ export function selectionSize(selection: StudioSelection): number {
     selection.nodeIds.length +
     selection.inkIds.length +
     selection.pathIds.length +
-    selection.tableIds.length
+    selection.tableIds.length +
+    selection.arrowIds.length
   );
 }
 
@@ -93,6 +105,22 @@ interface SelectableScene {
   ink?: readonly StudioInkStroke[];
   paths?: readonly PathElement[];
   tables?: readonly TableElement[];
+  arrows?: readonly ArrowElement[];
+}
+
+/**
+ * An arrow's extent is its drawn route, not its stored endpoints: a bound end
+ * is wherever the element it names happens to be, so the box has to be measured
+ * after the bindings are resolved or a sweep would miss the arrow it can see.
+ */
+export function arrowBoundsIn(scene: SelectableScene): (arrow: ArrowElement) => DiagramRect | null {
+  const lookup = arrowTargetLookup({
+    nodes: scene.nodes,
+    ink: scene.ink,
+    paths: scene.paths,
+    tables: scene.tables,
+  });
+  return (arrow) => arrowBounds(arrowGeometry(arrow, lookup).points);
 }
 
 export function studioElementsInRect(scene: SelectableScene, rect: DiagramRect): StudioSelection {
@@ -113,6 +141,15 @@ export function studioElementsInRect(scene: SelectableScene, rect: DiagramRect):
     tableIds: (scene.tables ?? [])
       .filter((table) => rectsIntersect(tableBounds(table), rect))
       .map((table) => table.id),
+    arrowIds: (() => {
+      const boundsOf = arrowBoundsIn(scene);
+      return (scene.arrows ?? [])
+        .filter((arrow) => {
+          const bounds = boundsOf(arrow);
+          return bounds !== null && rectsIntersect(bounds, rect);
+        })
+        .map((arrow) => arrow.id);
+    })(),
   };
 }
 
@@ -124,5 +161,6 @@ export function mergeSelections(a: StudioSelection, b: StudioSelection): StudioS
     inkIds: union(a.inkIds, b.inkIds),
     pathIds: union(a.pathIds, b.pathIds),
     tableIds: union(a.tableIds, b.tableIds),
+    arrowIds: union(a.arrowIds, b.arrowIds),
   };
 }

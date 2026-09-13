@@ -1,4 +1,6 @@
 import type {
+  ArrowElement,
+  ArrowEndpoint,
   DiagramArtifact,
   DiagramEdge,
   DiagramNode,
@@ -19,6 +21,7 @@ import {
   diagramIsAncestor,
   diagramNodeSize,
   effectiveDiagramNodeSize,
+  offsetArrow,
   tableSize,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
@@ -909,6 +912,7 @@ function normalizationDelta(
   ink: readonly StudioInkStroke[],
   paths: readonly PathElement[] = [],
   tables: readonly TableElement[] = [],
+  arrows: readonly ArrowElement[] = [],
 ): DiagramPoint {
   const xs: number[] = [];
   const ys: number[] = [];
@@ -945,6 +949,17 @@ function normalizationDelta(
     rights.push(table.x + size.width);
     bottoms.push(table.y + size.height);
   }
+  // Only an arrow's own endpoints. A bound end sits on an element already
+  // counted above, and its stored point is a fallback rather than a position.
+  for (const arrow of arrows) {
+    for (const end of [arrow.from, arrow.to]) {
+      if (end.elementId !== undefined) continue;
+      xs.push(end.x);
+      ys.push(end.y);
+      rights.push(end.x);
+      bottoms.push(end.y);
+    }
+  }
 
   if (xs.length === 0) return { x: 0, y: 0 };
 
@@ -977,10 +992,17 @@ export function prepareDiagram(
   z: readonly string[] = [],
   paths: readonly PathElement[] = [],
   tables: readonly TableElement[] = [],
+  arrows: readonly ArrowElement[] = [],
 ): PreparedDiagram {
   // v4: a sketch is a legitimate studio artifact on its own, so "something to
   // propose" now means any element, not specifically a shape.
-  if (nodes.length === 0 && ink.length === 0 && paths.length === 0 && tables.length === 0) {
+  if (
+    nodes.length === 0 &&
+    ink.length === 0 &&
+    paths.length === 0 &&
+    tables.length === 0 &&
+    arrows.length === 0
+  ) {
     return { ok: false, error: 'Add an element or draw something before proposing.' };
   }
 
@@ -1018,7 +1040,7 @@ export function prepareDiagram(
 
   // Shapes and ink shift together, so a sketch drawn around a diagram stays
   // registered with it once the whole thing is framed for the board preview.
-  const delta = normalizationDelta(normalizedNodes, ink, paths, tables);
+  const delta = normalizationDelta(normalizedNodes, ink, paths, tables, arrows);
   const shiftedNodes = normalizedNodes.map((node) => ({
     ...node,
     x: Math.round(node.x + delta.x),
@@ -1066,12 +1088,46 @@ export function prepareDiagram(
     y: Math.round(table.y + delta.y),
   }));
 
+  const arrowIds = new Set(arrows.map((arrow) => arrow.id));
+  if (
+    arrowIds.size !== arrows.length ||
+    arrows.some(
+      (arrow) =>
+        nodeIds.has(arrow.id) ||
+        inkIds.has(arrow.id) ||
+        pathIds.has(arrow.id) ||
+        tableIds.has(arrow.id),
+    )
+  ) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  // A bound endpoint is drawn from the element it names, so only its stored
+  // fallback point moves with the frame — but it has to move, or detaching the
+  // arrow later would send it back to where the canvas used to be.
+  //
+  // Bindings to elements that are no longer here are dropped at this boundary
+  // and nowhere else. The editor keeps them through a deletion on purpose: the
+  // route already falls back to the stored point, so the arrow looks right
+  // either way, and keeping the binding means undoing the deletion reattaches
+  // the arrow instead of leaving it pointing at nothing. Only the artifact has
+  // to be clean, for the same reason the paint order is pruned just below.
+  const bindable = new Set<string>([...nodeIds, ...inkIds, ...pathIds, ...tableIds]);
+  const detach = (endpoint: ArrowEndpoint): ArrowEndpoint =>
+    endpoint.elementId !== undefined && !bindable.has(endpoint.elementId)
+      ? { x: endpoint.x, y: endpoint.y }
+      : endpoint;
+  const shiftedArrows = arrows
+    .map((arrow) => offsetArrow(arrow, delta.x, delta.y))
+    .map((arrow) => ({ ...arrow, from: detach(arrow.from), to: detach(arrow.to) }));
+
   const known = new Set<string>([
     ...shiftedNodes.map((node) => node.id),
     ...normalizedEdges.map(edgeKey),
     ...inkIds,
     ...pathIds,
     ...tableIds,
+    ...arrowIds,
   ]);
   // Drop anything the order names that is no longer on the canvas — deleting an
   // element must not make the whole artifact unproposable.
@@ -1084,6 +1140,7 @@ export function prepareDiagram(
     ...(shiftedInk.length > 0 ? { ink: shiftedInk } : {}),
     ...(shiftedPaths.length > 0 ? { paths: shiftedPaths } : {}),
     ...(shiftedTables.length > 0 ? { tables: shiftedTables } : {}),
+    ...(shiftedArrows.length > 0 ? { arrows: shiftedArrows } : {}),
     ...(prunedOrder.length > 0 ? { z: prunedOrder } : {}),
   });
   if (!parsed.success) {

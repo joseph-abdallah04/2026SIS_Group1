@@ -61,6 +61,28 @@ describe('the shortcut sheet', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps Escape to itself, so dismissing it cannot close the studio', async () => {
+    // The studio is a native <dialog>: an un-prevented Escape is a close
+    // request, and the browser shuts the whole editor on it. Stopping the
+    // keydown does not reach that — only preventing its default does — so
+    // dismissing any sub-toolbar used to take the canvas down with it.
+    const user = userEvent.setup();
+    renderSheet(true);
+
+    let seen: KeyboardEvent | null = null;
+    const listener = (event: KeyboardEvent) => {
+      seen = event;
+    };
+    // Capture phase, like the sheet's own handler: listeners on the same node
+    // run in registration order and are not cut off by `stopPropagation`.
+    document.addEventListener('keydown', listener, true);
+    await user.keyboard('{Escape}');
+    document.removeEventListener('keydown', listener, true);
+
+    expect(seen).not.toBeNull();
+    expect(seen!.defaultPrevented).toBe(true);
+  });
+
   it('does not close on a press inside it', async () => {
     const user = userEvent.setup();
     const { onClose } = renderSheet(true);

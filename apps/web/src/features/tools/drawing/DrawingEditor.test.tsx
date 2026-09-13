@@ -1,13 +1,29 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CreativeToolbar } from '../../toolbar/CreativeToolbar';
+import { useCreativeTools } from '../CreativeToolsContext';
 import { CreativeStudio } from '../CreativeStudio';
 import { CreativeToolsProvider } from '../CreativeToolsProvider';
 import { DRAWING_VIEWBOX_HEIGHT, DRAWING_VIEWBOX_WIDTH } from './drawingModel';
+
+/**
+ * The creative toolbar no longer offers Draw, but the drawing editor is still
+ * live: a `?tool=drawing` link opens it, and so does extending or editing a
+ * drawing already on the board. All three arrive through `openTool`, which is
+ * what this stands in for.
+ */
+function OpenDrawing() {
+  const { openTool } = useCreativeTools();
+  return (
+    <button type="button" onClick={() => openTool('drawing')}>
+      Draw
+    </button>
+  );
+}
 
 function Harness({ propose }: { propose: (input: ProposalCreateInput) => Promise<void> }) {
   return (
@@ -21,6 +37,7 @@ function Harness({ propose }: { propose: (input: ProposalCreateInput) => Promise
         editProposal={async () => {}}
       >
         <CreativeToolbar />
+        <OpenDrawing />
         <CreativeStudio />
       </CreativeToolsProvider>
     </MemoryRouter>
@@ -52,7 +69,20 @@ function drawStroke(canvas: HTMLElement, pointerId = 1) {
 }
 
 describe('drawing editor', () => {
-  it('opens from the real toolbar and proposes a shared-schema drawing payload', async () => {
+  it('is no longer one of the tools the toolbar starts', async () => {
+    // Drawing was folded into the studio, which draws freehand on the same
+    // canvas as everything else. Only the button went: the editor below still
+    // has to work for the drawings already on a board.
+    render(<Harness propose={vi.fn(async () => undefined)} />);
+    const toolbar = screen.getByRole('navigation', { name: 'Creative tools' });
+    expect(
+      within(toolbar)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['New sticky', 'Studio']);
+  });
+
+  it('opens from the drawing entry point and proposes a shared-schema drawing payload', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });

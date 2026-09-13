@@ -186,6 +186,19 @@ describe('what is worth keeping', () => {
     ).toBe(true);
   });
 
+  it('counts a canvas of nothing but arrows', () => {
+    // An arrow is work like any other element. Left out of this, a canvas of
+    // only arrows read as empty and was thrown away on the way out.
+    expect(
+      isDraftWorthKeeping({
+        type: 'diagram',
+        nodes: [],
+        edges: [],
+        arrows: [{ id: 'a1', from: { x: 0, y: 0 }, to: { x: 80, y: 40 } }],
+      }),
+    ).toBe(true);
+  });
+
   it('does not count an empty canvas', () => {
     // Nothing has been done yet, so there is nothing to come back to.
     expect(isDraftWorthKeeping({ type: 'diagram', nodes: [], edges: [] })).toBe(false);

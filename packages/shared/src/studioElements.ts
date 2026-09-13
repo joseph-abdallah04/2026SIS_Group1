@@ -484,7 +484,7 @@ export function tableAutoRowHeight(
 
 // --- Paint order ----------------------------------------------------------
 
-export type StudioElementKind = 'node' | 'edge' | 'ink' | 'path' | 'table';
+export type StudioElementKind = 'node' | 'edge' | 'ink' | 'path' | 'table' | 'arrow';
 
 export interface StudioElementRef {
   kind: StudioElementKind;
@@ -510,6 +510,7 @@ interface PaintableArtifact {
   ink?: readonly { id: string }[];
   paths?: readonly { id: string }[];
   tables?: readonly { id: string }[];
+  arrows?: readonly { id: string }[];
   z?: readonly string[];
 }
 
@@ -535,6 +536,8 @@ export function studioPaintOrder(artifact: PaintableArtifact): StudioElementRef[
     ...(artifact.ink ?? []).map((stroke) => ({ kind: 'ink' as const, key: stroke.id })),
     ...(artifact.paths ?? []).map((path) => ({ kind: 'path' as const, key: path.id })),
     ...(artifact.tables ?? []).map((table) => ({ kind: 'table' as const, key: table.id })),
+    // Arrows last, so a connector is never buried under what it connects.
+    ...(artifact.arrows ?? []).map((arrow) => ({ kind: 'arrow' as const, key: arrow.id })),
   ];
 
   const order = artifact.z;

@@ -24,6 +24,14 @@ import {
   diagramIsAncestor,
 } from './diagramContract.js';
 import {
+  ARROW_CAPS,
+  ARROW_LABEL_LIMIT,
+  ARROW_LABEL_SIDES,
+  ARROW_MAX_BEND,
+  ARROW_ROUTES,
+  DIAGRAM_ARROW_LIMIT,
+} from './studioArrows.js';
+import {
   DIAGRAM_INK_LIMIT,
   DIAGRAM_INK_POINT_LIMIT,
   DIAGRAM_PATH_ANCHOR_LIMIT,
@@ -259,6 +267,40 @@ export const pathElementSchema = z.object({
   fillColor: diagramFillKeySchema.optional(),
 });
 
+// v4.2 arrows. An endpoint always carries a point and may also name the element
+// it is bound to; the binding decides where the arrow is drawn, and the point is
+// where it falls back to when that element is deleted.
+const arrowEndpointSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  elementId: z.string().min(1).optional(),
+  // Where on the bound element to attach, as a fraction of its box. Bounded to
+  // the box itself: a fraction outside it would put the arrow somewhere the
+  // element is not, which no editor gesture can produce.
+  at: z.object({ u: z.number().min(0).max(1), v: z.number().min(0).max(1) }).optional(),
+});
+
+export const arrowElementSchema = z.object({
+  id: z.string().min(1),
+  from: arrowEndpointSchema,
+  to: arrowEndpointSchema,
+  route: z.enum(ARROW_ROUTES).optional(),
+  bend: z.number().min(-ARROW_MAX_BEND).max(ARROW_MAX_BEND).optional(),
+  startCap: z.enum(ARROW_CAPS).optional(),
+  endCap: z.enum(ARROW_CAPS).optional(),
+  label: z.string().max(ARROW_LABEL_LIMIT).optional(),
+  // A fraction of the route's length, so it holds its place when the arrow is
+  // re-routed. Outside 0..1 would put the label off the end of its own line.
+  labelT: z.number().min(0).max(1).optional(),
+  labelSide: z.enum(ARROW_LABEL_SIDES).optional(),
+  labelBold: z.boolean().optional(),
+  labelColor: diagramStrokeKeySchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  strokeStyle: diagramStrokeStyleSchema.optional(),
+});
+
 export const tableCellSchema = z.object({
   text: z.string().max(TABLE_CELL_TEXT_LIMIT).optional(),
   fill: diagramFillKeySchema.optional(),
@@ -345,6 +387,18 @@ const diagramReadPathSchema = pathElementSchema.extend({
   fillColor: lenient(diagramFillKeySchema),
 });
 
+const diagramReadArrowSchema = arrowElementSchema.extend({
+  route: lenient(z.enum(ARROW_ROUTES)),
+  labelSide: lenient(z.enum(ARROW_LABEL_SIDES)),
+  startCap: lenient(z.enum(ARROW_CAPS)),
+  endCap: lenient(z.enum(ARROW_CAPS)),
+  labelColor: lenient(diagramStrokeKeySchema),
+  fontSizePreset: lenient(diagramFontSizePresetSchema),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  strokeStyle: lenient(diagramStrokeStyleSchema),
+});
+
 const diagramReadInkSchema = inkElementSchema.extend({
   strokeColor: lenient(diagramStrokeKeySchema),
   strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
@@ -361,6 +415,7 @@ export const diagramArtifactSchema = z.object({
   ink: z.array(diagramReadInkSchema).max(DIAGRAM_INK_LIMIT).optional().catch(undefined),
   paths: z.array(diagramReadPathSchema).max(DIAGRAM_PATH_LIMIT).optional().catch(undefined),
   tables: z.array(diagramReadTableSchema).max(DIAGRAM_TABLE_LIMIT).optional().catch(undefined),
+  arrows: z.array(diagramReadArrowSchema).max(DIAGRAM_ARROW_LIMIT).optional().catch(undefined),
   z: z.array(z.string()).max(DIAGRAM_Z_LIMIT).optional().catch(undefined),
 });
 
@@ -372,13 +427,14 @@ const diagramStrictArtifactSchema = z.object({
   ink: z.array(inkElementSchema).max(DIAGRAM_INK_LIMIT).optional(),
   paths: z.array(pathElementSchema).max(DIAGRAM_PATH_LIMIT).optional(),
   tables: z.array(tableElementSchema).max(DIAGRAM_TABLE_LIMIT).optional(),
+  arrows: z.array(arrowElementSchema).max(DIAGRAM_ARROW_LIMIT).optional(),
   z: z.array(z.string().min(1)).max(DIAGRAM_Z_LIMIT).optional(),
 });
 
 export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefine(
   // `z` is destructured under another name: it would otherwise shadow the zod
   // import for the whole refinement.
-  ({ nodes, edges, ink, paths, tables, z: paintOrder }, context) => {
+  ({ nodes, edges, ink, paths, tables, arrows, z: paintOrder }, context) => {
     const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
 
     nodes.forEach((node, index) => {
@@ -570,8 +626,63 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
       }
     });
 
+    const arrowIds = new Set<string>();
+    (arrows ?? []).forEach((arrow, index) => {
+      if (
+        arrowIds.has(arrow.id) ||
+        nodeIds.has(arrow.id) ||
+        edgeKeys.has(arrow.id) ||
+        inkIds.has(arrow.id) ||
+        pathIds.has(arrow.id) ||
+        tableIds.has(arrow.id)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across every kind of element',
+          path: ['arrows', index, 'id'],
+        });
+      }
+      arrowIds.add(arrow.id);
+
+      // An arrow may bind to anything with an outline to land on. It may not
+      // bind to another arrow: two arrows bound to each other would each need
+      // the other's route resolved first, and nothing could draw either.
+      const bindable = new Set<string>([...nodeIds, ...inkIds, ...pathIds, ...tableIds]);
+      for (const end of ['from', 'to'] as const) {
+        const elementId = arrow[end].elementId;
+        if (elementId !== undefined && !bindable.has(elementId)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'An arrow endpoint must be bound to an element this diagram contains',
+            path: ['arrows', index, end, 'elementId'],
+          });
+        }
+      }
+
+      // Both ends on one element is a self-loop: it draws as a loop around
+      // that element rather than a line across it, which is an ordinary thing
+      // to want to say about a thing, so it is deliberately allowed.
+
+      // `bend` slides an elbow's middle leg. A straight arrow has no middle
+      // leg, so a bend on one is a value no editor gesture can produce.
+      if (arrow.bend !== undefined && arrow.route !== 'elbow') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Only an elbowed arrow can carry a bend',
+          path: ['arrows', index, 'bend'],
+        });
+      }
+    });
+
     if (paintOrder !== undefined) {
-      const known = new Set<string>([...nodeIds, ...edgeKeys, ...inkIds, ...pathIds, ...tableIds]);
+      const known = new Set<string>([
+        ...nodeIds,
+        ...edgeKeys,
+        ...inkIds,
+        ...pathIds,
+        ...tableIds,
+        ...arrowIds,
+      ]);
       const seen = new Set<string>();
 
       paintOrder.forEach((key, index) => {

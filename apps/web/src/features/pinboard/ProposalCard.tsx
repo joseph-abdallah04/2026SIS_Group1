@@ -1,4 +1,5 @@
 import {
+  arrowGeometry,
   diagramEdgeDash,
   diagramEdgeRoutes,
   diagramEdgeStroke,
@@ -36,6 +37,8 @@ import {
 } from '@roundtable/shared';
 
 import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
+import { arrowTargetLookup } from '../tools/studio/studioArrowTargets';
+import { StudioArrowView } from '../tools/studio/StudioArrowView';
 
 import { stickyTypography } from '../tools/sticky/stickyPresentation';
 import {
@@ -121,6 +124,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
   const ink = item.artifactJson.ink ?? [];
   const paths = item.artifactJson.paths ?? [];
   const tables = item.artifactJson.tables ?? [];
+  const arrows = item.artifactJson.arrows ?? [];
   // Unpacked once per render: the extent needs every point, and so does each
   // stroke's path data.
   const unpackedInk = ink.map((stroke) => ({ ...stroke, points: inkPoints(stroke) }));
@@ -128,18 +132,29 @@ function DiagramBody({ item }: { item: BoardItem }) {
   const inkById = new Map(unpackedInk.map((stroke) => [stroke.id, stroke]));
   const pathById = new Map(paths.map((path) => [path.id, path]));
   const tableById = new Map(tables.map((table) => [table.id, table]));
+  // Resolved once: a bound arrow has to land on the same point of the same
+  // shape here as it did in the editor, so both go through one lookup.
+  const arrowTargets = arrowTargetLookup({ nodes, ink: unpackedInk, paths, tables });
+  const arrowRoutes = new Map(
+    arrows.map((arrow) => [arrow.id, arrowGeometry(arrow, arrowTargets)]),
+  );
+  const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
   // The card frames whatever the artifact contains, so ink counts towards the
   // extent exactly as a node does — otherwise a sketch would be cropped.
   const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
   const allAnchors = paths.flatMap((path) => path.anchors);
   const tableCorners = tables.map((table) => ({ table, size: tableSize(table) }));
+  // An arrow can reach past everything it points at, so its route counts
+  // towards the extent too — otherwise a free end would be cropped off.
+  const allArrowPoints = [...arrowRoutes.values()].flatMap((geometry) => geometry.points);
   const svgWidth =
     Math.max(
       ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
       ...allInkPoints.map((point) => point.x),
       ...allAnchors.map((anchor) => anchor.x),
       ...tableCorners.map(({ table, size }) => table.x + size.width),
+      ...allArrowPoints.map((point) => point.x),
       72,
     ) + 28;
   const svgHeight =
@@ -148,6 +163,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
       ...allInkPoints.map((point) => point.y),
       ...allAnchors.map((anchor) => anchor.y),
       ...tableCorners.map(({ table, size }) => table.y + size.height),
+      ...allArrowPoints.map((point) => point.y),
       32,
     ) + 24;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
@@ -384,6 +400,15 @@ function DiagramBody({ item }: { item: BoardItem }) {
             if (ref.kind === 'table') {
               const table = tableById.get(ref.key);
               return table ? renderTable(table) : null;
+            }
+            if (ref.kind === 'arrow') {
+              const arrow = arrowById.get(ref.key);
+              const geometry = arrowRoutes.get(ref.key);
+              return arrow && geometry ? (
+                <g key={arrow.id}>
+                  <StudioArrowView arrow={arrow} geometry={geometry} />
+                </g>
+              ) : null;
             }
             const node = nodeById.get(ref.key);
             return node ? renderNode(node) : null;

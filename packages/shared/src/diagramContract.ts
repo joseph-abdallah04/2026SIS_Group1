@@ -10,6 +10,7 @@
 
 // Type-only, so the runtime import graph stays one-directional:
 // `studioElements` imports this module's palettes, and nothing comes back.
+import type { ArrowElement } from './studioArrows.js';
 import type { InkElement, PathElement, TableElement } from './studioElements.js';
 
 export type DiagramNodeShape =
@@ -272,19 +273,27 @@ export const DIAGRAM_EDGE_STROKE_WIDTHS: Record<DiagramStrokeWidthPreset, number
 
 /** `medium` is the 11px both surfaces already used for node labels. */
 /**
- * Four steps, spread far enough apart to be told apart. The old 9/11/14 were
- * within a couple of points of each other, so picking one barely showed —
- * `medium` keeps the 11px both surfaces have always drawn labels at, which is
- * what stops stored diagrams changing under this.
+ * Four steps, each about half again the last.
+ *
+ * They used to run 8/11/15/20, which is barely a step at the bottom: `small`
+ * was too small to read comfortably and the gap to `medium` hardly showed. The
+ * smallest is now a comfortable reading size and each step is a clear change,
+ * so picking one is a decision with a visible result.
+ *
+ * This is deliberately *not* tied to the legacy size below. An element that
+ * never chose a preset still draws at the 11px both surfaces have always used,
+ * so no stored diagram moves under this; only an element that explicitly asked
+ * for a size gets the new scale, which is the point of changing it.
  */
 export const DIAGRAM_FONT_SIZES: Record<DiagramFontSizePreset, number> = {
-  small: 8,
-  medium: 11,
-  large: 15,
-  xlarge: 20,
+  small: 12,
+  medium: 16,
+  large: 22,
+  xlarge: 30,
 };
 
-export const DIAGRAM_LEGACY_FONT_SIZE = DIAGRAM_FONT_SIZES.medium;
+/** What an element with no preset has always been drawn at. */
+export const DIAGRAM_LEGACY_FONT_SIZE = 11;
 
 /**
  * How a node's label is painted, so the editor and the board card cannot drift.
@@ -782,9 +791,13 @@ export interface DiagramArtifact {
   /** v4 tables: a grid of cells with explicit column widths and row heights. */
   tables?: TableElement[];
   /**
-   * v4 paint order, as element keys — node, ink and path ids, and `edgeKey`
-   * strings
-   * for edges. Absent means the derived pre-v4 order (edges, then nodes with
+   * v4.2 standalone arrows. Unlike an `edge` an arrow may end in empty space or
+   * point at any kind of element, and it never takes part in auto-arrange.
+   */
+  arrows?: ArrowElement[];
+  /**
+   * v4 paint order, as element keys — node, ink, path, table and arrow ids,
+   * and `edgeKey` strings for edges. Absent means the derived pre-v4 order (edges, then nodes with
    * containers behind their contents). See `studioPaintOrder`.
    */
   z?: string[];

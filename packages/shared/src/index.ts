@@ -115,6 +115,9 @@ export * from './diagramContract.js';
 // v4 studio elements (ink, paths and tables) live beside
 // the diagram contract for the same reason: one import for domain types.
 export * from './studioElements.js';
+// v4.2 standalone arrows: their own collection, because an arrow is drawn
+// artwork with free endpoints rather than a semantic node-to-node edge.
+export * from './studioArrows.js';
 export * from './drawingContract.js';
 export * from './reactionContract.js';
 import type { DiagramArtifact } from './diagramContract.js';

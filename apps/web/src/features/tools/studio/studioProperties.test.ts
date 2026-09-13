@@ -76,7 +76,10 @@ describe('what one element supports', () => {
   });
 
   it('treats a table as its grid until the selection is inside it', () => {
-    expect(ids(table(false))).toEqual(['strokeColor', 'strokeWidth', 'textFormat']);
+    // Whole table: a fill is the fill of the thing, the same control every
+    // other element has. Inside it, the fill is the cells in hand instead, so
+    // the two are never offered together.
+    expect(ids(table(false))).toEqual(['fillColor', 'strokeColor', 'strokeWidth', 'textFormat']);
     expect(ids(table(true))).toContain('cellFill');
     expect(ids(table(true))).not.toContain('fillColor');
   });
@@ -174,5 +177,52 @@ describe('presentation', () => {
 
   it('groups nothing when there is nothing to group', () => {
     expect(groupProperties([])).toEqual([]);
+  });
+});
+
+describe('an arrow in the bar', () => {
+  const arrow = (label?: string): StudioTarget => ({
+    kind: 'arrow',
+    element: { id: 'a1', from: { x: 0, y: 0 }, to: { x: 80, y: 40 }, ...(label ? { label } : {}) },
+  });
+
+  it('offers its line settings and both of its ends', () => {
+    expect(propertiesFor(arrow())).toEqual(
+      expect.arrayContaining([
+        'strokeColor',
+        'strokeWidth',
+        'strokeStyle',
+        'startCap',
+        'arrowRoute',
+        'endCap',
+      ]),
+    );
+  });
+
+  it('offers a way to start a label, and formatting once there is one', () => {
+    // An arrow has no inside to type in, so the bar is where a label begins.
+    expect(propertiesFor(arrow())).toContain('addText');
+    expect(propertiesFor(arrow())).not.toContain('textFormat');
+    expect(propertiesFor(arrow('calls'))).toContain('textFormat');
+    expect(propertiesFor(arrow('calls'))).not.toContain('addText');
+  });
+
+  it('keeps the tail, the line and the head in reading order', () => {
+    const ids = commonProperties([arrow()]).map((entry) => entry.id);
+    expect(ids.indexOf('startCap')).toBeLessThan(ids.indexOf('arrowRoute'));
+    expect(ids.indexOf('arrowRoute')).toBeLessThan(ids.indexOf('endCap'));
+  });
+
+  it('shares only the line settings with a shape', () => {
+    // Caps and route are an arrow's own, so a mixed selection drops them
+    // rather than offering a control that would do nothing to half of it.
+    const shape: StudioTarget = {
+      kind: 'node',
+      element: { id: 'n1', label: '', x: 0, y: 0 },
+    };
+    const shared = commonProperties([arrow(), shape]).map((entry) => entry.id);
+    expect(shared).toContain('strokeColor');
+    expect(shared).not.toContain('startCap');
+    expect(shared).not.toContain('arrowRoute');
   });
 });

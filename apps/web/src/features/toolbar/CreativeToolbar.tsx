@@ -1,7 +1,16 @@
-import { Palette, Pencil, StickyNote } from 'lucide-react';
+import { Palette, StickyNote } from 'lucide-react';
 
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 
+/**
+ * The two things anyone can start here.
+ *
+ * The drawing tool has no button any more: the studio draws freehand on the
+ * same canvas as everything else, so a separate surface that can only hold
+ * strokes was a worse version of a tool already on offer. It is only the button
+ * that has gone — drawings already on a board still render, and extending or
+ * editing one still opens the editor that made it.
+ */
 export function CreativeToolbar() {
   const { activeTool, isLive, openTool, submissionStatus } = useCreativeTools();
   const disabled = !isLive || submissionStatus === 'submitting';
@@ -21,17 +30,6 @@ export function CreativeToolbar() {
       >
         <StickyNote aria-hidden="true" size={17} strokeWidth={1.8} />
         <span className="hidden sm:inline">New sticky</span>
-      </button>
-      <button
-        type="button"
-        aria-pressed={activeTool === 'drawing'}
-        disabled={disabled}
-        onClick={() => openTool('drawing')}
-        title={isLive ? 'New drawing' : 'Reconnect to create a drawing'}
-        className="flex h-9 items-center gap-2 rounded-full px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-cool-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-cool focus-visible:ring-offset-2 focus-visible:outline-none aria-pressed:bg-rt-cool-tint aria-pressed:text-rt-ink disabled:cursor-not-allowed disabled:opacity-45 sm:px-3.5"
-      >
-        <Pencil aria-hidden="true" size={17} strokeWidth={1.8} />
-        <span className="hidden sm:inline">Draw</span>
       </button>
       <button
         type="button"

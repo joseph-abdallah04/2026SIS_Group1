@@ -2675,6 +2675,24 @@ describe('studio tables', () => {
     );
   }
 
+  it('offers its row and column controls without being opened first', async () => {
+    // They live on the table, so they are there from the moment it is: no
+    // selecting it, no going inside it, no menu that could come up empty.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '3 by 3 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 920, clientX: 480, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 920, clientX: 480, clientY: 300 });
+
+    expect(screen.getByRole('button', { name: 'Add a row' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a column' })).toBeInTheDocument();
+  });
+
   it('places a table of the chosen size and proposes its grid', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
@@ -2812,7 +2830,10 @@ describe('studio tables', () => {
     expect(table.cells[0]!.text).toBeUndefined();
   });
 
-  it('adds and removes rows from the inspector', async () => {
+  it('adds and removes rows on the table itself', async () => {
+    // Rows are added where the pointer says, not from a menu: hovering a
+    // boundary offers the "+" that belongs to it, and the body of a row offers
+    // the "−" that takes that row away.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -2820,14 +2841,50 @@ describe('studio tables', () => {
     const { user, canvas } = await openDiagram();
 
     await placeTable(user, canvas, 425);
-    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Row below' }));
+
+    await user.hover(screen.getByLabelText('Add a row'));
+    await user.click(screen.getByRole('button', { name: 'Add a row' }));
     expect(screen.getByRole('button', { name: 'Cell row 4 column 1' })).toBeInTheDocument();
 
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Delete row' }));
+    await user.click(screen.getByRole('button', { name: 'Delete row 1' }));
     expect(screen.queryByRole('button', { name: 'Cell row 4 column 1' })).toBeNull();
+  });
+
+  it('inserts a row where the pointer is rather than at the end', async () => {
+    // The whole point of moving this onto the table: a menu could only ever act
+    // on the last row, or on whichever cell happened to be selected.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 427);
+    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.keyboard('top');
+    await user.keyboard('{Enter}');
+
+    await user.click(screen.getByRole('button', { name: 'Insert a row above row 1' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.rowHeights).toHaveLength(4);
+    // The new row landed above the typed one, which moved down a row.
+    expect(table.cells[0]?.text).toBeUndefined();
+    expect(table.cells[3]?.text).toBe('top');
+  });
+
+  it('keeps the last row, since a table without one is not a table', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 428, '1 by 1 table');
+    expect(screen.queryByLabelText('Delete row 1')).toBeNull();
   });
 
   it('adds a column and keeps every row the same length', async () => {
@@ -2838,9 +2895,8 @@ describe('studio tables', () => {
     const { user, canvas } = await openDiagram();
 
     await placeTable(user, canvas, 430);
-    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Column right' }));
+    await user.hover(screen.getByLabelText('Add a column'));
+    await user.click(screen.getByRole('button', { name: 'Add a column' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await screen.findByRole('heading', { name: 'Studio canvas proposed' });
@@ -3426,13 +3482,14 @@ describe('studio multi-selection', () => {
     const cell = screen.getByRole('button', { name: 'Cell row 1 column 1' });
     fireEvent.pointerDown(cell, { button: 0, pointerId: 685, clientX: 400, clientY: 290 });
     fireEvent.pointerUp(canvas, { pointerId: 685, clientX: 400, clientY: 290 });
-    // Selected whole: the cell inspector is not open yet.
-    await openMore(user);
-    expect(screen.queryByRole('button', { name: 'Row below' })).toBeNull();
+    // Selected whole. Typing is not cell input yet, because no cell is in hand
+    // — which is the difference between selecting a table and working in one.
+    await user.keyboard('x');
+    expect(screen.queryByRole('textbox', { name: 'Cell row 1 column 1' })).toBeNull();
 
     doublePress(cell, canvas, 690, 400, 290);
-    await openMore(user);
-    expect(screen.getByRole('button', { name: 'Row below' })).toBeInTheDocument();
+    await user.keyboard('x');
+    expect(screen.getByRole('textbox', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
   });
 });
 
@@ -4432,12 +4489,13 @@ describe('the edge of the sheet', () => {
   it('shows room around the sheet on a surface wider than it', async () => {
     // The view takes the difference in shape rather than letterboxing it, so a
     // wide window shows space either side of the sheet instead of dead margin.
-    const user = userEvent.setup();
     render(<Harness propose={propose()} />);
     const { canvas } = await openDiagram({ width: 1600, height: 600 });
-    // The surface is mocked after the first paint, so give it one more render
-    // to measure on.
-    await user.click(screen.getByRole('button', { name: 'Show grid' }));
+    // The surface is mocked after the first paint. A real browser reports a
+    // change of this kind through the window, so the test says so too — the
+    // editor no longer re-measures on every render, which was an update loop
+    // waiting to happen rather than a way of noticing a resize.
+    fireEvent(window, new Event('resize'));
 
     const [x, , width] = (canvas.getAttribute('viewBox') ?? '').split(' ').map(Number);
     expect(width).toBeGreaterThan(DIAGRAM_CANVAS_WIDTH);

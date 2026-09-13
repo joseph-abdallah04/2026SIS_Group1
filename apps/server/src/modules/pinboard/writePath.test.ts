@@ -797,4 +797,168 @@ describe('proposalCreate handler', () => {
       expect(create).not.toHaveBeenCalled();
     });
   });
+
+  // v4.2 standalone arrows. An arrow may end in empty space, so its endpoints
+  // are points rather than node ids — which means the rules that keep an edge
+  // honest do not apply, and these have to hold in their place.
+  describe('studio arrows (v4.2)', () => {
+    function studio(artifact: Record<string, unknown>) {
+      return {
+        type: 'diagram',
+        artifactJson: { type: 'diagram', nodes: [], edges: [], ...artifact },
+        x: 0,
+        y: 0,
+      } as Parameters<typeof createProposal>[0]['input'];
+    }
+
+    const arrow = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id,
+      from: { x: 10, y: 10 },
+      to: { x: 120, y: 80 },
+      ...overrides,
+    });
+
+    const node = { id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' };
+
+    beforeEach(() => {
+      activeQuestion.mockResolvedValue(questionRef('discussion'));
+    });
+
+    it('accepts an arrow drawn between two points', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ arrows: [arrow('arrow-1', { startCap: 'bar', endCap: 'solid' })] })),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('accepts an arrow bound to a node, and orders it with everything else', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [node],
+            arrows: [arrow('arrow-1', { to: { x: 120, y: 80, elementId: 'n1' } })],
+            z: ['n1', 'arrow-1'],
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects a binding to an element the diagram does not contain', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({ arrows: [arrow('arrow-1', { to: { x: 1, y: 1, elementId: 'ghost' } })] }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('accepts an arrow with both ends on one element, which is a self-loop', async () => {
+      // Drawn as a loop around that element rather than a line across it, so
+      // it is a legitimate thing to store rather than a degenerate arrow.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [node],
+            arrows: [
+              arrow('arrow-1', {
+                from: { x: 10, y: 10, elementId: 'n1' },
+                to: { x: 40, y: 40, elementId: 'n1' },
+              }),
+            ],
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('accepts an attachment naming a place on the bound element', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [node],
+            arrows: [
+              arrow('arrow-1', { to: { x: 40, y: 40, elementId: 'n1', at: { u: 0, v: 0.75 } } }),
+            ],
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('rejects an attachment outside the element it names', async () => {
+      // A fraction past the box would put the arrow somewhere the element is
+      // not, which no gesture in the editor can produce.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            nodes: [node],
+            arrows: [
+              arrow('arrow-1', { to: { x: 40, y: 40, elementId: 'n1', at: { u: -0.2, v: 3 } } }),
+            ],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an arrow bound to another arrow', async () => {
+      // Each would need the other's route resolved first, so neither could draw.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(
+          studio({
+            arrows: [
+              arrow('arrow-1'),
+              arrow('arrow-2', { from: { x: 0, y: 0, elementId: 'arrow-1' } }),
+            ],
+          }),
+        ),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a cap outside the closed set', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ arrows: [arrow('arrow-1', { endCap: 'crowsfoot' })] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a raw colour smuggled in place of a palette key', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ arrows: [arrow('arrow-1', { strokeColor: '#ff0000' })] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a bend far enough out to put the arrow off the sheet', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ arrows: [arrow('arrow-1', { route: 'elbow', bend: 900_000 })] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an arrow that reuses a node id', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(await propose(studio({ nodes: [node], arrows: [arrow('n1')] }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a paint order naming an arrow that is not there', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ arrows: [arrow('arrow-1')], z: ['arrow-1', 'arrow-ghost'] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
 });

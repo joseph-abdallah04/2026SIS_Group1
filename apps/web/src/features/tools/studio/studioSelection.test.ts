@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DiagramNode, PathElement } from '@roundtable/shared';
+import type { ArrowElement, DiagramNode, PathElement } from '@roundtable/shared';
 
 import { createTable } from './studioTables';
 import {
@@ -30,8 +30,19 @@ const stroke = {
   ],
 };
 const table = { ...createTable(2, 2, { x: 700, y: 400 }), id: 'table-1' };
+const arrow: ArrowElement = {
+  id: 'arrow-1',
+  from: { x: 200, y: 500 },
+  to: { x: 280, y: 560 },
+};
 
-const scene = { nodes: [node], ink: [stroke], paths: [path], tables: [table] };
+const scene = {
+  nodes: [node],
+  ink: [stroke],
+  paths: [path],
+  tables: [table],
+  arrows: [arrow],
+};
 
 describe('element bounds', () => {
   it('boxes a path from its anchors', () => {
@@ -60,6 +71,19 @@ describe('element bounds', () => {
 });
 
 describe('sweeping a selection', () => {
+  it('boxes an arrow by its drawn route, bindings resolved', () => {
+    // A bound end is wherever the element it names has got to, so a sweep that
+    // can see the arrow has to be measuring the same line the canvas draws.
+    const bound: ArrowElement = { ...arrow, to: { x: 900, y: 900, elementId: 'n1' } };
+    const caught = studioElementsInRect(
+      { ...scene, arrows: [bound] },
+      // Small enough that the arrow's *stored* far point, out at (900, 900),
+      // could never reach it: only the resolved route can be caught here.
+      { x: 0, y: 0, width: 100, height: 100 },
+    );
+    expect(caught.arrowIds).toEqual(['arrow-1']);
+  });
+
   it('catches every kind of element under the sweep', () => {
     const all = studioElementsInRect(scene, { x: 0, y: 0, width: 1000, height: 600 });
     expect(all).toEqual({
@@ -67,8 +91,9 @@ describe('sweeping a selection', () => {
       inkIds: ['ink-1'],
       pathIds: ['path-1'],
       tableIds: ['table-1'],
+      arrowIds: ['arrow-1'],
     });
-    expect(selectionSize(all)).toBe(4);
+    expect(selectionSize(all)).toBe(5);
   });
 
   it('catches only what the sweep actually crossed', () => {

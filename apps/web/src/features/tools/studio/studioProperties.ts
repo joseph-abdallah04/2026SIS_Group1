@@ -15,18 +15,41 @@
 //     property. A table's cell fill is `cellFill`, not `fillColor`, because
 //     applying it paints cells rather than the table.
 
-import type { DiagramEdge, DiagramNode, PathElement, TableElement } from '@roundtable/shared';
+import type {
+  ArrowElement,
+  DiagramEdge,
+  DiagramNode,
+  PathElement,
+  TableElement,
+} from '@roundtable/shared';
 
 import type { StudioInkStroke } from './studioInk';
 
 export type StudioPropertyId =
-  'strokeColor' | 'strokeWidth' | 'strokeStyle' | 'fillColor' | 'textFormat' | 'cellFill';
+  | 'strokeColor'
+  | 'strokeWidth'
+  | 'strokeStyle'
+  | 'fillColor'
+  | 'textFormat'
+  | 'addText'
+  | 'cellFill'
+  | 'startCap'
+  | 'arrowRoute'
+  | 'endCap';
 
-export type StudioPropertyGroup = 'stroke' | 'fill' | 'text' | 'table';
+export type StudioPropertyGroup = 'stroke' | 'fill' | 'text' | 'table' | 'arrow';
 
 /** What the bar renders for this property. */
 export type StudioPropertyControl =
-  'strokeSwatch' | 'fillSwatch' | 'widthPreset' | 'stylePreset' | 'textPanel' | 'toggle';
+  | 'strokeSwatch'
+  | 'fillSwatch'
+  | 'widthPreset'
+  | 'stylePreset'
+  | 'textPanel'
+  | 'textButton'
+  | 'capPanel'
+  | 'routePreset'
+  | 'toggle';
 
 export interface StudioPropertyDescriptor {
   id: StudioPropertyId;
@@ -53,6 +76,15 @@ const PROPERTY_ORDER: StudioPropertyDescriptor[] = [
   // One control rather than four. Text has enough settings to fill a bar on its
   // own, and they are only wanted while text is actually being worked on.
   { id: 'textFormat', label: 'Format text', group: 'text', control: 'textPanel' },
+  // An arrow has nowhere to type until it has a label, so it is given a way to
+  // start one. It takes the same slot the format control will occupy once
+  // there is text, so the bar does not reshuffle when the label arrives.
+  { id: 'addText', label: 'Add text', group: 'text', control: 'textButton' },
+  // The three that are an arrow's own: what it ends in at each end, and the
+  // shape of the line between them. Ordered as they read — tail, line, head.
+  { id: 'startCap', label: 'Start point', group: 'arrow', control: 'capPanel' },
+  { id: 'arrowRoute', label: 'Line shape', group: 'arrow', control: 'routePreset' },
+  { id: 'endCap', label: 'End point', group: 'arrow', control: 'capPanel' },
 ];
 
 const DESCRIPTOR_BY_ID = new Map(PROPERTY_ORDER.map((entry) => [entry.id, entry]));
@@ -69,6 +101,7 @@ export function studioPropertyDescriptor(id: StudioPropertyId): StudioPropertyDe
  * what separates the two.
  */
 export type StudioTarget =
+  | { kind: 'arrow'; element: ArrowElement }
   | { kind: 'node'; element: DiagramNode }
   | { kind: 'edge'; element: DiagramEdge }
   | { kind: 'ink'; element: StudioInkStroke }
@@ -110,13 +143,23 @@ export function propertiesFor(target: StudioTarget): StudioPropertyId[] {
       if (target.element.closed) ids.unshift('fillColor');
       return ids;
     }
+    case 'arrow': {
+      const ids: StudioPropertyId[] = ['strokeColor', 'strokeWidth', 'strokeStyle'];
+      // Both ends and the shape of the line between them.
+      ids.push('startCap', 'arrowRoute', 'endCap');
+      ids.push(hasText(target.element.label) ? 'textFormat' : 'addText');
+      return ids;
+    }
     case 'table':
       // A table is offered text formatting whether or not any cell has been
       // filled in: the settings apply to every cell, so they are as useful
       // before typing as after.
+      // Out of cell mode a fill is the whole grid, which is the same thing
+      // `fillColor` means everywhere else. Inside it, `cellFill` paints only
+      // the cells in hand, so the two never appear together.
       return target.inCellMode
         ? ['cellFill', 'strokeColor', 'strokeWidth', 'textFormat']
-        : ['strokeColor', 'strokeWidth', 'textFormat'];
+        : ['fillColor', 'strokeColor', 'strokeWidth', 'textFormat'];
   }
 }
 

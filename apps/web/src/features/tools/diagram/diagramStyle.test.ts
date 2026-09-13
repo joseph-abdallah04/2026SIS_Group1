@@ -3,6 +3,8 @@ import {
   DIAGRAM_EDGE_STROKE_WIDTHS,
   DIAGRAM_FILL_COLORS,
   DIAGRAM_FONT_SIZES,
+  DIAGRAM_FONT_SIZE_PRESETS,
+  DIAGRAM_LEGACY_FONT_SIZE,
   DIAGRAM_LABEL_INK,
   DIAGRAM_LEGACY_EDGE_STROKE,
   DIAGRAM_MAX_NODE_HEIGHT,
@@ -114,7 +116,24 @@ describe('style resolvers', () => {
   it('choosing the regular preset changes nothing the editor was already drawing', () => {
     expect(DIAGRAM_NODE_STROKE_WIDTHS.regular).toBe(1.5);
     expect(DIAGRAM_EDGE_STROKE_WIDTHS.regular).toBe(2);
-    expect(DIAGRAM_FONT_SIZES.medium).toBe(11);
+  });
+
+  it('leaves text that never chose a size exactly where it was', () => {
+    // The font presets are spread wider than they used to be, so no preset is
+    // the legacy size any more. What protects a stored diagram is that an
+    // element with no preset is not drawn from the scale at all.
+    expect(DIAGRAM_LEGACY_FONT_SIZE).toBe(11);
+    expect(diagramNodeFontSize(legacyBox)).toBe(11);
+  });
+
+  it('spreads the sizes far enough apart to tell them apart', () => {
+    const steps = DIAGRAM_FONT_SIZE_PRESETS.map((preset) => DIAGRAM_FONT_SIZES[preset]);
+    // Each step is a visible jump rather than a point or two.
+    for (let index = 1; index < steps.length; index += 1) {
+      expect(steps[index]! / steps[index - 1]!).toBeGreaterThan(1.3);
+    }
+    // And the smallest is a readable size rather than a footnote.
+    expect(steps[0]!).toBeGreaterThanOrEqual(12);
   });
 
   it('scales dash geometry with the stroke and rounds dotted caps', () => {

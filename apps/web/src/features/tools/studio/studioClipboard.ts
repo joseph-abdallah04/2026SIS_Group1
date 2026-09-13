@@ -5,7 +5,13 @@
 // arrived. This wraps it so a fragment can also carry ink, paths and tables,
 // each of which needs nothing more than a fresh id and an offset.
 
-import type { DiagramEdge, DiagramNode, PathElement, TableElement } from '@roundtable/shared';
+import type {
+  ArrowElement,
+  DiagramEdge,
+  DiagramNode,
+  PathElement,
+  TableElement,
+} from '@roundtable/shared';
 
 import {
   copyDiagramFragment,
@@ -13,6 +19,7 @@ import {
   type DiagramPoint,
   type PasteFragment,
 } from '../diagram/diagramModel';
+import { createArrowId } from './studioArrowDraft';
 import { createInkId, type StudioInkStroke } from './studioInk';
 import { createPathId } from './studioPaths';
 import { createTableId } from './studioTables';
@@ -22,6 +29,7 @@ export interface StudioFragment extends PasteFragment {
   ink: StudioInkStroke[];
   paths: PathElement[];
   tables: TableElement[];
+  arrows: ArrowElement[];
 }
 
 export interface StudioScene {
@@ -30,6 +38,7 @@ export interface StudioScene {
   ink?: readonly StudioInkStroke[];
   paths?: readonly PathElement[];
   tables?: readonly TableElement[];
+  arrows?: readonly ArrowElement[];
 }
 
 export function isFragmentEmpty(fragment: StudioFragment | null): boolean {
@@ -38,7 +47,8 @@ export function isFragmentEmpty(fragment: StudioFragment | null): boolean {
     (fragment.nodes.length === 0 &&
       fragment.ink.length === 0 &&
       fragment.paths.length === 0 &&
-      fragment.tables.length === 0)
+      fragment.tables.length === 0 &&
+      fragment.arrows.length === 0)
   );
 }
 
@@ -47,6 +57,7 @@ export function copyStudioFragment(scene: StudioScene, selection: StudioSelectio
   const inkWanted = new Set(selection.inkIds);
   const pathsWanted = new Set(selection.pathIds);
   const tablesWanted = new Set(selection.tableIds);
+  const arrowsWanted = new Set(selection.arrowIds);
 
   return {
     ...diagram,
@@ -64,6 +75,9 @@ export function copyStudioFragment(scene: StudioScene, selection: StudioSelectio
         rowHeights: [...table.rowHeights],
         cells: table.cells.map((cell) => ({ ...cell })),
       })),
+    arrows: (scene.arrows ?? [])
+      .filter((arrow) => arrowsWanted.has(arrow.id))
+      .map((arrow) => ({ ...arrow, from: { ...arrow.from }, to: { ...arrow.to } })),
   };
 }
 
@@ -75,6 +89,7 @@ export type StudioPasteResult =
       ink: StudioInkStroke[];
       paths: PathElement[];
       tables: TableElement[];
+      arrows: ArrowElement[];
       selection: StudioSelection;
     }
   | { ok: false; error: string };
@@ -109,11 +124,21 @@ export function pasteStudioFragment(
     nodeIds = pasted.addedIds;
   }
 
+  // Old id to new, for every element that came along. An arrow's bindings are
+  // remapped through it below; the fragment keeps the original ids, which is
+  // what makes that possible.
+  const copiedIds = new Map<string, string>();
+  source.nodes.forEach((node, index) => {
+    const copied = nodeIds[index];
+    if (copied) copiedIds.set(node.id, copied);
+  });
+
   const ink = [...(scene.ink ?? [])];
   const inkIds: string[] = [];
   for (const stroke of source.ink) {
     const id = createInkId();
     inkIds.push(id);
+    copiedIds.set(stroke.id, id);
     ink.push({
       ...stroke,
       id,
@@ -126,6 +151,7 @@ export function pasteStudioFragment(
   for (const path of source.paths) {
     const id = createPathId();
     pathIds.push(id);
+    copiedIds.set(path.id, id);
     paths.push({
       ...path,
       id,
@@ -142,6 +168,7 @@ export function pasteStudioFragment(
   for (const table of source.tables) {
     const id = createTableId();
     tableIds.push(id);
+    copiedIds.set(table.id, id);
     tables.push({
       ...table,
       id,
@@ -153,6 +180,25 @@ export function pasteStudioFragment(
     });
   }
 
+  // An arrow's bindings are remapped onto the copies: pasting a shape and the
+  // arrow pointing at it gives an arrow pointing at the *new* shape. A binding
+  // to something left behind is dropped rather than kept — it would tie the
+  // copy to the original, so one of the two would move and the other would not.
+  const rebind = (endpoint: ArrowElement['from']): ArrowElement['from'] => {
+    const moved = { x: endpoint.x + offset.x, y: endpoint.y + offset.y };
+    if (endpoint.elementId === undefined) return moved;
+    const copied = copiedIds.get(endpoint.elementId);
+    return copied ? { ...moved, elementId: copied } : moved;
+  };
+
+  const arrows = [...(scene.arrows ?? [])];
+  const arrowIds: string[] = [];
+  for (const arrow of source.arrows) {
+    const id = createArrowId();
+    arrowIds.push(id);
+    arrows.push({ ...arrow, id, from: rebind(arrow.from), to: rebind(arrow.to) });
+  }
+
   return {
     ok: true,
     nodes,
@@ -160,6 +206,7 @@ export function pasteStudioFragment(
     ink,
     paths,
     tables,
-    selection: { ...EMPTY_STUDIO_SELECTION, nodeIds, inkIds, pathIds, tableIds },
+    arrows,
+    selection: { ...EMPTY_STUDIO_SELECTION, nodeIds, inkIds, pathIds, tableIds, arrowIds },
   };
 }

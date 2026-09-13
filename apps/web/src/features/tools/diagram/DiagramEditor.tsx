@@ -11,7 +11,9 @@ import {
 } from 'react';
 import {
   ArrowDown,
+  ArrowDownFromLine,
   ArrowRight,
+  ArrowUpFromLine,
   CheckCircle2,
   Columns3,
   Circle,
@@ -27,7 +29,9 @@ import {
   Link2,
   LoaderCircle,
   LayoutTemplate,
+  CornerDownRight,
   Minus,
+  MoveRight,
   MoveHorizontal,
   PaintBucket,
   Pencil,
@@ -41,7 +45,6 @@ import {
   SquareDashed,
   Spline,
   Squircle,
-  Table,
   Trash2,
   Triangle,
   Type,
@@ -52,6 +55,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type {
+  ArrowCap,
+  ArrowElement,
+  ArrowGeometry,
+  ArrowPoint,
+  ArrowRoute,
+  ArrowTargetLookup,
   PathAnchor,
   PathElement,
   TableElement,
@@ -69,8 +78,18 @@ import type {
   TableCellAlign,
 } from '@roundtable/shared';
 import {
+  ARROW_CAPS,
+  ARROW_LABEL_LIMIT,
+  nearestTOnRoute,
+  arrowCapGeometry,
+  arrowEndCap,
+  arrowGeometry,
+  arrowLabelSide,
+  arrowRoute,
+  arrowStartCap,
+  offsetArrow,
+  arrowStrokeWidth,
   DIAGRAM_FILL_COLORS,
-  DIAGRAM_FILL_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
   DIAGRAM_TEXT_ALIGNS,
   DIAGRAM_LABEL_INK,
@@ -107,12 +126,12 @@ import {
   tableCellFontSize,
   tableCellLines,
   tableColCount,
+  tableRowCount,
   tableColumnOffsets,
   tableRowOffsets,
   tableSize,
   tableStrokeColor,
   tableStrokeWidth,
-  TABLE_CELL_ALIGNS,
   TABLE_DEFAULT_COL_WIDTH,
   TABLE_DEFAULT_ROW_HEIGHT,
   TABLE_MAX_COLS,
@@ -163,6 +182,7 @@ import {
   renameEdge,
   renameNode,
   reparentNodes,
+  snapToGrid,
   resizeNode,
   styleEdge,
   ungroupContainer,
@@ -207,6 +227,7 @@ import {
 } from '../studio/studioClipboard';
 import { offsetRect, snapDragToGrid, unionBounds } from '../studio/studioSnapping';
 import {
+  arrowBoundsIn,
   inkBounds,
   pathBounds,
   tableBounds,
@@ -277,6 +298,19 @@ import {
   writeStudioDraft,
   type StudioDraftScope,
 } from '../studio/studioDraft';
+import {
+  arrowEndpointAt,
+  arrowSnapToleranceForView,
+  bendForPointer,
+  draftArrow,
+  elbowHandlePoint,
+  finishArrow,
+  snapArrowPoint,
+  type ArrowDraft,
+  type ArrowSnap,
+} from '../studio/studioArrowDraft';
+import { arrowTargets } from '../studio/studioArrowTargets';
+import { StudioArrowView } from '../studio/StudioArrowView';
 import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 
@@ -286,7 +320,7 @@ import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates
  * node is still draggable while the pencil is held.
  */
 type CanvasTool =
-  'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template';
+  'select' | 'draw' | 'erase' | 'pen' | 'line' | 'table' | 'text' | 'shape' | 'template' | 'arrow';
 
 // The size picker offers a sensible span, not the whole allowed range: the
 // number inputs beside it reach the rest.
@@ -580,7 +614,11 @@ function ColorChoices<K extends string>({
  */
 function paintOrderWithNewestOnTop(graph: DiagramSnapshot, id: string): string[] | undefined {
   const mixed =
-    (graph.ink?.length ?? 0) + (graph.paths?.length ?? 0) + (graph.tables?.length ?? 0) > 0;
+    (graph.ink?.length ?? 0) +
+      (graph.paths?.length ?? 0) +
+      (graph.tables?.length ?? 0) +
+      (graph.arrows?.length ?? 0) >
+    0;
   if (!graph.z?.length && !mixed) return undefined;
 
   const current = graph.z?.length ? graph.z : studioPaintOrder(graph).map((ref) => ref.key);
@@ -666,6 +704,49 @@ function BarMenu({
         {children(() => onOpenChange(null))}
       </Popover>
     </span>
+  );
+}
+
+/**
+ * What each cap is called.
+ *
+ * The tiles are pictures of the shape, so these exist for the screen reader and
+ * for the tooltip — the two places a picture is no use.
+ */
+const ARROW_CAP_LABELS: Record<ArrowCap, string> = {
+  none: 'No',
+  line: 'Line arrow',
+  solid: 'Solid arrow',
+  triangle: 'Triangle',
+  triangleHollow: 'Hollow triangle',
+  circle: 'Circle',
+  circleHollow: 'Hollow circle',
+  diamond: 'Diamond',
+  diamondHollow: 'Hollow diamond',
+  bar: 'Bar',
+};
+
+/**
+ * A cap, drawn as a tile for the picker.
+ *
+ * Straight out of `arrowCapGeometry`, so the tile is the shape the canvas will
+ * actually draw rather than a hand-made icon that can drift from it.
+ */
+function CapTile({ cap }: { cap: ArrowCap }) {
+  const geometry = arrowCapGeometry(cap, { x: 20, y: 10 }, 0, 2);
+  return (
+    <svg viewBox="0 0 24 20" width={20} height={16} aria-hidden="true">
+      <path d="M 2 10 L 18 10" stroke="currentColor" strokeWidth={1.5} fill="none" />
+      {geometry.d === '' ? null : (
+        <path
+          d={geometry.d}
+          fill={geometry.closed ? (geometry.filled ? 'currentColor' : '#FFFFFF') : 'none'}
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
   );
 }
 
@@ -887,6 +968,7 @@ export function DiagramEditor() {
       ...(from?.ink?.length ? { ink: dataToInk(from.ink) } : {}),
       ...(from?.paths?.length ? { paths: from.paths.map((path) => ({ ...path })) } : {}),
       ...(from?.tables?.length ? { tables: from.tables.map((table) => ({ ...table })) } : {}),
+      ...(from?.arrows?.length ? { arrows: from.arrows.map((arrow) => ({ ...arrow })) } : {}),
       ...(from?.z?.length ? { z: [...from.z] } : {}),
     };
   }
@@ -894,6 +976,7 @@ export function DiagramEditor() {
   const { nodes, edges } = history.snapshot;
   const ink = history.snapshot.ink ?? [];
   const paths = history.snapshot.paths ?? [];
+  const arrows = history.snapshot.arrows ?? [];
   const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
@@ -905,6 +988,28 @@ export function DiagramEditor() {
   // Where the element being placed would land. Following the cursor lets it be
   // positioned before it exists, rather than dropped somewhere and dragged.
   const [ghostCursor, setGhostCursor] = useState<DiagramPoint | null>(null);
+  // Which of the two arrow tiles is armed, and the arrow being drawn. The draft
+  // is the whole of the placement state: a press sets `from`, the pointer sets
+  // `to`, and the second press turns it into an element.
+  const [pendingArrowRoute, setPendingArrowRoute] = useState<ArrowRoute>('straight');
+  const [arrowDraft, setArrowDraftState] = useState<ArrowDraft | null>(null);
+  // Mirrored in a ref: a press and the release that follows it can land in one
+  // React batch, and the release has to see what the move just wrote.
+  const arrowDraftRef = useRef<ArrowDraft | null>(null);
+  // What the pointer is currently over, so the feedback dot can say what an
+  // endpoint dropped here would bind to — before as well as during a drag.
+  const [arrowSnap, setArrowSnap] = useState<ArrowSnap | null>(null);
+  // A press that has not yet travelled far enough to be a drag. Lifting before
+  // it does leaves the draft open, which is the click-then-click gesture.
+  const arrowPressRef = useRef<{ pointerId: number; committed: boolean } | null>(null);
+  // Re-pointing one end of an existing arrow, or sliding an elbow's middle leg.
+  const arrowEditRef = useRef<{
+    pointerId: number;
+    arrowId: string;
+    handle: 'from' | 'to' | 'bend' | 'label';
+    previous: DiagramSnapshot;
+    moved: boolean;
+  } | null>(null);
   // Which of the properties bar's controls has its choices open.
   const [openBarMenu, setOpenBarMenu] = useState<string | null>(null);
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
@@ -950,6 +1055,15 @@ export function DiagramEditor() {
   const [selectedInkIds, setSelectedInkIds] = useState<string[]>([]);
   const [selectedPathIds, setSelectedPathIds] = useState<string[]>([]);
   const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
+  const [selectedArrowIds, setSelectedArrowIds] = useState<string[]>([]);
+  // Which arrow's label is open for typing. An arrow has no inside to type in,
+  // so its label is edited in a field floated over the middle of the line.
+  const [editingArrowId, setEditingArrowId] = useState<string | null>(null);
+  const arrowLabelInputRef = useRef<HTMLInputElement>(null);
+  // A canvas element's native dblclick never arrives — pointer capture eats the
+  // compatibility events — so a second press is detected the same way every
+  // other element on this canvas detects one.
+  const lastArrowPressRef = useRef<NodePress | null>(null);
   const [selectedAnchor, setSelectedAnchor] = useState<number | null>(null);
   // Click selects an element whole; double-click goes inside it. Until then a
   // drag moves the thing rather than reshaping it.
@@ -968,6 +1082,16 @@ export function DiagramEditor() {
     moved: boolean;
   } | null>(null);
   // Table creation size, and which cell of which table is in hand.
+  // Which insertion point on a table the pointer is over. Rows and columns are
+  // added on the table itself rather than from a menu, so this is what decides
+  // where the one visible "+" sits.
+  const [tableInsert, setTableInsert] = useState<{
+    tableId: string;
+    axis: 'row' | 'col';
+    index: number;
+    /** A boundary adds; a row or column body takes that one away. */
+    action: 'insert' | 'remove';
+  } | null>(null);
   const [tableRows, setTableRows] = useState(3);
   const [tableCols, setTableCols] = useState(3);
   // Pen and line styling, kept apart from the freehand ink's own pen.
@@ -980,6 +1104,9 @@ export function DiagramEditor() {
   const pathFillColor = pathFilled ? FILL_FOR_STROKE[pathColor] : null;
   const selectedPathId = selectedPathIds.length === 1 ? (selectedPathIds[0] ?? null) : null;
   const selectedTableId = selectedTableIds.length === 1 ? (selectedTableIds[0] ?? null) : null;
+  // The bar edits one thing at a time, so its controls read from this rather
+  // than from the set a marquee may have swept up.
+  const selectedArrowId = selectedArrowIds.length === 1 ? (selectedArrowIds[0] ?? null) : null;
   const [cellRange, setCellRange] = useState<CellRange | null>(null);
   const [editingCell, setEditingCell] = useState<CellRef | null>(null);
   const cellInputRef = useRef<HTMLInputElement>(null);
@@ -1061,6 +1188,14 @@ export function DiagramEditor() {
   const selectedPath = selectedPathId ? (pathById.get(selectedPathId) ?? null) : null;
   const tables = history.snapshot.tables ?? [];
   const tableById = new Map(tables.map((table) => [table.id, table]));
+  const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
+  const selectedArrow = selectedArrowId ? (arrowById.get(selectedArrowId) ?? null) : null;
+  const editingArrow = editingArrowId ? (arrowById.get(editingArrowId) ?? null) : null;
+  // Bound endpoints are resolved against the whole canvas, so an arrow follows
+  // whatever it points at as that element is moved, resized or reshaped. Built
+  // once and read two ways: by id when drawing, and swept when snapping.
+  const arrowTargetMap = arrowTargets({ nodes, ink, paths, tables });
+  const arrowTargetsById: ArrowTargetLookup = (id) => arrowTargetMap.get(id);
   const selectedTable = selectedTableId ? (tableById.get(selectedTableId) ?? null) : null;
   const edgeIndexByKey = new Map(edges.map((edge, index) => [edgeKey(edge), index]));
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
@@ -1106,7 +1241,9 @@ export function DiagramEditor() {
    * closes itself before anything is put down.
    */
   useEffect(() => {
-    if (!ghost) return;
+    // An arrow has no ghost — its preview is the rubber band itself — but
+    // Escape has to put it down all the same.
+    if (!ghost && canvasTool !== 'arrow') return;
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -1373,6 +1510,7 @@ export function DiagramEditor() {
     const inkIds = new Set(selectedInkIds);
     const pathIds = new Set(selectedPathIds);
     const tableIds = new Set(selectedTableIds);
+    const arrowIds = new Set(selectedArrowIds);
 
     const withFill = <T extends { fillColor?: DiagramFillKey }>(element: T): T => {
       if (style.fillColor === undefined) return element;
@@ -1422,15 +1560,80 @@ export function DiagramEditor() {
             })
           : path,
       ),
-      tables: (graph.tables ?? []).map((table) =>
-        tableIds.has(table.id)
+      tables: (graph.tables ?? []).map((table) => {
+        if (!tableIds.has(table.id)) return table;
+        const styled = {
+          ...table,
+          ...strokeKeys,
+          ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
+        };
+        // A table has no fill of its own — it is a grid of cells — so filling
+        // one means filling all of them.
+        if (style.fillColor === undefined) return styled;
+        return fillCellRange(styled, wholeTableRange(styled), style.fillColor);
+      }),
+      arrows: (graph.arrows ?? []).map((arrow) =>
+        arrowIds.has(arrow.id)
           ? {
-              ...table,
+              ...arrow,
               ...strokeKeys,
+              ...(style.strokeStyle ? { strokeStyle: style.strokeStyle } : {}),
               ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
+              ...(style.labelBold === undefined ? {} : { labelBold: style.labelBold }),
+              ...(style.labelColor ? { labelColor: style.labelColor } : {}),
             }
-          : table,
+          : arrow,
       ),
+    });
+  }
+
+  /**
+   * Open the selected arrow's label for typing.
+   *
+   * Both the "Add text" control and a double press on the line come here, the
+   * same two ways a shape's label is reached.
+   */
+  function beginArrowLabelEdit(arrowId: string | null = selectedArrowId) {
+    if (!arrowId) return;
+    setEditingArrowId(arrowId);
+  }
+
+  function commitArrowLabel(arrowId: string, text: string) {
+    const graph = history.snapshotRef.current;
+    const trimmed = text.trim().slice(0, ARROW_LABEL_LIMIT);
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      arrows: (graph.arrows ?? []).map((arrow) => {
+        if (arrow.id !== arrowId) return arrow;
+        const next = { ...arrow };
+        // An empty label is no label: stored as an absent key, the way every
+        // other optional field on this contract is.
+        if (trimmed === '') delete next.label;
+        else next.label = trimmed;
+        return next;
+      }),
+    });
+    setEditingArrowId(null);
+  }
+
+  /** One arrow's own settings: its caps, its shape, and where its label sits. */
+  function applyArrowSetting(change: Partial<ArrowElement>) {
+    if (selectedArrowIds.length === 0) return;
+    clearError();
+    const graph = history.snapshotRef.current;
+    const wanted = new Set(selectedArrowIds);
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      arrows: (graph.arrows ?? []).map((arrow) => {
+        if (!wanted.has(arrow.id)) return arrow;
+        const next = { ...arrow, ...change };
+        // A bend belongs to an elbow. Carrying one onto a straight arrow is a
+        // shape the write path refuses, so the switch drops it.
+        if (next.route !== 'elbow') delete next.bend;
+        return next;
+      }),
     });
   }
 
@@ -1451,7 +1654,11 @@ export function DiagramEditor() {
                 itemName="fill"
                 keys={QUICK_FILL_KEYS}
                 colorFor={(key) => DIAGRAM_FILL_COLORS[key]}
-                activeKey={selectedNode?.fillColor ?? selectedPath?.fillColor ?? null}
+                activeKey={
+                  selectedNode?.fillColor ??
+                  selectedPath?.fillColor ??
+                  (selectedTable ? (tableCellAt(selectedTable, 0, 0)?.fill ?? null) : null)
+                }
                 disabled={isSubmitting}
                 onSelect={(key) => {
                   applySelectionStyle({ fillColor: key });
@@ -1596,6 +1803,112 @@ export function DiagramEditor() {
           </BarMenu>
         );
 
+      case 'addText':
+        return (
+          <Tooltip label={property.label} placement="bottom">
+            <button
+              type="button"
+              aria-label={property.label}
+              disabled={isSubmitting}
+              onClick={() => beginArrowLabelEdit()}
+              className={BAR_CONTROL}
+            >
+              <Type aria-hidden="true" size={15} />
+            </button>
+          </Tooltip>
+        );
+
+      case 'startCap':
+      case 'endCap': {
+        const end = property.id === 'startCap' ? 'startCap' : 'endCap';
+        const current = selectedArrow
+          ? end === 'startCap'
+            ? arrowStartCap(selectedArrow)
+            : arrowEndCap(selectedArrow)
+          : null;
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={
+              <span className={end === 'startCap' ? 'rotate-180' : undefined}>
+                <CapTile cap={current ?? 'none'} />
+              </span>
+            }
+          >
+            {(close) => (
+              <div role="group" aria-label={`${property.label} shapes`} className="flex gap-1">
+                {ARROW_CAPS.map((cap) => (
+                  <button
+                    key={cap}
+                    type="button"
+                    aria-label={`${ARROW_CAP_LABELS[cap]} ${end === 'startCap' ? 'start' : 'end'}`}
+                    aria-pressed={current === cap}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      applyArrowSetting({ [end]: cap });
+                      close();
+                    }}
+                    className={`${TILE_BUTTON} ${current === cap ? TILE_ACTIVE : ''}`}
+                  >
+                    <span className={end === 'startCap' ? 'rotate-180' : undefined}>
+                      <CapTile cap={cap} />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </BarMenu>
+        );
+      }
+
+      case 'arrowRoute': {
+        const current = selectedArrow ? arrowRoute(selectedArrow) : 'straight';
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={isSubmitting}
+            label={property.label}
+            icon={
+              current === 'elbow' ? (
+                <CornerDownRight aria-hidden="true" size={15} />
+              ) : (
+                <MoveRight aria-hidden="true" size={15} />
+              )
+            }
+          >
+            {(close) => (
+              <div role="group" aria-label="Line shapes" className="flex gap-1">
+                {(
+                  [
+                    ['straight', 'Straight line', MoveRight],
+                    ['elbow', 'Elbowed line', CornerDownRight],
+                  ] as const
+                ).map(([value, name, Icon]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-label={name}
+                    aria-pressed={current === value}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      applyArrowSetting({ route: value });
+                      close();
+                    }}
+                    className={`${TILE_BUTTON} ${current === value ? TILE_ACTIVE : ''}`}
+                  >
+                    <Icon aria-hidden="true" size={14} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </BarMenu>
+        );
+      }
+
       case 'textFormat': {
         const cellStyleTarget = selectedTable
           ? (cellRange ?? wholeTableRange(selectedTable))
@@ -1614,7 +1927,9 @@ export function DiagramEditor() {
           replaceTable(styleCellRange(selectedTable, cellStyleTarget, style), selectedTable.id);
         }
 
-        const bold = selectedTable ? cellsAllBold : Boolean(selectedNode?.labelBold);
+        const bold = selectedTable
+          ? cellsAllBold
+          : Boolean(selectedNode?.labelBold ?? selectedArrow?.labelBold);
         const align: DiagramTextAlign = selectedTable
           ? (tableCellAt(
               selectedTable,
@@ -1641,13 +1956,16 @@ export function DiagramEditor() {
           else applySelectionStyle({ labelColor: next });
         }
 
-        const size = selectedTable
+        // Whatever is selected has to answer this, or the control cannot show
+        // which size is already chosen — an arrow fell through to the default
+        // and so never lit up the size it was actually set to.
+        const size: DiagramFontSizePreset = selectedTable
           ? (tableCellAt(
               selectedTable,
               cellStyleTarget?.focus.row ?? 0,
               cellStyleTarget?.focus.col ?? 0,
             )?.fontSizePreset ?? 'medium')
-          : (selectedNode?.fontSizePreset ?? 'medium');
+          : (selectedNode?.fontSizePreset ?? selectedArrow?.fontSizePreset ?? 'medium');
 
         return (
           <BarMenu
@@ -1689,28 +2007,57 @@ export function DiagramEditor() {
                   />
                 </ToolStripGroup>
 
-                <ToolStripGroup label="Text alignment" row>
-                  {DIAGRAM_TEXT_ALIGNS.map((option) => {
-                    const AlignIcon: LucideIcon = CELL_ALIGN_ICONS[option];
-                    return (
+                {selectedArrow ? (
+                  <ToolStripGroup label="Label position" row>
+                    {(
+                      [
+                        ['above', 'Above the line', ArrowUpFromLine],
+                        ['on', 'On the line', Minus],
+                        ['below', 'Below the line', ArrowDownFromLine],
+                      ] as const
+                    ).map(([side, name, SideIcon]) => (
                       <PresetButton
-                        key={option}
-                        label={<AlignIcon aria-hidden="true" size={15} />}
-                        name={`Align ${option}`}
-                        active={align === option}
+                        key={side}
+                        label={<SideIcon aria-hidden="true" size={15} />}
+                        name={name}
+                        active={arrowLabelSide(selectedArrow) === side}
                         disabled={isSubmitting}
-                        onSelect={() => setAlign(option)}
+                        onSelect={() => applyArrowSetting({ labelSide: side })}
                       />
-                    );
-                  })}
-                </ToolStripGroup>
+                    ))}
+                  </ToolStripGroup>
+                ) : null}
+
+                {/* Alignment inside a box means nothing on a line: an arrow's
+                    label is placed along it instead, by dragging it. */}
+                {selectedArrow ? null : (
+                  <ToolStripGroup label="Text alignment" row>
+                    {DIAGRAM_TEXT_ALIGNS.map((option) => {
+                      const AlignIcon: LucideIcon = CELL_ALIGN_ICONS[option];
+                      return (
+                        <PresetButton
+                          key={option}
+                          label={<AlignIcon aria-hidden="true" size={15} />}
+                          name={`Align ${option}`}
+                          active={align === option}
+                          disabled={isSubmitting}
+                          onSelect={() => setAlign(option)}
+                        />
+                      );
+                    })}
+                  </ToolStripGroup>
+                )}
 
                 <ColorChoices
                   row
                   itemName="cell text"
                   keys={QUICK_STROKE_KEYS}
                   colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
-                  activeKey={selectedTable ? null : (selectedNode?.labelColor ?? null)}
+                  activeKey={
+                    selectedTable
+                      ? null
+                      : (selectedNode?.labelColor ?? selectedArrow?.labelColor ?? null)
+                  }
                   disabled={isSubmitting}
                   onSelect={setTextColor}
                 />
@@ -1736,6 +2083,9 @@ export function DiagramEditor() {
     }
     for (const path of graph.paths ?? []) {
       if (selectedPathIds.includes(path.id)) targets.push({ kind: 'path', element: path });
+    }
+    for (const arrow of graph.arrows ?? []) {
+      if (selectedArrowIds.includes(arrow.id)) targets.push({ kind: 'arrow', element: arrow });
     }
     for (const table of graph.tables ?? []) {
       if (!selectedTableIds.includes(table.id)) continue;
@@ -1792,6 +2142,14 @@ export function DiagramEditor() {
     }
     for (const table of graph.tables ?? []) {
       if (selectedTableIds.includes(table.id)) boxes.push({ key: table.id, ...tableBounds(table) });
+    }
+    if (selectedArrowIds.length > 0) {
+      const boundsOf = arrowBoundsIn(graph);
+      for (const arrow of graph.arrows ?? []) {
+        if (!selectedArrowIds.includes(arrow.id)) continue;
+        const bounds = boundsOf(arrow);
+        if (bounds) boxes.push({ key: arrow.id, ...bounds });
+      }
     }
     return boxes;
   }
@@ -1900,6 +2258,7 @@ export function DiagramEditor() {
       ink: result.ink,
       paths: result.paths,
       tables: result.tables,
+      arrows: result.arrows,
     });
     // What just landed is what you want to move, so it is what is selected.
     applySelection(result.selection);
@@ -2084,7 +2443,11 @@ export function DiagramEditor() {
     // that stays for selections made purely of shapes.
     const mixedSelection =
       selectedIds.includes(node.id) &&
-      selectedInkIds.length + selectedPathIds.length + selectedTableIds.length > 0;
+      selectedInkIds.length +
+        selectedPathIds.length +
+        selectedTableIds.length +
+        selectedArrowIds.length >
+        0;
     if (mixedSelection) {
       event.preventDefault();
       event.stopPropagation();
@@ -2209,6 +2572,7 @@ export function DiagramEditor() {
       ...selection.inkIds,
       ...selection.pathIds,
       ...selection.tableIds,
+      ...selection.arrowIds,
     ]);
     for (const id of selection.nodeIds) {
       moving.add(id);
@@ -2384,6 +2748,7 @@ export function DiagramEditor() {
       inkIds: selectedInkIds,
       pathIds: selectedPathIds,
       tableIds: selectedTableIds,
+      arrowIds: selectedArrowIds,
     };
   }
 
@@ -2392,6 +2757,7 @@ export function DiagramEditor() {
     setSelectedInkIds(next.inkIds);
     setSelectedPathIds(next.pathIds);
     setSelectedTableIds(next.tableIds);
+    setSelectedArrowIds(next.arrowIds);
     setSelectedEdgeKey(null);
     setSelectedAnchor(null);
     setPathEditing(false);
@@ -2427,7 +2793,8 @@ export function DiagramEditor() {
     const inkGone = new Set(selection.inkIds);
     const pathGone = new Set(selection.pathIds);
     const tableGone = new Set(selection.tableIds);
-    const gone = new Set([...inkGone, ...pathGone, ...tableGone]);
+    const arrowGone = new Set(selection.arrowIds);
+    const gone = new Set([...inkGone, ...pathGone, ...tableGone, ...arrowGone]);
 
     // An arrow takes precedence: completing a connection leaves both the arrow
     // and the element it landed on selected, and deleting then means the arrow.
@@ -2449,9 +2816,85 @@ export function DiagramEditor() {
       ink: (graph.ink ?? []).filter((stroke) => !inkGone.has(stroke.id)),
       paths: (graph.paths ?? []).filter((path) => !pathGone.has(path.id)),
       tables: (graph.tables ?? []).filter((table) => !tableGone.has(table.id)),
+      // Arrows bound to something deleted here keep the binding: the route
+      // already falls back to the stored point, so it looks right either way,
+      // and keeping it means undo reattaches the arrow. `prepareDiagram` drops
+      // whatever is still stale when the canvas is actually proposed.
+      arrows: (graph.arrows ?? []).filter((arrow) => !arrowGone.has(arrow.id)),
       ...(graph.z ? { z: graph.z.filter((key) => !gone.has(key)) } : {}),
     });
     clearAllSelection();
+  }
+
+  /**
+   * Grab one end of a selected arrow, or the handle on its middle leg.
+   *
+   * One history entry per drag, recorded on release, so re-pointing an arrow
+   * undoes in one go rather than a step per pointer move.
+   */
+  function beginArrowEdit(
+    event: PointerEvent<SVGElement>,
+    arrowId: string,
+    handle: 'from' | 'to' | 'bend' | 'label',
+  ) {
+    const canvas = canvasRef.current;
+    if (!canvas || canvasTool !== 'select') return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Every handle but the label captures the pointer, so a drag can leave the
+    // canvas and come back. The label must not: capture retargets the press
+    // that follows to the canvas, and the second press on a label is how it is
+    // opened for typing. A label is dragged along its own line, so it has no
+    // reason to leave the surface anyway.
+    if (handle !== 'label') canvas.setPointerCapture(event.pointerId);
+    arrowEditRef.current = {
+      pointerId: event.pointerId,
+      arrowId,
+      handle,
+      previous: history.snapshotRef.current,
+      moved: false,
+    };
+  }
+
+  function updateArrowEdit(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = arrowEditRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    session.moved = true;
+
+    const graph = history.snapshotRef.current;
+    const point = surfacePoint(event);
+    const arrows = (graph.arrows ?? []).map((arrow) => {
+      if (arrow.id !== session.arrowId) return arrow;
+      if (session.handle === 'label') {
+        // Where along the route the pointer is, as the fraction the contract
+        // stores — so the label keeps its place when the arrow is re-routed.
+        const geometry = arrowGeometry(arrow, arrowTargetsById);
+        return { ...arrow, labelT: nearestTOnRoute(geometry.points, point) };
+      }
+      if (session.handle === 'bend') {
+        // The leg lands on the grid, so an elbow lines up with the artwork it
+        // is routed between rather than sitting a few units off it.
+        const aim = snapEnabled ? { x: snapToGrid(point.x), y: snapToGrid(point.y) } : point;
+        return { ...arrow, bend: bendForPointer(arrow, aim, arrowTargetsById) };
+      }
+      const endpoint = arrowEndpointFor(point);
+      setArrowSnap(endpoint.elementId ? { elementId: endpoint.elementId, point: endpoint } : null);
+      return { ...arrow, [session.handle]: endpoint };
+    });
+
+    history.preview({ nodes: graph.nodes, edges: graph.edges, arrows });
+    return true;
+  }
+
+  function endArrowEdit(event: PointerEvent<SVGSVGElement>): boolean {
+    const session = arrowEditRef.current;
+    if (!session || session.pointerId !== event.pointerId) return false;
+    arrowEditRef.current = null;
+    setArrowSnap(null);
+    if (session.moved) history.recordPreview(session.previous);
+    releaseCapture(event);
+    return true;
   }
 
   /** Anchor and handle drags are one history entry each, recorded on release. */
@@ -2656,7 +3099,7 @@ export function DiagramEditor() {
    */
   function beginElementMove(
     event: PointerEvent<SVGElement>,
-    kind: 'path' | 'table' | 'ink' | 'node',
+    kind: 'path' | 'table' | 'ink' | 'node' | 'arrow',
     id: string,
   ) {
     const canvas = canvasRef.current;
@@ -2677,7 +3120,9 @@ export function DiagramEditor() {
           ? 'tableIds'
           : kind === 'ink'
             ? 'inkIds'
-            : 'nodeIds';
+            : kind === 'arrow'
+              ? 'arrowIds'
+              : 'nodeIds';
     const selection: StudioSelection = current[key].includes(id)
       ? {
           ...current,
@@ -2737,6 +3182,7 @@ export function DiagramEditor() {
     const inkGoing = new Set(moving.inkIds);
     const pathGoing = new Set(moving.pathIds);
     const tableGoing = new Set(moving.tableIds);
+    const arrowGoing = new Set(moving.arrowIds);
 
     history.preview({
       nodes: origin.nodes.map((node) =>
@@ -2758,6 +3204,11 @@ export function DiagramEditor() {
       ),
       tables: (origin.tables ?? []).map((table) =>
         tableGoing.has(table.id) ? moveTableBy(table, total.x, total.y) : table,
+      ),
+      // A bound end is drawn from its element, so dragging an arrow moves only
+      // the ends that are free — which is what binding means.
+      arrows: (origin.arrows ?? []).map((arrow) =>
+        arrowGoing.has(arrow.id) ? offsetArrow(arrow, total.x, total.y) : arrow,
       ),
     });
     return true;
@@ -2791,6 +3242,16 @@ export function DiagramEditor() {
     }
     for (const table of scene.tables ?? []) {
       if (selection.tableIds.includes(table.id)) rects.push(tableBounds(table));
+    }
+    if (selection.arrowIds.length > 0) {
+      // Without this an arrow dragged on its own has no bounds to snap by, so
+      // it was the one thing on the canvas the grid did not apply to.
+      const boundsOf = arrowBoundsIn(scene);
+      for (const arrow of scene.arrows ?? []) {
+        if (!selection.arrowIds.includes(arrow.id)) continue;
+        const bounds = boundsOf(arrow);
+        if (bounds) rects.push(bounds);
+      }
     }
     return rects;
   }
@@ -3035,6 +3496,38 @@ export function DiagramEditor() {
         >
           <Minus aria-hidden="true" size={14} />
         </button>
+        {/* Arrows sit under the line for the same reason the line sits with the
+            shapes: they are drawn rather than placed, but they make a form. */}
+        {(
+          [
+            ['straight', 'Arrow', MoveRight],
+            ['elbow', 'Elbowed arrow', CornerDownRight],
+          ] as const
+        ).map(([route, arrowLabel, ArrowIcon]) => (
+          <button
+            key={route}
+            type="button"
+            aria-label={arrowLabel}
+            aria-pressed={canvasTool === 'arrow' && pendingArrowRoute === route}
+            disabled={isSubmitting}
+            onClick={() => {
+              setPendingArrowRoute(route);
+              setArrowDraft(null);
+              selectCanvasTool('arrow');
+              close();
+            }}
+            title={
+              route === 'straight'
+                ? 'Press where the arrow starts, then drag to where it ends'
+                : 'The same, bent into right angles on the way'
+            }
+            className={`${TILE_BUTTON} ${
+              canvasTool === 'arrow' && pendingArrowRoute === route ? TILE_ACTIVE : ''
+            }`}
+          >
+            <ArrowIcon aria-hidden="true" size={14} />
+          </button>
+        ))}
       </div>
     );
   }
@@ -3137,179 +3630,6 @@ export function DiagramEditor() {
    * canvas keeps the width.
    */
   /** A table's structure: the rows and columns themselves, and their fill. */
-  function renderTableStructure() {
-    return (
-      <div className="max-h-[70vh] w-64 overflow-y-auto">
-        {selectedTable && cellRange ? (
-          <section className="mt-4" aria-label="Table">
-            <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Table
-            </p>
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  replaceTable(insertRow(selectedTable, cellRange.focus.row + 1), selectedTable.id)
-                }
-              >
-                Row below
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  replaceTable(
-                    insertColumn(selectedTable, cellRange.focus.col + 1),
-                    selectedTable.id,
-                  )
-                }
-              >
-                Column right
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const next = deleteRow(selectedTable, cellRange.focus.row);
-                  replaceTable(next, selectedTable.id);
-                  const clamped = clampCellRef(next, cellRange.focus);
-                  setCellRange({ anchor: clamped, focus: clamped });
-                }}
-              >
-                Delete row
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const next = deleteColumn(selectedTable, cellRange.focus.col);
-                  replaceTable(next, selectedTable.id);
-                  const clamped = clampCellRef(next, cellRange.focus);
-                  setCellRange({ anchor: clamped, focus: clamped });
-                }}
-              >
-                Delete column
-              </Button>
-            </div>
-
-            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Cell fill
-            </p>
-            <div className="mt-2 grid grid-cols-8 gap-1.5">
-              {DIAGRAM_FILL_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`${key} cell fill`}
-                  color={DIAGRAM_FILL_COLORS[key]}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id)
-                  }
-                />
-              ))}
-              <IconButton
-                label="Clear cell fill"
-                className="h-full w-full"
-                onClick={() =>
-                  replaceTable(fillCellRange(selectedTable, cellRange, null), selectedTable.id)
-                }
-              >
-                <X aria-hidden="true" size={13} />
-              </IconButton>
-            </div>
-
-            <p className="mt-3 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-              Cell text
-            </p>
-            <div className="mt-2 grid grid-cols-8 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`${key} cell text`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(
-                      styleCellRange(selectedTable, cellRange, { color: key }),
-                      selectedTable.id,
-                    )
-                  }
-                />
-              ))}
-              <IconButton
-                label="Default cell text colour"
-                className="h-full w-full"
-                onClick={() =>
-                  replaceTable(
-                    styleCellRange(selectedTable, cellRange, { color: null }),
-                    selectedTable.id,
-                  )
-                }
-              >
-                <X aria-hidden="true" size={13} />
-              </IconButton>
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_FONT_SIZE_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={FONT_SIZE_LABELS[preset]}
-                  // The letter alone does not identify the control; the word does.
-                  name={`${preset} cell text`}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(
-                      styleCellRange(selectedTable, cellRange, { fontSizePreset: preset }),
-                      selectedTable.id,
-                    )
-                  }
-                />
-              ))}
-              <PresetButton
-                label="B"
-                name="Bold cell text"
-                active={Boolean(
-                  tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)?.bold,
-                )}
-                onSelect={() =>
-                  replaceTable(
-                    styleCellRange(selectedTable, cellRange, {
-                      bold: !tableCellAt(selectedTable, cellRange.focus.row, cellRange.focus.col)
-                        ?.bold,
-                    }),
-                    selectedTable.id,
-                  )
-                }
-              />
-            </div>
-
-            <div className="mt-2 flex gap-1.5">
-              {TABLE_CELL_ALIGNS.map((align) => (
-                <PresetButton
-                  key={align}
-                  label={align[0]!.toUpperCase()}
-                  name={`Align ${align}`}
-                  active={false}
-                  onSelect={() =>
-                    replaceTable(alignCellRange(selectedTable, cellRange, align), selectedTable.id)
-                  }
-                />
-              ))}
-              <PresetButton
-                label="H"
-                name={selectedTable.headerRow ? 'Turn header row off' : 'Turn header row on'}
-                active={Boolean(selectedTable.headerRow)}
-                onSelect={() =>
-                  replaceTable(
-                    { ...selectedTable, headerRow: !selectedTable.headerRow },
-                    selectedTable.id,
-                  )
-                }
-              />
-            </div>
-          </section>
-        ) : null}
-      </div>
-    );
-  }
-
   /** An arrow's own settings, including the one thing it cannot be given on the
    * canvas: a label. */
   function renderEdgeDetails() {
@@ -3546,9 +3866,16 @@ export function DiagramEditor() {
   /**
    * Watch the shape of the surface, so the drawn view follows the window.
    *
-   * Measured on every render as well as on resize: a resize observer catches
-   * the window changing, but not the first layout, and not a surface whose size
-   * comes from somewhere the observer never hears about.
+   * Measured once on mount and then by the observer below, which fires an
+   * initial observation of its own and catches every later change.
+   *
+   * It used to measure on *every* render, with no dependency list — a setState
+   * in the render's own commit. That only settles while two consecutive
+   * measurements agree to within the tolerance; any layout that disagrees with
+   * itself turns it into an unbounded update loop, which React ends by tearing
+   * the tree down. That is the white screen this editor has already had once,
+   * from the same pattern in the properties bar, and it is not worth keeping
+   * for a first measurement the observer reports anyway.
    */
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -3557,19 +3884,30 @@ export function DiagramEditor() {
     if (bounds.width <= 0 || bounds.height <= 0) return;
     const next = bounds.width / bounds.height;
     setCanvasAspect((current) => (Math.abs(current - next) < 1e-3 ? current : next));
-  });
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || typeof ResizeObserver !== 'function') return;
-    const observer = new ResizeObserver(() => {
+    if (!canvas) return;
+
+    const measure = () => {
       const bounds = canvas.getBoundingClientRect();
       if (bounds.width <= 0 || bounds.height <= 0) return;
       const next = bounds.width / bounds.height;
       setCanvasAspect((current) => (Math.abs(current - next) < 1e-3 ? current : next));
-    });
-    observer.observe(canvas);
-    return () => observer.disconnect();
+    };
+
+    // The window is the other way the surface changes shape, and the one an
+    // element observer does not always see — a surface sized from the viewport
+    // rather than from its own content changes without the element resizing in
+    // any way the observer is told about.
+    window.addEventListener('resize', measure);
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(canvas);
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -3581,6 +3919,7 @@ export function DiagramEditor() {
       ...(graph.ink?.length ? { ink: inkToData(graph.ink) } : {}),
       ...(graph.paths?.length ? { paths: graph.paths } : {}),
       ...(graph.tables?.length ? { tables: graph.tables } : {}),
+      ...(graph.arrows?.length ? { arrows: graph.arrows } : {}),
       ...(graph.z?.length ? { z: graph.z } : {}),
     };
 
@@ -3607,7 +3946,64 @@ export function DiagramEditor() {
     setPendingTable(null);
     setPendingTemplate(null);
     setGhostCursor(null);
+    setArrowDraft(null);
+    setArrowSnap(null);
+    arrowPressRef.current = null;
     setCanvasTool('select');
+  }
+
+  function setArrowDraft(next: ArrowDraft | null) {
+    arrowDraftRef.current = next;
+    setArrowDraftState(next);
+  }
+
+  /** Scene units, so the catchment is the same size on screen at any zoom. */
+  function arrowSnapTolerance() {
+    return arrowSnapToleranceForView(renderedViewRef.current, surfaceBounds());
+  }
+
+  /**
+   * An endpoint for this pointer position, bound to whatever it landed on.
+   *
+   * A free end lands on the grid like every other piece of artwork, so an arrow
+   * drawn between two empty spots lines up with the shapes around it. A bound
+   * end does not: it belongs to the element it named, and the grid has no say
+   * over where that element's edge is.
+   */
+  function arrowEndpointFor(point: DiagramPoint) {
+    const endpoint = arrowEndpointAt(point, arrowTargetMap.values(), arrowSnapTolerance());
+    if (endpoint.elementId !== undefined || !snapEnabled) return endpoint;
+    return { ...endpoint, x: snapToGrid(endpoint.x), y: snapToGrid(endpoint.y) };
+  }
+
+  /**
+   * Put the drafted arrow on the canvas and go back to select.
+   *
+   * Same rule as every other element placed from the rail: the tool is for one
+   * arrow, and what anyone wants immediately afterwards is to move or restyle
+   * the thing they just made.
+   */
+  function placeArrow(draft: ArrowDraft) {
+    const arrow = finishArrow(draft, {
+      strokeColor: pathColor,
+      strokeWidthPreset: pathWidth,
+      strokeStyle: pathStyle,
+    });
+    if (!arrow) return false;
+
+    const graph = history.snapshotRef.current;
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      arrows: [...(graph.arrows ?? []), arrow],
+      ...((order) => (order ? { z: order } : {}))(paintOrderWithNewestOnTop(graph, arrow.id)),
+    });
+    setArrowDraft(null);
+    setArrowSnap(null);
+    arrowPressRef.current = null;
+    setCanvasTool('select');
+    applySelection({ ...EMPTY_STUDIO_SELECTION, arrowIds: [arrow.id] });
+    return true;
   }
 
   function surfaceBounds() {
@@ -3710,6 +4106,25 @@ export function DiagramEditor() {
     if (connectionMode) {
       setSelectedIds([]);
       setSelectedEdgeKey(null);
+      return;
+    }
+
+    if (canvasTool === 'arrow') {
+      event.preventDefault();
+      clearAllSelection();
+      const point = surfacePoint(event);
+      const draft = arrowDraftRef.current;
+      if (draft) {
+        // Second press of a click-then-click: this is the destination. The
+        // element the arrow started on is a legitimate target — that is a
+        // self-loop, and it draws as a loop around the element.
+        placeArrow({ ...draft, to: arrowEndpointFor(point) });
+        return;
+      }
+      canvas.setPointerCapture(event.pointerId);
+      const from = arrowEndpointFor(point);
+      setArrowDraft({ from, to: { x: point.x, y: point.y }, route: pendingArrowRoute });
+      arrowPressRef.current = { pointerId: event.pointerId, committed: false };
       return;
     }
 
@@ -3829,6 +4244,19 @@ export function DiagramEditor() {
   }
 
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
+    if (updateArrowEdit(event)) return;
+
+    if (canvasTool === 'arrow') {
+      const point = surfacePoint(event);
+      const draft = arrowDraftRef.current;
+      const snap = snapArrowPoint(point, arrowTargetMap.values(), arrowSnapTolerance());
+      setArrowSnap(snap);
+      // Before the first press the dot is all there is to show; after it, the
+      // preview arrow follows the pointer as well.
+      if (draft) setArrowDraft({ ...draft, to: arrowEndpointFor(point) });
+      return;
+    }
+
     if (canvasTool === 'text' || canvasTool === 'shape' || canvasTool === 'template') {
       setGhostCursor(surfacePoint(event));
       return;
@@ -3978,6 +4406,20 @@ export function DiagramEditor() {
   }
 
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
+    if (endArrowEdit(event)) return;
+
+    const arrowPress = arrowPressRef.current;
+    if (arrowPress && arrowPress.pointerId === event.pointerId) {
+      releaseCapture(event);
+      const draft = arrowDraftRef.current;
+      // Two gestures, one draft: a press-drag-release lands the arrow here, and
+      // a press that never travelled leaves it open for a second click. Which
+      // one happened is just whether the far end got far enough away.
+      if (draft && placeArrow(draft)) return;
+      arrowPressRef.current = null;
+      return;
+    }
+
     if (endPan(event)) return;
     if (endElementMove(event)) return;
     if (endPathEdit(event)) return;
@@ -4097,6 +4539,7 @@ export function DiagramEditor() {
     const inkGoing = new Set(selectedInkIds);
     const pathGoing = new Set(selectedPathIds);
     const tableGoing = new Set(selectedTableIds);
+    const arrowGoing = new Set(selectedArrowIds);
 
     history.commit({
       // Nodes keep their own mover: it understands snapping and containers.
@@ -4124,6 +4567,9 @@ export function DiagramEditor() {
       ),
       tables: (graph.tables ?? []).map((table) =>
         tableGoing.has(table.id) ? moveTableBy(table, offset.x, offset.y) : table,
+      ),
+      arrows: (graph.arrows ?? []).map((arrow) =>
+        arrowGoing.has(arrow.id) ? offsetArrow(arrow, offset.x, offset.y) : arrow,
       ),
     });
   }
@@ -4248,6 +4694,12 @@ export function DiagramEditor() {
         deleteSelection();
         return;
       }
+      // An arrow has nothing inside it to delete first, so Delete always means
+      // the whole arrow — unlike a path, where it takes an anchor if one is held.
+      if (selection.arrowIds.length > 0) {
+        deleteSelection();
+        return;
+      }
       // With a path selected, Delete takes the anchor in hand if there is one
       // and the whole path otherwise — and a path too short to lose an anchor
       // goes entirely rather than being left as a stub.
@@ -4342,6 +4794,7 @@ export function DiagramEditor() {
           inkIds: (graph.ink ?? []).map((stroke) => stroke.id),
           pathIds: (graph.paths ?? []).map((path) => path.id),
           tableIds: (graph.tables ?? []).map((table) => table.id),
+          arrowIds: (graph.arrows ?? []).map((arrow) => arrow.id),
         });
         return;
       }
@@ -4399,6 +4852,7 @@ export function DiagramEditor() {
       graph.z ?? [],
       graph.paths ?? [],
       graph.tables ?? [],
+      graph.arrows ?? [],
     );
     if (!prepared.ok) {
       setValidationError(prepared.error);
@@ -4548,17 +5002,6 @@ export function DiagramEditor() {
                 <Trash2 aria-hidden="true" size={15} />
               </button>
             </Tooltip>
-            {selectedTable ? (
-              <BarMenu
-                openMenu={openBarMenu}
-                onOpenChange={setOpenBarMenu}
-                disabled={isSubmitting}
-                label="Rows and columns"
-                icon={<Table aria-hidden="true" size={15} />}
-              >
-                {() => renderTableStructure()}
-              </BarMenu>
-            ) : null}
             {selectedEdge ? (
               <BarMenu
                 openMenu={openBarMenu}
@@ -4640,6 +5083,124 @@ export function DiagramEditor() {
         ) : null}
       </g>
     );
+  }
+
+  function renderArrow(arrow: ArrowElement) {
+    const geometry = arrowGeometry(arrow, arrowTargetsById);
+    const selected = selectedArrowIds.includes(arrow.id);
+    const strokeWidth = arrowStrokeWidth(arrow);
+
+    return (
+      <g
+        key={arrow.id}
+        onPointerDown={(event) => {
+          if (canvasTool !== 'select' || event.button !== 0) return;
+          event.stopPropagation();
+          canvasRef.current?.focus();
+          cancelConnection();
+          // A second press on an arrow already selected opens its label, the
+          // same gesture that types into a shape.
+          const press = {
+            key: arrow.id,
+            time: event.timeStamp,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          };
+          if (!event.shiftKey && isDoublePress(lastArrowPressRef.current, arrow.id, press)) {
+            lastArrowPressRef.current = null;
+            beginArrowLabelEdit(arrow.id);
+            return;
+          }
+          lastArrowPressRef.current = press;
+          if (event.shiftKey) {
+            setSelectedArrowIds((current) =>
+              current.includes(arrow.id)
+                ? current.filter((id) => id !== arrow.id)
+                : [...current, arrow.id],
+            );
+            return;
+          }
+          if (!selected) applySelection({ ...EMPTY_STUDIO_SELECTION, arrowIds: [arrow.id] });
+          beginElementMove(event, 'arrow', arrow.id);
+        }}
+      >
+        {/* The hit target follows the route, so an arrow is grabbable where it
+            is actually drawn rather than in the box around it. */}
+        <path
+          data-testid="studio-arrow-hit"
+          d={geometry.d}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={Math.max(18, strokeWidth + 12)}
+        />
+        <StudioArrowView
+          arrow={arrow}
+          geometry={geometry}
+          {...(selected
+            ? { stroke: SELECTION_ACCENT, strokeWidth: Math.max(3, strokeWidth + 1) }
+            : {})}
+        />
+        {selected && selectedArrowIds.length === 1 ? renderArrowHandles(arrow, geometry) : null}
+        {selected && arrow.label && editingArrowId !== arrow.id ? (
+          // A grab area over the label, so it can be slid along the line. Only
+          // while the arrow is selected: otherwise it would swallow presses
+          // meant for whatever the label happens to sit over.
+          <rect
+            role="button"
+            aria-label="Move this arrow’s label along the line"
+            x={geometry.label.x - 26}
+            y={geometry.label.y - 9}
+            width={52}
+            height={18}
+            fill="transparent"
+            style={{ cursor: 'grab' }}
+            onPointerDown={(event) => beginArrowEdit(event, arrow.id, 'label')}
+            // The label is the one place on this canvas where the browser's own
+            // double click survives: dragging it deliberately does not capture
+            // the pointer, and capture is what eats the follow-up events
+            // everywhere else here.
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              beginArrowLabelEdit(arrow.id);
+            }}
+          />
+        ) : null}
+      </g>
+    );
+  }
+
+  /**
+   * The grab points on a selected arrow: one per end, plus the middle leg of an
+   * elbow. Only on a single selection — handles on every arrow of a group would
+   * be a thicket, and none of them would mean anything to a group drag.
+   */
+  function renderArrowHandles(arrow: ArrowElement, geometry: ArrowGeometry) {
+    const ends: { handle: 'from' | 'to' | 'bend'; point: ArrowPoint; label: string }[] = [
+      { handle: 'from', point: geometry.points[0]!, label: 'Move the start of this arrow' },
+      {
+        handle: 'to',
+        point: geometry.points[geometry.points.length - 1]!,
+        label: 'Move the end of this arrow',
+      },
+    ];
+    const bendAt = arrowRoute(arrow) === 'elbow' ? elbowHandlePoint(arrow, arrowTargetsById) : null;
+    if (bendAt) ends.push({ handle: 'bend', point: bendAt, label: 'Slide this arrow’s bend' });
+
+    return ends.map(({ handle, point, label }) => (
+      <circle
+        key={handle}
+        role="button"
+        aria-label={label}
+        cx={point.x}
+        cy={point.y}
+        r={5}
+        fill="#FFFFFF"
+        stroke={SELECTION_ACCENT}
+        strokeWidth={2}
+        style={{ cursor: 'grab' }}
+        onPointerDown={(event) => beginArrowEdit(event, arrow.id, handle)}
+      />
+    ));
   }
 
   function renderPath(path: PathElement, key?: string, isDraft = false) {
@@ -5001,6 +5562,8 @@ export function DiagramEditor() {
           );
         })}
 
+        {canvasTool === 'select' ? renderTableInserts(table, size, colOffsets, rowOffsets) : null}
+
         {selected ? (
           <>
             <rect
@@ -5050,6 +5613,189 @@ export function DiagramEditor() {
         ) : null}
       </g>
     );
+  }
+
+  /**
+   * Where a row or a column can be added or taken away, on the table itself.
+   *
+   * A boundary adds — rows reached from the left edge, columns from the top,
+   * and the last of each from the bottom and right edges, which is where "one
+   * more" belongs. The body of a row or column takes that one away.
+   *
+   * Each is a real control rather than something the pointer conjures: the
+   * target is always there and always named, and hovering only draws the badge
+   * on it. A control that exists only under the pointer cannot be reached any
+   * other way, which would put every one of these out of reach of a keyboard.
+   *
+   * This replaces a menu of Row-below / Column-right buttons. A menu cannot say
+   * *where*, so it could only act on the last row or on whichever cell happened
+   * to be selected.
+   */
+  function renderTableInserts(
+    table: TableElement,
+    size: DiagramNodeSize,
+    colOffsets: number[],
+    rowOffsets: number[],
+  ) {
+    const rows = tableRowCount(table);
+    const cols = tableColCount(table);
+    const REACH = 14;
+
+    function control(
+      key: string,
+      action: 'insert' | 'remove',
+      axis: 'row' | 'col',
+      index: number,
+      name: string,
+      zone: { x: number; y: number; width: number; height: number },
+      badge: DiagramPoint,
+    ) {
+      const showing =
+        tableInsert !== null &&
+        tableInsert.tableId === table.id &&
+        tableInsert.axis === axis &&
+        tableInsert.index === index &&
+        tableInsert.action === action;
+
+      return (
+        <g
+          key={key}
+          role="button"
+          aria-label={name}
+          style={{ cursor: 'pointer' }}
+          onPointerEnter={() => setTableInsert({ tableId: table.id, axis, index, action })}
+          onPointerLeave={() =>
+            setTableInsert((current) =>
+              current &&
+              current.tableId === table.id &&
+              current.axis === axis &&
+              current.index === index &&
+              current.action === action
+                ? null
+                : current,
+            )
+          }
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.stopPropagation();
+            event.preventDefault();
+            clearError();
+            const next =
+              action === 'insert'
+                ? axis === 'row'
+                  ? insertRow(table, index)
+                  : insertColumn(table, index)
+                : axis === 'row'
+                  ? deleteRow(table, index)
+                  : deleteColumn(table, index);
+            replaceTable(next, table.id);
+            // What was selected may not exist any more, so the range comes back
+            // inside whatever the table now is.
+            if (action === 'remove' && cellRange) {
+              const clamped = clampCellRef(next, cellRange.focus);
+              setCellRange({ anchor: clamped, focus: clamped });
+            }
+            setTableInsert(null);
+          }}
+        >
+          <rect {...zone} fill="transparent" />
+          {showing ? (
+            <>
+              <circle
+                cx={badge.x}
+                cy={badge.y}
+                r={7}
+                fill={action === 'insert' ? SELECTION_ACCENT : '#8A5B14'}
+                pointerEvents="none"
+              />
+              <path
+                d={
+                  action === 'insert'
+                    ? `M ${badge.x - 3.5} ${badge.y} L ${badge.x + 3.5} ${badge.y} M ${badge.x} ${badge.y - 3.5} L ${badge.x} ${badge.y + 3.5}`
+                    : `M ${badge.x - 3.5} ${badge.y} L ${badge.x + 3.5} ${badge.y}`
+                }
+                stroke="#FFFFFF"
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                pointerEvents="none"
+              />
+            </>
+          ) : null}
+        </g>
+      );
+    }
+
+    const controls: ReactNode[] = [];
+
+    for (let index = 0; index <= rows; index += 1) {
+      const y = rowOffsets[index] ?? size.height;
+      const last = index === rows;
+      controls.push(
+        control(
+          `row-add-${index}`,
+          'insert',
+          'row',
+          index,
+          last ? 'Add a row' : `Insert a row above row ${index + 1}`,
+          last
+            ? { x: 0, y: size.height, width: size.width, height: REACH }
+            : { x: -REACH, y: y - REACH / 2, width: REACH, height: REACH },
+          last ? { x: size.width / 2, y: size.height + REACH / 2 } : { x: -REACH / 2, y },
+        ),
+      );
+
+      // The body of the row, between its two boundaries. A table has to keep a
+      // row, so the last one cannot be taken away.
+      if (last || rows <= 1) continue;
+      const height = (rowOffsets[index + 1] ?? size.height) - y;
+      if (height <= REACH) continue;
+      controls.push(
+        control(
+          `row-remove-${index}`,
+          'remove',
+          'row',
+          index,
+          `Delete row ${index + 1}`,
+          { x: -REACH, y: y + REACH / 2, width: REACH, height: height - REACH },
+          { x: -REACH / 2, y: y + height / 2 },
+        ),
+      );
+    }
+
+    for (let index = 0; index <= cols; index += 1) {
+      const x = colOffsets[index] ?? size.width;
+      const last = index === cols;
+      controls.push(
+        control(
+          `col-add-${index}`,
+          'insert',
+          'col',
+          index,
+          last ? 'Add a column' : `Insert a column left of column ${index + 1}`,
+          last
+            ? { x: size.width, y: 0, width: REACH, height: size.height }
+            : { x: x - REACH / 2, y: -REACH, width: REACH, height: REACH },
+          last ? { x: size.width + REACH / 2, y: size.height / 2 } : { x, y: -REACH / 2 },
+        ),
+      );
+
+      if (last || cols <= 1) continue;
+      const width = (colOffsets[index + 1] ?? size.width) - x;
+      if (width <= REACH) continue;
+      controls.push(
+        control(
+          `col-remove-${index}`,
+          'remove',
+          'col',
+          index,
+          `Delete column ${index + 1}`,
+          { x: x + REACH / 2, y: -REACH, width: width - REACH, height: REACH },
+          { x: x + width / 2, y: -REACH / 2 },
+        ),
+      );
+    }
+
+    return <>{controls}</>;
   }
 
   function renderInk(stroke: StudioInkStroke) {
@@ -5570,10 +6316,85 @@ export function DiagramEditor() {
                 const table = tableById.get(ref.key);
                 return table ? renderTable(table) : null;
               }
+              if (ref.kind === 'arrow') {
+                const arrow = arrowById.get(ref.key);
+                return arrow ? renderArrow(arrow) : null;
+              }
               const node = nodeById.get(ref.key);
               return node ? renderNode(node) : null;
             })}
           </g>
+
+          {/* The arrow being drawn, and what its ends would bind to. Outside the
+              ordered pass because it is not part of the artifact yet. */}
+          {editingArrow
+            ? (() => {
+                const geometry = arrowGeometry(editingArrow, arrowTargetsById);
+                const width = 140;
+                const height = 24;
+                return (
+                  <foreignObject
+                    x={geometry.label.x - width / 2}
+                    y={geometry.label.y - height / 2}
+                    width={width}
+                    height={height}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex h-full w-full items-center">
+                      <input
+                        ref={arrowLabelInputRef}
+                        aria-label="Arrow label"
+                        autoFocus
+                        defaultValue={editingArrow.label ?? ''}
+                        maxLength={ARROW_LABEL_LIMIT}
+                        onBlur={(event) => commitArrowLabel(editingArrow.id, event.target.value)}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === 'Enter') {
+                            commitArrowLabel(editingArrow.id, event.currentTarget.value);
+                          }
+                          // Escape abandons the edit and keeps what was there.
+                          if (event.key === 'Escape') setEditingArrowId(null);
+                        }}
+                        className="w-full rounded border border-rt-cool bg-rt-surface px-1 text-center text-[11px] text-rt-ink outline-none"
+                      />
+                    </div>
+                  </foreignObject>
+                );
+              })()
+            : null}
+
+          {arrowDraft ? (
+            <g data-testid="arrow-draft" opacity={0.85}>
+              <StudioArrowView
+                arrow={draftArrow(arrowDraft, {
+                  strokeColor: pathColor,
+                  strokeWidthPreset: pathWidth,
+                  strokeStyle: pathStyle,
+                })}
+                geometry={arrowGeometry(
+                  draftArrow(arrowDraft, {
+                    strokeColor: pathColor,
+                    strokeWidthPreset: pathWidth,
+                    strokeStyle: pathStyle,
+                  }),
+                  arrowTargetsById,
+                )}
+              />
+            </g>
+          ) : null}
+          {arrowSnap ? (
+            <circle
+              data-testid="arrow-snap"
+              cx={arrowSnap.point.x}
+              cy={arrowSnap.point.y}
+              r={4}
+              fill={SELECTION_ACCENT}
+              stroke="#FFFFFF"
+              strokeWidth={1.5}
+              pointerEvents="none"
+            />
+          ) : null}
 
           {activeStroke ? renderInk(activeStroke) : null}
 
@@ -5760,8 +6581,12 @@ export function DiagramEditor() {
             </p>
           ) : (
             <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
-              {nodes.length} {nodes.length === 1 ? 'element' : 'elements'} · {edges.length}{' '}
-              {edges.length === 1 ? 'arrow' : 'arrows'}
+              {nodes.length} {nodes.length === 1 ? 'element' : 'elements'} ·{' '}
+              {/* Both kinds together: a connection between two shapes and a
+                  standalone arrow are one thing to whoever drew them, whatever
+                  the artifact calls each. */}
+              {edges.length + arrows.length}{' '}
+              {edges.length + arrows.length === 1 ? 'arrow' : 'arrows'}
               {ink.length > 0 ? ` · ${ink.length} ${ink.length === 1 ? 'stroke' : 'strokes'}` : ''}
               {paths.length > 0
                 ? ` · ${paths.length} ${paths.length === 1 ? 'path' : 'paths'}`
