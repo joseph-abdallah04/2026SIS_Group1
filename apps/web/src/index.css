@@ -390,6 +390,25 @@ body {
   width: 0.9rem;
 }
 
+/* The waiting room's head is 3.5rem — roughly twice the rail's — so the ring
+   needs the extra stand-off and weight to read as the same signal at that
+   size, and the badge has to grow with it or it turns into a speck. The
+   surface is the lobby's own page fill (WaitingRoom.tsx), without which the
+   badge ring reads as the mismatched halo the header variant above already
+   documents. */
+.rt-voice-seat[data-size='lobby']::after {
+  inset: -5px;
+  border-width: 3px;
+}
+
+.rt-voice-seat[data-size='lobby'] .rt-voice-bubble-muted {
+  right: 1px;
+  bottom: 1px;
+  height: 1.15rem;
+  width: 1.15rem;
+  --rt-seat-surface: #f7f4ee;
+}
+
 .rt-voice-seat[data-size='header'] .rt-voice-bubble-muted {
   height: 0.72rem;
   width: 0.72rem;
