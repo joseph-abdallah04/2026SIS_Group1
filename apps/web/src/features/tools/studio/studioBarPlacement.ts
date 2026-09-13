@@ -24,14 +24,20 @@ export interface BarPlacement {
   side: 'above' | 'below';
 }
 
-/** Breathing room from the selection and from the edges of the canvas. */
-const GAP = 8;
+/**
+ * Breathing room from the selection and from the edges of the canvas.
+ *
+ * Wide enough to clear what an element draws *outside* its own bounds: a
+ * table's insert and remove badges sit above its top edge and to the left of
+ * its first column, and eight units put the bar straight over them.
+ */
+export const BAR_GAP = 22;
 
 export function placePropertiesBar(
   selection: PlacementRect,
   bar: { width: number; height: number },
   viewport: PlacementRect,
-  gap = GAP,
+  gap = BAR_GAP,
 ): BarPlacement {
   // Centred on the selection, then pulled back inside the canvas. Clamping the
   // low edge last means a bar wider than the canvas is left-aligned rather than

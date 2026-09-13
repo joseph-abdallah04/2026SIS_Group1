@@ -48,6 +48,12 @@ interface PopoverProps {
    * by the trigger, or by choosing another tool instead.
    */
   dismissOnOutsidePress?: boolean;
+  /**
+   * Whether Escape closes it. A panel whose tool is mid-gesture leaves the key
+   * alone: Escape there means "put down what I am carrying", and the canvas is
+   * the one that can do that.
+   */
+  dismissOnEscape?: boolean;
   children: ReactNode;
 }
 
@@ -80,6 +86,7 @@ export function Popover({
   width,
   triggerRef,
   dismissOnOutsidePress = true,
+  dismissOnEscape = true,
   children,
 }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -134,7 +141,7 @@ export function Popover({
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || !dismissOnEscape) return;
       // The studio is a native `<dialog>`, so Escape is a close request: the
       // browser fires `cancel` on it and the whole editor shuts. Stopping the
       // keydown does not reach that — only preventing its default does. Without
@@ -151,7 +158,7 @@ export function Popover({
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [open, onClose, triggerRef, dismissOnOutsidePress]);
+  }, [open, onClose, triggerRef, dismissOnOutsidePress, dismissOnEscape]);
 
   if (!open) return null;
 

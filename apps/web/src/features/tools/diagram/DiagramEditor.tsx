@@ -94,7 +94,6 @@ import {
   DIAGRAM_TEXT_ALIGNS,
   DIAGRAM_LABEL_INK,
   DIAGRAM_STROKE_COLORS,
-  DIAGRAM_STROKE_KEYS,
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
   diagramEdgeDash,
@@ -152,7 +151,6 @@ import { useCreativeTools } from '../CreativeToolsContext';
 import {
   DIAGRAM_CANVAS_HEIGHT,
   DIAGRAM_CANVAS_WIDTH,
-  DIAGRAM_EDGE_LABEL_LIMIT,
   DIAGRAM_GRID,
   DIAGRAM_LABEL_LIMIT,
   DIAGRAM_NODE_SHAPES,
@@ -160,14 +158,13 @@ import {
   placeNodePosition,
   DIAGRAM_SHAPE_PALETTE_ORDER,
   DIAGRAM_SHAPE_MEDIA_TYPE,
-  addEdge,
   addNode,
   clampNodesInsideContainer,
-  clearEdgeStyle,
   clientPointToDiagramPoint,
   containerAtPoint,
   deleteContainerWithContents,
   deleteEdge,
+  styleEdge,
   deleteNodesWithEdges,
   edgeKey,
   draggedSelectionRoots,
@@ -184,7 +181,6 @@ import {
   reparentNodes,
   snapToGrid,
   resizeNode,
-  styleEdge,
   ungroupContainer,
   type DiagramAlignMode,
   type DiagramDistributeAxis,
@@ -300,6 +296,8 @@ import {
 } from '../studio/studioDraft';
 import {
   arrowEndpointAt,
+  createArrowId,
+  pointerTravelSlopForView,
   arrowSnapToleranceForView,
   bendForPointer,
   draftArrow,
@@ -445,8 +443,25 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
 const SUBTOOL_SIZE = 'h-7 w-7';
 const SUBTOOL_SWATCH_SIZE = 'h-5 w-5';
 
-const TILE_BUTTON = `flex ${SUBTOOL_SIZE} items-center justify-center rounded-lg border border-rt-tertiary bg-rt-surface text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const TILE_SHAPE = `flex ${SUBTOOL_SIZE} items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const TILE_IDLE =
+  'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink';
 const TILE_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
+
+/**
+ * A sub-toolbar tile, lit when it is the one in use.
+ *
+ * The two states are swapped rather than stacked. Appending the active colours
+ * to a class list that already carries the idle ones leaves Tailwind emitting
+ * both, and which of them wins is decided by the order they happen to sit in
+ * the stylesheet — here, the idle ones did, so a tool armed from this palette
+ * never actually looked armed however correct its `aria-pressed` was.
+ */
+function tileClass(active: boolean): string {
+  return `${TILE_SHAPE} ${active ? TILE_ACTIVE : TILE_IDLE}`;
+}
+
+const TILE_BUTTON = tileClass(false);
 
 const CELL_ALIGN_ICONS: Record<TableCellAlign, LucideIcon> = {
   left: AlignLeft,
@@ -749,6 +764,14 @@ function CapTile({ cap }: { cap: ArrowCap }) {
     </svg>
   );
 }
+
+/**
+ * How far outside a table its row and column controls reach, in scene units.
+ *
+ * Shared with the properties bar's placement: the bar keeps clear of the
+ * selection it is given, so the selection it is given has to include these.
+ */
+const TABLE_INSERT_REACH = 14;
 
 /** Shown faintly inside a selected element that has no label yet. */
 const NODE_LABEL_PLACEHOLDER = 'Add text';
@@ -1139,7 +1162,6 @@ export function DiagramEditor() {
   // The box the floating toolbars are positioned inside; the canvas is centred
   // within it, so the two do not share an origin.
   const canvasFrameRef = useRef<HTMLElement>(null);
-  const edgeLabelInputRef = useRef<HTMLInputElement>(null);
   const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const resizeRef = useRef<ResizeSession | null>(null);
@@ -1246,7 +1268,11 @@ export function DiagramEditor() {
     if (!ghost && canvasTool !== 'arrow') return;
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.key !== 'Escape') return;
+      // Deliberately not checking `defaultPrevented`. A popover that wants this
+      // key stops it in the capture phase, so this never runs for one — while
+      // the overlay marks every Escape as handled to stop the browser treating
+      // it as a request to close the studio, which would switch this off.
       const target = event.target as HTMLElement | null;
       // Not while something is being typed into: Escape belongs to the field.
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
@@ -1417,28 +1443,58 @@ export function DiagramEditor() {
     setSelectedEdgeKey(null);
   }
 
+  /**
+   * Join two shapes.
+   *
+   * This makes a standalone `arrow`, not an `edge`. An arrow is the connector
+   * the studio draws everywhere else now: it can be restyled, given caps, bent
+   * into an elbow, labelled and re-pointed, none of which an edge can do. Both
+   * ends bind to their shape, so it follows them exactly as an edge did.
+   *
+   * Edges themselves are untouched — every stored diagram still renders and
+   * still arranges by them. Nothing new is written as one.
+   */
   function connectNode(node: DiagramNode) {
     if (!connectionSourceId) {
       setConnectionSourceId(node.id);
       selectOnly(node.id);
       return;
     }
-
-    const graph = history.snapshotRef.current;
-    const result = addEdge(graph.nodes, graph.edges, connectionSourceId, node.id);
-    if (!result.ok) {
-      setValidationError(result.error);
+    if (connectionSourceId === node.id) {
+      setValidationError('An arrow needs two different elements.');
       return;
     }
 
-    history.commit({ nodes: graph.nodes, edges: result.edges });
-    setSelectedEdgeKey(edgeKey(result.edge));
-    setSelectedIds([]);
+    const graph = history.snapshotRef.current;
+    const from = graph.nodes.find((candidate) => candidate.id === connectionSourceId);
+    if (!from) {
+      cancelConnection();
+      return;
+    }
+
+    const centreOf = (target: DiagramNode) => {
+      const size = effectiveDiagramNodeSize(target);
+      return { x: target.x + size.width / 2, y: target.y + size.height / 2 };
+    };
+    const arrow: ArrowElement = {
+      id: createArrowId(),
+      // No attachment named on either end: the arrow aims at each centre and
+      // meets whichever face the other is on, sliding round as they move. That
+      // is exactly what an edge did.
+      from: { ...centreOf(from), elementId: from.id },
+      to: { ...centreOf(node), elementId: node.id },
+    };
+
+    clearError();
+    const order = paintOrderWithNewestOnTop(graph, arrow.id);
+    history.commit({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      arrows: [...(graph.arrows ?? []), arrow],
+      ...(order ? { z: order } : {}),
+    });
     cancelConnection();
-    // Naming the arrow is the obvious next thing, and its field lives behind the
-    // bar's More button — so joining two elements opens that panel itself.
-    setOpenBarMenu('Arrow');
-    queueMicrotask(() => edgeLabelInputRef.current?.focus());
+    applySelection({ ...EMPTY_STUDIO_SELECTION, arrowIds: [arrow.id] });
   }
 
   function removeSelectedNodes() {
@@ -1851,7 +1907,7 @@ export function DiagramEditor() {
                       applyArrowSetting({ [end]: cap });
                       close();
                     }}
-                    className={`${TILE_BUTTON} ${current === cap ? TILE_ACTIVE : ''}`}
+                    className={tileClass(current === cap)}
                   >
                     <span className={end === 'startCap' ? 'rotate-180' : undefined}>
                       <CapTile cap={cap} />
@@ -1898,7 +1954,7 @@ export function DiagramEditor() {
                       applyArrowSetting({ route: value });
                       close();
                     }}
-                    className={`${TILE_BUTTON} ${current === value ? TILE_ACTIVE : ''}`}
+                    className={tileClass(current === value)}
                   >
                     <Icon aria-hidden="true" size={14} />
                   </button>
@@ -2115,8 +2171,21 @@ export function DiagramEditor() {
     const top = Math.min(...boxes.map((box) => box.y));
     const right = Math.max(...boxes.map((box) => box.x + box.width));
     const bottom = Math.max(...boxes.map((box) => box.y + box.height));
+
+    // A table draws its insert and remove badges outside its own grid, above
+    // the top edge and left of the first column. The bar is placed clear of
+    // whatever it is given, so it has to be given the space those occupy —
+    // in scene units, so the clearance holds at any zoom rather than only at
+    // the one a fixed pixel gap was chosen for.
+    const reach = selectedTableIds.length > 0 ? TABLE_INSERT_REACH : 0;
+
     return diagramRectToClientRect(
-      { x: left, y: top, width: right - left, height: bottom - top },
+      {
+        x: left - reach,
+        y: top - reach,
+        width: right - left + reach * 2,
+        height: bottom - top + reach * 2,
+      },
       surfaceBounds(),
       renderedView,
     );
@@ -2266,20 +2335,6 @@ export function DiagramEditor() {
 
   function duplicateSelection() {
     pasteFragment(copySelection());
-  }
-
-  function applyEdgeStyle(style: Parameters<typeof styleEdge>[2]) {
-    if (!selectedEdge) return;
-    clearError();
-    const graph = history.snapshotRef.current;
-    history.commit({ nodes: graph.nodes, edges: styleEdge(graph.edges, selectedEdge, style) });
-  }
-
-  function resetEdgeStyle() {
-    if (!selectedEdge) return;
-    clearError();
-    const graph = history.snapshotRef.current;
-    history.commit({ nodes: graph.nodes, edges: clearEdgeStyle(graph.edges, selectedEdge) });
   }
 
   function normalizeSelectedLabel() {
@@ -2667,9 +2722,14 @@ export function DiagramEditor() {
     const graph = history.snapshotRef.current;
     commitPaths([...(graph.paths ?? []), path], paintOrderWithNewestOnTop(graph, path.id));
 
-    // Finishing hands the shape straight back, selected and on the select tool,
-    // so the next thing you can do is move it. The table tool already behaves
-    // this way; drawing another line is one click on Pen.
+    // The line tool stays armed, the way the brush does: these are tools you
+    // draw several of in a row, and going back to Select after each one makes
+    // the second line cost two clicks more than the first. The pen finishes a
+    // whole shape in one go, so it hands that shape back ready to move.
+    if (canvasTool === 'line') {
+      clearAllSelection();
+      return;
+    }
     setCanvasTool('select');
     applySelection({ ...EMPTY_STUDIO_SELECTION, pathIds: [path.id] });
   }
@@ -3451,7 +3511,15 @@ export function DiagramEditor() {
     );
   }
 
-  function renderShapeOptions(close: () => void) {
+  /**
+   * The palette of things to place: shapes, a line, the two arrows.
+   *
+   * Nothing here closes the palette. These are all tools used more than once —
+   * three boxes and an arrow between them is four trips back to the rail if
+   * picking one puts the palette away — so it stays up until it is dismissed,
+   * by the rail button or by a press somewhere that is not the canvas.
+   */
+  function renderShapeOptions() {
     const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
     return (
       <div role="group" aria-label="Elements" className="flex flex-col items-center gap-1">
@@ -3469,7 +3537,6 @@ export function DiagramEditor() {
               onClick={() => {
                 setPendingShape(shape);
                 selectCanvasTool('shape');
-                close();
               }}
               disabled={disabled}
               aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
@@ -3487,12 +3554,9 @@ export function DiagramEditor() {
           aria-label="Line"
           aria-pressed={canvasTool === 'line'}
           disabled={isSubmitting}
-          onClick={() => {
-            selectCanvasTool('line');
-            close();
-          }}
+          onClick={() => selectCanvasTool('line')}
           title="Draw a straight line; hold Shift to constrain the angle"
-          className={`${TILE_BUTTON} ${canvasTool === 'line' ? TILE_ACTIVE : ''}`}
+          className={tileClass(canvasTool === 'line')}
         >
           <Minus aria-hidden="true" size={14} />
         </button>
@@ -3514,16 +3578,13 @@ export function DiagramEditor() {
               setPendingArrowRoute(route);
               setArrowDraft(null);
               selectCanvasTool('arrow');
-              close();
             }}
             title={
               route === 'straight'
                 ? 'Press where the arrow starts, then drag to where it ends'
                 : 'The same, bent into right angles on the way'
             }
-            className={`${TILE_BUTTON} ${
-              canvasTool === 'arrow' && pendingArrowRoute === route ? TILE_ACTIVE : ''
-            }`}
+            className={tileClass(canvasTool === 'arrow' && pendingArrowRoute === route)}
           >
             <ArrowIcon aria-hidden="true" size={14} />
           </button>
@@ -3630,127 +3691,6 @@ export function DiagramEditor() {
    * canvas keeps the width.
    */
   /** A table's structure: the rows and columns themselves, and their fill. */
-  /** An arrow's own settings, including the one thing it cannot be given on the
-   * canvas: a label. */
-  function renderEdgeDetails() {
-    return (
-      <div className="max-h-[70vh] w-64 overflow-y-auto">
-        {selectedEdge ? (
-          <section className="mt-4 border-t border-rt-tertiary pt-4" aria-label="Selected arrow">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                  Selected arrow
-                </p>
-                <p className="mt-1 truncate text-[11px] text-rt-ink-muted">
-                  {selectedNodeById(nodes, selectedEdge.from)?.label} →{' '}
-                  {selectedNodeById(nodes, selectedEdge.to)?.label}
-                </p>
-              </div>
-              <IconButton label="Delete selected arrow" onClick={removeSelectedEdge}>
-                <Trash2 aria-hidden="true" size={16} />
-              </IconButton>
-            </div>
-            <label
-              htmlFor="diagram-edge-label"
-              className="mt-3 block text-[12px] font-semibold text-rt-ink"
-            >
-              Label <span className="font-normal text-rt-ink-faint">(optional)</span>
-            </label>
-            <input
-              ref={edgeLabelInputRef}
-              id="diagram-edge-label"
-              value={selectedEdge.label ?? ''}
-              maxLength={DIAGRAM_EDGE_LABEL_LIMIT}
-              onFocus={() => {
-                edgeLabelStartRef.current ??= history.snapshotRef.current;
-              }}
-              onChange={(event) => {
-                clearError();
-                const graph = history.snapshotRef.current;
-                history.preview({
-                  nodes: graph.nodes,
-                  edges: renameEdge(graph.edges, selectedEdge, event.target.value),
-                });
-              }}
-              onBlur={normalizeSelectedEdgeLabel}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelEdgeLabelEdit();
-                  canvasRef.current?.focus();
-                } else if (event.key === 'Enter') {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-              }}
-              placeholder="e.g. sends request"
-              className="mt-1.5 h-10 w-full rounded-lg border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none select-text placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint"
-            />
-            <p className="mt-1.5 text-right text-[10px] tabular-nums text-rt-ink-faint">
-              {(selectedEdge.label ?? '').length}/{DIAGRAM_EDGE_LABEL_LIMIT}
-            </p>
-
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <p className="text-[11px] font-medium text-rt-ink-muted">Arrow style</p>
-              <Button
-                variant="quiet"
-                className="min-h-7 px-2 text-[11px]"
-                aria-label="Reset arrow style"
-                disabled={isSubmitting}
-                title="Return this arrow to the default appearance"
-                onClick={resetEdgeStyle}
-              >
-                Reset
-              </Button>
-            </div>
-            <div className="mt-1 grid grid-cols-7 gap-1.5">
-              {DIAGRAM_STROKE_KEYS.map((key) => (
-                <SwatchButton
-                  key={key}
-                  label={`Arrow ${key}`}
-                  color={DIAGRAM_STROKE_COLORS[key]}
-                  active={selectedEdge.strokeColor === key}
-                  disabled={isSubmitting}
-                  onSelect={() => applyEdgeStyle({ strokeColor: key })}
-                />
-              ))}
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_STROKE_WIDTH_PRESETS.map((preset) => (
-                <PresetButton
-                  key={preset}
-                  label={STROKE_WIDTH_LABELS[preset]}
-                  name={`Arrow width ${preset}`}
-                  active={selectedEdge.strokeWidthPreset === preset}
-                  disabled={isSubmitting}
-                  onSelect={() => applyEdgeStyle({ strokeWidthPreset: preset })}
-                />
-              ))}
-            </div>
-            <div className="mt-1.5 flex gap-1.5">
-              {DIAGRAM_STROKE_STYLES.map((style) => (
-                <PresetButton
-                  key={style}
-                  label={STROKE_STYLE_LABELS[style]}
-                  name={`Arrow style ${style}`}
-                  active={selectedEdge.strokeStyle === style}
-                  disabled={isSubmitting}
-                  onSelect={() => applyEdgeStyle({ strokeStyle: style })}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
-      </div>
-    );
-  }
-
-  /**
-   * The question asked before a container is deleted. Floating over the canvas
-   * rather than tucked into a panel: it is a question, and one that has to be
-   * answered before anything else happens.
-   */
   function renderContainerDeletePrompt() {
     return (
       <div className="pointer-events-auto absolute bottom-4 left-1/2 z-30 w-72 -translate-x-1/2">
@@ -3963,6 +3903,14 @@ export function DiagramEditor() {
   }
 
   /**
+   * How far the pointer has to travel before a press is a drag rather than a
+   * click. Shared by the arrow and the line, so both read a wobble the same way.
+   */
+  function travelSlop() {
+    return pointerTravelSlopForView(renderedViewRef.current, surfaceBounds());
+  }
+
+  /**
    * An endpoint for this pointer position, bound to whatever it landed on.
    *
    * A free end lands on the grid like every other piece of artwork, so an arrow
@@ -3977,18 +3925,18 @@ export function DiagramEditor() {
   }
 
   /**
-   * Put the drafted arrow on the canvas and go back to select.
+   * Put the drafted arrow on the canvas, and stay on the tool.
    *
-   * Same rule as every other element placed from the rail: the tool is for one
-   * arrow, and what anyone wants immediately afterwards is to move or restyle
-   * the thing they just made.
+   * Drawing tools stay armed — the brush always has, and an arrow is rarely
+   * the only one anybody wants. Select is one press away when it is time to
+   * move something.
    */
   function placeArrow(draft: ArrowDraft) {
-    const arrow = finishArrow(draft, {
-      strokeColor: pathColor,
-      strokeWidthPreset: pathWidth,
-      strokeStyle: pathStyle,
-    });
+    const arrow = finishArrow(
+      draft,
+      { strokeColor: pathColor, strokeWidthPreset: pathWidth, strokeStyle: pathStyle },
+      travelSlop(),
+    );
     if (!arrow) return false;
 
     const graph = history.snapshotRef.current;
@@ -4001,8 +3949,8 @@ export function DiagramEditor() {
     setArrowDraft(null);
     setArrowSnap(null);
     arrowPressRef.current = null;
-    setCanvasTool('select');
-    applySelection({ ...EMPTY_STUDIO_SELECTION, arrowIds: [arrow.id] });
+    // Armed, like the line and the brush: an arrow is rarely the only one.
+    clearAllSelection();
     return true;
   }
 
@@ -4185,7 +4133,16 @@ export function DiagramEditor() {
       }
 
       const placed = nextAnchorPoint(anchors, raw, event.shiftKey);
-      const next = canvasTool === 'line' ? [{ x: placed.x, y: placed.y }] : [...anchors, placed];
+      // The line is drawn by two gestures, like the arrow: press-drag-release,
+      // or a click for each end. Starting over on every press is what broke
+      // the second one — the first point was thrown away before the second
+      // could arrive, so a click-then-click could never finish a line.
+      const next =
+        canvasTool === 'line'
+          ? anchors.length === 0
+            ? [{ x: placed.x, y: placed.y }]
+            : [...anchors, placed]
+          : [...anchors, placed];
       setPathAnchors(next);
       pathAnchorsRef.current = next;
       setPathCursor(placed);
@@ -4391,15 +4348,21 @@ export function DiagramEditor() {
       return true;
     }
 
-    // One drag is the whole line tool: it finishes where the pointer lifts.
     if (canvasTool === 'line') {
       const anchors = pathAnchorsRef.current;
       const start = anchors[0];
+      // Two anchors means the second press has landed: that is the line.
+      if (anchors.length >= 2) {
+        commitPathDraft(anchors.slice(0, 2), false);
+        return true;
+      }
+      // Otherwise this is the release of a drag. If it travelled far enough,
+      // the line is finished here; if it did not, the press was a click and the
+      // first point stays put, waiting for a second one. Without that distance
+      // check any wobble at all committed a line a pixel long — a dot.
       const end = pathCursor;
-      if (start && end && (start.x !== end.x || start.y !== end.y)) {
+      if (start && end && Math.hypot(end.x - start.x, end.y - start.y) >= travelSlop()) {
         commitPathDraft([start, { x: end.x, y: end.y }], false);
-      } else {
-        clearPathDraft();
       }
     }
     return true;
@@ -5002,17 +4965,6 @@ export function DiagramEditor() {
                 <Trash2 aria-hidden="true" size={15} />
               </button>
             </Tooltip>
-            {selectedEdge ? (
-              <BarMenu
-                openMenu={openBarMenu}
-                onOpenChange={setOpenBarMenu}
-                disabled={isSubmitting}
-                label="Arrow"
-                icon={<Link2 aria-hidden="true" size={15} />}
-              >
-                {() => renderEdgeDetails()}
-              </BarMenu>
-            ) : null}
           </>
         }
       />
@@ -5624,8 +5576,9 @@ export function DiagramEditor() {
    *
    * Each is a real control rather than something the pointer conjures: the
    * target is always there and always named, and hovering only draws the badge
-   * on it. A control that exists only under the pointer cannot be reached any
-   * other way, which would put every one of these out of reach of a keyboard.
+   * on it. A target that exists only while it is hovered cannot be found by
+   * anything that does not hover — a screen reader, a test, a touch. Keyboard
+   * operation still goes through the canvas, as it does for every element here.
    *
    * This replaces a menu of Row-below / Column-right buttons. A menu cannot say
    * *where*, so it could only act on the last row or on whichever cell happened
@@ -5639,7 +5592,7 @@ export function DiagramEditor() {
   ) {
     const rows = tableRowCount(table);
     const cols = tableColCount(table);
-    const REACH = 14;
+    const REACH = TABLE_INSERT_REACH;
 
     function control(
       key: string,

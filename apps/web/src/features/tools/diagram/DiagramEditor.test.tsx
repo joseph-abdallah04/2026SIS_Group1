@@ -1,4 +1,4 @@
-import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
@@ -160,9 +160,21 @@ async function openBarPanel(user: ReturnType<typeof userEvent.setup>, name: stri
  * arrow's settings. Everything else the old sidebar held is reached on the
  * canvas instead — a label by double-pressing, a size by its corner handles.
  */
+/**
+ * Open the bar's own panel, if the selection has one.
+ *
+ * It only ever had two, and both have since gone: a table's rows and columns
+ * moved onto the table, and an edge's settings became the arrow's own controls
+ * in the bar. Kept as a no-op rather than deleted from a dozen call sites,
+ * and narrowed to the bar so it cannot reach a tool palette that happens to
+ * hold a button of the same name — which is exactly what it did to the shapes
+ * palette's Arrow tile once that palette started staying open.
+ */
 async function openMore(user: ReturnType<typeof userEvent.setup>) {
+  const bar = screen.queryByRole('toolbar', { name: 'Selection properties' });
+  if (!bar) return;
   for (const name of ['Rows and columns', 'Arrow']) {
-    const trigger = screen.queryByRole('button', { name });
+    const trigger = within(bar).queryByRole('button', { name });
     if (!trigger) continue;
     if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
     return;
@@ -731,17 +743,24 @@ describe('diagram editor', () => {
     await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
-    await openMore(user);
-    await user.type(screen.getByLabelText('Label (optional)'), 'references');
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    await user.type(screen.getByRole('textbox', { name: 'Arrow label' }), 'references');
+    await user.keyboard('{Enter}');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     expect(propose).toHaveBeenCalledWith(
       expect.objectContaining({
         extendsProposalId: 'parent-diagram',
         artifactJson: expect.objectContaining({
-          edges: [
-            { from: 'n1', to: 'n2', label: 'becomes' },
-            { from: 'n3', to: 'n1', label: 'references' },
+          // The inherited edge is carried through untouched. The new connection
+          // is an arrow: nothing writes an edge any more.
+          edges: [{ from: 'n1', to: 'n2', label: 'becomes' }],
+          arrows: [
+            expect.objectContaining({
+              from: expect.objectContaining({ elementId: 'n3' }),
+              to: expect.objectContaining({ elementId: 'n1' }),
+              label: 'references',
+            }),
           ],
         }),
       }),
@@ -758,7 +777,10 @@ describe('diagram editor', () => {
     );
   });
 
-  it('connects two nodes, labels the arrow, and proposes normalized edge data', async () => {
+  it('connects two nodes with an arrow bound to both of them', async () => {
+    // Connect used to write an `edge`. It writes the studio's own arrow now —
+    // the same thing the arrow tool draws — so what it makes can be restyled,
+    // capped, bent and labelled. Edges are still read; none are written.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -773,25 +795,29 @@ describe('diagram editor', () => {
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     expect(screen.getByText('Choose a destination for Server.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Client' }));
-    // Joining two elements opens the panel holding the arrow's name and puts
-    // the cursor in it: naming it is the obvious next thing.
-    const edgeLabel = screen.getByLabelText('Label (optional)');
-    expect(edgeLabel).toHaveFocus();
-    await user.type(edgeLabel, '  sends   request  ');
-    await user.click(screen.getByRole('button', { name: 'Propose' }));
 
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
     const payload = propose.mock.calls[0]?.[0];
     expect(payload).toBeDefined();
     if (!payload || payload.artifactJson.type !== 'diagram') {
       throw new Error('Expected a diagram proposal payload');
     }
     expect(proposalCreateSchema.safeParse(payload).success).toBe(true);
-    expect(payload.artifactJson.edges).toEqual([{ from: 'n2', to: 'n1', label: 'sends request' }]);
+    expect(payload.artifactJson.edges).toEqual([]);
+
+    const arrows = payload.artifactJson.arrows ?? [];
+    expect(arrows).toHaveLength(1);
+    // Bound at both ends, so it follows the two shapes exactly as an edge did.
+    expect(arrows[0]?.from.elementId).toBe('n2');
+    expect(arrows[0]?.to.elementId).toBe('n1');
     expect(Math.min(...payload.artifactJson.nodes.map((node) => node.x))).toBe(24);
     expect(Math.min(...payload.artifactJson.nodes.map((node) => node.y))).toBe(24);
   });
 
-  it('undoes an arrow label and connection as separate intentional changes', async () => {
+  it('hands the new arrow to the bar, with the arrow controls on it', async () => {
+    // The edge had a panel of its own for the one thing it could not be given
+    // on the canvas: a name. An arrow needs no such panel — everything it has
+    // is in the bar, so that panel is gone.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -802,18 +828,36 @@ describe('diagram editor', () => {
     await openMore(user);
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
+
+    expect(screen.getByRole('button', { name: 'Start point' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Line shape' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End point' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Label (optional)')).toBeNull();
+  });
+
+  it('undoes a label and the connection itself as separate changes', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     await openMore(user);
-    const edgeLabel = screen.getByLabelText('Label (optional)');
-    await user.type(edgeLabel, 'calls');
-    await user.tab();
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
+
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    await user.type(screen.getByRole('textbox', { name: 'Arrow label' }), 'calls');
+    await user.keyboard('{Enter}');
+    expect(screen.getByText('calls')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
-    expect(
-      screen.getByRole('button', { name: 'Arrow from Unlabelled to Unlabelled' }),
-    ).toBeInTheDocument();
     expect(screen.queryByText('calls')).not.toBeInTheDocument();
+    expect(screen.getByTestId('studio-arrow')).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
-    expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('studio-arrow')).toBeNull();
   });
 
   it('undoes Arrange back to the authored positions', async () => {
@@ -833,7 +877,7 @@ describe('diagram editor', () => {
     expect(box).toHaveAttribute('transform', before ?? '');
   });
 
-  it('deletes a selected arrow without deleting its nodes', async () => {
+  it('deletes a connection without deleting the shapes it joined', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -845,12 +889,10 @@ describe('diagram editor', () => {
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
 
-    expect(
-      screen.getByRole('button', { name: 'Arrow from Unlabelled to Unlabelled' }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('studio-arrow')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Delete selection' }));
 
-    expect(screen.queryByRole('button', { name: /Arrow from/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('studio-arrow')).toBeNull();
     expect(screen.getByText('2 elements · 0 arrows')).toBeInTheDocument();
   });
 
@@ -1441,9 +1483,13 @@ describe('diagram resize and style', () => {
     const arrow = screen.getByRole('button', { name: 'Arrow from Client to Server' });
     fireEvent.pointerDown(arrow, { button: 0, pointerId: 74 });
 
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Arrow width thick' }));
-    await user.click(screen.getByRole('button', { name: 'Arrow style dotted' }));
+    // An inherited edge is still selectable and still restyled — through the
+    // bar's own line controls now that its private panel has gone.
+    await user.click(screen.getByRole('button', { name: 'Line width' }));
+    await user.click(screen.getByRole('button', { name: 'Thick width' }));
+    // Choosing one closes the menu, so the line type needs it opened again.
+    await user.click(screen.getByRole('button', { name: 'Line width' }));
+    await user.click(screen.getByRole('button', { name: 'Dotted style' }));
 
     // Selected arrows draw in the selection accent; the dash still scales.
     const line = arrow.querySelector('path[stroke-dasharray]');
@@ -4045,16 +4091,54 @@ describe('studio sub-toolbars in the editor', () => {
     expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('closes the shape palette once a shape has been placed', async () => {
-    render(<Harness propose={propose()} />);
+  it('lights the drawing tool the palette has armed', async () => {
+    // These three stay armed after they draw, so the palette has to say which
+    // one is in hand. The state was correct all along and invisible: the active
+    // colours were appended to a class list that already carried the idle ones,
+    // so Tailwind emitted both and the idle ones won.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
     const { user } = await openDiagram();
 
-    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    await user.click(screen.getByRole('button', { name: 'Shapes' }));
+    const line = screen.getByRole('button', { name: 'Line' });
+    const elbow = screen.getByRole('button', { name: 'Elbowed arrow' });
+    // Tokens, not substrings: the idle state carries `hover:border-rt-primary`.
+    const lit = (el: HTMLElement) => el.classList.contains('border-rt-primary');
+    const idle = (el: HTMLElement) => el.classList.contains('border-rt-tertiary');
+    expect(lit(line)).toBe(false);
 
-    expect(screen.getByRole('button', { name: 'Shapes' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
+    await user.click(line);
+    expect(line).toHaveAttribute('aria-pressed', 'true');
+    expect(lit(line)).toBe(true);
+    // The idle colours are gone rather than merely outranked.
+    expect(idle(line)).toBe(false);
+
+    await user.click(elbow);
+    expect(lit(elbow)).toBe(true);
+    expect(lit(line)).toBe(false);
+  });
+
+  it('keeps the shape palette open across placements', async () => {
+    // A palette of things to place is used more than once. Closing it on every
+    // placement meant a trip back to the rail for each shape; it stays up now,
+    // and a press somewhere that is not the canvas still dismisses it.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    expect(screen.getByRole('button', { name: 'Shapes' })).toHaveAttribute('aria-expanded', 'true');
+
+    // A different shape, straight from the palette that is already open.
+    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    expect(screen.getByRole('button', { name: 'Shapes' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /Rounded rectangle:/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ellipse:/ })).toBeInTheDocument();
   });
 
   it('closes the starter frames once one has been applied', async () => {

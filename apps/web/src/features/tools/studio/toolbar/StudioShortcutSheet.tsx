@@ -67,7 +67,11 @@ export function StudioShortcutSheet({ open, onClose, triggerRef }: StudioShortcu
       placement="bottom-end"
       triggerRef={triggerRef}
     >
-      <div className="max-h-[60vh] w-64 overflow-y-auto px-1 py-0.5">
+      {/* The chrome cluster this hangs off is `pointer-events-none`, so that a
+          press on the canvas behind it still lands. The sheet has to opt back
+          in or the wheel goes straight through it to the canvas, which is what
+          made a list too long for its own box impossible to scroll. */}
+      <div className="pointer-events-auto max-h-[60vh] w-64 overflow-y-auto overscroll-contain px-1 py-0.5">
         <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
           Tools
         </p>

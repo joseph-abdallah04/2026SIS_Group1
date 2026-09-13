@@ -43,12 +43,22 @@ export function arrowSnapToleranceForView(view: ViewExtent, bounds: ViewExtent):
 }
 
 /**
- * Shorter than this and the arrow is a smudge, not a mark.
+ * How far the pointer must travel before a press counts as a drag, in CSS
+ * pixels.
  *
- * A press that never became a drag lands here: it leaves the placement open for
- * a second click rather than dropping an arrow with both ends in one spot.
+ * Below this the press was a click that happened to wobble — a hand on a
+ * trackpad rarely lands perfectly still — and a click means "this end goes
+ * here, tell me the other one", not "here is a whole element a few pixels
+ * long". Generous on purpose: the cost of reading a small drag as a click is
+ * one extra click, and the cost of the reverse is a dot on the canvas to find
+ * and delete.
  */
-export const ARROW_MIN_LENGTH = 6;
+export const POINTER_TRAVEL_SLOP = 12;
+
+export function pointerTravelSlopForView(view: ViewExtent, bounds: ViewExtent): number {
+  if (bounds.width <= 0 || bounds.height <= 0) return POINTER_TRAVEL_SLOP;
+  return POINTER_TRAVEL_SLOP * Math.max(view.width / bounds.width, view.height / bounds.height);
+}
 
 export interface ArrowStyle {
   strokeColor?: DiagramStrokeKey;
@@ -207,18 +217,25 @@ export function draftArrow(draft: ArrowDraft, style: ArrowStyle = {}): ArrowElem
 }
 
 /** Has the pointer travelled far enough for this to be an arrow? */
-export function isArrowWorthPlacing(draft: ArrowDraft): boolean {
+export function isArrowWorthPlacing(
+  draft: ArrowDraft,
+  slop: number = POINTER_TRAVEL_SLOP,
+): boolean {
   // Both ends on one element is a self-loop, which is drawn around that element
   // and so has a length of its own however close the two drops were.
   if (draft.from.elementId !== undefined && draft.from.elementId === draft.to.elementId) {
     return true;
   }
-  return Math.hypot(draft.to.x - draft.from.x, draft.to.y - draft.from.y) >= ARROW_MIN_LENGTH;
+  return Math.hypot(draft.to.x - draft.from.x, draft.to.y - draft.from.y) >= slop;
 }
 
 /** The finished arrow, with a fresh id. */
-export function finishArrow(draft: ArrowDraft, style: ArrowStyle = {}): ArrowElement | null {
-  if (!isArrowWorthPlacing(draft)) return null;
+export function finishArrow(
+  draft: ArrowDraft,
+  style: ArrowStyle = {},
+  slop: number = POINTER_TRAVEL_SLOP,
+): ArrowElement | null {
+  if (!isArrowWorthPlacing(draft, slop)) return null;
   return { ...draftArrow(draft, style), id: createArrowId() };
 }
 

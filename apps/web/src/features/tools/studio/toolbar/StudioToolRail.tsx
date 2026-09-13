@@ -78,10 +78,12 @@ const MENU_ANCHOR: Partial<Record<RailSlot, 'rail' | 'button'>> = {
 };
 
 /**
- * Panels that stay open while their tool is in use. Closing the ink settings the
- * moment a stroke starts would mean reopening them between every stroke. They
- * close when the tool itself is put down — the pen hands the canvas back to
- * Select once a shape is finished, and its settings go with it.
+ * Panels that close when their tool is put down.
+ *
+ * The ink and pen settings belong to the tool being used: once the canvas hands
+ * itself back to Select, they have nothing to settle. The shapes palette is
+ * deliberately not one of these — it is a palette of things to place, and it
+ * stays up across placements so several can be placed in a row.
  */
 const STICKY_MENUS: readonly RailSlot[] = ['freehand', 'pen'];
 
@@ -285,7 +287,16 @@ export function StudioToolRail({
         placement={placement}
         label={`${MENU_LABELS[openMenu] ?? ''} options`}
         triggerRef={openTriggerRef}
-        dismissOnOutsidePress={!STICKY_MENUS.includes(openMenu)}
+        // A press on the canvas while this menu's own tool is armed is the
+        // gesture the menu exists for — placing a shape, drawing a line — not
+        // somebody dismissing it. Closing on that meant reopening the panel
+        // between every element. A press anywhere else still closes it.
+        dismissOnOutsidePress={!STICKY_MENUS.includes(openMenu) && openMenu !== slot}
+        // Escape is left alone by the one palette whose tools put something on
+        // the canvas: while a shape, a line or an arrow is armed, Escape means
+        // "put down what I am carrying", and only the canvas can do that. The
+        // ink and pen panels carry nothing, so Escape still closes those.
+        dismissOnEscape={!(openMenu === 'shapes' && slot === 'shapes')}
       >
         {openMenuContent()}
       </Popover>
