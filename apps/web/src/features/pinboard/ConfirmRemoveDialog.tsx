@@ -60,7 +60,7 @@ export function ConfirmRemoveDialog({
         // A click on the backdrop lands on the dialog element itself.
         if (event.target === dialogRef.current && !pending) onCancel();
       }}
-      className="m-auto w-[336px] max-w-[calc(100vw-32px)] rounded-xl border border-rt-tertiary bg-rt-surface p-0 text-rt-ink shadow-lg backdrop:bg-rt-ink/35"
+      className="m-auto w-[336px] max-w-[calc(100vw-32px)] rounded-2xl border border-rt-tertiary bg-rt-surface p-0 text-rt-ink shadow-lg backdrop:bg-rt-ink/35"
     >
       <div className="p-5">
         <h2 id="confirm-remove-title" className="text-[15px] font-semibold tracking-[-0.01em]">

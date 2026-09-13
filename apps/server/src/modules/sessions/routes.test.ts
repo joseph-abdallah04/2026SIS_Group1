@@ -8,8 +8,10 @@ import { ApiError } from '../../middleware/error.js';
 import { errorHandler } from '../../middleware/error.js';
 
 const assertSessionMember = vi.fn();
+const addSessionQuestion = vi.fn();
 const createSession = vi.fn();
 const deleteSession = vi.fn();
+const emitQuestionAdded = vi.fn();
 const emitQuestionFocus = vi.fn();
 const emitQuestionPhase = vi.fn();
 const emitSessionEnded = vi.fn();
@@ -48,8 +50,10 @@ vi.mock('../../middleware/auth.js', () => ({
 
 vi.mock('./service.js', () => ({
   assertSessionMember,
+  addSessionQuestion,
   createSession,
   deleteSession,
+  emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
@@ -440,6 +444,46 @@ describe('lifecycle broadcasts after a successful REST command', () => {
       });
       expect(res.status).toBe(200);
       expect(emitQuestionFocus).toHaveBeenCalledWith(io, 's1', 'q2');
+    });
+  });
+
+  it('POST /:id/questions appends through addSessionQuestion and broadcasts', async () => {
+    const question = {
+      id: 'q3',
+      sessionId: 's1',
+      text: 'What did we miss?',
+      position: 2,
+      status: 'pending',
+      createdAt: new Date('2026-09-10T00:00:00.000Z'),
+    };
+    addSessionQuestion.mockResolvedValue(question);
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'POST',
+        path: '/api/sessions/s1/questions',
+        body: { text: 'What did we miss?' },
+      });
+      expect(res.status).toBe(201);
+      expect(addSessionQuestion).toHaveBeenCalledWith({
+        sessionId: 's1',
+        leaderId: 'u1',
+        text: 'What did we miss?',
+      });
+      expect(emitQuestionAdded).toHaveBeenCalledWith(io, question);
+    });
+  });
+
+  it('rejects an empty question body before touching the service', async () => {
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'POST',
+        path: '/api/sessions/s1/questions',
+        body: { text: '   ' },
+      });
+      expect(res.status).toBe(400);
+      expect(addSessionQuestion).not.toHaveBeenCalled();
     });
   });
 

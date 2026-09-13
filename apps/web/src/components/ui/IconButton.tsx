@@ -24,7 +24,7 @@ export function IconButton({
       type={type}
       aria-label={label}
       title={title}
-      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${TONE_CLASSES[tone]} ${className}`}
+      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${TONE_CLASSES[tone]} ${className}`}
       {...props}
     />
   );

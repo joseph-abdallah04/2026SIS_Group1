@@ -247,7 +247,7 @@ export function DrawingEditor() {
     >
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-rt-tertiary bg-rt-surface px-3 py-2.5 sm:px-5">
         <div
-          className="flex items-center rounded-lg border border-rt-tertiary bg-rt-surface-alt p-0.5"
+          className="flex items-center rounded-full border border-rt-tertiary bg-rt-surface-alt p-0.5"
           aria-label="Drawing tool"
         >
           <button
@@ -255,7 +255,7 @@ export function DrawingEditor() {
             aria-label="Pen"
             aria-pressed={mode === 'pen'}
             onClick={() => setMode('pen')}
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
+            className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
           >
             <Pencil aria-hidden="true" size={15} />
             <span className="hidden sm:inline">Pen</span>
@@ -265,7 +265,7 @@ export function DrawingEditor() {
             aria-label="Eraser"
             aria-pressed={mode === 'eraser'}
             onClick={() => setMode('eraser')}
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
+            className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold text-rt-ink-muted focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-pressed:bg-rt-surface aria-pressed:text-rt-ink aria-pressed:shadow-sm"
           >
             <Eraser aria-hidden="true" size={15} />
             <span className="hidden sm:inline">Eraser</span>
@@ -300,7 +300,7 @@ export function DrawingEditor() {
           })}
         </fieldset>
 
-        <fieldset className="flex h-8 items-center overflow-hidden rounded-lg border border-rt-tertiary bg-rt-surface">
+        <fieldset className="flex h-8 items-center overflow-hidden rounded-full border border-rt-tertiary bg-rt-surface">
           <legend className="sr-only">Pen width</legend>
           {PEN_WIDTHS.map((option) => (
             <button
@@ -342,7 +342,7 @@ export function DrawingEditor() {
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3 sm:p-6">
         <div
-          className="relative w-full shrink-0 overflow-hidden rounded-lg border border-rt-tertiary shadow-[0_8px_30px_rgba(8,12,21,0.10)]"
+          className="relative w-full shrink-0 overflow-hidden rounded-2xl border border-rt-tertiary shadow-[0_8px_30px_rgba(8,12,21,0.10)]"
           style={{
             maxWidth: `min(1080px, calc((100dvh - ${DRAWING_VERTICAL_CHROME_REM}rem) * ${DRAWING_VIEWBOX_WIDTH / DRAWING_VIEWBOX_HEIGHT}))`,
             aspectRatio: `${DRAWING_VIEWBOX_WIDTH} / ${DRAWING_VIEWBOX_HEIGHT}`,

@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { signToken } from '../modules/auth/jwt.js';
 import { requireAuth } from './auth.js';
 
-function mockReqRes(authorization?: string) {
-  const req = { headers: { authorization } } as Request;
+function mockReqRes(authorization?: string, query: Request['query'] = {}) {
+  const req = { headers: { authorization }, query } as Request;
   const json = vi.fn();
   const status = vi.fn().mockReturnValue({ json });
   const res = { status } as unknown as Response;
@@ -37,5 +37,15 @@ describe('requireAuth', () => {
     expect(status).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(1);
     expect(req.userId).toBe('user-42');
+  });
+
+  it('ignores a token in the query string — the header is the only proof', () => {
+    const token = signToken({ userId: 'user-42' });
+    const { req, res, status, json, next } = mockReqRes(undefined, { token });
+    requireAuth(req, res, next);
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MISSING_TOKEN' }));
+    expect(next).not.toHaveBeenCalled();
+    expect(req.userId).toBeUndefined();
   });
 });

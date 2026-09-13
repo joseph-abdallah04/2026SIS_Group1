@@ -33,7 +33,7 @@ export function StudioOverlay({ children, isLive, onClose, title }: StudioOverla
       }}
     >
       <div className="flex h-full min-h-0 flex-col">
-        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-primary px-4 text-rt-ink sm:px-6">
+        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-4 text-rt-ink sm:px-6">
           <IconButton label="Back to pinboard" onClick={onClose}>
             <ArrowLeft aria-hidden="true" size={19} strokeWidth={1.8} />
           </IconButton>

@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Question, QuestionStatus } from '@roundtable/shared';
+import type { Question, QuestionStatus, VotingPhase } from '@roundtable/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn();
@@ -36,10 +36,14 @@ function renderPanel({
   questions,
   activeQuestionId,
   isLeader = true,
+  votingPhase,
+  hasProposals,
 }: {
   questions: Question[];
   activeQuestionId: string | null;
   isLeader?: boolean;
+  votingPhase?: VotingPhase;
+  hasProposals?: boolean;
 }) {
   return render(
     <AgendaPanel
@@ -47,6 +51,8 @@ function renderPanel({
       questions={questions}
       activeQuestionId={activeQuestionId}
       isLeader={isLeader}
+      votingPhase={votingPhase}
+      hasProposals={hasProposals}
     />,
   );
 }
@@ -113,7 +119,6 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
   it.each([
     ['pending', 'Start discussion', 'discussion'],
     ['discussion', 'Open voting', 'voting'],
-    ['voting', 'Mark answered', 'answered'],
   ] as const)('offers the next step from %s and sends it', async (status, label, sent) => {
     renderPanel({ questions: [question(0, status)], activeQuestionId: 'q1' });
 
@@ -123,6 +128,62 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
       questionId: 'q1',
       status: sent,
     });
+  });
+
+  it('does not offer Mark answered during voting — ending the vote does that', () => {
+    renderPanel({ questions: [question(0, 'voting')], activeQuestionId: 'q1' });
+
+    expect(screen.queryByRole('button', { name: 'Mark answered' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skip question' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to discussion' })).toBeInTheDocument();
+  });
+
+  it('lets the leader leave shortlisting and return to discussion', async () => {
+    renderPanel({
+      questions: [question(0, 'voting')],
+      activeQuestionId: 'q1',
+      votingPhase: 'shortlisting',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to discussion' }));
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
+      questionId: 'q1',
+      status: 'discussion',
+    });
+  });
+
+  it('does not offer a way back once the ballot is open', () => {
+    renderPanel({
+      questions: [question(0, 'voting')],
+      activeQuestionId: 'q1',
+      votingPhase: 'open',
+    });
+
+    expect(screen.queryByRole('button', { name: 'Back to discussion' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer Open voting without enough proposals to shortlist', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      hasProposals: false,
+    });
+
+    expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Open voting' }));
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('hides Skip while the ballot is showing the result', () => {
+    renderPanel({
+      questions: [question(0, 'voting')],
+      activeQuestionId: 'q1',
+      votingPhase: 'closed',
+    });
+
+    expect(screen.getByText('Results')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip question' })).not.toBeInTheDocument();
   });
 
   // The status arrives on the `sessionPhase` broadcast, so a panel that
@@ -217,5 +278,44 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     });
 
     expect(screen.getByText(/end the session when you/)).toBeInTheDocument();
+  });
+
+  it('lets the leader type a question into the agenda and posts it', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.type(screen.getByLabelText('New question'), 'What did we miss?');
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
+        text: 'What did we miss?',
+      }),
+    );
+    expect(screen.queryByDisplayValue('What did we miss?')).not.toBeInTheDocument();
+    expect(screen.queryByText('What did we miss?')).not.toBeInTheDocument();
+  });
+
+  it('does not offer the add field to a participant', () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      isLeader: false,
+    });
+
+    expect(screen.queryByLabelText('New question')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+  });
+
+  it('does not post a blank question', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(post).not.toHaveBeenCalled();
   });
 });

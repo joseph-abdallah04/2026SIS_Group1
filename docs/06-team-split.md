@@ -27,7 +27,7 @@
 | --- | --------------------- | ------------------------------ | ---------------- | ---------------------- | -------------------------------------- |
 | 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33     | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
 | 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
-| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18          | `pinboard/`            | `Proposal`, `Reaction`                 |
+| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18, F38     | `pinboard/`            | `Proposal`, `Reaction`                 |
 | 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
 | 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32          | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
 | 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | _(none — LiveKit-managed)_             |
@@ -192,8 +192,8 @@ The socket server currently accepts any connection and only logs connect/disconn
 
 ## Pinboard Core Owner
 
-**Features:** F14–F18  
-**Responsibility:** Proposal CRUD, reactions, canvas real-time sync, right-click context menu
+**Features:** F14–F18, F38  
+**Responsibility:** Proposal CRUD, reactions, reuse of your own earlier proposals, canvas real-time sync, right-click context menu
 
 ### Code ownership
 
@@ -207,8 +207,8 @@ Frontend: apps/web/src/features/pinboard/
 ### Database tables
 
 ```
-Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
-ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId, emoji)
+Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
+ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
 
 ### Socket events
@@ -266,7 +266,7 @@ reaction lands in the same place on every board.
 
 - Proposal artifacts are **editable by their author only** (F16); other users build on them via the separate "Extend" flow (F23), which creates a new proposal owned by that user
 - `extendsProposalId` links child proposals to parents; never delete parent if child exists
-- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
+- One reaction per person per proposal, enforced by a unique constraint on (proposalId, userId). Pressing the emoji you already left removes it; pressing a different one moves yours to it. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
 - Reactions are held to the same phase lock as every other board write: they move only while the question is in `discussion`. They are not votes (F27–F31), and a tally moving beside a live ballot would be read as one
 
 ---
@@ -508,25 +508,45 @@ POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, e
   the server: voice still owns no tables, and the only thing lost across a
   refresh is the participant's own intent. Someone who rejoins muted never
   opens the microphone at all — no prompt, no recording indicator
-- The participant rail (F13) is docked on the **right** of the board, mirroring
-  F24's agenda rail on the left, and collapses to a ~44px strip that keeps the
-  speaking rings and mute badges. **For the AI Assistant owner:** F34's floating
-  chat panel opens over this side and will overlay the rail. That is accepted —
-  the strip is the answer, so presence survives while the assistant is open. If
-  the assistant panel ever becomes layout-pushing rather than floating, the two
-  need reconciling
-- There are no avatars in this product (`User` has `displayName` only). The rail
-  reuses the waiting room's initials bubbles — `initialsFromName` and
+- The roster (F13) is a white chip **centred in the board header**, beside the
+  phase pill and the mic. Five bubbles, then a `⋯` overflow that opens the full
+  list; the question pill's cap dropped from 70% to 46% so the centre is
+  reserved rather than borrowed (the agenda rail carries the same question text
+  untruncated, so nothing is actually lost)
+- **Resolved, and not to be re-litigated:** the roster was a rail on the right
+  until F13.2. It moved because the AI assistant covers that side — its bubble
+  is `fixed right-4 bottom-24` at 56px, which sat on the rail _permanently_,
+  whether the rail was open (256px) or collapsed (44px), and landed on the join
+  code card at its foot; its expanded panel defaults to 420px at `vw - 444`,
+  covering everything but the rail's rightmost 24px, and wins on paint order as
+  a later sibling of `<main>` with `z-index: auto`. Asking the assistant to
+  offset by the rail width would have meant tracking a rail that changes width
+  and may not exist. **The AI Assistant owner needs no change for this.** Note
+  the voting module's ballot rail still docks on that side and has the same
+  exposure — that one is unexamined here
+- A header roster cannot scroll, so truncation would eventually hide whoever is
+  talking. `splitForHeader` promotes a hidden speaker into the least-missed
+  visible slot instead, never displacing you or another speaker, and the `⋯`
+  carries the ring when promotion cannot fit one. The reduced count on a narrow
+  header comes from `useCompactHeader` (a media query) rather than CSS, because
+  the two widths need _different data_ — a CSS-hidden bubble could hide a
+  promoted speaker, and rendering both sets would read the room out twice
+- The join code followed the roster out of the rail and now sits in the board
+  **footer** beside the zoom control, reshaped to a single row so the footer
+  does not grow taller
+- There are no avatars in this product (`User` has `displayName` only). The
+  roster reuses the waiting room's initials bubbles — `initialsFromName` and
   `swatchForId` from `features/sessions/waitingRoomSeats` — keyed on LiveKit
   identity, which `issueVoiceToken` mints as the user id, so a person's bubble
   carries across the join. Note `swatchForId`, **not** `colorsForParticipants`:
   the latter walks collisions against whichever id set it is handed, so seating
   a live roster with it made a person's colour depend on who else was connected
-  — about a fifth of five-person rooms recoloured someone already on the rail
-  when the next person joined. The waiting room keeps the walk on purpose (names
-  there are hover-only, so distinct fills do the distinguishing); the rail shows
-  names always, so it trades duplicate fills for stability
-- The rail's roster is LiveKit's alone; it never merges the sessions module's
+  — about a fifth of five-person rooms recoloured someone already on show when
+  the next person joined. The waiting room keeps the walk on purpose (names
+  there are hover-only, so distinct fills do the distinguishing); the roster
+  names people in its overflow list and its tooltips, so it trades duplicate
+  fills for stability
+- The roster is LiveKit's alone; it never merges the sessions module's
   member list. Everyone who opens the session view joins the room whether or not
   they grant a microphone, so the room already _is_ the presence list
 - Speaking is de-flickered with a 600ms trailing hold (`useSustainedSpeaking`).
@@ -784,7 +804,7 @@ Examples:
 
 1. **Auth + Profile** — F01–F03, F33
 2. **Session Lifecycle** — F04–F10, F24–F26
-3. **Pinboard Core** — F14–F18
+3. **Pinboard Core** — F14–F18, F38
 4. **Creative Tools** — F19–F22, F23
 5. **Voting + Summary** — F27–F32
 6. **Voice** — F11–F13

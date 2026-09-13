@@ -17,14 +17,13 @@ function liveProps() {
 }
 
 describe('MicToggle', () => {
-  it('shows your name with the mic on, and offers muting', () => {
+  it('names you with the mic on, and offers muting', () => {
     render(<MicToggle {...liveProps()} />);
 
     const button = screen.getByRole('button', { name: /Ada — microphone on/ });
     expect(button).toHaveAccessibleName(/Mute your microphone/);
     // Not pressed: "pressed" is reserved for the muted state.
     expect(button).toHaveAttribute('aria-pressed', 'false');
-    expect(button).toHaveTextContent('Ada');
   });
 
   it('reads as muted, and offers unmuting, once the mic is off', () => {
@@ -33,13 +32,38 @@ describe('MicToggle', () => {
     const button = screen.getByRole('button', { name: /Ada — microphone muted/ });
     expect(button).toHaveAccessibleName(/Unmute your microphone/);
     expect(button).toHaveAttribute('aria-pressed', 'true');
-    expect(button).toHaveTextContent('Muted');
   });
 
   it('falls back to "You" before the room has told us our name', () => {
     render(<MicToggle {...liveProps()} name={null} />);
 
-    expect(screen.getByRole('button')).toHaveTextContent('You');
+    // In the accessible name, which is the only name an icon-only button has.
+    expect(screen.getByRole('button')).toHaveAccessibleName(/^You — microphone/);
+  });
+
+  it('is the symbol alone — no name, no state in words', () => {
+    // The point of the control: your name is in the roster chip now, and
+    // repeating it here said the same thing twice a few pixels apart.
+    const { rerender } = render(<MicToggle {...liveProps()} />);
+    expect(screen.getByRole('button')).toHaveTextContent('');
+
+    rerender(<MicToggle {...liveProps()} micEnabled={false} />);
+    expect(screen.getByRole('button')).toHaveTextContent('');
+  });
+
+  it('fills red while muted, so the state is not carried by a glyph alone', () => {
+    // Muted is what costs you the meeting if you miss it. A lone red icon
+    // among five white chips is easy to overlook, so the fill stays.
+    render(<MicToggle {...liveProps()} micEnabled={false} />);
+    expect(screen.getByRole('button')).toHaveClass('bg-red-50');
+  });
+
+  it('stays quiet and grey while the mic is live', () => {
+    render(<MicToggle {...liveProps()} />);
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveClass('bg-white');
+    expect(button).not.toHaveClass('bg-red-50');
   });
 
   it('toggles on click', async () => {

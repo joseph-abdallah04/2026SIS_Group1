@@ -2,13 +2,24 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
+import { prepareStickyText, STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
-import { CARD_INK, CARD_SHADOW, CARD_WIDTH, STICKY_RADIUS, STICKY_THEMES } from './pinboardTokens';
-
-/** Matches `stickyArtifactSchema` — the server rejects anything longer. */
-const STICKY_MAX_CHARS = 2000;
+import {
+  CARD_INK,
+  CARD_RADIUS,
+  CARD_WIDTH,
+  REACTION_HOVER_FILL,
+  REACTION_ON_BORDER,
+  REMOVE_HOVER_BORDER,
+  REMOVE_HOVER_FILL,
+  REMOVE_HOVER_INK,
+  STICKY_RADIUS,
+  STICKY_SHADOW,
+  STICKY_SIZE,
+  STICKY_THEMES,
+} from './pinboardTokens';
 
 interface DragHandlers {
   onPointerDown: (item: BoardItem, event: React.PointerEvent<HTMLElement>) => void;
@@ -54,8 +65,13 @@ interface PositionedProposalProps {
    * the viewer has already pressed. Null until the board is joined.
    */
   viewerId: string | null;
-  /** Toggle one of this viewer's reactions on this proposal (F18). */
-  onReact: (item: BoardItem, emoji: string) => Promise<void>;
+  /** Toggle one of this viewer's reactions on this proposal (F18). Absent once the board is frozen. */
+  onReact?: (item: BoardItem, emoji: string) => Promise<void>;
+  /** Whether this proposal is on the leader's voting shortlist (F27). */
+  isShortlisted: boolean;
+  /** Leader may add/remove this card while the shortlist is still open. */
+  canToggleShortlist: boolean;
+  onToggleShortlist: (id: string) => void;
 }
 
 /**
@@ -65,6 +81,11 @@ interface PositionedProposalProps {
  * for it would be heavier than the change. Drawings and diagrams reopen in the
  * Creative Tools studio (F19–F21) instead, which is the only place their
  * shapes can be manipulated.
+ *
+ * The length rule is the same one the tool enforces when a sticky is written,
+ * and comes from the same place. Editing used to stop only at the schema's
+ * outer bound, so a note capped at 280 characters on the way in could be grown
+ * to 2000 immediately afterwards, on a card that is only 210px square.
  */
 function StickyTextEditor({
   artifact,
@@ -89,7 +110,17 @@ function StickyTextEditor({
 
   const trimmed = text.trim();
   const unchanged = trimmed === artifact.text.trim();
-  const submittable = !saving && !unchanged && trimmed.length > 0;
+  const prepared = prepareStickyText(text);
+  const submittable = !saving && !unchanged && prepared.ok;
+  /**
+   * Shown as soon as it is true, not on a press.
+   *
+   * Save is disabled while the note is too long, so a message that waited for
+   * a click would wait for one that cannot land. Typing cannot get you here —
+   * the field stops at the limit — but a note written before the limit
+   * existed, or through another client, opens over it.
+   */
+  const tooLong = !prepared.ok && trimmed.length > STICKY_TEXT_LIMIT ? prepared.error : null;
 
   const submit = () => {
     if (!submittable) return;
@@ -106,19 +137,19 @@ function StickyTextEditor({
 
   return (
     <div
-      className="flex flex-col overflow-hidden border"
+      className="flex flex-col overflow-hidden"
       style={{
         width,
+        height: STICKY_SIZE,
         borderRadius: STICKY_RADIUS,
-        borderColor: theme.border,
         background: theme.bg,
-        boxShadow: CARD_SHADOW,
+        boxShadow: STICKY_SHADOW,
       }}
     >
       <textarea
         ref={ref}
         value={text}
-        maxLength={STICKY_MAX_CHARS}
+        maxLength={STICKY_TEXT_LIMIT}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onCancel();
@@ -129,10 +160,9 @@ function StickyTextEditor({
             submit();
           }
         }}
-        className="resize-none bg-transparent outline-none"
+        className="min-h-0 flex-1 resize-none bg-transparent outline-none"
         style={{
-          minHeight: 128,
-          padding: '16px 14px 8px',
+          padding: '14px 14px 6px',
           fontSize: '14px',
           fontWeight: 500,
           lineHeight: 1.45,
@@ -140,6 +170,12 @@ function StickyTextEditor({
         }}
         aria-label="Edit sticky note text"
       />
+      {tooLong ? (
+        <p role="alert" className="px-3 pb-1 text-[10.5px] leading-snug text-rt-secondary-deep">
+          {tooLong}
+        </p>
+      ) : null}
+
       <div className="flex items-center gap-2 px-3 pb-2.5">
         <button
           type="button"
@@ -156,6 +192,16 @@ function StickyTextEditor({
         >
           Cancel
         </button>
+        {/* The same count the tool shows while a sticky is being written, so
+            the ceiling does not appear to move between writing and editing. */}
+        <span
+          aria-live="polite"
+          className={`ml-auto text-[10px] tabular-nums ${
+            trimmed.length >= STICKY_TEXT_LIMIT ? 'text-rt-secondary-deep' : 'text-rt-ink-faint'
+          }`}
+        >
+          {trimmed.length}/{STICKY_TEXT_LIMIT}
+        </span>
       </div>
     </div>
   );
@@ -175,21 +221,27 @@ function CardControl({
 }: {
   label: string;
   onClick: () => void;
-  /** Warms the hover colour, so removal does not look like every other action. */
+  /** Turns the hover red, so removal does not look like every other action. */
   destructive?: boolean;
   children: ReactNode;
 }) {
+  // Both controls share one hover rule and differ only in the colours handed
+  // to it, because a hover colour cannot be an inline style. Editing takes the
+  // same slate the reaction chips use; removing takes the red.
   return (
     <button
       type="button"
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
-        destructive
-          ? 'hover:border-rt-secondary hover:bg-rt-secondary-wash hover:text-rt-secondary-deep'
-          : 'hover:bg-rt-primary-tint hover:text-rt-ink'
-      }`}
+      style={
+        {
+          '--rt-control-fill': destructive ? REMOVE_HOVER_FILL : REACTION_HOVER_FILL,
+          '--rt-control-edge': destructive ? REMOVE_HOVER_BORDER : REACTION_ON_BORDER,
+          '--rt-control-ink': destructive ? REMOVE_HOVER_INK : CARD_INK,
+        } as React.CSSProperties
+      }
+      className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary"
     >
       {children}
     </button>
@@ -263,17 +315,23 @@ export function PositionedProposal({
   onDelete,
   viewerId,
   onReact,
+  isShortlisted,
+  canToggleShortlist,
+  onToggleShortlist,
 }: PositionedProposalProps) {
   const [editing, setEditing] = useState(false);
   // Removal is destructive and cannot be undone, so it always passes through a
   // confirmation (F17) — for the author and the moderating leader alike.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // Paper or panel: the difference decides the corner every highlight follows.
+  const isSticky = item.artifactJson.type === 'sticky';
   // A sticky is edited in place — it is one field, and a full-screen editor for
   // it would be heavier than the change. Anything else reopens in the tool that
   // made it, which is the only place its shape can be manipulated.
-  const editsInline = isOwn && item.artifactJson.type === 'sticky';
-  const canEdit = isOwn && (editsInline || onOpenEditor !== undefined);
+  const editsInline = isOwn && isSticky;
+  const boardFrozen = !canMove && !canDelete && onOpenEditor === undefined;
+  const canEdit = isOwn && !boardFrozen && (editsInline || onOpenEditor !== undefined);
   const draggable = canMove && !editing;
 
   const confirmRemove = () => {
@@ -292,7 +350,9 @@ export function PositionedProposal({
 
   return (
     <div
-      className="group absolute"
+      className={`group absolute ${
+        isShortlisted ? 'ring-2 ring-rt-secondary bg-rt-secondary-wash' : ''
+      }`}
       // Tells the canvas to leave this pointer gesture alone: dragging a card
       // you may move must not also pan the board underneath it. A card you may
       // not move carries no flag, so dragging it pans, which is what every
@@ -300,6 +360,9 @@ export function PositionedProposal({
       data-card-draggable={draggable ? 'true' : undefined}
       style={{
         left: position.x,
+        // The shortlist ring is drawn on this wrapper, so it has to follow the
+        // card's own corner: square on a sticky, rounded on every panel.
+        borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
         top: position.y,
         // A card being dragged, or edited, belongs above its neighbours.
         zIndex: isDragging ? 30 : editing ? 20 : 1,
@@ -307,8 +370,9 @@ export function PositionedProposal({
         // promise that grabbing is the only thing a card does, when clicking it
         // also reaches its Edit and Remove controls — and it would put a hand
         // over most of a busy board. The cursor changes once a drag is actually
-        // under way, which is the moment it means something.
-        cursor: isDragging ? 'grabbing' : 'default',
+        // under way, which is the moment it means something. During shortlisting
+        // the card itself is the control, so a pointer is accurate.
+        cursor: isDragging ? 'grabbing' : canToggleShortlist ? 'pointer' : 'default',
         // Without this the browser claims touch drags for scrolling first.
         touchAction: draggable ? 'none' : undefined,
         // Text inside a card must not become a selection while dragging it.
@@ -321,7 +385,56 @@ export function PositionedProposal({
       onPointerMove={draggable ? dragHandlers.onPointerMove : undefined}
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
+      onClick={
+        canToggleShortlist
+          ? (event) => {
+              // The corner tick is its own button and already toggles.
+              if ((event.target as HTMLElement).closest('button')) return;
+              onToggleShortlist(item.id);
+            }
+          : undefined
+      }
     >
+      {canToggleShortlist ? (
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleShortlist(item.id);
+          }}
+          className={`absolute z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+            isShortlisted
+              ? 'border-rt-secondary bg-rt-secondary text-white'
+              : 'border-rt-secondary bg-white text-rt-secondary'
+          }`}
+          style={{
+            // Centred on the corner point of the shortlist outline itself.
+            // A sticky's outline turns a square corner just outside the card,
+            // so that point is at -1. A panel's is an arc, and its corner is
+            // the 45-degree point on it, which sits about 4px inside the box.
+            top: isSticky ? -1 : 4,
+            left: isSticky ? -1 : 4,
+            transform: 'translate(-50%, -50%)',
+            cursor: 'pointer',
+          }}
+          aria-label={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
+        >
+          {isShortlisted ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-3 w-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          ) : null}
+        </button>
+      ) : null}
+
       {editing && item.artifactJson.type === 'sticky' ? (
         <StickyTextEditor
           artifact={item.artifactJson}
@@ -339,13 +452,17 @@ export function PositionedProposal({
             isNew={isNew}
             isOwnedByViewer={isOwn}
             isAuthorLeader={isAuthorLeader}
+            isShortlisted={isShortlisted}
           />
 
-          <ReactionRow
-            reactions={item.reactions}
-            viewerId={viewerId}
-            onReact={(emoji) => onReact(item, emoji)}
-          />
+          {onReact ? (
+            <ReactionRow
+              reactions={item.reactions}
+              viewerId={viewerId}
+              onReact={(emoji) => onReact(item, emoji)}
+              width={CARD_WIDTH[item.type]}
+            />
+          ) : null}
 
           {canEdit || canDelete ? (
             <OwnerControls

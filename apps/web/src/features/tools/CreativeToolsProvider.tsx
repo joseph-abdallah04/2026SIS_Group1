@@ -10,6 +10,8 @@ import { useProposalSubmission } from './useProposalSubmission';
 interface CreativeToolsProviderProps {
   children: ReactNode;
   isLive: boolean;
+  /** Who is looking, so the editors can tell reuse from extending (F38). */
+  viewerId: string | null;
   proposals: readonly BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
@@ -18,6 +20,7 @@ interface CreativeToolsProviderProps {
 export function CreativeToolsProvider({
   children,
   isLive,
+  viewerId,
   proposals,
   propose,
   editProposal,
@@ -94,6 +97,7 @@ export function CreativeToolsProvider({
       value={{
         activeTool,
         extensionSource,
+        isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,
         isLive,
         submissionStatus: submission.status,

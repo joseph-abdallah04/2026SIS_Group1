@@ -31,7 +31,7 @@ export function NoticeDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-sm rounded-xl border border-rt-tertiary bg-rt-surface p-5 shadow-lg"
+        className="w-full max-w-sm rounded-2xl border border-rt-tertiary bg-rt-surface p-5 shadow-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id={titleId} className="text-[16px] font-semibold tracking-[-0.01em] text-rt-ink">

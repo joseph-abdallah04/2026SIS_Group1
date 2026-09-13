@@ -15,6 +15,7 @@ function diagramItem(nodes: DiagramNode[]): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-03T00:00:00.000Z',
+    editedAt: null,
     extendsProposalId: null,
     reactions: [],
   };
@@ -127,6 +128,22 @@ describe('card layout', () => {
     const article = container.querySelector('article');
     expect(article?.firstElementChild?.querySelector('svg')).not.toBeNull();
     expect(article?.lastElementChild?.tagName).toBe('FOOTER');
+  });
+
+  // The mark answers "is this still what they wrote", so it appears only once
+  // the words have actually changed.
+  it('says nothing about editing on a card nobody has edited', () => {
+    render(<ProposalCard item={diagramItem([])} />);
+
+    expect(screen.queryByText(/Edited/)).toBeNull();
+  });
+
+  it('marks a card whose content was rewritten, and says when', () => {
+    render(<ProposalCard item={{ ...diagramItem([]), editedAt: '2026-09-03T04:30:00.000Z' }} />);
+
+    const mark = screen.getByText(/Edited/);
+    expect(mark).toBeTruthy();
+    expect(mark.getAttribute('title')).toMatch(/^Edited at /);
   });
 
   it('carries the author and the time in that footer', () => {

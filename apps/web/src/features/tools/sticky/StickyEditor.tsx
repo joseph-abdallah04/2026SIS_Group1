@@ -4,9 +4,10 @@ import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
 import {
-  CARD_SHADOW,
   CARD_WIDTH,
   STICKY_RADIUS,
+  STICKY_SHADOW,
+  STICKY_SIZE,
   STICKY_THEMES,
 } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
@@ -19,6 +20,7 @@ export function StickyEditor() {
   const {
     closeTool,
     extensionSource,
+    isReusingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -85,7 +87,9 @@ export function StickyEditor() {
         >
           {extensionSource ? (
             <div className="mb-5 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-              Extending {extensionSource.authorName}&apos;s sticky
+              {isReusingOwn
+                ? 'Reusing your sticky'
+                : `Extending ${extensionSource.authorName}'s sticky`}
             </div>
           ) : null}
 
@@ -114,7 +118,7 @@ export function StickyEditor() {
               if (submissionError) resetSubmission();
             }}
             placeholder="Capture the idea in one clear note"
-            className="mt-2 h-36 min-h-36 w-full resize-none rounded-lg border border-rt-tertiary bg-rt-surface px-3.5 py-3 text-[14px] leading-relaxed text-rt-ink outline-none transition-colors placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint sm:h-auto"
+            className="mt-2 h-36 min-h-36 w-full resize-none rounded-2xl border border-rt-tertiary bg-rt-surface px-3.5 py-3 text-[14px] leading-relaxed text-rt-ink outline-none transition-colors placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint sm:h-auto"
           />
 
           <fieldset className="mt-5">
@@ -131,7 +135,7 @@ export function StickyEditor() {
                     aria-pressed={selected}
                     title={option[0]?.toUpperCase() + option.slice(1)}
                     onClick={() => setColor(option)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
                     style={{
                       background: optionTheme.bg,
                       borderColor: selected ? '#4D6A74' : optionTheme.border,
@@ -181,19 +185,18 @@ export function StickyEditor() {
           Board preview
         </div>
         <article
-          className="flex shrink-0 flex-col overflow-hidden border"
+          className="flex shrink-0 flex-col overflow-hidden"
           style={{
             width: CARD_WIDTH.sticky,
+            height: STICKY_SIZE,
             borderRadius: STICKY_RADIUS,
-            borderColor: theme.border,
             background: theme.bg,
-            boxShadow: CARD_SHADOW,
+            boxShadow: STICKY_SHADOW,
           }}
         >
           <p
-            className="line-clamp-4 wrap-break-word font-medium text-rt-ink"
+            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
             style={{
-              minHeight: 112,
               padding: '14px 14px 6px',
               fontSize: typography.fontSize,
               lineHeight: typography.lineHeight,

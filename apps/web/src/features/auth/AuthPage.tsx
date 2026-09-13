@@ -15,11 +15,8 @@ const LABEL_CLASSES =
   'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
 
 /**
- * Pill-shaped CTA for this page only — the shared `Button` component hardcodes
- * `rounded-lg` for every other button in the app, and a `className` override
- * can't reliably win that fight (Tailwind resolves conflicting utilities like
- * `rounded-lg`/`rounded-full` by generation order, not DOM order). Uses the
- * mustard `rt-secondary` token as the CTA — same gold as the rest of the app.
+ * Full-width pill CTA for this page. Uses the mustard `rt-secondary` token
+ * as the CTA — same gold as the rest of the app.
  */
 function SubmitButton({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
