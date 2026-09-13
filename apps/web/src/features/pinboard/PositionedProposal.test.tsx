@@ -89,6 +89,17 @@ describe('editing a sticky in place', () => {
     expect(screen.getByText(`5/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
   });
 
+  // The box stops at the limit counting every character, so the count has to
+  // as well, or it reads short of the limit while refusing the next key.
+  it('counts spaces at the end of the note', async () => {
+    renderOwnSticky('Hello');
+
+    const box = await openEditor();
+    await userEvent.type(box, '{End}  ');
+
+    expect(screen.getByText(`7/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
+  });
+
   // A note written before the cap existed, or through another client, opens
   // longer than the limit. Save is closed, and the reason is on screen rather
   // than waiting for a press that cannot land.

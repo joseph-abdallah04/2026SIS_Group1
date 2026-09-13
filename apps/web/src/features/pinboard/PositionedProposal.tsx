@@ -223,16 +223,19 @@ function StickyTextEditor({
           Cancel
         </button>
         {/* The same count the tool shows while a sticky is being written, so
-            the ceiling does not appear to move between writing and editing. */}
+            the ceiling does not appear to move between writing and editing.
+            Every character counts, spaces at either end included: the box
+            itself stops at that many, so a count that skipped them could read
+            short of the limit while refusing the next keystroke. */}
         <span
           aria-live="polite"
           className={`ml-auto text-[10px] tabular-nums ${
-            trimmed.length >= STICKY_TEXT_LIMIT || paperFull
+            text.length >= STICKY_TEXT_LIMIT || paperFull
               ? 'text-rt-secondary-deep'
               : 'text-rt-ink-faint'
           }`}
         >
-          {trimmed.length}/{STICKY_TEXT_LIMIT}
+          {text.length}/{STICKY_TEXT_LIMIT}
         </span>
       </div>
     </div>
