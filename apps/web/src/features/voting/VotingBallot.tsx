@@ -16,7 +16,7 @@ interface VotingBallotProps {
   phase: Extract<VotingPhase, 'open' | 'closed'>;
   isLeader: boolean;
   viewerId: string | null;
-  leaderId: string;
+  leaderId: string | null;
   voterStatuses: VotingVoterStatus[] | null;
   winnerProposalId: string | null;
   tiedProposalIds: string[];
@@ -42,7 +42,9 @@ function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally {
 }
 
 function VoterRow({ person }: { person: VotingVoterStatus }) {
-  const swatch = swatchForId(person.userId);
+  // A deleted voter's row still needs *a* stable color, just not one tied to
+  // an id that no longer exists.
+  const swatch = swatchForId(person.userId ?? 'deleted-user');
   return (
     <li className="flex items-center gap-2">
       <span
@@ -203,7 +205,7 @@ export function VotingBallot({
                     <ProposalCard
                       item={item}
                       isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
-                      isAuthorLeader={item.authorId === leaderId}
+                      isAuthorLeader={item.authorId != null && item.authorId === leaderId}
                     />
                   );
 

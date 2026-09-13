@@ -1,14 +1,108 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { updateProfileSchema } from '@roundtable/shared/schemas';
 
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { ApiClientError } from '../../lib/api';
-import { getMe, updateProfile } from '../auth/api';
+import { clearToken } from '../../lib/auth';
+import { disconnectSocket } from '../../lib/socket';
+import { deleteAccount, getMe, updateProfile } from '../auth/api';
 
 const INPUT_CLASSES =
   'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:outline-none';
 
 const LABEL_CLASSES =
   'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
+
+/**
+ * Account deletion. The typed-confirmation gate is the password field itself — the
+ * button stays disabled until it's non-empty — plus a second, explicit
+ * ConfirmDialog step before anything irreversible actually fires, same
+ * pattern as ending/leaving a live session elsewhere in this app.
+ *
+ * On success this clears the token and drops the socket exactly like
+ * logout (`pages/index.tsx`'s `onLogout`) before navigating away — there is
+ * no account left to have a session for.
+ */
+function DeleteAccountSection() {
+  const navigate = useNavigate();
+  const [password, setPassword] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onConfirm() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteAccount({ password });
+      clearToken();
+      disconnectSocket();
+      navigate('/login', { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err.message : 'Could not delete your account');
+      setConfirming(false);
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="mt-10 border-t border-dashed border-rt-tertiary pt-6">
+      <h2 className="text-sm font-semibold text-red-600">Delete account</h2>
+      <p className="mt-1 max-w-xl text-sm text-rt-ink-muted">
+        Permanently deletes your account. Sessions you led and proposals you posted stay in
+        place, credited to "Deleted user". You'll need to end or leave any session you're
+        currently in first. This cannot be undone.
+      </p>
+
+      <label className="mt-4 flex max-w-xs flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted">
+        Confirm your password
+        <input
+          type="password"
+          autoComplete="current-password"
+          className={INPUT_CLASSES}
+          value={password}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setError(null);
+          }}
+        />
+      </label>
+
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-red-600">
+          {error}
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        disabled={password.length === 0}
+        className="mt-4 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Delete account
+      </button>
+
+      {confirming ? (
+        <ConfirmDialog
+          title="Delete your account?"
+          confirmLabel="Delete account"
+          confirmingLabel="Deleting…"
+          busy={deleting}
+          onConfirm={() => void onConfirm()}
+          onCancel={() => setConfirming(false)}
+        >
+          <p>
+            This permanently deletes your account and logs you out immediately. Sessions you led
+            and proposals you posted stay in place, credited to "Deleted user". This cannot be
+            undone.
+          </p>
+        </ConfirmDialog>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Content for the "Profile" tab of /settings — no page chrome of its own,
@@ -152,6 +246,8 @@ export function ProfilePage() {
           </button>
         </div>
       </form>
+
+      <DeleteAccountSection />
     </div>
   );
 }

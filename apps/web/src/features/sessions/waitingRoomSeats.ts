@@ -93,7 +93,10 @@ export function colorsForParticipants(ids: readonly string[]): Record<string, Se
 }
 
 /** Leader at index 0 (12 o'clock). Everyone else keeps arrival order. */
-export function orderSeats<T extends { id: string }>(participants: readonly T[], leaderId: string): T[] {
+export function orderSeats<T extends { id: string }>(
+  participants: readonly T[],
+  leaderId: string | null,
+): T[] {
   const leader = participants.find((person) => person.id === leaderId);
   const others = participants.filter((person) => person.id !== leaderId);
   return leader ? [leader, ...others] : [...others];

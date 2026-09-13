@@ -722,7 +722,7 @@ export function PinboardCanvas({
                     position={positionOf(item)}
                     isNew={newItemIds.has(item.id)}
                     isOwn={viewerId !== null && item.authorId === viewerId}
-                    isAuthorLeader={item.authorId === board.leaderId}
+                    isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
                     onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
                     canMove={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)

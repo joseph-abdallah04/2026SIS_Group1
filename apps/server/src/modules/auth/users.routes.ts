@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { updateProfileSchema } from '@roundtable/shared/schemas';
+import { deleteAccountSchema, updateProfileSchema } from '@roundtable/shared/schemas';
 
 import { requireAuth } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
-import { updateDisplayName } from './service.js';
+import { deleteAccount, updateDisplayName } from './service.js';
 
 export const usersRoutes = Router();
 
@@ -14,6 +14,19 @@ usersRoutes.patch('/me', requireAuth, validateBody(updateProfileSchema), async (
   try {
     const user = await updateDisplayName(req.userId!, req.body.displayName);
     res.status(200).json(user);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/users/me — same "never trust a client-supplied id"
+// pattern as every other route here, `req.userId` only, never a param/body
+// id. The password is re-checked in `deleteAccount` itself, not here — this
+// is just wiring, no auth logic belongs at the route layer.
+usersRoutes.delete('/me', requireAuth, validateBody(deleteAccountSchema), async (req, res, next) => {
+  try {
+    await deleteAccount(req.userId!, req.body.password);
+    res.status(200).json({ ok: true });
   } catch (err) {
     next(err);
   }
