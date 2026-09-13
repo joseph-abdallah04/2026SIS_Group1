@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BoardItem } from '@roundtable/shared';
 
-import { BOARD_SIZE, CARD_WIDTH } from './pinboardTokens';
+import { cardWidth } from './cardMetrics';
+import { BOARD_SIZE } from './pinboardTokens';
 
 /** Below this many pixels a pointer gesture is a click, not a drag. */
 const DRAG_THRESHOLD_PX = 3;
@@ -22,6 +23,8 @@ function clamp(value: number, max: number): number {
 interface Gesture {
   proposalId: string;
   type: BoardItem['type'];
+  /** Measured at grab time: a sticky's width depends on what it says. */
+  width: number;
   pointerId: number;
   /** Where the pointer went down, in screen pixels. */
   fromPointer: Point;
@@ -105,6 +108,7 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
       gesture.current = {
         proposalId: item.id,
         type: item.type,
+        width: cardWidth(item),
         pointerId: event.pointerId,
         fromPointer: { x: event.clientX, y: event.clientY },
         fromCard: from,
@@ -137,7 +141,7 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
       // holding the position the drag *started* at, and every move would
       // faithfully save the card back to where it already was.
       active.at = {
-        x: clamp(active.fromCard.x + dx / scale, BOARD_SIZE.width - CARD_WIDTH[active.type]),
+        x: clamp(active.fromCard.x + dx / scale, BOARD_SIZE.width - active.width),
         y: clamp(active.fromCard.y + dy / scale, BOARD_SIZE.height - CARD_FOOTPRINT_H),
       };
       setDragging({ proposalId: active.proposalId, at: active.at });

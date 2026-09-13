@@ -8,6 +8,8 @@ export function CreativeToolbar() {
 
   return (
     <nav
+      // The sticky popup rises from here, so it measures where "here" is.
+      data-creative-toolbar
       aria-label="Creative tools"
       className="flex h-11 items-center rounded-full border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)]"
     >

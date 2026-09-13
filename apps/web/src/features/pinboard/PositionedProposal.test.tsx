@@ -102,6 +102,31 @@ describe('editing a sticky in place', () => {
     expect(onEditText).not.toHaveBeenCalled();
   });
 
+  // The character cap counts characters; wide letters fill the paper first.
+  // There is no size past the largest, so the editor stops taking text there.
+  it('stops taking text once the note fills the largest sticky', async () => {
+    // A stand-in layout in which a note longer than twelve characters overflows
+    // the largest sticky, whatever the character count says.
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const note = this.querySelector('p')?.textContent ?? '';
+        const width = parseFloat(this.style.width) || 0;
+        return { width, height: note.length > 12 ? width + 50 : 100 } as DOMRect;
+      });
+    try {
+      renderOwnSticky();
+      const box = await openEditor();
+      await userEvent.clear(box);
+      await userEvent.type(box, 'Ship the beta on Friday');
+
+      // Trailing spaces still go in: they take no room, and saving trims them.
+      expect((box as HTMLTextAreaElement).value.trim()).toBe('Ship the bet');
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
   it('will not save an empty note', async () => {
     const { onEditText } = renderOwnSticky();
 

@@ -10,9 +10,16 @@ export function CreativeStudio() {
     useCreativeTools();
   if (!activeTool) return null;
 
+  // A sticky is one line of text and a colour, so it is written in a popup
+  // over the board rather than in a room of its own: leaving the board to
+  // write a sentence costs more than the sentence. It brings its own dialog,
+  // and its own header, because it has no studio chrome to hang one on.
+  if (activeTool === 'sticky') return <StickyEditor />;
+
   // Reuse (F38) and Extend (F23) share one write path, so the source alone
-  // says which is happening, and this title is the only label every tool
-  // shows: the drawing editor has a toolbar where the others have a banner.
+  // says which is happening, and this title is the only label the drawing
+  // and diagram tools share: the drawing editor has a toolbar where the
+  // diagram editor has a banner.
   const action = editSource
     ? 'Edit'
     : extensionSource
@@ -24,7 +31,6 @@ export function CreativeStudio() {
 
   return (
     <StudioOverlay isLive={isLive} onClose={closeTool} title={title}>
-      {activeTool === 'sticky' ? <StickyEditor /> : null}
       {activeTool === 'drawing' ? <DrawingEditor /> : null}
       {activeTool === 'diagram' ? <DiagramEditor /> : null}
     </StudioOverlay>

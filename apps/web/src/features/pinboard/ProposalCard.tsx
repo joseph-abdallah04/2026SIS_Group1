@@ -16,16 +16,21 @@ import {
 
 import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
 
-import { stickyTypography } from '../tools/sticky/stickyPresentation';
+import {
+  STICKY_FONT_SIZE,
+  STICKY_LINE_HEIGHT,
+  STICKY_NOTE_CLASS,
+  STICKY_NOTE_PADDING,
+} from '../tools/sticky/stickyPresentation';
+import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
+  CARD_FOOT_CLASS,
   CARD_RADIUS,
   CARD_SHADOW,
-  CARD_WIDTH,
   OWNED_INK,
   STICKY_RADIUS,
   STICKY_SHADOW,
-  STICKY_SIZE,
   STICKY_THEMES,
   THUMB_BACKGROUND,
 } from './pinboardTokens';
@@ -80,7 +85,7 @@ function CardFoot({
   isAuthorLeader: boolean;
 }) {
   return (
-    <footer className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint">
+    <footer className={CARD_FOOT_CLASS}>
       <span className="min-w-0 truncate font-medium text-rt-ink-muted">
         {isOwnedByViewer ? 'You' : item.authorName}
         {/* Never beside "You": the mark is there to say whose cards belong to the
@@ -293,8 +298,11 @@ export function ProposalCard({
           isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''
         }`}
         style={{
-          width: CARD_WIDTH[item.type],
-          ...(isSticky ? { height: STICKY_SIZE } : {}),
+          width: cardWidth(item),
+          // Square, and a floor rather than a fixed height: the step the note's
+          // length picked is the size it starts at, and an awkward wrap can
+          // still push it taller rather than shrinking the text to fit.
+          ...(isSticky ? { minHeight: cardWidth(item) } : {}),
           borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
           ...(isSticky ? {} : { borderColor: theme ? theme.border : CARD_BORDER }),
           background: theme ? theme.bg : '#FFFFFF',
@@ -305,12 +313,13 @@ export function ProposalCard({
           // Fills whatever the square leaves above the byline, so a short note
           // sits at the top of the paper rather than centred in it.
           <p
-            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
+            className={STICKY_NOTE_CLASS}
             style={{
-              padding: '14px 14px 6px',
-              // Shared with the editor's preview, so a note that had to shrink
-              // to fit while you were writing it looks the same on the board.
-              ...stickyTypography(artifact.text),
+              padding: STICKY_NOTE_PADDING,
+              // No clamp: the tool caps how long a note can be, so everything
+              // the board accepts has room to be read in full.
+              fontSize: STICKY_FONT_SIZE,
+              lineHeight: STICKY_LINE_HEIGHT,
             }}
           >
             {artifact.text}

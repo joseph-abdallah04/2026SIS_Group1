@@ -8,6 +8,7 @@ import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
+import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
@@ -15,7 +16,6 @@ import { useProposalDrag } from './useProposalDrag';
 import {
   DESK_MARGIN,
   BOARD_SIZE,
-  CARD_WIDTH,
   DOT_COLOR,
   DOT_RADIUS,
   DOT_SPACING,
@@ -241,6 +241,24 @@ export function PinboardCanvas({
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
   const scale = ZOOM_SCALE[zoom];
+
+  /**
+   * One more render once the page's fonts have arrived. A sticky's size is
+   * measured by laying its note out, and a board that rendered while Inter was
+   * still loading measured every note in the fallback face, which wraps
+   * differently. Those measurements are not kept, so this render redoes them in
+   * the real one.
+   */
+  const [, setFontsSettled] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) setFontsSettled(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const isEmpty = board.items.length === 0;
   // `isLeader` arrives as a prop rather than being derived from
   // `viewerId === board.leaderId` here: the header needs it to choose between
@@ -474,7 +492,7 @@ export function PinboardCanvas({
       const at = positionOf(item);
       minX = Math.min(minX, at.x);
       minY = Math.min(minY, at.y);
-      maxX = Math.max(maxX, at.x + CARD_WIDTH[item.type]);
+      maxX = Math.max(maxX, at.x + cardWidth(item));
       maxY = Math.max(maxY, at.y + CARD_FOOTPRINT_H);
     }
     return { minX, minY, width: maxX - minX, height: maxY - minY };
@@ -755,7 +773,12 @@ export function PinboardCanvas({
         {ballot}
       </div>
 
-      <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
+      {/* Marked so the sticky popup can centre itself over the board this
+          spans, rather than over a window the side panels make lopsided. */}
+      <footer
+        data-board-footer
+        className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]"
+      >
         {boardOpen ? (
           <>
             <CreativeToolbar />

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
@@ -65,7 +65,9 @@ describe('creative sticky flow', () => {
       x: 32,
       y: 32,
     });
-    expect(await screen.findByRole('heading', { name: 'Sticky proposed' })).toBeInTheDocument();
+    // The sticky is on the board behind it, so the popup gets out of the way
+    // instead of confirming what the board is already showing.
+    await waitFor(() => expect(screen.queryByLabelText('Note')).not.toBeInTheDocument());
   });
 
   it('prevents duplicate writes while a proposal is in flight', async () => {
@@ -89,10 +91,12 @@ describe('creative sticky flow', () => {
     expect(propose).toHaveBeenCalledTimes(1);
 
     await act(async () => finishProposal?.());
-    expect(await screen.findByRole('heading', { name: 'Sticky proposed' })).toBeInTheDocument();
+    // The sticky is on the board behind it, so the popup gets out of the way
+    // instead of confirming what the board is already showing.
+    await waitFor(() => expect(screen.queryByLabelText('Note')).not.toBeInTheDocument());
   });
 
-  it('keeps the write lock when the studio closes before acknowledgement', async () => {
+  it('keeps the write lock when the popup closes before acknowledgement', async () => {
     const user = userEvent.setup();
     let finishProposal: (() => void) | undefined;
     const propose = vi.fn(
@@ -106,13 +110,39 @@ describe('creative sticky flow', () => {
     await user.click(screen.getByRole('button', { name: 'New sticky' }));
     await user.type(screen.getByLabelText('Note'), 'Keep this write locked');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
 
     expect(screen.getByRole('button', { name: 'New sticky' })).toBeDisabled();
     expect(propose).toHaveBeenCalledTimes(1);
 
     await act(async () => finishProposal?.());
     expect(screen.getByRole('button', { name: 'New sticky' })).toBeEnabled();
+  });
+
+  it('stops taking text once the note fills the largest sticky', async () => {
+    // A stand-in layout in which a note longer than twelve characters overflows
+    // the largest sticky, whatever the character count says.
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const note = this.querySelector('p')?.textContent ?? '';
+        const width = parseFloat(this.style.width) || 0;
+        return { width, height: note.length > 12 ? width + 50 : 100 } as DOMRect;
+      });
+    try {
+      const user = userEvent.setup();
+      render(<Harness propose={vi.fn(async () => undefined)} />);
+
+      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.type(screen.getByLabelText('Note'), 'Keep the idea focused.');
+
+      // Trailing spaces still go in: they take no room, and proposing trims them.
+      expect((screen.getByLabelText('Note') as HTMLTextAreaElement).value.trim()).toBe(
+        'Keep the ide',
+      );
+    } finally {
+      rect.mockRestore();
+    }
   });
 
   it('disables creation while offline', () => {

@@ -37,7 +37,15 @@ export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 export const CARD_INK = '#080C15';
 /** Edge for cards with no colour of their own; a sticky uses its theme's. */
 export const CARD_BORDER = '#CFCFCF';
-export const CARD_RADIUS = '16px';
+export const CARD_RADIUS_PX = 16;
+/**
+ * The byline every card carries. Named because a sticky's size is measured
+ * against it: a probe that set the byline differently would size the card for
+ * a footer it does not have.
+ */
+export const CARD_FOOT_CLASS =
+  'flex items-center justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint';
+export const CARD_RADIUS = `${CARD_RADIUS_PX}px`;
 export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21,0.04)';
 
 /** Soft accent for the leader mark in a card's footer. */
@@ -108,9 +116,26 @@ export const STICKY_THEMES: Record<StickyColor, { bg: string; border: string }> 
  *
  * Every other card on the board is a rounded panel. A sticky is meant to read
  * as a piece of paper somebody stuck there, and rounding it is the single
- * change that makes it read as a UI card instead.
+ * change that makes it read as a UI card instead. One token, shared by the
+ * board and the popup a note is written in, so the two cannot drift apart.
  */
-export const STICKY_RADIUS = '0px';
+export const STICKY_RADIUS_PX = 0;
+export const STICKY_RADIUS = `${STICKY_RADIUS_PX}px`;
+
+/**
+ * Where a card's corner actually turns, measured in from its box corner.
+ *
+ * The 45-degree point on the arc, which is where the eye reads a corner as
+ * being. `spread` carries an outline drawn outside the card, so a marker can
+ * centre on the line rather than on the box the line surrounds. A square
+ * corner falls out of the same formula as a small negative number, which is
+ * the half of the stroke that sits outside the card.
+ *
+ * Anything pinned to a corner has to go through this, or rounding the card
+ * leaves it hanging in the gap the rounding cut away.
+ */
+export const cornerPoint = (radius: number, spread = 0) =>
+  Math.round(radius - (radius + spread) / Math.SQRT2);
 
 /**
  * The shadow a sticky casts.
@@ -129,16 +154,6 @@ export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
   drawing: 250,
   diagram: 300,
 };
-
-/**
- * A sticky is square, so it is as tall as it is wide.
- *
- * Unlike the other cards it does not grow to fit its contents: a pad of notes
- * comes in one size, and a wall of them reads as a wall precisely because they
- * all match. Text that would overflow is clamped rather than allowed to
- * stretch the paper.
- */
-export const STICKY_SIZE = CARD_WIDTH.sticky;
 
 /**
  * Zoom is a property of the view, not of the cards: the board is drawn once at

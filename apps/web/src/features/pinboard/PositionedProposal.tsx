@@ -3,21 +3,30 @@ import { Pencil, Trash2 } from 'lucide-react';
 import type { BoardItem, StickyArtifact } from '@roundtable/shared';
 
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
+import {
+  STICKY_FONT_SIZE,
+  STICKY_LINE_HEIGHT,
+  stickyFits,
+  stickySize,
+} from '../tools/sticky/stickyPresentation';
+import { cardWidth } from './cardMetrics';
+import { useNoteAutoGrow } from '../tools/sticky/useNoteAutoGrow';
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
 import {
   CARD_INK,
   CARD_RADIUS,
-  CARD_WIDTH,
+  CARD_RADIUS_PX,
+  cornerPoint,
   REACTION_HOVER_FILL,
   REACTION_ON_BORDER,
   REMOVE_HOVER_BORDER,
   REMOVE_HOVER_FILL,
   REMOVE_HOVER_INK,
   STICKY_RADIUS,
+  STICKY_RADIUS_PX,
   STICKY_SHADOW,
-  STICKY_SIZE,
   STICKY_THEMES,
 } from './pinboardTokens';
 
@@ -85,20 +94,20 @@ interface PositionedProposalProps {
  * The length rule is the same one the tool enforces when a sticky is written,
  * and comes from the same place. Editing used to stop only at the schema's
  * outer bound, so a note capped at 280 characters on the way in could be grown
- * to 2000 immediately afterwards, on a card that is only 210px square.
+ * to 2000 immediately afterwards, on a card the size of a postcard.
  */
 function StickyTextEditor({
   artifact,
-  width,
   onSave,
   onCancel,
 }: {
   artifact: StickyArtifact;
-  width: number;
   onSave: (text: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [text, setText] = useState(artifact.text);
+  const size = stickySize(text);
+  const [paperFull, setPaperFull] = useState(false);
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const theme = STICKY_THEMES[artifact.color];
@@ -122,6 +131,11 @@ function StickyTextEditor({
    */
   const tooLong = !prepared.ok && trimmed.length > STICKY_TEXT_LIMIT ? prepared.error : null;
 
+  // The editor grows with the note for the same reason the card does, and
+  // raises its floor rather than setting its height: the paper around it is a
+  // flex column that already stretches this to fill a short note's square.
+  useNoteAutoGrow(ref, text, 'minHeight');
+
   const submit = () => {
     if (!submittable) return;
     setSaving(true);
@@ -139,8 +153,11 @@ function StickyTextEditor({
     <div
       className="flex flex-col overflow-hidden"
       style={{
-        width,
-        height: STICKY_SIZE,
+        // Sized from the text as it is typed, by the same ladder the board
+        // card uses, so a note that will land bigger grows while you write it
+        // rather than jumping when you save.
+        width: size,
+        minHeight: size,
         borderRadius: STICKY_RADIUS,
         background: theme.bg,
         boxShadow: STICKY_SHADOW,
@@ -150,7 +167,17 @@ function StickyTextEditor({
         ref={ref}
         value={text}
         maxLength={STICKY_TEXT_LIMIT}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          // The same refusal the tool makes while a sticky is written: a note
+          // is not allowed to outgrow the largest square by being rewritten.
+          if (next.length > text.length && !stickyFits(next)) {
+            setPaperFull(true);
+            return;
+          }
+          setPaperFull(false);
+          setText(next);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onCancel();
           // Enter saves, Shift+Enter adds a line — the usual bargain for a
@@ -160,12 +187,12 @@ function StickyTextEditor({
             submit();
           }
         }}
-        className="min-h-0 flex-1 resize-none bg-transparent outline-none"
+        className="min-h-0 flex-1 resize-none overflow-hidden bg-transparent outline-none transition-[min-height] duration-150 ease-out motion-reduce:transition-none"
         style={{
           padding: '14px 14px 6px',
-          fontSize: '14px',
+          fontSize: STICKY_FONT_SIZE,
           fontWeight: 500,
-          lineHeight: 1.45,
+          lineHeight: STICKY_LINE_HEIGHT,
           color: CARD_INK,
         }}
         aria-label="Edit sticky note text"
@@ -176,7 +203,10 @@ function StickyTextEditor({
         </p>
       ) : null}
 
-      <div className="flex items-center gap-2 px-3 pb-2.5">
+      {/* The same height as the card's byline, so a note has exactly the room
+          while it is edited that it will have on the board, and the editor
+          stays the square the card is. */}
+      <div className="flex items-center gap-2 px-3 pb-2">
         <button
           type="button"
           onClick={submit}
@@ -197,7 +227,9 @@ function StickyTextEditor({
         <span
           aria-live="polite"
           className={`ml-auto text-[10px] tabular-nums ${
-            trimmed.length >= STICKY_TEXT_LIMIT ? 'text-rt-secondary-deep' : 'text-rt-ink-faint'
+            trimmed.length >= STICKY_TEXT_LIMIT || paperFull
+              ? 'text-rt-secondary-deep'
+              : 'text-rt-ink-faint'
           }`}
         >
           {trimmed.length}/{STICKY_TEXT_LIMIT}
@@ -326,6 +358,9 @@ export function PositionedProposal({
   const [removing, setRemoving] = useState(false);
   // Paper or panel: the difference decides the corner every highlight follows.
   const isSticky = item.artifactJson.type === 'sticky';
+  // The shortlist outline is a 2px ring, so its stroke runs 1px outside the
+  // card and the marker that sits on it follows the card's own corner.
+  const markerOffset = cornerPoint(isSticky ? STICKY_RADIUS_PX : CARD_RADIUS_PX, 1);
   // A sticky is edited in place — it is one field, and a full-screen editor for
   // it would be heavier than the change. Anything else reopens in the tool that
   // made it, which is the only place its shape can be manipulated.
@@ -409,12 +444,12 @@ export function PositionedProposal({
               : 'border-rt-secondary bg-white text-rt-secondary'
           }`}
           style={{
-            // Centred on the corner point of the shortlist outline itself.
-            // A sticky's outline turns a square corner just outside the card,
-            // so that point is at -1. A panel's is an arc, and its corner is
-            // the 45-degree point on it, which sits about 4px inside the box.
-            top: isSticky ? -1 : 4,
-            left: isSticky ? -1 : 4,
+            // Centred on the corner point of the shortlist outline itself,
+            // which is the 45-degree point on the arc the card's radius cuts.
+            // Derived rather than typed, so changing what a sticky's corner
+            // looks like cannot leave this marker hanging beside it.
+            top: markerOffset,
+            left: markerOffset,
             transform: 'translate(-50%, -50%)',
             cursor: 'pointer',
           }}
@@ -438,7 +473,6 @@ export function PositionedProposal({
       {editing && item.artifactJson.type === 'sticky' ? (
         <StickyTextEditor
           artifact={item.artifactJson}
-          width={CARD_WIDTH.sticky}
           onCancel={() => setEditing(false)}
           onSave={async (text) => {
             await onEditText(item, text);
@@ -460,7 +494,7 @@ export function PositionedProposal({
               reactions={item.reactions}
               viewerId={viewerId}
               onReact={(emoji) => onReact(item, emoji)}
-              width={CARD_WIDTH[item.type]}
+              width={cardWidth(item)}
             />
           ) : null}
 
