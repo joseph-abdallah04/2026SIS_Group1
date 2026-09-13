@@ -64,11 +64,19 @@ interface PinboardCanvasProps {
    */
   micControl?: ReactNode;
   /**
-   * F13's participant rail, on the right of the board. A node for the same
-   * reason `agenda` is: the board owns the three-column split the rail sits
-   * inside, but not what a LiveKit roster is.
+   * F13's roster, centred in the header. A node for the same reason `agenda`
+   * is: the board owns where things sit, but not what a LiveKit roster is.
+   *
+   * It was a rail on the right until F13.2, when the assistant's corner bubble
+   * and chat panel turned out to cover that side permanently.
    */
   participants?: ReactNode;
+  /**
+   * The live join code, in the footer beside the zoom control. It followed the
+   * roster out of the retired right rail, and sits outside the `boardOpen`
+   * branch because inviting someone is worth doing in any phase.
+   */
+  joinCode?: ReactNode;
   /**
    * Who the server believes this client is, or null before the join snapshot.
    * Author-only affordances key off this; the server re-checks regardless (F16).
@@ -226,6 +234,7 @@ export function PinboardCanvas({
   myProposals,
   micControl,
   participants,
+  joinCode,
   viewerId,
   editProposal,
   deleteProposal,
@@ -581,7 +590,12 @@ export function PinboardCanvas({
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
       <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-3 text-rt-ink">
         <RoundTableLogo />
-        <div className="flex max-w-[70%] items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
+        {/* `min-w-0` so the truncating child below can actually give way. The
+            cap dropped from 70% when the roster took the centre: at 70% this
+            pill could run all the way to where the action group starts,
+            leaving the middle nothing. The agenda rail carries the same
+            question text untruncated, so shortening it here costs a duplicate. */}
+        <div className="flex max-w-[46%] min-w-0 items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
           <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
             {phaseLabel}
           </span>
@@ -594,7 +608,22 @@ export function PinboardCanvas({
           )}
         </div>
         {headerTimer}
-        <div className="ml-auto flex items-center gap-2.5">
+
+        {/* Two spacers, not `ml-auto` on the group: they centre the roster
+            against the header while there is slack and collapse evenly when
+            there is not, so it never drifts with the question's length. */}
+        <div className="min-w-0 flex-1" />
+        {participants}
+        <div className="min-w-0 flex-1" />
+
+        {/* `shrink-0`: none of these pills truncate, so left shrinkable they
+            compress to min-content and wrap their labels onto a second line,
+            which makes the whole header taller. Pinned, they hold their size
+            and the question pill above is the only thing that gives — which is
+            what its `min-w-0` and `max-w` are for. There is no `flex-wrap`
+            here, so past the point where even a truncated pill will not fit
+            the row overflows rather than reflowing. */}
+        <div className="flex shrink-0 items-center gap-2.5">
           {shortlistControl}
           {micControl}
           <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
@@ -623,9 +652,10 @@ export function PinboardCanvas({
         </div>
       </header>
 
-      {/* Agenda left (F24), board centre, participants right (F13) — all above
-          the footer, so the toolbar and zoom control keep the full width they
-          had. Both rails collapse independently to give the board back. */}
+      {/* The agenda sits beside the board and above the footer, so the toolbar
+          and zoom control keep the full width they had. F13's roster used to
+          dock opposite it; it lives in the header now, and the board has that
+          256px back. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
 
@@ -751,7 +781,6 @@ export function PinboardCanvas({
           ) : null}
         </div>
 
-        {participants}
         {ballot}
       </div>
 
@@ -779,7 +808,8 @@ export function PinboardCanvas({
             {writeError}
           </p>
         ) : null}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          {joinCode}
           <ZoomControl
             zoom={zoom}
             canZoomIn={zoom !== ZOOM_LEVELS[0]}

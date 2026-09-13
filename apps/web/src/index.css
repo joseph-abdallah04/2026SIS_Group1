@@ -316,6 +316,32 @@ body {
   font-size: 11px;
 }
 
+/* Smallest of the three. The board header's content band is about 29px inside
+   its `py-3`, so anything larger makes the whole header taller. */
+.rt-voice-seat[data-size='header'] .rt-voice-bubble {
+  height: 1.5rem;
+  width: 1.5rem;
+  font-size: 9px;
+}
+
+/* F13.2: the header's overflow control, ringed while a speaker is behind it
+   that promotion could not fit into the visible bubbles. Same green, same
+   pulse, so "someone in here is talking" reads as the same signal as a ring on
+   a face. */
+.rt-voice-more {
+  position: relative;
+}
+
+.rt-voice-more[data-speaking='true']::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 9999px;
+  border: 2px solid #2f8f5b;
+  animation: rt-voice-speaking 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
 .rt-voice-seat[data-speaking='true']::after {
   content: '';
   position: absolute;
@@ -350,9 +376,11 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  /* Ringed in the rail's own background so the badge stays legible where it
-     overlaps the bubble's fill. */
-  border: 1.5px solid var(--color-rt-surface-alt);
+  /* Ringed in whatever the badge is sitting on, so it stays legible where it
+     overlaps the bubble's fill. Defaults to the rail's background and is
+     overridden per surface — the header's chip is white, and the old hardcoded
+     value read there as a mismatched halo. */
+  border: 1.5px solid var(--rt-seat-surface, var(--color-rt-surface-alt));
   background: #b42318;
   color: #ffffff;
 }
@@ -362,10 +390,24 @@ body {
   width: 0.9rem;
 }
 
+.rt-voice-seat[data-size='header'] .rt-voice-bubble-muted {
+  height: 0.72rem;
+  width: 0.72rem;
+  --rt-seat-surface: var(--color-rt-surface);
+}
+
+/* The overflow roster is a white panel, not the rail's tinted surface the row
+   size was drawn for, so its mute badges need the same correction the header
+   bubbles get. Set on the list so it cascades to every badge inside. */
+.rt-voice-roster {
+  --rt-seat-surface: var(--color-rt-surface);
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* The ring still appears and disappears — it is information, not decoration.
      Only the pulse stops. */
-  .rt-voice-seat[data-speaking='true']::after {
+  .rt-voice-seat[data-speaking='true']::after,
+  .rt-voice-more[data-speaking='true']::after {
     animation: none;
   }
 }
