@@ -4,8 +4,11 @@
 export { createSessionsRoutes } from './routes.js';
 export {
   assertSessionMember,
+  addSessionQuestion,
   createSession,
+  deleteDraftSessionsForUser,
   deleteSession,
+  emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
   emitSessionEnded,
@@ -13,14 +16,17 @@ export {
   endSession,
   generateSessionCode,
   getActiveQuestion,
+  getDiscussionTimer,
   getQuestion,
   getSession,
   getSessionMemberIdentity,
   getSessionWithQuestions,
+  findLiveSessionForUser,
   focusQuestion,
   joinSessionByCode,
   leaveSession,
   listSessionMembers,
+  listSessionParticipants,
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
@@ -29,6 +35,7 @@ export {
   updateSessionDraft,
 } from './service.js';
 export type {
+  LiveSessionRef,
   QuestionRef,
   SessionMemberIdentity,
   SessionMemberRow,

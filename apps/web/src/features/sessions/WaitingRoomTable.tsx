@@ -13,7 +13,7 @@ import {
 
 interface WaitingRoomTableProps {
   participants: SessionUserPayload[] | null;
-  leaderId: string;
+  leaderId: string | null;
   children?: ReactNode;
 }
 

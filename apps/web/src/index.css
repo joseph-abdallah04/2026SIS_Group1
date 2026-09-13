@@ -221,7 +221,7 @@ body {
   z-index: 21;
   width: max-content;
   max-width: 10rem;
-  border-radius: 0.375rem;
+  border-radius: 0.75rem;
   background: var(--color-rt-ink);
   padding: 0.2rem 0.45rem;
   font-size: 11px;
@@ -327,5 +327,156 @@ body {
   .rt-studio-rise,
   .rt-studio-fade {
     animation: none;
+  }
+}
+
+/*
+ * F13 participant rail. The bubble is the waiting room's head at rail size —
+ * same initials, same hashed swatch — with two states added on top: a ring
+ * while someone is talking, and F12's red-slash mic while they are muted.
+ *
+ * The ring is a pseudo-element on a wrapper rather than a border or an outline
+ * on the bubble itself, so lighting it up neither reflows the row nor eats
+ * into the space the initials are centred in.
+ */
+.rt-voice-seat {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.rt-voice-bubble {
+  display: flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 2px rgba(8, 12, 21, 0.12);
+}
+
+.rt-voice-seat[data-size='strip'] .rt-voice-bubble {
+  height: 2rem;
+  width: 2rem;
+  font-size: 11px;
+}
+
+/* Smallest of the three. The board header's content band is about 29px inside
+   its `py-3`, so anything larger makes the whole header taller. */
+.rt-voice-seat[data-size='header'] .rt-voice-bubble {
+  height: 1.5rem;
+  width: 1.5rem;
+  font-size: 9px;
+}
+
+/* F13.2: the header's overflow control, ringed while a speaker is behind it
+   that promotion could not fit into the visible bubbles. Same green, same
+   pulse, so "someone in here is talking" reads as the same signal as a ring on
+   a face. */
+.rt-voice-more {
+  position: relative;
+}
+
+.rt-voice-more[data-speaking='true']::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 9999px;
+  border: 2px solid #2f8f5b;
+  animation: rt-voice-speaking 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.rt-voice-seat[data-speaking='true']::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  /* Green is the one hue this palette does not otherwise spend, so it reads as
+     "live" rather than as another piece of brand furniture. */
+  border: 2px solid #2f8f5b;
+  animation: rt-voice-speaking 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes rt-voice-speaking {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.09);
+  }
+}
+
+.rt-voice-bubble-muted {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: flex;
+  height: 0.8rem;
+  width: 0.8rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  /* Ringed in whatever the badge is sitting on, so it stays legible where it
+     overlaps the bubble's fill. Defaults to the rail's background and is
+     overridden per surface — the header's chip is white, and the old hardcoded
+     value read there as a mismatched halo. */
+  border: 1.5px solid var(--rt-seat-surface, var(--color-rt-surface-alt));
+  background: #b42318;
+  color: #ffffff;
+}
+
+.rt-voice-seat[data-size='strip'] .rt-voice-bubble-muted {
+  height: 0.9rem;
+  width: 0.9rem;
+}
+
+.rt-voice-seat[data-size='header'] .rt-voice-bubble-muted {
+  height: 0.72rem;
+  width: 0.72rem;
+  --rt-seat-surface: var(--color-rt-surface);
+}
+
+/* The overflow roster is a white panel, not the rail's tinted surface the row
+   size was drawn for, so its mute badges need the same correction the header
+   bubbles get. Set on the list so it cascades to every badge inside. */
+.rt-voice-roster {
+  --rt-seat-surface: var(--color-rt-surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The ring still appears and disappears — it is information, not decoration.
+     Only the pulse stops. */
+  .rt-voice-seat[data-speaking='true']::after,
+  .rt-voice-more[data-speaking='true']::after {
+    animation: none;
+  }
+}
+
+@keyframes rt-timer-flash {
+  0%,
+  100% {
+    color: var(--color-rt-ink);
+  }
+  50% {
+    color: #b42318;
+  }
+}
+
+.rt-timer-flash {
+  animation: rt-timer-flash 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-timer-flash {
+    animation: none;
+    color: #b42318;
   }
 }

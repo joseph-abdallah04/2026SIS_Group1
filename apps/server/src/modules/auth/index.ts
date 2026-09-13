@@ -3,6 +3,9 @@
 // inside. `requireAuth` itself lives in `../../middleware/auth.ts` (it's
 // cross-cutting Express glue, consumed the same way `error.ts` is).
 export { authRoutes } from './routes.js';
+export { usersRoutes } from './users.routes.js';
+export { getCurrentUser } from './service.js';
+
 // The realtime gateway verifies the handshake token itself: Socket.IO's
 // handshake carries no headers, so `requireAuth` (which reads
 // `Authorization`) cannot cover it, and a socket must still not join a room

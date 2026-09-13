@@ -13,6 +13,8 @@ interface CreativeToolsProviderProps {
   /** The question the board is on; a draft is kept per question. */
   questionId: string;
   isLive: boolean;
+  /** Who is looking, so the editors can tell reuse from extending (F38). */
+  viewerId: string | null;
   proposals: readonly BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
@@ -23,6 +25,7 @@ export function CreativeToolsProvider({
   sessionId,
   questionId,
   isLive,
+  viewerId,
   proposals,
   propose,
   editProposal,
@@ -100,6 +103,7 @@ export function CreativeToolsProvider({
         activeTool,
         draftScope: { sessionId, questionId },
         extensionSource,
+        isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,
         isLive,
         submissionStatus: submission.status,

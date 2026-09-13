@@ -36,7 +36,7 @@ export function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-sm rounded-xl border border-rt-tertiary bg-rt-surface p-5 shadow-lg"
+        className="w-full max-w-sm rounded-2xl border border-rt-tertiary bg-rt-surface p-5 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id={titleId} className="text-[16px] font-semibold tracking-[-0.01em] text-rt-ink">
@@ -48,7 +48,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-lg px-3 py-2 text-[13px] font-semibold text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink"
+            className="rounded-full px-3 py-2 text-[13px] font-semibold text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink"
           >
             Cancel
           </button>
@@ -56,7 +56,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="rounded-lg bg-red-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+            className="rounded-full bg-red-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-red-700 disabled:opacity-60"
           >
             {busy ? (confirmingLabel ?? confirmLabel) : confirmLabel}
           </button>

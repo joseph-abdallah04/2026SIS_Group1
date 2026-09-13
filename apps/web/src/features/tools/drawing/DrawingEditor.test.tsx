@@ -31,6 +31,7 @@ function Harness({ propose }: { propose: (input: ProposalCreateInput) => Promise
       <CreativeToolsProvider
         sessionId="session-1"
         questionId="question-1"
+        viewerId={null}
         isLive
         proposals={[]}
         propose={propose}

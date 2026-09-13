@@ -7,6 +7,18 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    /**
+     * Well above the 5s default.
+     *
+     * The heaviest editor tests drive dozens of real user interactions through
+     * jsdom and take around four seconds on an idle machine. Run alongside the
+     * rest of the suite they lose that margin and fail on the clock rather than
+     * on an assertion, which is a false alarm that teaches everyone to re-run
+     * the suite instead of reading it. A timeout guards against a hang, not
+     * against slowness, so it should be long enough that tripping it means
+     * something is genuinely stuck.
+     */
+    testTimeout: 30_000,
   },
   server: {
     proxy: {

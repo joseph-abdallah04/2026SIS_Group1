@@ -953,6 +953,7 @@ export function DiagramEditor() {
     closeTool,
     draftScope,
     extensionSource,
+    isReusingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -6054,7 +6055,9 @@ export function DiagramEditor() {
         <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1 sm:top-4 sm:right-4">
           {extensionSource ? (
             <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-              Extending {extensionSource.authorName}&apos;s diagram
+              {isReusingOwn
+                ? 'Reusing your diagram'
+                : `Extending ${extensionSource.authorName}'s diagram`}
             </div>
           ) : null}
         </div>

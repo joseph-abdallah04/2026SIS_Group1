@@ -9,6 +9,7 @@ import {
 } from '@roundtable/shared';
 
 import { EmojiPicker } from './EmojiPicker';
+import { REACTION_HOVER_FILL, REACTION_ON_BORDER, REACTION_ON_FILL } from './pinboardTokens';
 
 interface ReactionRowProps {
   /** Every emoji anyone used here, in the order they first appeared. */
@@ -17,6 +18,8 @@ interface ReactionRowProps {
   viewerId: string | null;
   /** Toggle one reaction. Rejections surface on the canvas, not on the chip. */
   onReact: (emoji: string) => Promise<void>;
+  /** The card's width, so the row wraps within it rather than past its edge. */
+  width: number;
 }
 
 /**
@@ -56,14 +59,27 @@ function ReactionChip({
       // chip straddles the card's border, so half of it is over the board and
       // it cannot borrow a background from either side.
       //
+      // A reacted chip is shaded in the board's own slate rather than the amber
+      // accent. Amber is the palette's only accent and is already carrying
+      // every button, focus ring and sticky in the app, so spending it here
+      // made a row of chips shout for attention they do not need.
+      //
       // Sized to the glyph and nothing more. The minimum width matches the
       // height, so a chip nobody has used yet is a circle around its emoji
       // rather than a capsule with empty room in it, and only a count widens
       // one.
-      className={`inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+      style={
         mine
-          ? 'border-rt-primary/50 bg-rt-primary-tint text-rt-ink'
-          : 'border-rt-tertiary bg-white hover:bg-rt-primary-tint'
+          ? { background: REACTION_ON_FILL, borderColor: REACTION_ON_BORDER }
+          : ({
+              '--rt-chip-hover': REACTION_HOVER_FILL,
+              '--rt-chip-edge': REACTION_ON_BORDER,
+            } as React.CSSProperties)
+      }
+      className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+        mine
+          ? 'text-rt-ink'
+          : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'
       } ${
         dim ? 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100' : 'opacity-100'
       } ${busy ? 'scale-95' : ''}`}
@@ -106,15 +122,18 @@ function ReactionChip({
  * Being to the right of the used chips, the space they hold cannot push a
  * count off its place.
  *
- * One line, never wrapping: a second row would run down over whatever is under
- * the card.
+ * The row wraps within the card's width. With one reaction per person a busy
+ * card can carry a chip per participant, and a single line would run off the
+ * side and over its neighbours. Wrapping downward rather than upward is why
+ * the row is anchored by its top: extra lines hang below the card instead of
+ * climbing over the byline.
  *
  * Nothing is counted locally. The chip goes busy, the server decides whether
  * the press added or removed a reaction, and the count arrives on the
  * broadcast every other participant is reading too, so this card cannot end up
  * showing a number the rest of the room does not have.
  */
-export function ReactionRow({ reactions, viewerId, onReact }: ReactionRowProps) {
+export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRowProps) {
   const [pending, setPending] = useState<string | null>(null);
   const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
   const pickerButton = useRef<HTMLButtonElement>(null);
@@ -153,7 +172,19 @@ export function ReactionRow({ reactions, viewerId, onReact }: ReactionRowProps) 
     // Still straddling the bottom edge, but lined up with the byline's own left
     // margin rather than hung off the corner: the chips read as belonging to
     // the card, and the corner itself stays clear.
-    <div className="absolute -bottom-2.5 left-3 flex items-center gap-1">
+    //
+    // Anchored by the top and pulled up by half a chip, so the first line
+    // straddles the border and any further line grows downward.
+    <div
+      // The row itself is transparent to the pointer, and each chip takes it
+      // back. A row that wraps grows down over whatever card is below, and the
+      // gaps between chips are most of that area: without this, a second line
+      // would quietly swallow clicks on a neighbour it does not even cover.
+      className="pointer-events-none absolute top-full left-3 -mt-2.5 flex flex-wrap items-center gap-1"
+      // The card's width less the left inset and a matching gap on the right,
+      // so a wrapped row sits inside the card's footprint.
+      style={{ maxWidth: width - 24 }}
+    >
       {used.map((group) => chipFor(group.emoji, false))}
       {untouched.map((emoji) => chipFor(emoji, true))}
 
@@ -170,7 +201,13 @@ export function ReactionRow({ reactions, viewerId, onReact }: ReactionRowProps) 
             open ? null : (pickerButton.current?.getBoundingClientRect() ?? null),
           )
         }
-        className={`inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,opacity] hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+        style={
+          {
+            '--rt-chip-hover': REACTION_HOVER_FILL,
+            '--rt-chip-edge': REACTION_ON_BORDER,
+          } as React.CSSProperties
+        }
+        className={`pointer-events-auto inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,border-color,opacity] hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover) hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
           pickerAnchor
             ? 'opacity-100'
             : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'

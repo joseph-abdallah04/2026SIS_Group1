@@ -4,14 +4,18 @@
 import { randomInt } from 'node:crypto';
 
 import {
+  DELETED_USER_DISPLAY_NAME,
   normalizeSessionCode,
+  SHORTLIST_MIN,
   type Question,
-  type QuestionStatus,
   type Session,
   type SessionSummary,
+  type SessionTimerSnapshot,
+  type QuestionStatus,
 } from '@roundtable/shared';
 import {
   SESSION_CODE_ALPHABET,
+  SESSION_QUESTION_LIMIT,
   type CreateSessionInput,
   type UpdateSessionInput,
 } from '@roundtable/shared/schemas';
@@ -95,6 +99,8 @@ export async function createSession({ leaderId, input }: CreateSessionArgs): Pro
         leaderId,
         code: null,
         status: 'draft',
+        discussionTimerSeconds: input.discussionTimerSeconds ?? null,
+        votingTimerSeconds: input.votingTimerSeconds ?? null,
       },
     });
 
@@ -184,7 +190,11 @@ export async function updateSessionDraft({
 
     const session = await tx.session.update({
       where: { id: sessionId },
-      data: { title: input.title },
+      data: {
+        title: input.title,
+        discussionTimerSeconds: input.discussionTimerSeconds ?? null,
+        votingTimerSeconds: input.votingTimerSeconds ?? null,
+      },
     });
 
     await tx.question.deleteMany({ where: { sessionId } });
@@ -255,6 +265,50 @@ export async function deleteSession({ sessionId, userId }: DeleteSessionArgs): P
       await tx.session.delete({ where: { id: sessionId } });
     }
   });
+}
+
+export interface LiveSessionRef {
+  id: string;
+  title: string;
+}
+
+/**
+ * Whether this user currently leads or belongs to (as a not-yet-left member
+ * of) any lobby/active session — the same fact `assertNotInAnotherLiveSession`
+ * above enforces for join/create/open, exposed as a read for other modules.
+ *
+ * Auth's account deletion calls this to refuse deleting a user out from
+ * under a session that is still live: the leader is always also a
+ * `SessionMember` with `leftAt: null` (F07 — a leader cannot leave, only
+ * end), so this single membership check catches leading and merely
+ * belonging to a live session alike.
+ */
+export async function findLiveSessionForUser(userId: string): Promise<LiveSessionRef | null> {
+  return prisma.session.findFirst({
+    where: {
+      status: { in: ['lobby', 'active'] },
+      members: { some: { userId, leftAt: null } },
+    },
+    select: { id: true, title: true },
+  });
+}
+
+/**
+ * Removes every draft this user leads, as part of deleting their account.
+ * A draft has exactly one member — its own leader (`createSession` adds them
+ * at creation, and a draft mints no join code for anyone else to use before
+ * `lobby`) — so unlike an ended session, there is no other member's history
+ * here to preserve; leaving the row behind leaderless would just be an
+ * orphan nobody can ever reach or clean up.
+ *
+ * Takes the caller's transaction handle so this runs atomically with the
+ * user row actually being deleted.
+ */
+export async function deleteDraftSessionsForUser(
+  userId: string,
+  client: PrismaLike = prisma,
+): Promise<void> {
+  await client.session.deleteMany({ where: { leaderId: userId, status: 'draft' } });
 }
 
 /** Duck-typed rather than importing Prisma's error class: the `.code` is the
@@ -423,7 +477,10 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
       select: { id: true },
     });
     if (first) {
-      await tx.question.update({ where: { id: first.id }, data: { status: 'discussion' } });
+      await tx.question.update({
+        where: { id: first.id },
+        data: { status: 'discussion', discussionStartedAt: new Date() },
+      });
     }
 
     return tx.session.update({
@@ -445,13 +502,16 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
  * - `discussion -> answered` is absent because answering is what closes a
  *   vote (F30) — a leader who wants to move on without voting skips instead,
  *   which records *that* rather than inventing an answer nobody chose;
+ * - `voting -> discussion` is the shortlisting escape hatch: accidental
+ *   "Open voting" before the ballot is locked. Once ballots are in, the
+ *   round has to close or skip — it cannot rewind;
  * - `answered` and `skipped` are terminal, so the agenda only moves forward
  *   and a question cannot be reopened after the board has moved past it.
  */
 const PHASE_TRANSITIONS: Record<QuestionStatus, readonly QuestionStatus[]> = {
   pending: ['discussion', 'skipped'],
   discussion: ['voting', 'skipped'],
-  voting: ['answered', 'skipped'],
+  voting: ['discussion', 'answered', 'skipped'],
   answered: [],
   skipped: [],
 };
@@ -525,6 +585,33 @@ export async function setQuestionPhase({
       );
     }
 
+    if (status === 'voting') {
+      const proposalCount = await tx.proposal.count({
+        where: { questionId, deletedAt: null },
+      });
+      if (proposalCount < SHORTLIST_MIN) {
+        throw new ApiError(
+          409,
+          `Add at least ${SHORTLIST_MIN} proposals before opening voting`,
+          'NOT_ENOUGH_TO_VOTE',
+        );
+      }
+    }
+
+    if (question.status === 'voting' && status === 'discussion') {
+      const round = await tx.votingRound.findUnique({
+        where: { questionId },
+        select: { status: true },
+      });
+      if (round && round.status !== 'shortlisting') {
+        throw new ApiError(
+          409,
+          'The vote has already started — it cannot go back to discussion',
+          'VOTING_ALREADY_STARTED',
+        );
+      }
+    }
+
     if (status === 'discussion' || status === 'voting') {
       const open = await tx.question.findFirst({
         where: {
@@ -545,9 +632,20 @@ export async function setQuestionPhase({
 
     const updated = await tx.question.update({
       where: { id: questionId },
-      data: { status },
+      data: {
+        status,
+        ...(status === 'discussion' ? { discussionStartedAt: new Date() } : {}),
+      },
       select: QUESTION_REF_SELECT,
     });
+
+    // Drop an unfinished shortlist so a later "Open voting" does not revive
+    // ticks from the attempt the leader backed out of.
+    if (question.status === 'voting' && status === 'discussion') {
+      await tx.votingRound.deleteMany({
+        where: { questionId, status: 'shortlisting' },
+      });
+    }
 
     // The board follows the question that just changed, except when closing
     // one: then it advances to the next pending question so the room is not
@@ -630,6 +728,79 @@ export async function focusQuestion({
 
 export function emitQuestionFocus(io: RealtimeServer, sessionId: string, questionId: string): void {
   io.to(sessionRoom(sessionId)).emit('sessionFocus', { sessionId, questionId });
+}
+
+export interface AddSessionQuestionArgs {
+  sessionId: string;
+  leaderId: string;
+  /** Already validated by the caller against `addSessionQuestionSchema`. */
+  text: string;
+}
+
+/**
+ * Append one pending question to a live agenda. Drafts still go through
+ * `updateSessionDraft` (replace the whole list); ended sessions are frozen.
+ * Position is the next index after whatever is already there — the client
+ * only sends the text.
+ */
+export async function addSessionQuestion({
+  sessionId,
+  leaderId,
+  text,
+}: AddSessionQuestionArgs): Promise<Question> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: {
+        leaderId: true,
+        status: true,
+        _count: { select: { questions: true } },
+      },
+    });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.leaderId !== leaderId) {
+      throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+    }
+    if (session.status !== 'active' && session.status !== 'lobby') {
+      throw new ApiError(
+        409,
+        `Cannot add a question to a session that is ${session.status}`,
+        'INVALID_TRANSITION',
+      );
+    }
+    if (session._count.questions >= SESSION_QUESTION_LIMIT) {
+      throw new ApiError(
+        409,
+        `The agenda already has ${SESSION_QUESTION_LIMIT} questions`,
+        'AGENDA_FULL',
+      );
+    }
+
+    const last = await tx.question.findFirst({
+      where: { sessionId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+
+    return tx.question.create({
+      data: {
+        sessionId,
+        text,
+        position: (last?.position ?? -1) + 1,
+        status: 'pending',
+      },
+      select: { ...QUESTION_REF_SELECT, createdAt: true },
+    });
+  });
+}
+
+export function emitQuestionAdded(io: RealtimeServer, question: Question): void {
+  io.to(sessionRoom(question.sessionId)).emit('questionAdded', {
+    sessionId: question.sessionId,
+    question,
+  });
 }
 
 /**
@@ -787,7 +958,10 @@ export interface SessionPreview {
   id: string;
   title: string;
   status: Session['status'];
-  leaderId: string;
+  // Null if the leader's account has since been deleted — not
+  // guarded against here, since account deletion is intentionally allowed
+  // even while a session someone leads is still joinable.
+  leaderId: string | null;
   questionCount: number;
 }
 
@@ -870,7 +1044,10 @@ export async function joinSessionByCode({
 }
 
 export interface SessionMemberRow {
-  userId: string;
+  // Null if this member's account has since been deleted — the row (and
+  // this history entry) survives regardless; see `SessionMember.userId`'s
+  // schema comment.
+  userId: string | null;
   displayName: string;
   joinedAt: Date;
 }
@@ -889,7 +1066,26 @@ export async function listSessionMembers(sessionId: string): Promise<SessionMemb
 
   return rows.map((row) => ({
     userId: row.userId,
-    displayName: row.user.displayName,
+    displayName: row.user?.displayName ?? DELETED_USER_DISPLAY_NAME,
+    joinedAt: row.joinedAt,
+  }));
+}
+
+/**
+ * Everyone who ever sat in this session, including people who later left.
+ * F31's recap and the vote denominator treat membership as history
+ * (docs/02 §4); `listSessionMembers` stays the live "still here" list.
+ */
+export async function listSessionParticipants(sessionId: string): Promise<SessionMemberRow[]> {
+  const rows = await prisma.sessionMember.findMany({
+    where: { sessionId },
+    orderBy: { joinedAt: 'asc' },
+    select: { userId: true, joinedAt: true, user: { select: { displayName: true } } },
+  });
+
+  return rows.map((row) => ({
+    userId: row.userId,
+    displayName: row.user?.displayName ?? DELETED_USER_DISPLAY_NAME,
     joinedAt: row.joinedAt,
   }));
 }
@@ -1009,7 +1205,12 @@ export interface SessionRef {
   id: string;
   title: string;
   status: Session['status'];
-  leaderId: string;
+  // Null if the leader's account has since been deleted — every
+  // `=== actor.id` comparison against this elsewhere just stops matching
+  // anyone, which is the correct degrade (no one is "the leader" anymore).
+  leaderId: string | null;
+  discussionTimerSeconds: number | null;
+  votingTimerSeconds: number | null;
 }
 
 export interface QuestionRef {
@@ -1048,8 +1249,57 @@ const QUESTION_REF_SELECT = {
 export async function getSession(sessionId: string): Promise<SessionRef | null> {
   return prisma.session.findUnique({
     where: { id: sessionId },
-    select: { id: true, title: true, status: true, leaderId: true },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      leaderId: true,
+      discussionTimerSeconds: true,
+      votingTimerSeconds: true,
+    },
   });
+}
+
+/**
+ * Discussion clock for whoever is currently talking, including shortlisting.
+ * Hidden once the ballot is open: the voting module owns that overlay's clock.
+ *
+ * The `votingRound` read below is a deliberate exception to docs/02 §2 (a
+ * module reaches another only through its public surface). The dependency runs
+ * voting -> sessions, so importing the voting module here would close a cycle,
+ * and the alternative — having voting own the discussion clock — would put a
+ * sessions-configured timer behind a module that only exists once a ballot
+ * does. Kept to the one column that answers "has the ballot taken over the
+ * screen yet"; anything more belongs on the other side of the boundary.
+ */
+export async function getDiscussionTimer(sessionId: string): Promise<SessionTimerSnapshot | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { discussionTimerSeconds: true },
+  });
+  if (!session?.discussionTimerSeconds) return null;
+
+  const questions = await prisma.question.findMany({
+    where: { sessionId, status: { in: ['discussion', 'voting'] } },
+    select: { id: true, status: true, discussionStartedAt: true },
+  });
+  const live =
+    questions.find((question) => question.status === 'discussion') ??
+    questions.find((question) => question.status === 'voting');
+  if (!live?.discussionStartedAt) return null;
+
+  if (live.status === 'voting') {
+    const round = await prisma.votingRound.findUnique({
+      where: { questionId: live.id },
+      select: { status: true },
+    });
+    if (round && (round.status === 'open' || round.status === 'closed')) return null;
+  }
+
+  return {
+    startedAt: live.discussionStartedAt.toISOString(),
+    durationSeconds: session.discussionTimerSeconds,
+  };
 }
 
 export async function getQuestion(questionId: string): Promise<QuestionRef | null> {

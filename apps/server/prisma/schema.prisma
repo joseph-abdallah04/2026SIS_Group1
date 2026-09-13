@@ -29,6 +29,7 @@ model User {
   llmConfig          UserLLMConfig?
   proposals          Proposal[]
   reactions          ProposalReaction[]
+  votes              Vote[]
 
   @@map("users")
 }
@@ -64,8 +65,13 @@ model Session {
   // still allows at most one *live* session per code.
   code      String?       @unique // short join code, e.g. "K7NP-3WQZ"
   title     String
-  leaderId  String
-  leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])
+  // Nullable: deleting a user account severs this reference (SetNull) rather
+  // than blocking the deletion or cascading the session away — a session's
+  // history (its members, questions, proposals, votes) is not the deleted
+  // user's to take with them. NULL means "led by a since-deleted account",
+  // not "unassigned" — every session is created with a leader.
+  leaderId  String?
+  leader    User?         @relation("SessionLeader", fields: [leaderId], references: [id], onDelete: SetNull)
   status    SessionStatus @default(lobby)
   createdAt DateTime      @default(now())
   // Set once, on lobby -> active (F09). Distinct from `createdAt` (when the
@@ -73,14 +79,19 @@ model Session {
   // spent in the waiting room.
   startedAt DateTime?
   endedAt   DateTime?
+  // Optional clocks set at create/draft edit. Null means that timer is off.
+  // Stored in seconds so the client can count without rounding minutes.
+  discussionTimerSeconds Int? @map("discussion_timer_seconds")
+  votingTimerSeconds     Int? @map("voting_timer_seconds")
   // The question the board is showing. Distinct from each question's own
   // status: the leader can look back at an answered question's pinboard
   // without reopening it (proposals stay closed). Set when the session
   // starts, then by phase changes and by an explicit focus.
   currentQuestionId String?
 
-  questions Question[]
-  members   SessionMember[]
+  questions    Question[]
+  members      SessionMember[]
+  votingRounds VotingRound[]
 
   @@index([leaderId])
   @@map("sessions")
@@ -94,8 +105,13 @@ model Question {
   position  Int
   status    QuestionStatus @default(pending)
   createdAt DateTime       @default(now())
+  // When this question last entered `discussion`. The discussion clock
+  // counts from here; it is not a deadline — overtime is display-only.
+  discussionStartedAt DateTime? @map("discussion_started_at")
 
-  proposals Proposal[]
+  proposals   Proposal[]
+  votingRound VotingRound?
+  answer      Answer?
 
   // Index (not unique) on (sessionId, position): reordering questions needs
   // two rows to briefly share a position mid-swap. Ordering correctness is
@@ -108,8 +124,14 @@ model SessionMember {
   id        String   @id @default(cuid())
   sessionId String
   session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Nullable: deleting a user account severs this reference (SetNull)
+  // instead of deleting the row. This table is history (docs/02 §4) —
+  // the summary and the vote denominator both count everyone who took
+  // part, so losing the row on account deletion would rewrite the past
+  // for every other member of every session this user was ever in, not
+  // just the ones the deleted user could see.
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   joinedAt  DateTime @default(now())
   // Set by F07's explicit "Leave session". A soft delete, because docs/02 §4
   // makes this table history — the summary and the vote denominator both count
@@ -144,8 +166,11 @@ model Proposal {
   id                String    @id @default(cuid())
   questionId        String
   question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  authorId          String
-  author            User      @relation(fields: [authorId], references: [id])
+  // Nullable for the same reason as Session.leaderId: deleting the author's
+  // account severs this reference rather than deleting a proposal other
+  // people may have reacted to, voted on, or extended.
+  authorId          String?
+  author            User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
   type              ProposalType
   artifactJson      Json
   // Where this proposal sits on the board. Shared: everyone sees it in the
@@ -156,8 +181,16 @@ model Proposal {
   extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
   extensions        Proposal[] @relation("ProposalExtends")
   createdAt         DateTime  @default(now())
+  // When the artifact was last rewritten, or null if it never has been.
+  // Deliberately set in service code rather than with `@updatedAt`, which
+  // fires on every write to the row: dragging a card across the board is not
+  // editing what it says, and marking it "edited" for a move would be a lie.
+  editedAt          DateTime?
   deletedAt         DateTime?
   reactions         ProposalReaction[]
+  shortlistItems    VotingShortlistItem[]
+  votes             Vote[]
+  winningAnswers    Answer[]            @relation("WinningProposal")
 
   @@index([questionId, createdAt])
   @@map("proposals")
@@ -180,10 +213,14 @@ model ProposalReaction {
   emoji      String   @db.VarChar(32)
   createdAt  DateTime @default(now())
 
-  // The reason a reaction cannot be double-counted: pressing the chip twice
+  // One reaction per person per proposal, not per emoji. A reaction says how
+  // somebody feels about an idea, and a person has one feeling about it at a
+  // time: picking a second emoji replaces the first rather than adding to it.
+  //
+  // It is also what makes double-counting impossible. Pressing a chip twice
   // asks for a row that already exists, and the database refuses it. The rule
   // is here rather than only in service code so no future caller can lose it.
-  @@unique([proposalId, userId, emoji])
+  @@unique([proposalId, userId])
   // Reads are always "every reaction on this proposal, oldest first".
   @@index([proposalId, createdAt])
   @@map("proposal_reactions")
@@ -193,7 +230,80 @@ model ProposalReaction {
 // (tools owner adds artifact storage here if server-persisted)
 
 // === voting + summary module ===
-// (voting/summary owner adds vote + summary tables here)
+// One round per question. `shortlisting` is F27 (leader picking); `open` is
+// F28 (ballots in); `closed` is F30 (tally done). Vote rows land in F28.
+
+enum VotingRoundStatus {
+  shortlisting
+  open
+  closed
+}
+
+model VotingRound {
+  id         String            @id @default(cuid())
+  sessionId  String
+  session    Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId String            @unique
+  question   Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  status     VotingRoundStatus @default(shortlisting)
+  createdAt  DateTime          @default(now())
+  openedAt   DateTime?         @map("opened_at")
+  closedAt   DateTime?
+  items      VotingShortlistItem[]
+  votes      Vote[]
+
+  @@index([sessionId])
+  @@map("voting_rounds")
+}
+
+// One ballot per member per round (F28). Unique on (round, voter) so changing
+// your mind overwrites rather than double-counting. The row names the
+// proposal, not the person, in any public tally — identity stays on the server.
+model Vote {
+  id         String      @id @default(cuid())
+  roundId    String
+  round      VotingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  // Nullable: deleting a user severs this reference (SetNull) rather than
+  // deleting the ballot itself. F31's recap tallies a round from whatever
+  // Vote rows exist — cascading this away on account deletion would quietly
+  // change a closed round's declared winner after the fact (a 2-1 becoming
+  // a tie), for everyone else who was in that vote, not just the deleted user.
+  voterId    String?
+  voter      User?       @relation(fields: [voterId], references: [id], onDelete: SetNull)
+  proposalId String
+  proposal   Proposal    @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@unique([roundId, voterId])
+  @@index([roundId, proposalId])
+  @@map("votes")
+}
+
+// F30: the proposal that won this question, written when the leader closes
+// the round. `winningProposalId` is null when the round closed with no votes.
+model Answer {
+  id                String    @id @default(cuid())
+  questionId        String    @unique
+  question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  winningProposalId String?
+  winningProposal   Proposal? @relation("WinningProposal", fields: [winningProposalId], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+
+  @@map("answers")
+}
+
+model VotingShortlistItem {
+  id         String      @id @default(cuid())
+  roundId    String
+  round      VotingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  proposalId String
+  proposal   Proposal    @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, proposalId])
+  @@map("voting_shortlist_items")
+}
+
 
 // === voice module ===
 // (voice owner adds participant/track state tables here, if needed)

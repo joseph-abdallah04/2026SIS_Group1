@@ -15,7 +15,7 @@ function renderRow({
   viewerId = 'viewer' as string | null,
   onReact = vi.fn(async () => {}),
 } = {}) {
-  render(<ReactionRow reactions={reactions} viewerId={viewerId} onReact={onReact} />);
+  render(<ReactionRow reactions={reactions} viewerId={viewerId} onReact={onReact} width={210} />);
   return { onReact };
 }
 
@@ -91,7 +91,7 @@ describe('reaction row', () => {
           settle = resolve;
         }),
     );
-    render(<ReactionRow reactions={[]} viewerId="viewer" onReact={onReact} />);
+    render(<ReactionRow reactions={[]} viewerId="viewer" onReact={onReact} width={210} />);
 
     await userEvent.click(chip(THUMB));
     expect(chip(THUMB).hasAttribute('disabled')).toBe(true);
@@ -119,12 +119,14 @@ describe('reaction row', () => {
   it('reads the pressed state from the viewer, not from the reaction', () => {
     const reactions = [{ emoji: THUMB, userIds: ['someone-else'] }];
     const { unmount } = render(
-      <ReactionRow reactions={reactions} viewerId="viewer" onReact={vi.fn()} />,
+      <ReactionRow reactions={reactions} viewerId="viewer" onReact={vi.fn()} width={210} />,
     );
     expect(chip(THUMB, 1).getAttribute('aria-pressed')).toBe('false');
     unmount();
 
-    render(<ReactionRow reactions={reactions} viewerId="someone-else" onReact={vi.fn()} />);
+    render(
+      <ReactionRow reactions={reactions} viewerId="someone-else" onReact={vi.fn()} width={210} />,
+    );
     expect(chip(THUMB, 1).getAttribute('aria-pressed')).toBe('true');
   });
 

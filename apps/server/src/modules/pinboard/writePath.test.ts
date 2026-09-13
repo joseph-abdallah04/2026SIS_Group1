@@ -14,6 +14,7 @@ vi.mock('./sessionsAdapter.js', () => ({
   getQuestion: vi.fn(),
   getActiveQuestion: vi.fn(),
   getSession: vi.fn(),
+  getDiscussionTimer: vi.fn(),
 }));
 
 const { prisma } = await import('../../db.js');
@@ -59,7 +60,14 @@ function createdRow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   question.mockResolvedValue(questionRef('discussion'));
-  session.mockResolvedValue({ id: 's1', title: 'Session', status: 'active', leaderId: 'leader-1' });
+  session.mockResolvedValue({
+    id: 's1',
+    title: 'Session',
+    status: 'active',
+    leaderId: 'leader-1',
+    discussionTimerSeconds: null,
+    votingTimerSeconds: null,
+  });
   create.mockResolvedValue(createdRow() as never);
 });
 
@@ -111,6 +119,8 @@ describe('createProposal', () => {
       title: 'Session',
       status: 'ended',
       leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
     });
     await expect(
       createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
@@ -121,7 +131,14 @@ describe('createProposal', () => {
   it.each(['draft', 'lobby'] as const)(
     'refuses to write while the session is %s',
     async (status) => {
-      session.mockResolvedValue({ id: 's1', title: 'Session', status, leaderId: 'leader-1' });
+      session.mockResolvedValue({
+        id: 's1',
+        title: 'Session',
+        status,
+        leaderId: 'leader-1',
+        discussionTimerSeconds: null,
+        votingTimerSeconds: null,
+      });
       await expect(
         createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY }),
       ).rejects.toThrow(/not live/);
@@ -144,22 +161,42 @@ describe('createProposal', () => {
       expect(proposal.extendsProposalId).toBe('parent-1');
     });
 
-    it('rejects a parent on another board or already deleted', async () => {
+    it('rejects a parent from another session or already deleted', async () => {
       findFirst.mockResolvedValue(null);
       await expect(
         createProposal({ questionId: 'q1', authorId: 'u1', input: extending }),
-      ).rejects.toThrow(/not on this board/);
+      ).rejects.toThrow(/not in this session/);
       expect(create).not.toHaveBeenCalled();
     });
 
-    it('scopes the parent lookup to this question and non-deleted rows', async () => {
+    // Scoped to the session, not to this question: extending (F23) names
+    // something on the board in front of you, while reusing your own earlier
+    // work (F38) names something from a question that has since closed, and
+    // both arrive here as the same write.
+    it('scopes the parent lookup to this session and non-deleted rows', async () => {
       findFirst.mockResolvedValue({ id: 'parent-1' } as never);
       await createProposal({ questionId: 'q1', authorId: 'u1', input: extending });
       expect(findFirst.mock.calls[0]?.[0]?.where).toMatchObject({
         id: 'parent-1',
-        questionId: 'q1',
         deletedAt: null,
+        question: { sessionId: 's1' },
       });
+    });
+
+    it('accepts a parent from an earlier question of the same session', async () => {
+      findFirst.mockResolvedValue({ id: 'parent-1' } as never);
+      create.mockResolvedValue(createdRow({ extendsProposalId: 'parent-1' }) as never);
+
+      const proposal = await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: extending,
+      });
+
+      // The lookup never mentions the question the parent was proposed to, so
+      // an older one is as reachable as one on the current board.
+      expect(findFirst.mock.calls[0]?.[0]?.where).not.toHaveProperty('questionId');
+      expect(proposal.extendsProposalId).toBe('parent-1');
     });
   });
 });

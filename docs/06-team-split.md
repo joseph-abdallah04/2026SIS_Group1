@@ -27,7 +27,7 @@
 | --- | --------------------- | ------------------------------ | ---------------- | ---------------------- | -------------------------------------- |
 | 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33     | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
 | 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
-| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18          | `pinboard/`            | `Proposal`, `Reaction`                 |
+| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18, F38     | `pinboard/`            | `Proposal`, `Reaction`                 |
 | 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
 | 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32          | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
 | 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | _(none — LiveKit-managed)_             |
@@ -73,6 +73,8 @@ POST   /api/auth/signup               → { token: string }
 POST   /api/auth/login                → { token: string }
 GET    /api/auth/me                   → { user: User }
 PATCH  /api/users/me                  → { displayName } → User
+DELETE /api/users/me                  → { password } → { ok } (permanently deletes the caller's own account;
+                                          409 LIVE_SESSION_EXISTS while they lead/belong to a live session)
 PUT    /api/me/llm-config             → { baseUrl, apiKey, model } → { ok }
 GET    /api/me/llm-config             → { baseUrl, model } (no key)
 POST   /api/me/llm-config/test        → { ok: boolean, error? }
@@ -87,6 +89,7 @@ POST   /api/me/llm-config/test        → { ok: boolean, error? }
 
 - Coordinate **LLM config schema** with assistant owner before starting
 - Password hash via bcrypt; no plaintext storage
+- Account deletion (`DELETE /api/users/me`) is not on the F01-F03/F33 list above — it's extra Auth-owned work with no feature number of its own. It touches other modules' nullability (`Session.leaderId`, `Proposal.authorId`, `SessionMember.userId`, `Vote.voterId` — see docs/02 §3), so treat schema changes there as cross-module and worth a heads-up in review, not something to land silently in an Auth-only PR.
 
 ### Also owns (deferred from setup)
 
@@ -121,10 +124,12 @@ Frontend: apps/web/src/features/sessions/
 ### Database tables
 
 ```
-Session (id, code, title, leaderId, status, createdAt, endedAt)
+Session (id, code, title, leaderId?, status, createdAt, endedAt)
 Question (id, sessionId, text, position, phase)
-SessionMember (sessionId, userId, joinedAt) — who's in this session
+SessionMember (sessionId, userId?, joinedAt) — who's in this session
 ```
+
+`leaderId`/`userId` are nullable — SET NULL when the account is deleted (Auth's `DELETE /api/users/me`), not cascaded. A session or membership is never the deleted user's alone to take with them.
 
 ### API surface
 
@@ -192,8 +197,8 @@ The socket server currently accepts any connection and only logs connect/disconn
 
 ## Pinboard Core Owner
 
-**Features:** F14–F18  
-**Responsibility:** Proposal CRUD, reactions, canvas real-time sync, right-click context menu
+**Features:** F14–F18, F38  
+**Responsibility:** Proposal CRUD, reactions, reuse of your own earlier proposals, canvas real-time sync, right-click context menu
 
 ### Code ownership
 
@@ -207,9 +212,11 @@ Frontend: apps/web/src/features/pinboard/
 ### Database tables
 
 ```
-Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, deletedAt)
-ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId, emoji)
+Proposal (id, questionId, authorId?, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
+ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
+
+`authorId` is nullable — SET NULL when the account is deleted (Auth's `DELETE /api/users/me`), not cascaded, so a proposal others reacted to, voted on, or extended never disappears out from under them. `authorName` in the wire shape (`BoardItem`, `packages/shared`) falls back to `DELETED_USER_DISPLAY_NAME` ("Deleted user") when this is null.
 
 ### Socket events
 
@@ -266,7 +273,7 @@ reaction lands in the same place on every board.
 
 - Proposal artifacts are **editable by their author only** (F16); other users build on them via the separate "Extend" flow (F23), which creates a new proposal owned by that user
 - `extendsProposalId` links child proposals to parents; never delete parent if child exists
-- Reactions use unique constraint to allow toggle: pressing same emoji again removes reaction. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
+- One reaction per person per proposal, enforced by a unique constraint on (proposalId, userId). Pressing the emoji you already left removes it; pressing a different one moves yours to it. Any single emoji may be left; what is checked on the way in is that the value really is one emoji (`isEmoji` in `packages/shared`), because the column is otherwise a free-text field sitting in the middle of every card. `QUICK_REACTIONS` decides only which three a card offers as chips without opening the picker
 - Reactions are held to the same phase lock as every other board write: they move only while the question is in `discussion`. They are not votes (F27–F31), and a tally moving beside a live ballot would be read as one
 
 ---
@@ -384,9 +391,11 @@ Frontend: apps/web/src/features/voting/
 
 ```
 VotingRound (id, sessionId, questionId, status, createdAt, closedAt)
-Vote (id, roundId, voterId, proposalId) — unique(roundId, voterId)
+Vote (id, roundId, voterId?, proposalId) — unique(roundId, voterId)
 Answer (id, questionId, winningProposalId, decidedAt) — unique(questionId)
 ```
+
+`voterId` is nullable — SET NULL when the account is deleted (Auth's `DELETE /api/users/me`), not cascaded. The ballot itself survives, so a closed round's tally and declared winner never change after the fact; only the identity of who cast it is lost.
 
 ### Socket events
 
@@ -504,6 +513,54 @@ POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, e
   short-lived token, which supersedes the 24h figure written here pre-build)
 - LiveKit SDK handles all participant state
 - Voice is **optional** — joining session doesn't require microphone permission
+- Mute is remembered per session _and_ per user in `localStorage` (F12), not on
+  the server: voice still owns no tables, and the only thing lost across a
+  refresh is the participant's own intent. Someone who rejoins muted never
+  opens the microphone at all — no prompt, no recording indicator
+- The roster (F13) is a white chip **centred in the board header**, beside the
+  phase pill and the mic. Five bubbles, then a `⋯` overflow that opens the full
+  list; the question pill's cap dropped from 70% to 46% so the centre is
+  reserved rather than borrowed (the agenda rail carries the same question text
+  untruncated, so nothing is actually lost)
+- **Resolved, and not to be re-litigated:** the roster was a rail on the right
+  until F13.2. It moved because the AI assistant covers that side — its bubble
+  is `fixed right-4 bottom-24` at 56px, which sat on the rail _permanently_,
+  whether the rail was open (256px) or collapsed (44px), and landed on the join
+  code card at its foot; its expanded panel defaults to 420px at `vw - 444`,
+  covering everything but the rail's rightmost 24px, and wins on paint order as
+  a later sibling of `<main>` with `z-index: auto`. Asking the assistant to
+  offset by the rail width would have meant tracking a rail that changes width
+  and may not exist. **The AI Assistant owner needs no change for this.** Note
+  the voting module's ballot rail still docks on that side and has the same
+  exposure — that one is unexamined here
+- A header roster cannot scroll, so truncation would eventually hide whoever is
+  talking. `splitForHeader` promotes a hidden speaker into the least-missed
+  visible slot instead, never displacing you or another speaker, and the `⋯`
+  carries the ring when promotion cannot fit one. The reduced count on a narrow
+  header comes from `useCompactHeader` (a media query) rather than CSS, because
+  the two widths need _different data_ — a CSS-hidden bubble could hide a
+  promoted speaker, and rendering both sets would read the room out twice
+- The join code followed the roster out of the rail and now sits in the board
+  **footer** beside the zoom control, reshaped to a single row so the footer
+  does not grow taller
+- There are no avatars in this product (`User` has `displayName` only). The
+  roster reuses the waiting room's initials bubbles — `initialsFromName` and
+  `swatchForId` from `features/sessions/waitingRoomSeats` — keyed on LiveKit
+  identity, which `issueVoiceToken` mints as the user id, so a person's bubble
+  carries across the join. Note `swatchForId`, **not** `colorsForParticipants`:
+  the latter walks collisions against whichever id set it is handed, so seating
+  a live roster with it made a person's colour depend on who else was connected
+  — about a fifth of five-person rooms recoloured someone already on show when
+  the next person joined. The waiting room keeps the walk on purpose (names
+  there are hover-only, so distinct fills do the distinguishing); the roster
+  names people in its overflow list and its tooltips, so it trades duplicate
+  fills for stability
+- The roster is LiveKit's alone; it never merges the sessions module's
+  member list. Everyone who opens the session view joins the room whether or not
+  they grant a microphone, so the room already _is_ the presence list
+- Speaking is de-flickered with a 600ms trailing hold (`useSustainedSpeaking`).
+  Rising edges are never delayed — F13 wants a reaction within ~0.5s — but the
+  gaps between words would otherwise strobe the ring at syllable rate
 
 ---
 
@@ -756,7 +813,7 @@ Examples:
 
 1. **Auth + Profile** — F01–F03, F33
 2. **Session Lifecycle** — F04–F10, F24–F26
-3. **Pinboard Core** — F14–F18
+3. **Pinboard Core** — F14–F18, F38
 4. **Creative Tools** — F19–F22, F23
 5. **Voting + Summary** — F27–F32
 6. **Voice** — F11–F13

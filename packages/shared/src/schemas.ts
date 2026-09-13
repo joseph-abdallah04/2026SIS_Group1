@@ -52,28 +52,128 @@ import {
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
 // Use on REST bodies (server) and forms (web). Add your module's schemas under its label.
 
+// Every field carries its own message — the default zod ones ("String must
+// contain at least 8 character(s)") are implementation-speak, not something
+// to show someone filling in a form.
+// New-account passwords only — an existing account may predate this rule, so
+// `loginSchema` and `deleteAccountSchema` below deliberately stay permissive;
+// tightening this would lock people out of a password they already have.
+//
+// One combined check with one message, rather than a chain of `.regex()`
+// calls: zod only ever surfaces the *first* failing rule, so a chain would
+// reveal requirements one at a time across repeated submits instead of
+// telling the user everything expected up front.
+const PASSWORD_REQUIREMENTS_MESSAGE =
+  'Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character';
+
+function meetsPasswordRequirements(value: string): boolean {
+  return (
+    value.length >= 8 &&
+    /[A-Z]/.test(value) &&
+    /[a-z]/.test(value) &&
+    /[0-9]/.test(value) &&
+    /[^A-Za-z0-9]/.test(value)
+  );
+}
+
+const signupPasswordSchema = z
+  .string()
+  .refine(meetsPasswordRequirements, { message: PASSWORD_REQUIREMENTS_MESSAGE });
+
 export const signupSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  displayName: z.string().min(1).max(50),
+  email: z.string().email('Please enter a valid email address'),
+  password: signupPasswordSchema,
+  displayName: z
+    .string()
+    .trim()
+    .min(1, 'Please enter a display name')
+    .max(50, 'Display name must be 50 characters or fewer'),
 });
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email('Please enter a valid email address'),
+  password: z.string().min(1, 'Please enter your password'),
+});
+
+export const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(50),
+});
+
+// Account deletion: the typed-confirmation step is the password field itself — the
+// button stays disabled client-side until it's non-empty, and the server
+// re-checks it against the account's real passwordHash before deleting
+// anything, so a stale/unlocked tab isn't enough on its own.
+export const deleteAccountSchema = z.object({
   password: z.string().min(1),
 });
 
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;
 
 // === sessions module ===
+
+/** Seconds field on a session clock — 0, 15, 30, or 45. */
+export const TIMER_SECOND_STEP = 15;
+/** Longest discussion timer a leader may set. */
+export const DISCUSSION_TIMER_MAX_SECONDS = 3 * 60 * 60;
+/** Longest voting timer a leader may set. */
+export const VOTING_TIMER_MAX_SECONDS = 60 * 60;
+
+export interface TimerDurationParts {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+export function splitTimerSeconds(total: number | null | undefined): TimerDurationParts {
+  if (total == null || total <= 0) return { hours: 0, minutes: 0, seconds: 0 };
+  let seconds = Math.round((total % 60) / TIMER_SECOND_STEP) * TIMER_SECOND_STEP;
+  let minutes = Math.floor((total % 3600) / 60);
+  let hours = Math.floor(total / 3600);
+  if (seconds === 60) {
+    seconds = 0;
+    minutes += 1;
+  }
+  if (minutes === 60) {
+    minutes = 0;
+    hours += 1;
+  }
+  return { hours, minutes, seconds };
+}
+
+export function combineTimerSeconds(parts: TimerDurationParts): number | null {
+  const total = parts.hours * 3600 + parts.minutes * 60 + parts.seconds;
+  return total > 0 ? total : null;
+}
+
+const optionalTimerSeconds = (max: number) =>
+  z
+    .number()
+    .int()
+    .min(TIMER_SECOND_STEP)
+    .max(max)
+    .multipleOf(TIMER_SECOND_STEP)
+    .nullable()
+    .optional();
+
+/** Longest a single question may be. */
+export const SESSION_QUESTION_TEXT_MAX = 500;
+/** Hard cap on an agenda, including questions added mid-session. */
+export const SESSION_QUESTION_LIMIT = 50;
+
+export const questionTextSchema = z.string().trim().min(1).max(SESSION_QUESTION_TEXT_MAX);
 
 // F04: title + an ordered list of questions. Order is exactly the array
 // order — the server assigns `position` from array index, so reordering
 // client-side and resubmitting is how a question list gets reordered.
+// Timer seconds are optional: omit or `null` means that clock is off.
 export const createSessionSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  questions: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
+  questions: z.array(questionTextSchema).min(1).max(SESSION_QUESTION_LIMIT),
+  discussionTimerSeconds: optionalTimerSeconds(DISCUSSION_TIMER_MAX_SECONDS),
+  votingTimerSeconds: optionalTimerSeconds(VOTING_TIMER_MAX_SECONDS),
 });
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
@@ -123,6 +223,14 @@ export const focusQuestionSchema = z.object({
 });
 
 export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
+
+// Leader appending one pending question to a live agenda. Position and
+// status are assigned server-side — the body is only the text.
+export const addSessionQuestionSchema = z.object({
+  text: questionTextSchema,
+});
+
+export type AddSessionQuestionInput = z.infer<typeof addSessionQuestionSchema>;
 
 // === pinboard module ===
 
@@ -867,3 +975,22 @@ export const proposalReactSchema = z.object({
 });
 
 export type ProposalReactInput = z.infer<typeof proposalReactSchema>;
+
+// === voting module ===
+
+export const shortlistToggleSchema = z.object({
+  proposalId: z.string().min(1),
+});
+
+export type ShortlistToggleInput = z.infer<typeof shortlistToggleSchema>;
+
+/** Empty body: session and leader come from the socket, not the payload. */
+export const emptyVotingIntentSchema = z.object({});
+
+export type EmptyVotingIntent = z.infer<typeof emptyVotingIntentSchema>;
+
+export const voteCastSchema = z.object({
+  proposalId: z.string().min(1),
+});
+
+export type VoteCastInput = z.infer<typeof voteCastSchema>;

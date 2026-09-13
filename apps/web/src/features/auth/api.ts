@@ -1,5 +1,10 @@
-import type { AuthResult } from '@roundtable/shared';
-import type { LoginInput, SignupInput } from '@roundtable/shared/schemas';
+import type { AuthResult, User } from '@roundtable/shared';
+import type {
+  DeleteAccountInput,
+  LoginInput,
+  SignupInput,
+  UpdateProfileInput,
+} from '@roundtable/shared/schemas';
 
 import { api } from '../../lib/api';
 
@@ -17,4 +22,16 @@ export function login(input: LoginInput): Promise<AuthResult> {
 
 export function logout(): Promise<void> {
   return api.post<void>('/api/auth/logout', {});
+}
+
+export function getMe(): Promise<{ user: User }> {
+  return api.get<{ user: User }>('/api/auth/me');
+}
+
+export function updateProfile(input: UpdateProfileInput): Promise<User> {
+  return api.patch<User>('/api/users/me', input);
+}
+
+export function deleteAccount(input: DeleteAccountInput): Promise<{ ok: true }> {
+  return api.delete<{ ok: true }>('/api/users/me', input);
 }

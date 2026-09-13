@@ -1,4 +1,4 @@
-import { useState, type ButtonHTMLAttributes, type FormEvent } from 'react';
+import { useState, type ButtonHTMLAttributes, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { loginSchema, signupSchema } from '@roundtable/shared/schemas';
 
@@ -15,11 +15,8 @@ const LABEL_CLASSES =
   'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
 
 /**
- * Pill-shaped CTA for this page only — the shared `Button` component hardcodes
- * `rounded-lg` for every other button in the app, and a `className` override
- * can't reliably win that fight (Tailwind resolves conflicting utilities like
- * `rounded-lg`/`rounded-full` by generation order, not DOM order). Uses the
- * mustard `rt-secondary` token as the CTA — same gold as the rest of the app.
+ * Full-width pill CTA for this page. Uses the mustard `rt-secondary` token
+ * as the CTA — same gold as the rest of the app.
  */
 function SubmitButton({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
@@ -30,6 +27,20 @@ function SubmitButton({ children, ...props }: ButtonHTMLAttributes<HTMLButtonEle
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * A validation or server error on login/signup. A bordered, tinted box reads
+ * as "something needs your attention" from a glance — plain red text sitting
+ * inline with the fields was easy to mistake for placeholder copy, and easy
+ * to miss with a field still focused.
+ */
+function FormError({ children }: { children: ReactNode }) {
+  return (
+    <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {children}
+    </p>
   );
 }
 
@@ -81,7 +92,7 @@ function LoginForm() {
       navigate(safeReturnPath(searchParams.get('next')), { replace: true });
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
+        err instanceof ApiClientError ? err.message : 'Something went wrong. Please try again.',
       );
     } finally {
       setSubmitting(false);
@@ -98,7 +109,10 @@ function LoginForm() {
           autoComplete="email"
           placeholder="you@team.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setError(null);
+          }}
           required
         />
       </label>
@@ -110,16 +124,15 @@ function LoginForm() {
           type="password"
           autoComplete="current-password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setError(null);
+          }}
           required
         />
       </label>
 
-      {error ? (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      ) : null}
+      {error ? <FormError>{error}</FormError> : null}
 
       <SubmitButton disabled={submitting}>{submitting ? 'Logging in…' : 'Log in'}</SubmitButton>
     </form>
@@ -131,12 +144,18 @@ function SignupForm() {
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
 
     const parsed = signupSchema.safeParse({ email, password, displayName });
     if (!parsed.success) {
@@ -153,7 +172,7 @@ function SignupForm() {
       navigate(safeReturnPath(searchParams.get('next')), { replace: true });
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Something went wrong — please try again',
+        err instanceof ApiClientError ? err.message : 'Something went wrong. Please try again.',
       );
     } finally {
       setSubmitting(false);
@@ -169,7 +188,10 @@ function SignupForm() {
           type="text"
           autoComplete="name"
           value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
+          onChange={(e) => {
+            setDisplayName(e.target.value);
+            setError(null);
+          }}
           maxLength={50}
           required
         />
@@ -183,7 +205,10 @@ function SignupForm() {
           autoComplete="email"
           placeholder="you@team.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setError(null);
+          }}
           required
         />
       </label>
@@ -195,17 +220,32 @@ function SignupForm() {
           type="password"
           autoComplete="new-password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setError(null);
+          }}
           minLength={8}
           required
         />
       </label>
 
-      {error ? (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      ) : null}
+      <label className={LABEL_CLASSES}>
+        Confirm password
+        <input
+          className={INPUT_CLASSES}
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(e) => {
+            setConfirmPassword(e.target.value);
+            setError(null);
+          }}
+          minLength={8}
+          required
+        />
+      </label>
+
+      {error ? <FormError>{error}</FormError> : null}
 
       <SubmitButton disabled={submitting}>
         {submitting ? 'Creating account…' : 'Sign up'}
