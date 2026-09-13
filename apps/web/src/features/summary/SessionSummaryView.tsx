@@ -33,7 +33,7 @@ function QuestionRecap({
   question: SessionRecapQuestion;
   index: number;
   viewerId: string | null;
-  leaderId: string;
+  leaderId: string | null;
 }) {
   const winnerId = question.winnerProposalId;
   const tied = new Set(question.tiedProposalIds);
@@ -86,7 +86,7 @@ function QuestionRecap({
                   <ProposalCard
                     item={item}
                     isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
-                    isAuthorLeader={item.authorId === leaderId}
+                    isAuthorLeader={item.authorId != null && item.authorId === leaderId}
                   />
                 </div>
                 {tally ? (

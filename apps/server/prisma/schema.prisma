@@ -65,8 +65,13 @@ model Session {
   // still allows at most one *live* session per code.
   code      String?       @unique // short join code, e.g. "K7NP-3WQZ"
   title     String
-  leaderId  String
-  leader    User          @relation("SessionLeader", fields: [leaderId], references: [id])
+  // Nullable: deleting a user account severs this reference (SetNull) rather
+  // than blocking the deletion or cascading the session away — a session's
+  // history (its members, questions, proposals, votes) is not the deleted
+  // user's to take with them. NULL means "led by a since-deleted account",
+  // not "unassigned" — every session is created with a leader.
+  leaderId  String?
+  leader    User?         @relation("SessionLeader", fields: [leaderId], references: [id], onDelete: SetNull)
   status    SessionStatus @default(lobby)
   createdAt DateTime      @default(now())
   // Set once, on lobby -> active (F09). Distinct from `createdAt` (when the
@@ -119,8 +124,14 @@ model SessionMember {
   id        String   @id @default(cuid())
   sessionId String
   session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Nullable: deleting a user account severs this reference (SetNull)
+  // instead of deleting the row. This table is history (docs/02 §4) —
+  // the summary and the vote denominator both count everyone who took
+  // part, so losing the row on account deletion would rewrite the past
+  // for every other member of every session this user was ever in, not
+  // just the ones the deleted user could see.
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   joinedAt  DateTime @default(now())
   // Set by F07's explicit "Leave session". A soft delete, because docs/02 §4
   // makes this table history — the summary and the vote denominator both count
@@ -155,8 +166,11 @@ model Proposal {
   id                String    @id @default(cuid())
   questionId        String
   question          Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  authorId          String
-  author            User      @relation(fields: [authorId], references: [id])
+  // Nullable for the same reason as Session.leaderId: deleting the author's
+  // account severs this reference rather than deleting a proposal other
+  // people may have reacted to, voted on, or extended.
+  authorId          String?
+  author            User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
   type              ProposalType
   artifactJson      Json
   // Where this proposal sits on the board. Shared: everyone sees it in the
@@ -249,8 +263,13 @@ model Vote {
   id         String      @id @default(cuid())
   roundId    String
   round      VotingRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
-  voterId    String
-  voter      User        @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  // Nullable: deleting a user severs this reference (SetNull) rather than
+  // deleting the ballot itself. F31's recap tallies a round from whatever
+  // Vote rows exist — cascading this away on account deletion would quietly
+  // change a closed round's declared winner after the fact (a 2-1 becoming
+  // a tie), for everyone else who was in that vote, not just the deleted user.
+  voterId    String?
+  voter      User?       @relation(fields: [voterId], references: [id], onDelete: SetNull)
   proposalId String
   proposal   Proposal    @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   createdAt  DateTime    @default(now())

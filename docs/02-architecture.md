@@ -82,15 +82,15 @@ No cycles. If two modules seem to need each other, invert: raise an event or mov
 
 ```
 User          id, email, passwordHash, displayName, createdAt
-Session       id, code?, title(focus), leaderId→User, status(draft|lobby|active|ended),
+Session       id, code?, title(focus), leaderId?→User, status(draft|lobby|active|ended),
               createdAt, startedAt?, endedAt?
 Question      id, sessionId→Session, text, position(int), status(pending|discussion|voting|answered|skipped)
-SessionMember id, sessionId→Session, userId→User, joinedAt, leftAt?  (unique sessionId+userId)
-Proposal      id, questionId→Question, authorId→User, type(sticky|drawing|diagram),
+SessionMember id, sessionId→Session, userId?→User, joinedAt, leftAt?  (unique sessionId+userId)
+Proposal      id, questionId→Question, authorId?→User, type(sticky|drawing|diagram),
               artifactJson(jsonb), x, y, extendsProposalId?→Proposal, createdAt
 Reaction      id, proposalId→Proposal, userId→User, emoji             (unique proposalId+userId+emoji)
 VotingRound   id, questionId→Question, status(open|closed), createdAt, closedAt
-Vote          id, roundId→VotingRound, voterId→User, proposalId→Proposal (unique roundId+voterId)
+Vote          id, roundId→VotingRound, voterId?→User, proposalId→Proposal (unique roundId+voterId)
 Answer        id, questionId→Question(unique), winningProposalId→Proposal, decidedAt
 Summary       id, sessionId→Session(unique), contentJson(jsonb), createdAt
 UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, updatedAt
@@ -98,6 +98,7 @@ UserLLMConfig id, userId→User(unique), baseUrl, apiKeyEncrypted, model, update
 
 Notes:
 
+- `Session.leaderId`, `Proposal.authorId`, `SessionMember.userId`, and `Vote.voterId` are all nullable (`ON DELETE SET NULL`) — deleting a user's account (`DELETE /api/users/me`) severs these references rather than cascading the row away or blocking the delete. A session, proposal, membership, or ballot is never one person's to take with them: it survives with the reference cleared, so everyone else's history, tallies, and recap outcomes stay correct. Only what is entirely the deleted user's own (draft sessions they alone are a member of, their reactions, their LLM config) is actually removed. Account deletion itself is refused with `409 LIVE_SESSION_EXISTS` while the user leads or belongs to a `lobby`/`active` session — see `apps/server/src/modules/auth/service.ts`'s `deleteAccount`.
 - `Session.status` runs `draft → lobby → active → ended`. A `draft` is the leader still writing the title and questions (F04/F05, editable and deletable only in this state); `lobby` means joinable (F06 mints the code); `active` is the live session (F09 sets `startedAt`).
 - `Session.code` is nullable and unique. It is claimed on `draft → lobby` and released on end, so NULL means "not joinable" — Postgres treats NULLs as distinct, so any number of drafts and ended sessions sit at NULL while the unique index still allows only one _live_ session per code.
 - `SessionMember.leftAt` is F07's "Leave session": a soft delete, because this table is history (see §4). NULL means currently in the session, so everything that asks "who is in here?" filters on `leftAt: null`. Rejoining by code clears it and keeps the original `joinedAt`.
@@ -158,7 +159,7 @@ REST handles non-realtime concerns (all prefixed `/api`):
 
 | Area      | Endpoints                                                                                                                                                                                                                                                                                                                            |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`                                                                                                                                                                                                                                           |
+| auth      | `POST /api/auth/signup`, `POST /api/auth/login`, `GET /api/auth/me`, `PATCH /api/users/me`, `DELETE /api/users/me {password}` (permanently deletes the caller's own account; `409 LIVE_SESSION_EXISTS` while they lead/belong to a live session)                                                                                   |
 | sessions  | `POST /api/sessions` (with questions), `GET /api/sessions`, `GET /api/sessions/:id`, `PATCH/DELETE /api/sessions/:id` (draft only), `GET /api/sessions/:id/members`, `POST /api/sessions/:id/open`, `POST /api/sessions/:id/start`, `POST /api/sessions/:id/phase {questionId, status}`, `POST /api/sessions/:id/end`, `POST /api/sessions/:id/leave`, `GET /api/sessions/code/:code`, `POST /api/sessions/join {code}` |
 | summary   | `GET /api/sessions/:id/summary`                                                                                                                                                                                                                                                                                                      |
 | voice     | `POST /api/sessions/:id/livekit-token`                                                                                                                                                                                                                                                                                                |

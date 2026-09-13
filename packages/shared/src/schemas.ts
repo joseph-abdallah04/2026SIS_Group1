@@ -25,24 +25,65 @@ import {
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
 // Use on REST bodies (server) and forms (web). Add your module's schemas under its label.
 
+// Every field carries its own message — the default zod ones ("String must
+// contain at least 8 character(s)") are implementation-speak, not something
+// to show someone filling in a form.
+// New-account passwords only — an existing account may predate this rule, so
+// `loginSchema` and `deleteAccountSchema` below deliberately stay permissive;
+// tightening this would lock people out of a password they already have.
+//
+// One combined check with one message, rather than a chain of `.regex()`
+// calls: zod only ever surfaces the *first* failing rule, so a chain would
+// reveal requirements one at a time across repeated submits instead of
+// telling the user everything expected up front.
+const PASSWORD_REQUIREMENTS_MESSAGE =
+  'Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character';
+
+function meetsPasswordRequirements(value: string): boolean {
+  return (
+    value.length >= 8 &&
+    /[A-Z]/.test(value) &&
+    /[a-z]/.test(value) &&
+    /[0-9]/.test(value) &&
+    /[^A-Za-z0-9]/.test(value)
+  );
+}
+
+const signupPasswordSchema = z
+  .string()
+  .refine(meetsPasswordRequirements, { message: PASSWORD_REQUIREMENTS_MESSAGE });
+
 export const signupSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  displayName: z.string().trim().min(1).max(50),
+  email: z.string().email('Please enter a valid email address'),
+  password: signupPasswordSchema,
+  displayName: z
+    .string()
+    .trim()
+    .min(1, 'Please enter a display name')
+    .max(50, 'Display name must be 50 characters or fewer'),
 });
 
 export const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().email('Please enter a valid email address'),
+  password: z.string().min(1, 'Please enter your password'),
 });
 
 export const updateProfileSchema = z.object({
   displayName: z.string().trim().min(1).max(50),
 });
 
+// Account deletion: the typed-confirmation step is the password field itself — the
+// button stays disabled client-side until it's non-empty, and the server
+// re-checks it against the account's real passwordHash before deleting
+// anything, so a stale/unlocked tab isn't enough on its own.
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1),
+});
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;
 
 // === sessions module ===
 
