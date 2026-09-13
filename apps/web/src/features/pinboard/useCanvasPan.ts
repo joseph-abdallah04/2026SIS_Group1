@@ -123,19 +123,9 @@ export function useCanvasPan({ contentWidth, contentHeight, onZoom }: UseCanvasP
     if (!element) return;
 
     const onWheel = (event: WheelEvent) => {
+      // A zoom gesture is handled for the whole page below, wherever it lands.
+      if (event.ctrlKey || event.metaKey) return;
       event.preventDefault();
-
-      // Ctrl/Cmd + wheel is the zoom gesture, and it is also what a trackpad
-      // pinch sends: the browser reports pinch as a wheel event with ctrlKey
-      // set, whether or not ctrl is physically down.
-      if (event.ctrlKey || event.metaKey) {
-        const rect = element.getBoundingClientRect();
-        onZoom(event.deltaY < 0 ? 'in' : 'out', {
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-        });
-        return;
-      }
 
       // Holding shift turns a one-axis wheel into horizontal panning, the
       // convention every canvas tool shares. Trackpads send both axes already.
@@ -146,7 +136,72 @@ export function useCanvasPan({ contentWidth, contentHeight, onZoom }: UseCanvasP
 
     element.addEventListener('wheel', onWheel, { passive: false });
     return () => element.removeEventListener('wheel', onWheel);
-  }, [panBy, onZoom]);
+  }, [panBy]);
+
+  /**
+   * Zooming on this page zooms the board, wherever the pointer is.
+   *
+   * The zoom gesture used to be caught only over the canvas. Over the header,
+   * the toolbar or a side panel nothing stopped it, so the browser zoomed the
+   * whole page instead: the header and toolbar swelled, the board did not, and
+   * the only way back was to find the browser's own reset. On a page that is a
+   * zoomable board, there is one thing zoom can sensibly mean.
+   *
+   * Ctrl/Cmd + wheel is the gesture, and it is also what a trackpad pinch sends:
+   * the browser reports a pinch as a wheel event with ctrlKey set, whether or not
+   * ctrl is physically down. Ctrl/Cmd with plus or minus is the keyboard form.
+   *
+   * Over the board, a zoom holds the point under the pointer still, which is
+   * what makes it feel like zooming into something. Anywhere else there is no
+   * point on the board under the pointer, so it zooms about the middle of the
+   * view. Ctrl/Cmd + 0 is left to the browser, so a page that was already
+   * zoomed before arriving here can always be put back.
+   */
+  useEffect(() => {
+    const middle = (rect: DOMRect): Point => ({ x: rect.width / 2, y: rect.height / 2 });
+
+    const onZoomWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const element = viewportRef.current;
+      // A pinch with no vertical travel carries no direction to zoom in.
+      if (!element || event.deltaY === 0) return;
+
+      const rect = element.getBoundingClientRect();
+      const overBoard =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      onZoom(
+        event.deltaY < 0 ? 'in' : 'out',
+        overBoard ? { x: event.clientX - rect.left, y: event.clientY - rect.top } : middle(rect),
+      );
+    };
+
+    const onZoomKey = (event: KeyboardEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || event.altKey) return;
+      // Both keys of each pair, since plus is shift-equals on most layouts and
+      // the keypad sends its own.
+      const direction =
+        event.key === '=' || event.key === '+'
+          ? 'in'
+          : event.key === '-' || event.key === '_'
+            ? 'out'
+            : null;
+      if (!direction) return;
+      event.preventDefault();
+      const element = viewportRef.current;
+      if (element) onZoom(direction, middle(element.getBoundingClientRect()));
+    };
+
+    window.addEventListener('wheel', onZoomWheel, { passive: false });
+    window.addEventListener('keydown', onZoomKey);
+    return () => {
+      window.removeEventListener('wheel', onZoomWheel);
+      window.removeEventListener('keydown', onZoomKey);
+    };
+  }, [onZoom]);
 
   // Space is held on the window, not the canvas: the canvas is rarely the
   // focused element, and the gesture has to work wherever the pointer is.
