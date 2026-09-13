@@ -1,7 +1,9 @@
 import type { AuthResult, User } from '@roundtable/shared';
 import type {
+  ForgotPasswordInput,
   LoginInput,
   ResendVerificationInput,
+  ResetPasswordInput,
   SignupInput,
   UpdateProfileInput,
 } from '@roundtable/shared/schemas';
@@ -41,4 +43,14 @@ export function verifyEmail(token: string): Promise<AuthResult> {
 
 export function resendVerification(input: ResendVerificationInput): Promise<{ ok: true }> {
   return api.post<{ ok: true }>('/api/auth/resend-verification', input);
+}
+
+export function forgotPassword(input: ForgotPasswordInput): Promise<{ ok: true }> {
+  return api.post<{ ok: true }>('/api/auth/forgot-password', input);
+}
+
+// No session token — see the endpoint's own comment on why a reset
+// deliberately lands you on a "log in again" screen, not an auto-login.
+export function resetPassword(input: ResetPasswordInput): Promise<{ ok: true }> {
+  return api.post<{ ok: true }>('/api/auth/reset-password', input);
 }

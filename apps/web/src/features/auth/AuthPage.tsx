@@ -142,6 +142,13 @@ function LoginForm() {
         />
       </label>
 
+      <Link
+        to="/forgot-password"
+        className="self-start text-sm font-semibold text-rt-primary-deep hover:underline"
+      >
+        Forgot password?
+      </Link>
+
       {error ? (
         <p role="alert" className="text-sm text-red-600">
           {error}

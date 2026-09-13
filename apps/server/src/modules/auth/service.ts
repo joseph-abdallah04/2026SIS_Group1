@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import bcrypt from 'bcryptjs';
 import type { Request } from 'express';
 import type { AuthResult, User } from '@roundtable/shared';
@@ -8,12 +10,32 @@ import { Prisma, type User as UserRow } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { sendEmail } from '../../lib/email.js';
 import { ApiError } from '../../middleware/error.js';
-import { signEmailVerificationToken, signToken, verifyEmailVerificationToken } from './jwt.js';
+import {
+  signEmailVerificationToken,
+  signPasswordResetToken,
+  signToken,
+  verifyEmailVerificationToken,
+  verifyPasswordResetToken,
+} from './jwt.js';
 
 const BCRYPT_ROUNDS = 10;
 
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+/**
+ * A short, one-way fingerprint of a passwordHash — embedded in a password
+ * reset token at send-time and re-checked against the *current* hash at
+ * consume-time (see `resetPassword`). It is a hash of the bcrypt hash, never
+ * the hash itself: nothing about it helps recover the password, it only
+ * changes exactly when the hash it was taken from does. That single property
+ * is what makes a reset link single-use and automatically dead once the
+ * password it targets has already been changed — by that link or any other
+ * means — without a separate consumed-tokens table.
+ */
+function passwordFingerprint(passwordHash: string): string {
+  return createHash('sha256').update(passwordHash).digest('hex').slice(0, 16);
 }
 
 function isEmailUniqueViolation(err: unknown): boolean {
@@ -262,4 +284,88 @@ export async function resendVerification(rawEmail: string): Promise<void> {
       console.error(`[auth] resend-verification: failed to send to ${email}:`, err);
     }
   }
+}
+
+const RESET_RATE_LIMIT_MS = 60_000;
+// Separate map from `lastResendAt` — same single-process, restart-resets-it
+// rationale (docs/02 §4), but a different cooldown bucket per email address.
+const lastResetRequestAt = new Map<string, number>();
+
+/**
+ * Requests a password-reset email. Same enumeration-safety shape as
+ * `resendVerification`: rate-limited on the raw submitted email before any
+ * database lookup, and the HTTP response is identical (`200 { ok: true }`)
+ * whether or not an account exists for that address — this is the ticket's
+ * explicit requirement, so nothing here may leak which emails are registered.
+ */
+export async function forgotPassword(rawEmail: string): Promise<void> {
+  const email = rawEmail.trim().toLowerCase();
+
+  const last = lastResetRequestAt.get(email);
+  const now = Date.now();
+  if (last !== undefined && now - last < RESET_RATE_LIMIT_MS) {
+    throw new ApiError(429, 'Please wait a moment before requesting another email', 'RATE_LIMITED');
+  }
+  lastResetRequestAt.set(email, now);
+
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, passwordHash: true },
+  });
+  if (user) {
+    const token = signPasswordResetToken({
+      userId: user.id,
+      pwFingerprint: passwordFingerprint(user.passwordHash),
+    });
+    const resetUrl = `${env.CLIENT_ORIGIN}/reset-password?token=${encodeURIComponent(token)}`;
+    // Same reasoning as signup's send failure: the caller already gets the
+    // identical 200 either way, so a delivery failure here must not surface
+    // any differently than the "no such account" branch above.
+    try {
+      await sendEmail({
+        to: email,
+        subject: 'Reset your RoundTable password',
+        html:
+          `<p>Click the link below to set a new password for your RoundTable account.</p>` +
+          `<p><a href="${resetUrl}">${resetUrl}</a></p>` +
+          `<p>This link expires in 30 minutes. If you didn't request this, you can ignore this email.</p>`,
+      });
+    } catch (err) {
+      console.error(`[auth] forgot-password: failed to send to ${email}:`, err);
+    }
+  }
+}
+
+/**
+ * Consumes a reset link and sets a new password. Deliberately does not
+ * return an `AuthResult` — unlike `verifyEmail`, this does not log the user
+ * in; they land on a "password updated" screen and log in with the new
+ * password like normal, which is the more conventional shape for a reset
+ * flow and needs nothing from this endpoint beyond success/failure.
+ */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const result = verifyPasswordResetToken(token);
+  if (!result.ok) {
+    const message =
+      result.code === 'TOKEN_EXPIRED'
+        ? 'This password reset link has expired'
+        : 'This password reset link is invalid';
+    throw new ApiError(401, message, result.code);
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: result.userId } });
+  if (!user) {
+    throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  // See `passwordFingerprint`'s comment: this is what makes the link
+  // single-use. It fails identically whether this exact token was already
+  // spent, or the password changed some other way since — either way the
+  // hash it was fingerprinted against is gone.
+  if (passwordFingerprint(user.passwordHash) !== result.pwFingerprint) {
+    throw new ApiError(409, 'This password reset link has already been used', 'ALREADY_USED');
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
 }

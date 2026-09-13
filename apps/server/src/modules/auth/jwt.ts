@@ -4,6 +4,7 @@ import { env } from '../../env.js';
 
 const SESSION_EXPIRES_IN = '7d';
 const EMAIL_VERIFY_EXPIRES_IN = '24h';
+const PASSWORD_RESET_EXPIRES_IN = '30m';
 
 export interface TokenPayload {
   userId: string;
@@ -64,4 +65,46 @@ export function signEmailVerificationToken(payload: TokenPayload): string {
 
 export function verifyEmailVerificationToken(token: string): VerifyResult {
   return verifyPurposeToken('email-verify', token);
+}
+
+export interface PasswordResetPayload {
+  userId: string;
+  // A short fingerprint of the account's passwordHash at send-time (see
+  // `passwordFingerprint` in service.ts) — not part of the generic
+  // sign/verifyPurposeToken shape above, since no other token kind needs a
+  // second claim. Letting `resetPassword` compare this against the *current*
+  // hash is what makes the link single-use and auto-invalidate on password
+  // change, without a separate consumed-tokens table.
+  pwFingerprint: string;
+}
+
+export type PasswordResetVerifyResult =
+  | { ok: true; userId: string; pwFingerprint: string }
+  | { ok: false; code: 'TOKEN_EXPIRED' | 'INVALID_TOKEN' };
+
+export function signPasswordResetToken({ userId, pwFingerprint }: PasswordResetPayload): string {
+  return jwt.sign({ userId, pwFingerprint, purpose: 'password-reset' }, env.JWT_SECRET, {
+    expiresIn: PASSWORD_RESET_EXPIRES_IN,
+  });
+}
+
+export function verifyPasswordResetToken(token: string): PasswordResetVerifyResult {
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET);
+    if (
+      typeof decoded !== 'object' ||
+      decoded === null ||
+      typeof decoded.userId !== 'string' ||
+      typeof decoded.pwFingerprint !== 'string' ||
+      decoded.purpose !== 'password-reset'
+    ) {
+      return { ok: false, code: 'INVALID_TOKEN' };
+    }
+    return { ok: true, userId: decoded.userId, pwFingerprint: decoded.pwFingerprint };
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      return { ok: false, code: 'TOKEN_EXPIRED' };
+    }
+    return { ok: false, code: 'INVALID_TOKEN' };
+  }
 }

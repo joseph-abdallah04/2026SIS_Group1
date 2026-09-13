@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import {
+  forgotPasswordSchema,
   loginSchema,
   resendVerificationSchema,
+  resetPasswordSchema,
   signupSchema,
   verifyEmailQuerySchema,
 } from '@roundtable/shared/schemas';
@@ -9,7 +11,15 @@ import {
 import { requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
 import { validateBody, validateQuery } from '../../middleware/validate.js';
-import { getUserById, login, resendVerification, signup, verifyEmail } from './service.js';
+import {
+  forgotPassword,
+  getUserById,
+  login,
+  resendVerification,
+  resetPassword,
+  signup,
+  verifyEmail,
+} from './service.js';
 
 export const authRoutes = Router();
 
@@ -59,6 +69,30 @@ authRoutes.post(
     }
   },
 );
+
+// Public and unauthenticated, same reasoning as resend-verification: an
+// account someone has been locked out of has no session to authenticate
+// with, and this endpoint's whole point is to be reachable by email address
+// alone.
+authRoutes.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, res, next) => {
+  try {
+    await forgotPassword(req.body.email);
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Public — the token in the body *is* the credential, same as verify-email's
+// query-string token.
+authRoutes.post('/reset-password', validateBody(resetPasswordSchema), async (req, res, next) => {
+  try {
+    await resetPassword(req.body.token, req.body.password);
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Stateless JWTs — nothing to revoke server-side in this MVP. This exists so
 // there's a real endpoint to call (and a live route for `requireAuth` to run

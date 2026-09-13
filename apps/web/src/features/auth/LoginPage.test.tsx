@@ -38,6 +38,14 @@ describe('LoginPage', () => {
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
   });
 
+  it('links to the forgot-password page', () => {
+    renderPage();
+    expect(screen.getByRole('link', { name: /forgot password/i })).toHaveAttribute(
+      'href',
+      '/forgot-password',
+    );
+  });
+
   it('shows the generic error and does not navigate on invalid credentials', async () => {
     vi.mocked(authApi.login).mockRejectedValue(
       new ApiClientError(401, 'Incorrect email or password', 'INVALID_CREDENTIALS'),

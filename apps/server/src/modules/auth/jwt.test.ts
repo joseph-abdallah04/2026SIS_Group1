@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { env } from '../../env.js';
 import {
   signEmailVerificationToken,
+  signPasswordResetToken,
   signToken,
   verifyEmailVerificationToken,
+  verifyPasswordResetToken,
   verifyToken,
 } from './jwt.js';
 
@@ -62,10 +64,43 @@ describe('signEmailVerificationToken / verifyEmailVerificationToken', () => {
   });
 });
 
+describe('signPasswordResetToken / verifyPasswordResetToken', () => {
+  it('round-trips a userId and pwFingerprint', () => {
+    const token = signPasswordResetToken({ userId: 'user-1', pwFingerprint: 'abc123' });
+    expect(verifyPasswordResetToken(token)).toEqual({
+      ok: true,
+      userId: 'user-1',
+      pwFingerprint: 'abc123',
+    });
+  });
+
+  it('rejects a tampered signature', () => {
+    const token = signPasswordResetToken({ userId: 'user-1', pwFingerprint: 'abc123' });
+    const tampered = token.slice(0, -1) + (token.endsWith('a') ? 'b' : 'a');
+    expect(verifyPasswordResetToken(tampered)).toEqual({ ok: false, code: 'INVALID_TOKEN' });
+  });
+
+  it('rejects an expired token', () => {
+    const expired = jwt.sign(
+      { userId: 'user-1', pwFingerprint: 'abc123', purpose: 'password-reset' },
+      env.JWT_SECRET,
+      { expiresIn: '-1s' },
+    );
+    expect(verifyPasswordResetToken(expired)).toEqual({ ok: false, code: 'TOKEN_EXPIRED' });
+  });
+
+  it('rejects a token missing pwFingerprint', () => {
+    const malformed = jwt.sign({ userId: 'user-1', purpose: 'password-reset' }, env.JWT_SECRET, {
+      expiresIn: '30m',
+    });
+    expect(verifyPasswordResetToken(malformed)).toEqual({ ok: false, code: 'INVALID_TOKEN' });
+  });
+});
+
 describe('token purpose isolation', () => {
-  // Both kinds are plain JWTs signed with the same secret and both carry a
-  // `userId` — without the purpose check, an emailed verification link would
-  // also work as a Bearer session token through requireAuth.
+  // All three kinds are plain JWTs signed with the same secret and all carry
+  // a `userId` — without the purpose check, an emailed link of one kind
+  // would also work as the other two through their respective verifiers.
   it('a session token is rejected as a verification token', () => {
     const sessionToken = signToken({ userId: 'user-1' });
     expect(verifyEmailVerificationToken(sessionToken)).toEqual({
@@ -77,5 +112,15 @@ describe('token purpose isolation', () => {
   it('a verification token is rejected as a session token', () => {
     const emailToken = signEmailVerificationToken({ userId: 'user-1' });
     expect(verifyToken(emailToken)).toEqual({ ok: false, code: 'INVALID_TOKEN' });
+  });
+
+  it('a password reset token is rejected as a session token', () => {
+    const resetToken = signPasswordResetToken({ userId: 'user-1', pwFingerprint: 'abc123' });
+    expect(verifyToken(resetToken)).toEqual({ ok: false, code: 'INVALID_TOKEN' });
+  });
+
+  it('a session token is rejected as a password reset token', () => {
+    const sessionToken = signToken({ userId: 'user-1' });
+    expect(verifyPasswordResetToken(sessionToken)).toEqual({ ok: false, code: 'INVALID_TOKEN' });
   });
 });

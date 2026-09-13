@@ -9,12 +9,11 @@ export default defineConfig({
     setupFiles: './src/test/setup.ts',
   },
   server: {
-    // Fixed, off the Vite-default 5173 so this doesn't collide with other
-    // projects' dev servers on this machine. strictPort fails fast instead
-    // of silently moving to a different port — a silent bump breaks
-    // CLIENT_ORIGIN-based links (e.g. the emailed verify-email link) without
-    // any visible error.
-    port: 5180,
+    // Stays on Vite's normal default (5173) — strictPort just fails fast
+    // instead of silently moving to a different port when 5173 is taken. A
+    // silent bump breaks CLIENT_ORIGIN-based links (e.g. the emailed
+    // verify-email link) without any visible error; failing loudly means you
+    // find out immediately instead of chasing a broken link later.
     strictPort: true,
     proxy: {
       '/api': 'http://127.0.0.1:3001',
