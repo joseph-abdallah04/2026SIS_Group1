@@ -49,9 +49,10 @@ function closingFades(): boolean {
 const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
 
 /**
- * Where the popup goes: resting just above the board's footer, centred on it.
+ * Where the popup goes: resting just above the board's floating toolbar,
+ * centred on the board.
  *
- * Centred on the board's own footer rather than on the window, because the
+ * Centred on the board's own toolbar row rather than on the window, because the
  * panels either side of the board are not the same width, and the middle of
  * the window is not the middle of the thing being written onto. Measured
  * rather than offset by a fixed amount for the same reason.
@@ -65,15 +66,15 @@ function placeAboveFooter(): CSSProperties | null {
   if (!toolbar) return null;
 
   const board = (
-    toolbar.closest<HTMLElement>('[data-board-footer]') ?? toolbar
+    toolbar.closest<HTMLElement>('[data-board-toolbar]') ?? toolbar
   ).getBoundingClientRect();
   const width = Math.min(window.innerWidth * 0.92, POPUP_MAX_WIDTH_PX);
   const centred = board.left + board.width / 2 - width / 2;
   return {
     top: 'auto',
     right: 'auto',
-    // Clear of the footer's top edge, not the toolbar's: the toolbar sits
-    // inside the footer, so resting on it would put the note on the line.
+    // The row spans the board but is only as tall as the toolbar, so its top
+    // edge is the toolbar's and the note rests just clear of it.
     bottom: window.innerHeight - board.top + FOOTER_GAP_PX,
     left: Math.max(EDGE_PX, Math.min(centred, window.innerWidth - width - EDGE_PX)),
   };

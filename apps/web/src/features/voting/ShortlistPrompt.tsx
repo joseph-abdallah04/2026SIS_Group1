@@ -11,8 +11,8 @@ interface ShortlistPromptProps {
 
 /**
  * Leader-only bar on the board during shortlisting: pick cards with the ticks,
- * then proceed. Sits just above the footer so it is next to the frozen toolbar
- * rather than competing with End session in the header.
+ * then proceed. Stacks just above the floating toolbar so it is next to the
+ * frozen tools rather than competing with End session in the header.
  */
 export function ShortlistPrompt({
   count,
