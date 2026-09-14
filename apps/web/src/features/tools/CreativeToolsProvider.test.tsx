@@ -147,7 +147,7 @@ describe('creative sticky flow', () => {
       const user = userEvent.setup();
       render(<Harness propose={vi.fn(async () => undefined)} />);
 
-      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.click(screen.getByRole('button', { name: 'Sticky' }));
       await user.type(screen.getByLabelText('Note'), 'Keep the idea focused.');
 
       // Only visible text is refused; spaces at the end of a line take no room.
@@ -184,7 +184,7 @@ describe('creative sticky flow', () => {
       render(<Harness propose={vi.fn(async () => undefined)} />);
       const note = () => screen.getByLabelText('Note') as HTMLTextAreaElement;
 
-      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.click(screen.getByRole('button', { name: 'Sticky' }));
       await user.type(note(), `Idea${'{Enter}'.repeat(30)}`);
 
       expect(note().value.split('\n')).toHaveLength(10);
@@ -338,13 +338,13 @@ describe('sticky drafts', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'Half an idea');
     await user.click(screen.getByRole('button', { name: 'pink sticky' }));
     await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(note()).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
 
     expect(note()).toHaveValue('Half an idea');
     expect(screen.getByRole('button', { name: 'pink sticky' })).toHaveAttribute(
@@ -364,14 +364,14 @@ describe('sticky drafts', () => {
       </Harness>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'Half an idea');
     await user.click(screen.getByRole('button', { name: 'Something on the board' }));
 
     expect(note()).toBeNull();
     expect(onBoard).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     expect(note()).toHaveValue('Half an idea');
   });
 
@@ -379,7 +379,7 @@ describe('sticky drafts', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.click(screen.getByRole('button', { name: 'blue sticky' }));
     await user.click(note()!);
 
@@ -391,10 +391,10 @@ describe('sticky drafts', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'Still here');
     const opened = note();
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
 
     expect(note()).toBe(opened);
   });
@@ -403,7 +403,7 @@ describe('sticky drafts', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
 
-    const opener = screen.getByRole('button', { name: 'New sticky' });
+    const opener = screen.getByRole('button', { name: 'Sticky' });
     await user.click(opener);
     await user.keyboard('{Escape}');
 
@@ -415,12 +415,12 @@ describe('sticky drafts', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'Ship it');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await waitFor(() => expect(note()).toBeNull());
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     expect(note()).toHaveValue('');
   });
 
@@ -437,13 +437,13 @@ describe('sticky drafts', () => {
     );
     render(<Harness propose={propose} {...inSession} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'On its way');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await user.click(screen.getByRole('button', { name: 'Close' }));
     await act(async () => land?.());
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     expect(note()).toHaveValue('');
   });
 
@@ -457,7 +457,7 @@ describe('sticky drafts', () => {
       </Harness>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'My own idea');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
@@ -466,7 +466,7 @@ describe('sticky drafts', () => {
     await user.type(note()!, ' and more');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     expect(note()).toHaveValue('My own idea');
   });
 
@@ -475,10 +475,10 @@ describe('sticky drafts', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'Nowhere to go');
     await user.click(screen.getByRole('button', { name: 'Close' }));
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
 
     expect(note()).toHaveValue('');
     expect(localStorage.length).toBe(0);
@@ -506,18 +506,18 @@ describe('sticky drafts across questions', () => {
     const user = userEvent.setup();
     const { rerender } = render(board('question-1'));
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'For question one');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     rerender(board('question-2'));
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     expect(note()).toHaveValue('');
     await user.type(note()!, 'For question two');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     rerender(board('question-1'));
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     expect(note()).toHaveValue('For question one');
   });
 
@@ -527,7 +527,7 @@ describe('sticky drafts across questions', () => {
     const user = userEvent.setup();
     const { rerender } = render(board('question-1'));
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'For question one');
     rerender(board('question-2'));
 
@@ -562,7 +562,7 @@ describe('closing the sticky popup', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     // Still there, on its way out, and no longer taking presses.
@@ -576,28 +576,28 @@ describe('closing the sticky popup', () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     expect(note()).toBeNull();
   });
 
-  // Pressing New sticky while it fades is asking for it back, not a second
+  // Pressing Sticky while it fades is asking for it back, not a second
   // close that lands a moment later and shuts it anyway.
   it('comes back if its own button is pressed while it fades', async () => {
     motion({ reduced: false });
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(note()!, 'Wait');
 
-    // Close, then press New sticky straight after, with nothing awaited in
+    // Close, then press Sticky straight after, with nothing awaited in
     // between: no timer can run until this yields, so the fade cannot finish
     // between the two however busy the machine is. Awaited presses made this
     // fail whenever the whole suite ran at once.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    const newSticky = screen.getByRole('button', { name: 'New sticky' });
+    const newSticky = screen.getByRole('button', { name: 'Sticky' });
     fireEvent.pointerDown(newSticky);
     fireEvent.click(newSticky);
 
@@ -642,7 +642,7 @@ describe('closing the sticky popup', () => {
       render(<Harness propose={propose} sessionId="session-1" viewerId="user-1" />);
       const key = draftKeyFor('session-1', 'question-1', 'user-1');
 
-      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.click(screen.getByRole('button', { name: 'Sticky' }));
       await user.type(note()!, 'Ship it');
       expect(localStorage.getItem(key)).not.toBeNull();
       await user.click(screen.getByRole('button', { name: 'Propose' }));
@@ -656,7 +656,7 @@ describe('closing the sticky popup', () => {
 
       act(() => finishFade?.());
       expect(note()).toBeNull();
-      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.click(screen.getByRole('button', { name: 'Sticky' }));
       expect(note()).toHaveValue('');
     } finally {
       timers.mockRestore();
