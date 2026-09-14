@@ -22,15 +22,40 @@ export function StudioOverlay({ children, isLive, onClose, title }: StudioOverla
     };
   }, []);
 
+  /**
+   * Keep Escape from ever being a close request.
+   *
+   * Refusing the request in `onCancel` is not enough on its own: a browser will
+   * only let a dialog decline so many times before closing anyway, so the third
+   * press in a row got through. Preventing the key means the request is never
+   * made.
+   *
+   * Last, in the bubble phase, so every handler inside the studio has already
+   * had the key and seen it unprevented. Several of them decline an Escape that
+   * something else has already dealt with — the editor will not put down what it
+   * is carrying if a popover just closed on the same press — so marking it
+   * early would quietly switch those off.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') event.preventDefault();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   return (
     <dialog
       ref={dialogRef}
       aria-labelledby="creative-studio-title"
       className="m-0 h-dvh max-h-none w-screen max-w-none overflow-hidden border-0 bg-rt-surface p-0 text-rt-ink backdrop:bg-rt-ink/35"
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
+      // Escape is a close request to a <dialog>, and closing the studio is far
+      // too much for it to mean. Inside, Escape steps back — out of a cell, out
+      // of a shape, out of a selection, out of a half-placed element — and each
+      // of those is one keystroke away from being the thing the user wanted.
+      // Having the last of them also throw the whole canvas away made the key
+      // dangerous to press. Leaving is the Back button, which is always there.
+      onCancel={(event) => event.preventDefault()}
     >
       <div className="flex h-full min-h-0 flex-col">
         <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-4 text-rt-ink sm:px-6">

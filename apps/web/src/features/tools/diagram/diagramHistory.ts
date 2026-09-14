@@ -1,8 +1,27 @@
-import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
+import type {
+  ArrowElement,
+  DiagramEdge,
+  DiagramNode,
+  PathElement,
+  TableElement,
+} from '@roundtable/shared';
+
+import type { StudioInkStroke } from '../studio/studioInk';
 
 export interface DiagramSnapshot {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  /**
+   * v4, optional for the same reason it is optional on the artifact: absent
+   * means no ink and the derived paint order, so a diagram with neither is the
+   * same object it has always been.
+   */
+  ink?: StudioInkStroke[];
+  paths?: PathElement[];
+  tables?: TableElement[];
+  /** v4.2 standalone arrows, optional on the same additive terms. */
+  arrows?: ArrowElement[];
+  z?: string[];
 }
 
 export interface DiagramHistory {
@@ -24,11 +43,58 @@ function cloneSnapshot(snapshot: DiagramSnapshot): DiagramSnapshot {
   return {
     nodes: snapshot.nodes.map((node) => ({ ...node })),
     edges: snapshot.edges.map((edge) => ({ ...edge })),
+    ...(snapshot.ink
+      ? { ink: snapshot.ink.map((stroke) => ({ ...stroke, points: [...stroke.points] })) }
+      : {}),
+    ...(snapshot.paths
+      ? {
+          paths: snapshot.paths.map((path) => ({
+            ...path,
+            anchors: path.anchors.map((anchor) => ({ ...anchor })),
+          })),
+        }
+      : {}),
+    ...(snapshot.tables
+      ? {
+          tables: snapshot.tables.map((table) => ({
+            ...table,
+            colWidths: [...table.colWidths],
+            rowHeights: [...table.rowHeights],
+            cells: table.cells.map((cell) => ({ ...cell })),
+          })),
+        }
+      : {}),
+    ...(snapshot.arrows
+      ? {
+          arrows: snapshot.arrows.map((arrow) => ({
+            ...arrow,
+            from: { ...arrow.from },
+            to: { ...arrow.to },
+          })),
+        }
+      : {}),
+    ...(snapshot.z ? { z: [...snapshot.z] } : {}),
   };
 }
 
+/**
+ * Identity of a snapshot, used to tell "changed" from "unchanged".
+ *
+ * The v4 fields are spelled out with empty-array defaults rather than letting
+ * `JSON.stringify` see the object as-is, so a snapshot carrying `ink: []` and
+ * one carrying no `ink` key compare equal. Otherwise merely entering draw mode
+ * and leaving again would register as an edit and mark the diagram dirty.
+ */
 export function diagramSnapshotKey(snapshot: DiagramSnapshot): string {
-  return JSON.stringify(snapshot);
+  return JSON.stringify({
+    nodes: snapshot.nodes,
+    edges: snapshot.edges,
+    ink: snapshot.ink ?? [],
+    paths: snapshot.paths ?? [],
+    tables: snapshot.tables ?? [],
+    arrows: snapshot.arrows ?? [],
+    z: snapshot.z ?? [],
+  });
 }
 
 export function createDiagramHistory(initial: DiagramSnapshot): DiagramHistory {

@@ -4,6 +4,16 @@ import { afterEach } from 'vitest';
 
 afterEach(cleanup);
 
+/**
+ * One jsdom serves the whole file, so storage outlives a test the way it
+ * outlives a reload. That is right for the studio's draft and wrong for a suite:
+ * without this, a canvas left behind by one test is restored into the next.
+ */
+afterEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
+});
+
 window.confirm = () => true;
 
 if (!globalThis.PointerEvent) {

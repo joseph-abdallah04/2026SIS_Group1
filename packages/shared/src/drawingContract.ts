@@ -68,3 +68,185 @@ export function unpackDrawingPoints(points: readonly number[]): { x: number; y: 
   }
   return unpacked;
 }
+
+// --- Stroke geometry ------------------------------------------------------
+//
+// Shared by the drawing tool and the studio canvas's v4 ink. Both draw the same
+// kind of mark, so simplification, path data and hit-testing live here once
+// rather than once per surface — and the board card, which renders both without
+// either editor, gets the identical result.
+//
+// These work on unpacked `{x, y}` points: packing is a storage concern, and
+// every caller is either mid-gesture or about to render.
+
+export interface StrokePoint {
+  x: number;
+  y: number;
+}
+
+/** Sub-two-unit tolerance removes pointer noise without flattening corners. */
+export const STROKE_SIMPLIFICATION_TOLERANCE = 1.5;
+
+function squaredDistance(first: StrokePoint, second: StrokePoint): number {
+  const deltaX = first.x - second.x;
+  const deltaY = first.y - second.y;
+  return deltaX * deltaX + deltaY * deltaY;
+}
+
+function squaredSegmentDistance(point: StrokePoint, start: StrokePoint, end: StrokePoint): number {
+  let x = start.x;
+  let y = start.y;
+  let deltaX = end.x - x;
+  let deltaY = end.y - y;
+
+  if (deltaX !== 0 || deltaY !== 0) {
+    const ratio =
+      ((point.x - x) * deltaX + (point.y - y) * deltaY) / (deltaX * deltaX + deltaY * deltaY);
+
+    if (ratio > 1) {
+      x = end.x;
+      y = end.y;
+    } else if (ratio > 0) {
+      x += deltaX * ratio;
+      y += deltaY * ratio;
+    }
+  }
+
+  deltaX = point.x - x;
+  deltaY = point.y - y;
+  return deltaX * deltaX + deltaY * deltaY;
+}
+
+function simplifyRadialDistance(
+  points: readonly StrokePoint[],
+  squaredTolerance: number,
+): StrokePoint[] {
+  const first = points[0];
+  if (!first) return [];
+
+  const simplified = [first];
+  let previous = first;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    if (point && squaredDistance(point, previous) > squaredTolerance) {
+      simplified.push(point);
+      previous = point;
+    }
+  }
+
+  const last = points.at(-1);
+  if (last && previous !== last) simplified.push(last);
+  return simplified;
+}
+
+function simplifyDouglasPeucker(
+  points: readonly StrokePoint[],
+  squaredTolerance: number,
+): StrokePoint[] {
+  const first = points[0];
+  const last = points.at(-1);
+  if (!first || !last || points.length <= 2) return [...points];
+
+  const markers = new Uint8Array(points.length);
+  const pendingRanges: Array<[number, number]> = [[0, points.length - 1]];
+  markers[0] = 1;
+  markers[points.length - 1] = 1;
+
+  while (pendingRanges.length > 0) {
+    const range = pendingRanges.pop();
+    if (!range) break;
+    const [startIndex, endIndex] = range;
+    const rangeStart = points[startIndex];
+    const rangeEnd = points[endIndex];
+    if (!rangeStart || !rangeEnd) continue;
+
+    let furthestIndex = -1;
+    let furthestDistance = squaredTolerance;
+
+    for (let index = startIndex + 1; index < endIndex; index += 1) {
+      const point = points[index];
+      if (!point) continue;
+      const distance = squaredSegmentDistance(point, rangeStart, rangeEnd);
+      if (distance > furthestDistance) {
+        furthestDistance = distance;
+        furthestIndex = index;
+      }
+    }
+
+    if (furthestIndex > startIndex && furthestIndex < endIndex) {
+      markers[furthestIndex] = 1;
+      pendingRanges.push([startIndex, furthestIndex], [furthestIndex, endIndex]);
+    }
+  }
+
+  return points.filter((_, index) => markers[index] === 1);
+}
+
+export function simplifyStrokePoints(
+  points: readonly StrokePoint[],
+  tolerance = STROKE_SIMPLIFICATION_TOLERANCE,
+): StrokePoint[] {
+  if (points.length <= 2) return [...points];
+  const squaredTolerance = tolerance * tolerance;
+  return simplifyDouglasPeucker(simplifyRadialDistance(points, squaredTolerance), squaredTolerance);
+}
+
+function roundCoordinate(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
+/**
+ * Path data for a stroke: quadratics through the midpoints, so a hand-drawn
+ * line stays smooth instead of showing every sampled point as a corner.
+ */
+export function strokePathData(points: readonly StrokePoint[]): string {
+  const first = points[0];
+  if (!first) return '';
+  if (points.length === 1) {
+    // A dot still has to paint, and a zero-length path does not.
+    return `M ${roundCoordinate(first.x)} ${roundCoordinate(first.y)} l 0.1 0`;
+  }
+
+  let path = `M ${roundCoordinate(first.x)} ${roundCoordinate(first.y)}`;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const point = points[index];
+    const next = points[index + 1];
+    if (!point || !next) continue;
+    const midpoint = { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 };
+    path += ` Q ${roundCoordinate(point.x)} ${roundCoordinate(point.y)} ${roundCoordinate(midpoint.x)} ${roundCoordinate(midpoint.y)}`;
+  }
+
+  const last = points.at(-1);
+  return last ? `${path} L ${roundCoordinate(last.x)} ${roundCoordinate(last.y)}` : path;
+}
+
+/**
+ * True when an eraser of `radius` at `point` covers any part of the stroke.
+ * `width` is the stroke's own thickness, which widens the hit area.
+ */
+export function strokePointsTouch(
+  points: readonly StrokePoint[],
+  width: number,
+  point: StrokePoint,
+  radius: number,
+): boolean {
+  const hitRadius = radius + width / 2;
+  const squaredHitRadius = hitRadius * hitRadius;
+
+  if (points.length === 1) {
+    const onlyPoint = points[0];
+    return onlyPoint ? squaredDistance(onlyPoint, point) <= squaredHitRadius : false;
+  }
+
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1];
+    const end = points[index];
+    if (start && end && squaredSegmentDistance(point, start, end) <= squaredHitRadius) {
+      return true;
+    }
+  }
+
+  return false;
+}

@@ -7,6 +7,11 @@ export type ProposalSubmissionStatus = 'idle' | 'submitting' | 'success';
 
 export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
+  /**
+   * Which board this editor belongs to, so an unfinished canvas can be kept
+   * against it. A draft made for one question must never open on another.
+   */
+  draftScope: { sessionId: string; questionId: string; viewerId: string | null };
   extensionSource: BoardItem | null;
   /**
    * The source is this viewer's own work, so the editor says "reusing yours"
@@ -22,6 +27,11 @@ export interface CreativeToolsContextValue {
    */
   editSource: BoardItem | null;
   isLive: boolean;
+  /**
+   * Where this viewer's unproposed sticky for the current question is kept, or
+   * null where there is no session, question or signed-in viewer to keep it for.
+   */
+  stickyDraftKey: string | null;
   submissionStatus: ProposalSubmissionStatus;
   submissionError: string | null;
   openTool: (tool: ToolKind) => void;
