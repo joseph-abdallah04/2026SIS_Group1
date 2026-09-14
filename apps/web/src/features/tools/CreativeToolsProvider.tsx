@@ -101,7 +101,7 @@ export function CreativeToolsProvider({
     <CreativeToolsContext.Provider
       value={{
         activeTool,
-        draftScope: { sessionId, questionId },
+        draftScope: { sessionId, questionId, viewerId },
         extensionSource,
         isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,

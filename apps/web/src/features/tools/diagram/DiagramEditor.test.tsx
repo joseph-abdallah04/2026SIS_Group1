@@ -1128,6 +1128,41 @@ describe('diagram viewport and productivity', () => {
     );
   });
 
+  it('aligns arrows along with everything else it swept up', async () => {
+    // The sweep measures arrows and the bar offers alignment for them, so the
+    // commit has to move them too. It did not: every other kind shifted and the
+    // arrows stayed exactly where they were, which reads as alignment being
+    // broken rather than as arrows being exempt from it.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    // Two free-ended arrows at different heights, and nothing else selected:
+    // an arrow-only alignment was a silent no-op.
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await user.click(screen.getByRole('button', { name: /^Arrow$/ }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 640, clientX: 60, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 640, clientX: 200, clientY: 340 });
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 641, clientX: 60, clientY: 420 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 641, clientX: 200, clientY: 500 });
+
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+    const before = screen.getAllByTestId('studio-arrow').map((arrow) => arrow.getAttribute('d'));
+
+    await user.click(screen.getByRole('button', { name: 'Align' }));
+    await user.click(screen.getByRole('button', { name: 'Align left' }));
+
+    const after = screen.getAllByTestId('studio-arrow').map((arrow) => arrow.getAttribute('d'));
+    expect(after).toHaveLength(before.length);
+    // At least one arrow has to have moved; aligning left cannot leave every
+    // one of them where it was.
+    expect(after).not.toEqual(before);
+  });
+
   it('toggles a node in and out of the selection with shift-click', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();

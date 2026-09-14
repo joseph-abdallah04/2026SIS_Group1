@@ -42,7 +42,12 @@ function hostileStorage(): Storage {
   };
 }
 
-const compose: StudioDraftScope = { sessionId: 's1', questionId: 'q1', mode: 'compose' };
+const compose: StudioDraftScope = {
+  sessionId: 's1',
+  questionId: 'q1',
+  viewerId: 'u1',
+  mode: 'compose',
+};
 
 const artifact = (): DiagramArtifact => ({
   type: 'diagram',
@@ -170,6 +175,25 @@ describe('when storage will not cooperate', () => {
     expect(() => writeStudioDraft(hostileStorage(), compose, artifact())).not.toThrow();
     expect(() => writeStudioDraft(undefined, compose, artifact())).not.toThrow();
     expect(() => clearStudioDraft(hostileStorage(), compose)).not.toThrow();
+  });
+});
+
+describe('whose draft it is', () => {
+  it('keeps two people in one tab apart', () => {
+    // Storage is per-tab, which bounds how long a draft lives but not who it
+    // belongs to: signing out and back in as somebody else would otherwise
+    // hand them the previous person's canvas.
+    const storage = memoryStorage();
+    writeStudioDraft(storage, compose, artifact());
+    expect(readStudioDraft(storage, { ...compose, viewerId: 'someone-else' })).toBeNull();
+    expect(readStudioDraft(storage, compose)).not.toBeNull();
+  });
+
+  it('gives a signed-out viewer a scope of their own', () => {
+    const storage = memoryStorage();
+    writeStudioDraft(storage, { ...compose, viewerId: null }, artifact());
+    expect(readStudioDraft(storage, compose)).toBeNull();
+    expect(readStudioDraft(storage, { ...compose, viewerId: null })).not.toBeNull();
   });
 });
 

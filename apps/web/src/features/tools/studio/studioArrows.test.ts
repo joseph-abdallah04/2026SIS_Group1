@@ -908,6 +908,39 @@ describe('the arrow read path', () => {
     expect(parsed.success && parsed.data.arrows?.[0]?.endCap).toBeUndefined();
   });
 
+  it('keeps the arrows it can read when one of them it cannot', () => {
+    // The whole point of the lenient read: a single element written by a build
+    // with a wider palette used to drop the entire collection, so one bad arrow
+    // erased every other arrow on the canvas.
+    const parsed = diagramArtifactSchema.safeParse(
+      artifact([
+        { id: 'good-1', from: { x: 0, y: 0 }, to: { x: 50, y: 50 } },
+        // Structurally wrong, not merely unrecognised: a field this build does
+        // not know is already caught per-field and leaves the arrow standing.
+        { id: 'bad', from: { x: 0 }, to: { x: 50, y: 50 } },
+        { id: 'good-2', from: { x: 9, y: 9 }, to: { x: 90, y: 90 } },
+      ]),
+    );
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.arrows?.map((arrow) => arrow.id)).toEqual([
+      'good-1',
+      'good-2',
+    ]);
+  });
+
+  it('keeps a node whose label styling this build does not recognise', () => {
+    // `nodes` has no fallback of its own, so a node that fails takes the whole
+    // artifact with it — and the board card can then render nothing at all.
+    const parsed = diagramArtifactSchema.safeParse({
+      type: 'diagram',
+      nodes: [{ id: 'n1', label: 'A', x: 0, y: 0, labelAlign: 'justified', labelColor: 'neon' }],
+      edges: [],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.nodes[0]?.labelAlign).toBeUndefined();
+    expect(parsed.success && parsed.data.nodes[0]?.label).toBe('A');
+  });
+
   it('leaves a pre-v4.2 diagram without arrows', () => {
     const parsed = diagramArtifactSchema.safeParse({
       type: 'diagram',

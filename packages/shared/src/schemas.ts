@@ -454,6 +454,34 @@ function lenient<T extends z.ZodTypeAny>(schema: T) {
   return schema.optional().catch(undefined);
 }
 
+/**
+ * A v4 collection, read so that one unreadable element costs only itself.
+ *
+ * `z.array(x).catch(undefined)` drops the *array* when any element fails, so a
+ * single stroke written by a build with a wider palette took every other stroke
+ * on the canvas with it. That is the same shape of loss as the stroke that
+ * exceeded the point cap and erased a whole drawing, and it is the one thing
+ * the lenient read exists to prevent.
+ *
+ * The cap is still all-or-nothing: an array longer than the contract allows is
+ * a payload no editor produced, so there is nothing to salvage from it.
+ */
+function lenientCollection<T extends z.ZodTypeAny>(schema: T, max: number) {
+  return z
+    .array(z.unknown())
+    .max(max)
+    .optional()
+    .catch(undefined)
+    .transform((items) =>
+      items === undefined
+        ? undefined
+        : items.flatMap((item) => {
+            const parsed = schema.safeParse(item);
+            return parsed.success ? [parsed.data as z.infer<T>] : [];
+          }),
+    );
+}
+
 const diagramReadNodeSchema = diagramNodeSchema.extend({
   shape: lenient(z.enum(DIAGRAM_NODE_SHAPE_KEYS)),
   parentId: lenient(z.string().min(1)),
@@ -463,6 +491,13 @@ const diagramReadNodeSchema = diagramNodeSchema.extend({
   strokeColor: lenient(diagramStrokeKeySchema),
   strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
   fontSizePreset: lenient(diagramFontSizePresetSchema),
+  // v4.1 label styling, lenient for the same reason everything above it is —
+  // and more urgently, because `nodes` is the one collection with no fallback
+  // of its own. A label alignment this build did not recognise failed the node,
+  // which failed the whole artifact, which took the board card with it.
+  labelBold: lenient(z.boolean()),
+  labelColor: lenient(diagramStrokeKeySchema),
+  labelAlign: lenient(z.enum(DIAGRAM_TEXT_ALIGNS)),
 });
 
 const diagramReadEdgeSchema = diagramEdgeSchema.extend({
@@ -520,10 +555,10 @@ export const diagramArtifactSchema = z.object({
   // v4, and tolerant like everything else on the read path: ink or an order
   // this build cannot make sense of degrades to "no ink" / "legacy order"
   // rather than failing the parse and taking the whole board down.
-  ink: z.array(diagramReadInkSchema).max(DIAGRAM_INK_LIMIT).optional().catch(undefined),
-  paths: z.array(diagramReadPathSchema).max(DIAGRAM_PATH_LIMIT).optional().catch(undefined),
-  tables: z.array(diagramReadTableSchema).max(DIAGRAM_TABLE_LIMIT).optional().catch(undefined),
-  arrows: z.array(diagramReadArrowSchema).max(DIAGRAM_ARROW_LIMIT).optional().catch(undefined),
+  ink: lenientCollection(diagramReadInkSchema, DIAGRAM_INK_LIMIT),
+  paths: lenientCollection(diagramReadPathSchema, DIAGRAM_PATH_LIMIT),
+  tables: lenientCollection(diagramReadTableSchema, DIAGRAM_TABLE_LIMIT),
+  arrows: lenientCollection(diagramReadArrowSchema, DIAGRAM_ARROW_LIMIT),
   z: z.array(z.string()).max(DIAGRAM_Z_LIMIT).optional().catch(undefined),
 });
 

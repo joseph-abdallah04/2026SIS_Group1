@@ -25,6 +25,15 @@ import type { DiagramArtifact } from '@roundtable/shared';
 export interface StudioDraftScope {
   sessionId: string;
   questionId: string;
+  /**
+   * Whose draft this is.
+   *
+   * Storage is per-tab, which bounds how long a draft lives but not who it
+   * belongs to: sign out, sign in as somebody else in the same tab, and the
+   * previous person's canvas would be waiting. Signed out is its own scope
+   * rather than a shared one.
+   */
+  viewerId: string | null;
   mode: 'compose' | 'extend' | 'edit';
   /** The proposal being extended or edited; absent when composing. */
   sourceId?: string | null;
@@ -33,7 +42,7 @@ export interface StudioDraftScope {
 const PREFIX = 'rt.studio.draft';
 
 export function studioDraftKey(scope: StudioDraftScope): string {
-  const parts = [PREFIX, scope.sessionId, scope.questionId, scope.mode];
+  const parts = [PREFIX, scope.sessionId, scope.questionId, scope.viewerId ?? 'anon', scope.mode];
   if (scope.sourceId) parts.push(scope.sourceId);
   return parts.join(':');
 }

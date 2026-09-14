@@ -107,8 +107,11 @@ interface StudioToolRailProps {
   tableOptions: (close: () => void) => ReactNode;
   templateOptions: (close: () => void) => ReactNode;
   /**
-   * Laying the whole diagram out along its arrows. A canvas setting rather than
-   * a tool: it acts on everything at once and nothing has to be selected first.
+   * Laying the whole diagram out as a graph. A canvas setting rather than a
+   * tool: it acts on everything at once and nothing has to be selected first.
+   *
+   * It reads `edges`, which only an inherited diagram now has — Connect writes
+   * standalone arrows, and those take no part in routing or layout by design.
    */
   arrangeOptions: (close: () => void) => ReactNode;
   /**

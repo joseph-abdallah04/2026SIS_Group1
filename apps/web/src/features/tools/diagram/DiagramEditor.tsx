@@ -2290,6 +2290,13 @@ export function DiagramEditor() {
         const offset = shift(table.id);
         return offset ? moveTableBy(table, offset.x, offset.y) : table;
       }),
+      // Arrows are offered to the sweep and measured by it, so they have to
+      // move with it. A bound end is drawn from the element it names and only
+      // its stored fallback shifts, which is the same thing a drag does.
+      arrows: (graph.arrows ?? []).map((arrow) => {
+        const offset = shift(arrow.id);
+        return offset ? offsetArrow(arrow, offset.x, offset.y) : arrow;
+      }),
     });
   }
 
@@ -3759,7 +3766,10 @@ export function DiagramEditor() {
           // called Arrange: one opens the choices, this one acts on them.
           aria-label="Arrange the diagram"
           disabled={nodes.length < 2 || isSubmitting}
-          title="Lay the diagram out along its arrows"
+          // Says "connections" rather than "arrows": it lays out by `edges`,
+          // and Connect has written standalone arrows since the studio gained
+          // them, so a diagram drawn here has connections this cannot see.
+          title="Lay inherited connections out as a graph"
           onClick={() => {
             clearError();
             const graph = history.snapshotRef.current;
