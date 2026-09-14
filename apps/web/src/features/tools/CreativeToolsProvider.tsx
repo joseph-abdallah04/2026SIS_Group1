@@ -108,7 +108,8 @@ export function CreativeToolsProvider({
         isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,
         isLive,
-        stickyDraftKey: sessionId && viewerId ? draftKeyFor(sessionId, viewerId) : null,
+        stickyDraftKey:
+          sessionId && questionId && viewerId ? draftKeyFor(sessionId, questionId, viewerId) : null,
         submissionStatus: submission.status,
         submissionError: submission.error,
         openTool,

@@ -193,6 +193,30 @@ describe('editing a sticky in place', () => {
     }
   });
 
+  // A note can open already too tall for any sticky, though typing cannot
+  // make one. Save stays closed, and the reason is on screen.
+  it('will not save a note too tall for any sticky, and says why', async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const text = this.querySelector('p')?.textContent ?? '';
+        const width = parseFloat(this.style.width) || 0;
+        return { width, height: text.length > 15 ? width + 50 : 100 } as DOMRect;
+      });
+    try {
+      const { onEditText } = renderOwnSticky('This note is far too tall');
+      const box = await openEditor();
+      // Shortened, but not enough: deleting is always allowed.
+      await userEvent.type(box, '{End}{Backspace}');
+
+      expect(screen.getByRole('alert').textContent).toContain('too long to fit on a sticky');
+      expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
+      expect(onEditText).not.toHaveBeenCalled();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
   it('will not save an empty note', async () => {
     const { onEditText } = renderOwnSticky();
 

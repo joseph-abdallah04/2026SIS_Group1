@@ -13,9 +13,14 @@ import { STICKY_TEXT_LIMIT } from '../artifactLimits';
  *
  * `localStorage` rather than the server, for the same reason the voice mute
  * preference is: an unproposed note is one person's intent, nobody else can
- * see it, and it is not board state until it is proposed. Keyed by session and
- * user, so a draft never follows somebody into another session, or appears for
- * the next person to sign in on a shared machine.
+ * see it, and it is not board state until it is proposed. Keyed by session,
+ * question and user: a note half-written for one question is an answer to that
+ * question, and must not open on the next one; nor follow somebody into another
+ * session, or appear for the next person to sign in on a shared machine.
+ *
+ * Drafts saved before the question was part of the key are never read. There
+ * is no telling which question they were written for, so no question can be
+ * trusted to show them.
  *
  * Every access is wrapped. Storage throws outright in some private modes and
  * wherever site data is blocked, and a lost draft is never worth failing the
@@ -29,8 +34,8 @@ export interface StickyDraft {
 const KEY_PREFIX = 'rt_sticky_draft';
 const COLORS: readonly StickyColor[] = ['yellow', 'pink', 'blue', 'green'];
 
-export function draftKeyFor(sessionId: string, userId: string): string {
-  return `${KEY_PREFIX}:${sessionId}:${userId}`;
+export function draftKeyFor(sessionId: string, questionId: string, userId: string): string {
+  return `${KEY_PREFIX}:${sessionId}:${questionId}:${userId}`;
 }
 
 /**

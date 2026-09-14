@@ -164,21 +164,30 @@ export function stickySize(text: string): number {
   return size;
 }
 
+/** Said when a note will not fit on any sticky, whatever its character count. */
+export const STICKY_TOO_TALL =
+  'This note is too long to fit on a sticky. Shorten it to propose it.';
+
 /**
  * Whether a note fits on the largest sticky.
  *
  * The character cap keeps ordinary prose inside ten lines, but it counts
  * characters, not width: a note in capitals, or one key held down, runs out of
  * paper well before it runs out of characters. The editors ask this before
- * taking more text, so no note can be written that the largest square cannot
- * hold, and no card ever has to grow taller than it is wide.
+ * taking more text, and again before proposing or saving, so no note they
+ * accept is taller than the largest square. A note that reaches the board some
+ * other way and does not fit still grows taller rather than being clipped:
+ * hiding somebody's words is the worse failure.
+ *
+ * With no layout engine at all there is nothing to measure against, and this
+ * answers yes. That is jsdom in tests; in a browser a note always has height.
  */
 export function stickyFits(text: string): boolean {
   if (typeof document === 'undefined') return true;
 
   const { card, note } = getProbe();
-  // Untrimmed. Line breaks at either end are trimmed when the note is saved,
-  // but they are on the paper while it is being written, and a check that
+  // Exactly as written. Line breaks at either end are kept when the note is
+  // saved, and they are on the paper while it is being written; a check that
   // ignored them would let Enter grow the popup forever.
   //
   // A line break at the very end draws no line of its own in a paragraph, yet

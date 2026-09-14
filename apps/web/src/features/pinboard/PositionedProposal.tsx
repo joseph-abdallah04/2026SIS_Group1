@@ -6,6 +6,7 @@ import { prepareStickyText, STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
 import {
   STICKY_FONT_SIZE,
   STICKY_LINE_HEIGHT,
+  STICKY_TOO_TALL,
   stickyFits,
   stickySize,
 } from '../tools/sticky/stickyPresentation';
@@ -122,7 +123,10 @@ function StickyTextEditor({
   // Whitespace counts as a change: adding a blank line is an edit like any other.
   const unchanged = text === artifact.text;
   const prepared = prepareStickyText(text);
-  const submittable = !saving && !unchanged && prepared.ok;
+  // Checked as well as the count, for a note that arrived already too tall for
+  // any sticky: typing cannot make one, but it can open like that.
+  const tooTall = prepared.ok && !stickyFits(text);
+  const submittable = !saving && !unchanged && prepared.ok && !tooTall;
   /**
    * Shown as soon as it is true, not on a press.
    *
@@ -131,7 +135,12 @@ function StickyTextEditor({
    * the field stops at the limit — but a note written before the limit
    * existed, or through another client, opens over it.
    */
-  const tooLong = !prepared.ok && text.length > STICKY_TEXT_LIMIT ? prepared.error : null;
+  const tooLong =
+    !prepared.ok && text.length > STICKY_TEXT_LIMIT
+      ? prepared.error
+      : tooTall
+        ? STICKY_TOO_TALL
+        : null;
 
   // The editor grows with the note for the same reason the card does, and
   // raises its floor rather than setting its height: the paper around it is a

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { CARD_WIDTH } from '../../pinboard/pinboardTokens';
 import { STICKY_TEXT_LIMIT } from '../artifactLimits';
 import {
   STICKY_FONT_SIZE,
@@ -22,6 +23,12 @@ describe('sticky sizes', () => {
     expect([8, 9, 10].map(stickySquare)).toEqual([217, 238, 258]);
     expect(STICKY_MIN_SIZE).toBe(217);
     expect(STICKY_MAX_SIZE).toBe(258);
+  });
+
+  // Anything still reading the token has to get the size a sticky really
+  // starts at, not the old 210.
+  it('start at the width the card token gives a sticky', () => {
+    expect(CARD_WIDTH.sticky).toBe(STICKY_MIN_SIZE);
   });
 
   it('set every note at one size', () => {

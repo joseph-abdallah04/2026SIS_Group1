@@ -10,6 +10,7 @@ import { STICKY_TEXT_LIMIT } from './artifactLimits';
 import { CreativeStudio } from './CreativeStudio';
 import { useCreativeTools } from './CreativeToolsContext';
 import { CreativeToolsProvider } from './CreativeToolsProvider';
+import { draftKeyFor } from './sticky/stickyDraft';
 
 interface HarnessProps {
   initialEntry?: string;
@@ -17,6 +18,7 @@ interface HarnessProps {
   proposals?: BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
   sessionId?: string;
+  questionId?: string;
   viewerId?: string | null;
   children?: React.ReactNode;
 }
@@ -27,6 +29,7 @@ function Harness({
   proposals = [],
   propose,
   sessionId = 'session-1',
+  questionId = 'question-1',
   viewerId = null,
   children,
 }: HarnessProps) {
@@ -34,7 +37,7 @@ function Harness({
     <MemoryRouter initialEntries={[initialEntry]}>
       <CreativeToolsProvider
         sessionId={sessionId}
-        questionId="question-1"
+        questionId={questionId}
         viewerId={viewerId}
         isLive={isLive}
         proposals={proposals}
@@ -193,6 +196,49 @@ describe('creative sticky flow', () => {
       expect(note().value.endsWith('x'.repeat(20))).toBe(true);
       expect(note().value.endsWith('x'.repeat(21))).toBe(false);
       expect(screen.getByText('Full')).toBeInTheDocument();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  // Typing cannot make a note too tall for any sticky, but an extension of
+  // one written under other rules can open like that. Proposing checks again.
+  it('will not propose a note too tall for any sticky', async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const text = this.querySelector('p')?.textContent ?? '';
+        const width = parseFloat(this.style.width) || 0;
+        return { width, height: text.includes('too tall') ? width + 50 : 100 } as DOMRect;
+      });
+    try {
+      const user = userEvent.setup();
+      const propose = vi.fn(async () => undefined);
+      const source: BoardItem = {
+        id: 'old-1',
+        questionId: 'question-1',
+        authorId: 'user-2',
+        authorName: 'Alice',
+        type: 'sticky',
+        artifactJson: { type: 'sticky', text: 'An old note, too tall', color: 'blue' },
+        x: 0,
+        y: 0,
+        createdAt: '2026-09-02T00:00:00.000Z',
+        editedAt: null,
+        extendsProposalId: null,
+        reactions: [],
+      };
+      render(
+        <Harness propose={propose} proposals={[source]}>
+          <ExtendButton proposal={source} />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+      expect(propose).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('too long to fit on a sticky');
     } finally {
       rect.mockRestore();
     }
@@ -439,6 +485,57 @@ describe('sticky drafts', () => {
   });
 });
 
+describe('sticky drafts across questions', () => {
+  const note = () => screen.queryByLabelText('Note') as HTMLTextAreaElement | null;
+  const board = (questionId: string) => (
+    <Harness
+      propose={vi.fn(async () => undefined)}
+      sessionId="session-1"
+      questionId={questionId}
+      viewerId="user-1"
+    />
+  );
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  // The board keeps one set of tools across the agenda. A note half-written
+  // for one question is an answer to that question, not the next one.
+  it('does not open a draft written for one question on another', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(board('question-1'));
+
+    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.type(note()!, 'For question one');
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    rerender(board('question-2'));
+    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    expect(note()).toHaveValue('');
+    await user.type(note()!, 'For question two');
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    rerender(board('question-1'));
+    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    expect(note()).toHaveValue('For question one');
+  });
+
+  // Moving on while the popup is open must not carry the note across, or keep
+  // writing one question's note under the next question's name.
+  it('starts the open popup afresh when the board moves to another question', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(board('question-1'));
+
+    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.type(note()!, 'For question one');
+    rerender(board('question-2'));
+
+    expect(note()).toHaveValue('');
+    expect(localStorage.getItem(draftKeyFor('session-1', 'question-2', 'user-1'))).toBeNull();
+  });
+});
+
 describe('closing the sticky popup', () => {
   const note = () => screen.queryByLabelText('Note') as HTMLTextAreaElement | null;
 
@@ -509,5 +606,60 @@ describe('closing the sticky popup', () => {
 
     expect(note()).toHaveValue('Wait');
     expect(note()?.closest('form')).toHaveClass('rt-sticky-popup-rise');
+  });
+
+  // The draft is cleared the moment a proposal lands, and the popup fades for a
+  // moment after that with the note still focused. A keystroke then must not
+  // write the proposed note straight back as a draft.
+  it('does not bring a proposed note back as a draft when typed into as it fades', async () => {
+    motion({ reduced: false });
+    localStorage.clear();
+    // The fade's own timer, held until this test lets it run, so the popup
+    // cannot finish closing before the keystroke lands however busy the
+    // machine is. Every other timer runs as normal.
+    const realSetTimeout = window.setTimeout;
+    let finishFade: (() => void) | undefined;
+    const timers = vi.spyOn(window, 'setTimeout').mockImplementation(((
+      handler: TimerHandler,
+      delay?: number,
+      ...rest: unknown[]
+    ) => {
+      if (delay === 150) {
+        finishFade = handler as () => void;
+        return 0;
+      }
+      return realSetTimeout(handler, delay, ...rest);
+    }) as typeof window.setTimeout);
+    try {
+      const user = userEvent.setup();
+      let land: (() => void) | undefined;
+      const propose = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            land = resolve;
+          }),
+      );
+      render(<Harness propose={propose} sessionId="session-1" viewerId="user-1" />);
+      const key = draftKeyFor('session-1', 'question-1', 'user-1');
+
+      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.type(note()!, 'Ship it');
+      expect(localStorage.getItem(key)).not.toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+      await act(async () => land?.());
+
+      // Landed, draft cleared, and fading with the note still focused.
+      await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
+      expect(note()?.closest('form')).toHaveClass('rt-sticky-popup-fade');
+      fireEvent.change(note()!, { target: { value: 'Ship it, and again' } });
+      expect(localStorage.getItem(key)).toBeNull();
+
+      act(() => finishFade?.());
+      expect(note()).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      expect(note()).toHaveValue('');
+    } finally {
+      timers.mockRestore();
+    }
   });
 });

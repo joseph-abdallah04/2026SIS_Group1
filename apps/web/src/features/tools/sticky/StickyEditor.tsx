@@ -16,7 +16,7 @@ import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinb
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
 import { clearStickyDraft, readStickyDraft, writeStickyDraft } from './stickyDraft';
-import { fitToSticky, stickyFits } from './stickyPresentation';
+import { fitToSticky, STICKY_TOO_TALL, stickyFits } from './stickyPresentation';
 import { useNoteAutoGrow } from './useNoteAutoGrow';
 
 const STICKY_COLORS: StickyColor[] = ['yellow', 'pink', 'blue', 'green'];
@@ -146,11 +146,6 @@ export function StickyEditor() {
   // sticky, which the character count alone would not show.
   const [paperFull, setPaperFull] = useState(false);
 
-  // Saved as it is typed, colour included, so closing the popup by any route
-  // — a press outside it, Escape, the close button, a refresh — keeps the note.
-  useEffect(() => {
-    if (draftKey) writeStickyDraft(draftKey, { text, color });
-  }, [draftKey, text, color]);
   const theme = STICKY_THEMES[color];
   const [placement, setPlacement] = useState(placeAboveFooter);
 
@@ -221,6 +216,26 @@ export function StickyEditor() {
   }, [submissionStatus, beginClose]);
 
   /**
+   * Saved as it is typed, colour included, so closing the popup by any route —
+   * a press outside it, Escape, the close button, a refresh — keeps the note.
+   *
+   * Not once it has been proposed, and not while it is on its way out. The
+   * draft is cleared the moment a proposal lands, and the popup fades for a
+   * moment after that with the note still focused; a keystroke then would
+   * write the proposed note straight back and open it again next time.
+   *
+   * Runs only when the note or its colour changes, and reads those two
+   * conditions from refs rather than depending on them. Depending on the
+   * submission status re-ran the save when closing reset that status to idle,
+   * a render before the popup went, and wrote the proposed note back anyway.
+   */
+  const proposedRef = useRef(false);
+  useEffect(() => {
+    if (!draftKey || closingRef.current || proposedRef.current) return;
+    writeStickyDraft(draftKey, { text, color });
+  }, [draftKey, text, color]);
+
+  /**
    * A press anywhere outside the popup closes it, and still does whatever it
    * was a press on: a card is still picked up, another tool still opens. The
    * note is already saved, so nothing is lost by it.
@@ -264,13 +279,23 @@ export function StickyEditor() {
       setValidationError(prepared.error);
       return;
     }
+    // The editor refuses text that outgrows the paper as it is typed, but a
+    // note can arrive already too long for it: an extension of one written
+    // under other rules, or a draft saved before line breaks counted.
+    if (!stickyFits(prepared.text)) {
+      setValidationError(STICKY_TOO_TALL);
+      return;
+    }
 
     setValidationError(null);
     const proposed = await submitArtifact({ type: 'sticky', text: prepared.text, color });
     // Cleared once it has landed, here rather than when the popup closes: the
     // popup can be closed while the proposal is still on its way, and a note
     // already on the board should not come back as a draft next time.
-    if (proposed && draftKey) clearStickyDraft(draftKey);
+    if (proposed) {
+      proposedRef.current = true;
+      if (draftKey) clearStickyDraft(draftKey);
+    }
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -350,7 +375,10 @@ export function StickyEditor() {
           rows={1}
           placeholder="Capture the idea in one clear note"
           value={text}
+          readOnly={closing}
           onChange={(event) => {
+            // On its way out, so there is nowhere for more writing to go.
+            if (closingRef.current) return;
             const next = event.target.value;
             // Refused only when it adds text, so deleting always works, even
             // on a note that arrived too long for its paper.

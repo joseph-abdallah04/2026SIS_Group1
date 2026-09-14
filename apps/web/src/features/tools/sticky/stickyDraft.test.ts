@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { clearStickyDraft, draftKeyFor, readStickyDraft, writeStickyDraft } from './stickyDraft';
 
-const KEY = draftKeyFor('session-1', 'user-1');
+const KEY = draftKeyFor('session-1', 'question-1', 'user-1');
 
 beforeEach(() => {
   localStorage.clear();
@@ -39,13 +39,27 @@ describe('sticky draft', () => {
     expect(readStickyDraft(KEY)).toBeNull();
   });
 
-  // Somebody else signing in on the same machine, or the same person in
-  // another session, must not open the popup on this note.
-  it('keeps each person in each session to their own draft', () => {
+  // Somebody else signing in on the same machine, the same person in another
+  // session, or the same session moving on to its next question, must not open
+  // the popup on this note.
+  it('keeps each person, in each session, on each question, to their own draft', () => {
     writeStickyDraft(KEY, { text: 'Mine', color: 'yellow' });
 
-    expect(readStickyDraft(draftKeyFor('session-1', 'user-2'))).toBeNull();
-    expect(readStickyDraft(draftKeyFor('session-2', 'user-1'))).toBeNull();
+    expect(readStickyDraft(draftKeyFor('session-1', 'question-1', 'user-2'))).toBeNull();
+    expect(readStickyDraft(draftKeyFor('session-2', 'question-1', 'user-1'))).toBeNull();
+    expect(readStickyDraft(draftKeyFor('session-1', 'question-2', 'user-1'))).toBeNull();
+  });
+
+  // Saved before drafts were per question, so there is no telling which
+  // question they belong to, and no question can show them.
+  it('never reads a draft saved before the question was part of the key', () => {
+    localStorage.setItem(
+      'rt_sticky_draft:session-1:user-1',
+      JSON.stringify({ text: 'Which question was this?', color: 'yellow' }),
+    );
+
+    expect(readStickyDraft(KEY)).toBeNull();
+    expect(readStickyDraft(draftKeyFor('session-1', 'question-2', 'user-1'))).toBeNull();
   });
 
   // Stored data outlives the code that wrote it.

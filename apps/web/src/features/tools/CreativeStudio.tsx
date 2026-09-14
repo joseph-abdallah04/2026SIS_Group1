@@ -6,7 +6,7 @@ import { TOOL_LABELS } from './toolRegistry';
 import { useCreativeTools } from './CreativeToolsContext';
 
 export function CreativeStudio() {
-  const { activeTool, closeTool, editSource, extensionSource, isReusingOwn, isLive } =
+  const { activeTool, closeTool, draftScope, editSource, extensionSource, isReusingOwn, isLive } =
     useCreativeTools();
   if (!activeTool) return null;
 
@@ -14,10 +14,12 @@ export function CreativeStudio() {
   // over the board rather than in a room of its own: leaving the board to
   // write a sentence costs more than the sentence. It brings its own dialog,
   // and its own header, because it has no studio chrome to hang one on.
-  // Keyed by what it opened on, so moving from one source to another is a new
-  // popup with its own note rather than the last one's text under a new label.
+  // Keyed by what it opened on and the question it was opened for, so moving
+  // to another source, or the board moving to another question, is a new popup
+  // with its own note rather than the last one's text under a new label.
   if (activeTool === 'sticky') {
-    return <StickyEditor key={editSource?.id ?? extensionSource?.id ?? 'new'} />;
+    const source = editSource?.id ?? extensionSource?.id ?? 'new';
+    return <StickyEditor key={`${draftScope.questionId}:${source}`} />;
   }
 
   // Reuse (F38) and Extend (F23) share one write path, so the source alone

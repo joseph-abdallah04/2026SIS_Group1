@@ -28,8 +28,8 @@ export interface CreativeToolsContextValue {
   editSource: BoardItem | null;
   isLive: boolean;
   /**
-   * Where this viewer's unproposed sticky is kept in this session, or null
-   * where there is no session or no signed-in viewer to keep it for.
+   * Where this viewer's unproposed sticky for the current question is kept, or
+   * null where there is no session, question or signed-in viewer to keep it for.
    */
   stickyDraftKey: string | null;
   submissionStatus: ProposalSubmissionStatus;

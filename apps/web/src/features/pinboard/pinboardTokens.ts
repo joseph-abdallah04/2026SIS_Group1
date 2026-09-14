@@ -150,7 +150,10 @@ export const STICKY_SHADOW =
 
 /** Intrinsic widths — types differ on purpose. */
 export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
-  sticky: 210,
+  // The smallest sticky, eight lines square. A sticky grows past this with its
+  // note, so read `cardWidth` for a real one; this is only its floor, and a
+  // test holds it to the size the sticky ladder starts at.
+  sticky: 217,
   drawing: 250,
   diagram: 300,
 };
