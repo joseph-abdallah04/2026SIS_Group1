@@ -26,6 +26,8 @@ function Harness({
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
       <CreativeToolsProvider
+        sessionId="session-1"
+        questionId="question-1"
         viewerId={null}
         isLive={isLive}
         proposals={proposals}
@@ -157,6 +159,8 @@ describe('creative sticky flow', () => {
     render(
       <MemoryRouter initialEntries={['/sessions/demo']}>
         <CreativeToolsProvider
+          sessionId="session-1"
+          questionId="question-1"
           viewerId={null}
           isLive
           proposals={[parent]}

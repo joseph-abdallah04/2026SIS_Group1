@@ -9,6 +9,9 @@ import { useProposalSubmission } from './useProposalSubmission';
 
 interface CreativeToolsProviderProps {
   children: ReactNode;
+  sessionId: string;
+  /** The question the board is on; a draft is kept per question. */
+  questionId: string;
   isLive: boolean;
   /** Who is looking, so the editors can tell reuse from extending (F38). */
   viewerId: string | null;
@@ -19,6 +22,8 @@ interface CreativeToolsProviderProps {
 
 export function CreativeToolsProvider({
   children,
+  sessionId,
+  questionId,
   isLive,
   viewerId,
   proposals,
@@ -96,6 +101,7 @@ export function CreativeToolsProvider({
     <CreativeToolsContext.Provider
       value={{
         activeTool,
+        draftScope: { sessionId, questionId, viewerId },
         extensionSource,
         isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,

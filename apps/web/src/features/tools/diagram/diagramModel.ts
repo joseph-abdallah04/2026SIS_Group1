@@ -1,9 +1,13 @@
 import type {
+  ArrowElement,
+  ArrowEndpoint,
   DiagramArtifact,
   DiagramEdge,
   DiagramNode,
   DiagramNodeShape,
   DiagramNodeSize,
+  PathElement,
+  TableElement,
 } from '@roundtable/shared';
 import {
   DIAGRAM_NODE_SHAPE_KEYS,
@@ -13,13 +17,23 @@ import {
   DIAGRAM_MIN_NODE_WIDTH,
   diagramCanParent,
   diagramDescendantIds,
+  diagramEdgeKey,
   diagramIsAncestor,
   diagramNodeSize,
   effectiveDiagramNodeSize,
+  offsetArrow,
+  tableSize,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_EDGE_LIMIT, DIAGRAM_NODE_LIMIT } from '../artifactLimits';
+import {
+  alignOffsets,
+  distributeOffsets,
+  type ArrangeBox,
+  type ArrangeOffset,
+} from '../studio/studioArrange';
+import { inkToData, type StudioInkStroke } from '../studio/studioInk';
 
 export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
 
@@ -28,15 +42,30 @@ export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
 export const DIAGRAM_SHAPE_MEDIA_TYPE = 'application/x-roundtable-diagram-shape';
 
 export const DIAGRAM_SHAPE_LABELS: Record<DiagramNodeShape, string> = {
-  box: 'Box',
+  box: 'Rounded rectangle',
   rectangle: 'Rectangle',
   ellipse: 'Ellipse',
   diamond: 'Decision',
   triangle: 'Triangle',
   cylinder: 'Database',
-  container: 'Container',
+  container: 'Dotted rectangle',
   text: 'Text',
 };
+
+/**
+ * The order the shape palette offers them in, most-reached first. Separate from
+ * `DIAGRAM_NODE_SHAPE_KEYS`, which is the contract's order and must not shuffle
+ * under stored diagrams. Text is absent: it has its own button on the rail.
+ */
+export const DIAGRAM_SHAPE_PALETTE_ORDER = [
+  'rectangle',
+  'box',
+  'ellipse',
+  'diamond',
+  'triangle',
+  'cylinder',
+  'container',
+] as const satisfies readonly DiagramNodeShape[];
 
 export const DIAGRAM_NODE_WIDTH = diagramNodeSize('box').width;
 export const DIAGRAM_NODE_HEIGHT = diagramNodeSize('box').height;
@@ -164,15 +193,58 @@ export function placeNodePosition(
 
 // `viewBox` is the currently visible slice of the sheet, so screen coordinates
 // stay correct under zoom and pan.
+/**
+ * How the scene is laid into the surface.
+ *
+ * The canvas fills the window, and the scene has a shape of its own, so the two
+ * rarely match: SVG scales the view uniformly to fit and centres what is left
+ * over. Every conversion between the two spaces has to account for that margin,
+ * and gets it from here rather than working it out again.
+ */
+export function diagramSurfaceFit(
+  bounds: DiagramSurfaceBounds,
+  viewBox: DiagramRect,
+): { scale: number; offsetX: number; offsetY: number } {
+  if (bounds.width <= 0 || bounds.height <= 0 || viewBox.width <= 0 || viewBox.height <= 0) {
+    return { scale: 1, offsetX: 0, offsetY: 0 };
+  }
+  const scale = Math.min(bounds.width / viewBox.width, bounds.height / viewBox.height);
+  return {
+    scale,
+    offsetX: (bounds.width - viewBox.width * scale) / 2,
+    offsetY: (bounds.height - viewBox.height * scale) / 2,
+  };
+}
+
 export function clientPointToDiagramPoint(
   clientPoint: DiagramPoint,
   bounds: DiagramSurfaceBounds,
   viewBox: DiagramRect = DIAGRAM_FULL_VIEW_BOX,
 ): DiagramPoint {
   if (bounds.width <= 0 || bounds.height <= 0) return { x: viewBox.x, y: viewBox.y };
+  const { scale, offsetX, offsetY } = diagramSurfaceFit(bounds, viewBox);
   return {
-    x: viewBox.x + ((clientPoint.x - bounds.left) / bounds.width) * viewBox.width,
-    y: viewBox.y + ((clientPoint.y - bounds.top) / bounds.height) * viewBox.height,
+    x: viewBox.x + (clientPoint.x - bounds.left - offsetX) / scale,
+    y: viewBox.y + (clientPoint.y - bounds.top - offsetY) / scale,
+  };
+}
+
+/**
+ * The reverse: a rectangle in scene units, in the surface's own client space.
+ * The properties bar needs it to know where the selection actually appears.
+ */
+export function diagramRectToClientRect(
+  rect: DiagramRect,
+  bounds: DiagramSurfaceBounds,
+  viewBox: DiagramRect = DIAGRAM_FULL_VIEW_BOX,
+): DiagramRect {
+  if (viewBox.width <= 0 || viewBox.height <= 0) return { x: 0, y: 0, width: 0, height: 0 };
+  const { scale, offsetX, offsetY } = diagramSurfaceFit(bounds, viewBox);
+  return {
+    x: bounds.left + offsetX + (rect.x - viewBox.x) * scale,
+    y: bounds.top + offsetY + (rect.y - viewBox.y) * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
   };
 }
 
@@ -221,9 +293,12 @@ export function prepareEdgeLabel(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, DIAGRAM_EDGE_LABEL_LIMIT);
 }
 
-export function edgeKey(edge: Pick<DiagramEdge, 'from' | 'to'>): string {
-  return JSON.stringify([edge.from, edge.to]);
-}
+/**
+ * Re-exported from `@roundtable/shared`: `z` (v4 paint order) names edges by
+ * this key, so the schema that validates an order and the editor that writes
+ * one have to agree on the format. One definition, shared.
+ */
+export const edgeKey = diagramEdgeKey;
 
 function isFree(
   nodes: readonly DiagramNode[],
@@ -282,7 +357,9 @@ export function addNode(
     : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
-    label: DIAGRAM_SHAPE_LABELS[shape],
+    // Empty, not named after its shape: the first thing anyone does with a new
+    // element is type into it, and pre-filling means selecting the text first.
+    label: '',
     x: position.x,
     y: position.y,
     shape,
@@ -354,46 +431,16 @@ export function moveNodesBy(
 // Alignment is an exactness operation, so it never snaps afterwards: rounding a
 // shared edge onto the grid moves differently sized nodes by different amounts
 // and breaks the very alignment that was just computed.
+//
+// The arithmetic lives in `studioArrange`, over plain boxes, because the
+// properties bar arranges strokes, paths and tables the same way. These two
+// stay as the node-shaped door onto it.
 export function alignNodes(
   nodes: readonly DiagramNode[],
   ids: readonly string[],
   mode: DiagramAlignMode,
 ): DiagramNode[] {
-  const selected = nodes.filter((node) => ids.includes(node.id));
-  if (selected.length < 2) return [...nodes];
-
-  const boxes = selected.map(nodeBounds);
-  const left = Math.min(...boxes.map((box) => box.x));
-  const right = Math.max(...boxes.map((box) => box.x + box.width));
-  const top = Math.min(...boxes.map((box) => box.y));
-  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
-
-  return nodes.map((node) => {
-    if (!ids.includes(node.id)) return node;
-    const size = effectiveDiagramNodeSize(node);
-    const target = { x: node.x, y: node.y };
-    switch (mode) {
-      case 'left':
-        target.x = left;
-        break;
-      case 'centerX':
-        target.x = (left + right) / 2 - size.width / 2;
-        break;
-      case 'right':
-        target.x = right - size.width;
-        break;
-      case 'top':
-        target.y = top;
-        break;
-      case 'centerY':
-        target.y = (top + bottom) / 2 - size.height / 2;
-        break;
-      case 'bottom':
-        target.y = bottom - size.height;
-        break;
-    }
-    return { ...node, ...placeNodePosition(target, effectiveDiagramNodeSize(node), false) };
-  });
+  return applyNodeOffsets(nodes, ids, (boxes) => alignOffsets(boxes, mode));
 }
 
 // Equal gaps between bounding boxes, with the outermost two left where they are.
@@ -403,34 +450,29 @@ export function distributeNodes(
   ids: readonly string[],
   axis: DiagramDistributeAxis,
 ): DiagramNode[] {
+  return applyNodeOffsets(nodes, ids, (boxes) => distributeOffsets(boxes, axis));
+}
+
+function applyNodeOffsets(
+  nodes: readonly DiagramNode[],
+  ids: readonly string[],
+  compute: (boxes: ArrangeBox[]) => Map<string, ArrangeOffset>,
+): DiagramNode[] {
   const selected = nodes.filter((node) => ids.includes(node.id));
-  if (selected.length < 3) return [...nodes];
-
-  const horizontal = axis === 'horizontal';
-  const extent = (node: DiagramNode) =>
-    horizontal ? effectiveDiagramNodeSize(node).width : effectiveDiagramNodeSize(node).height;
-  const start = (node: DiagramNode) => (horizontal ? node.x : node.y);
-
-  const ordered = [...selected].sort((a, b) => start(a) - start(b));
-  const first = ordered[0]!;
-  const last = ordered.at(-1)!;
-  const spanStart = start(first);
-  const spanEnd = start(last) + extent(last);
-  const totalExtent = ordered.reduce((sum, node) => sum + extent(node), 0);
-  const gap = (spanEnd - spanStart - totalExtent) / (ordered.length - 1);
-
-  const placed = new Map<string, number>();
-  let cursor = spanStart;
-  for (const node of ordered) {
-    placed.set(node.id, cursor);
-    cursor += extent(node) + gap;
-  }
+  const offsets = compute(selected.map((node) => ({ key: node.id, ...nodeBounds(node) })));
+  if (offsets.size === 0) return [...nodes];
 
   return nodes.map((node) => {
-    const position = placed.get(node.id);
-    if (position === undefined) return node;
-    const target = horizontal ? { x: position, y: node.y } : { x: node.x, y: position };
-    return { ...node, ...placeNodePosition(target, effectiveDiagramNodeSize(node), false) };
+    const offset = offsets.get(node.id);
+    if (!offset) return node;
+    return {
+      ...node,
+      ...placeNodePosition(
+        { x: node.x + offset.x, y: node.y + offset.y },
+        effectiveDiagramNodeSize(node),
+        false,
+      ),
+    };
   });
 }
 
@@ -858,30 +900,110 @@ export function deleteEdge(
   return edges.filter((edge) => edge.from !== target.from || edge.to !== target.to);
 }
 
+/**
+ * How far the artwork has to move to sit inside the preview frame.
+ *
+ * Ink is measured alongside the nodes because both are shifted by the same
+ * amount: normalising the shapes on their own would slide them out from under
+ * a sketch that was drawn around them.
+ */
+function normalizationDelta(
+  nodes: readonly DiagramNode[],
+  ink: readonly StudioInkStroke[],
+  paths: readonly PathElement[] = [],
+  tables: readonly TableElement[] = [],
+  arrows: readonly ArrowElement[] = [],
+): DiagramPoint {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const rights: number[] = [];
+  const bottoms: number[] = [];
+
+  for (const node of nodes) {
+    const size = effectiveDiagramNodeSize(node);
+    xs.push(node.x);
+    ys.push(node.y);
+    rights.push(node.x + size.width);
+    bottoms.push(node.y + size.height);
+  }
+  for (const stroke of ink) {
+    for (const point of stroke.points) {
+      xs.push(point.x);
+      ys.push(point.y);
+      rights.push(point.x);
+      bottoms.push(point.y);
+    }
+  }
+  for (const path of paths) {
+    for (const anchor of path.anchors) {
+      xs.push(anchor.x);
+      ys.push(anchor.y);
+      rights.push(anchor.x);
+      bottoms.push(anchor.y);
+    }
+  }
+  for (const table of tables) {
+    const size = tableSize(table);
+    xs.push(table.x);
+    ys.push(table.y);
+    rights.push(table.x + size.width);
+    bottoms.push(table.y + size.height);
+  }
+  // Only an arrow's own endpoints. A bound end sits on an element already
+  // counted above, and its stored point is a fallback rather than a position.
+  for (const arrow of arrows) {
+    for (const end of [arrow.from, arrow.to]) {
+      if (end.elementId !== undefined) continue;
+      xs.push(end.x);
+      ys.push(end.y);
+      rights.push(end.x);
+      bottoms.push(end.y);
+    }
+  }
+
+  if (xs.length === 0) return { x: 0, y: 0 };
+
+  return {
+    x: Math.min(
+      DIAGRAM_PREVIEW_PADDING - Math.min(...xs),
+      DIAGRAM_CANVAS_WIDTH - Math.max(...rights),
+    ),
+    y: Math.min(
+      DIAGRAM_PREVIEW_PADDING - Math.min(...ys),
+      DIAGRAM_CANVAS_HEIGHT - Math.max(...bottoms),
+    ),
+  };
+}
+
 export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): DiagramNode[] {
   if (nodes.length === 0) return [];
-  const minX = Math.min(...nodes.map((node) => node.x));
-  const minY = Math.min(...nodes.map((node) => node.y));
-  const maxRight = Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width));
-  const maxBottom = Math.max(
-    ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
-  );
-  const deltaX = Math.min(DIAGRAM_PREVIEW_PADDING - minX, DIAGRAM_CANVAS_WIDTH - maxRight);
-  const deltaY = Math.min(DIAGRAM_PREVIEW_PADDING - minY, DIAGRAM_CANVAS_HEIGHT - maxBottom);
-
+  const delta = normalizationDelta(nodes, []);
   return nodes.map((node) => ({
     ...node,
-    x: Math.round(node.x + deltaX),
-    y: Math.round(node.y + deltaY),
+    x: Math.round(node.x + delta.x),
+    y: Math.round(node.y + delta.y),
   }));
 }
 
 export function prepareDiagram(
   nodes: readonly DiagramNode[],
   edges: readonly DiagramEdge[],
+  ink: readonly StudioInkStroke[] = [],
+  z: readonly string[] = [],
+  paths: readonly PathElement[] = [],
+  tables: readonly TableElement[] = [],
+  arrows: readonly ArrowElement[] = [],
 ): PreparedDiagram {
-  if (nodes.length === 0) {
-    return { ok: false, error: 'Add at least one element before proposing this diagram.' };
+  // v4: a sketch is a legitimate studio artifact on its own, so "something to
+  // propose" now means any element, not specifically a shape.
+  if (
+    nodes.length === 0 &&
+    ink.length === 0 &&
+    paths.length === 0 &&
+    tables.length === 0 &&
+    arrows.length === 0
+  ) {
+    return { ok: false, error: 'Add an element or draw something before proposing.' };
   }
 
   const normalizedNodes = nodes.map((node) => ({
@@ -889,9 +1011,9 @@ export function prepareDiagram(
     label: prepareNodeLabel(node.label),
   }));
 
-  if (normalizedNodes.some((node) => !node.label)) {
-    return { ok: false, error: 'Give every element a label before proposing.' };
-  }
+  // Deliberately no "label everything" rule. Elements are created empty so they
+  // can be typed into straight away, and on a studio canvas an unlabelled shape
+  // is a drawing — no less legitimate than a stroke with no text beside it.
 
   const nodeIds = new Set(normalizedNodes.map((node) => node.id));
   if (nodeIds.size !== normalizedNodes.length) {
@@ -911,10 +1033,115 @@ export function prepareDiagram(
     withEdgeLabel(edge, edge.label ? prepareEdgeLabel(edge.label) : ''),
   );
 
+  const inkIds = new Set(ink.map((stroke) => stroke.id));
+  if (inkIds.size !== ink.length || ink.some((stroke) => nodeIds.has(stroke.id))) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  // Shapes and ink shift together, so a sketch drawn around a diagram stays
+  // registered with it once the whole thing is framed for the board preview.
+  const delta = normalizationDelta(normalizedNodes, ink, paths, tables, arrows);
+  const shiftedNodes = normalizedNodes.map((node) => ({
+    ...node,
+    x: Math.round(node.x + delta.x),
+    y: Math.round(node.y + delta.y),
+  }));
+  // Simplified and packed once, at the boundary: the editor keeps every sampled
+  // point for a faithful undo, and only what is proposed needs to be compact.
+  const shiftedInk = inkToData(
+    ink.map((stroke) => ({
+      ...stroke,
+      points: stroke.points.map((point) => ({ x: point.x + delta.x, y: point.y + delta.y })),
+    })),
+  );
+
+  const pathIds = new Set(paths.map((path) => path.id));
+  if (
+    pathIds.size !== paths.length ||
+    paths.some((path) => nodeIds.has(path.id) || inkIds.has(path.id))
+  ) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  // Paths move with the shapes and the ink, so a line drawn against a diagram
+  // stays where its author put it once the whole canvas is framed.
+  const shiftedPaths = paths.map((path) => ({
+    ...path,
+    anchors: path.anchors.map((point) => ({
+      ...point,
+      x: Math.round((point.x + delta.x) * 10) / 10,
+      y: Math.round((point.y + delta.y) * 10) / 10,
+    })),
+  }));
+
+  const tableIds = new Set(tables.map((table) => table.id));
+  if (
+    tableIds.size !== tables.length ||
+    tables.some((table) => nodeIds.has(table.id) || inkIds.has(table.id) || pathIds.has(table.id))
+  ) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  const shiftedTables = tables.map((table) => ({
+    ...table,
+    x: Math.round(table.x + delta.x),
+    y: Math.round(table.y + delta.y),
+  }));
+
+  const arrowIds = new Set(arrows.map((arrow) => arrow.id));
+  if (
+    arrowIds.size !== arrows.length ||
+    arrows.some(
+      (arrow) =>
+        nodeIds.has(arrow.id) ||
+        inkIds.has(arrow.id) ||
+        pathIds.has(arrow.id) ||
+        tableIds.has(arrow.id),
+    )
+  ) {
+    return { ok: false, error: 'Every element on the canvas must have a unique id.' };
+  }
+
+  // A bound endpoint is drawn from the element it names, so only its stored
+  // fallback point moves with the frame — but it has to move, or detaching the
+  // arrow later would send it back to where the canvas used to be.
+  //
+  // Bindings to elements that are no longer here are dropped at this boundary
+  // and nowhere else. The editor keeps them through a deletion on purpose: the
+  // route already falls back to the stored point, so the arrow looks right
+  // either way, and keeping the binding means undoing the deletion reattaches
+  // the arrow instead of leaving it pointing at nothing. Only the artifact has
+  // to be clean, for the same reason the paint order is pruned just below.
+  const bindable = new Set<string>([...nodeIds, ...inkIds, ...pathIds, ...tableIds]);
+  const detach = (endpoint: ArrowEndpoint): ArrowEndpoint =>
+    endpoint.elementId !== undefined && !bindable.has(endpoint.elementId)
+      ? { x: endpoint.x, y: endpoint.y }
+      : endpoint;
+  const shiftedArrows = arrows
+    .map((arrow) => offsetArrow(arrow, delta.x, delta.y))
+    .map((arrow) => ({ ...arrow, from: detach(arrow.from), to: detach(arrow.to) }));
+
+  const known = new Set<string>([
+    ...shiftedNodes.map((node) => node.id),
+    ...normalizedEdges.map(edgeKey),
+    ...inkIds,
+    ...pathIds,
+    ...tableIds,
+    ...arrowIds,
+  ]);
+  // Drop anything the order names that is no longer on the canvas — deleting an
+  // element must not make the whole artifact unproposable.
+  const prunedOrder = z.filter((key) => known.has(key));
+
   const parsed = diagramWriteArtifactSchema.safeParse({
     type: 'diagram',
-    nodes: normalizeDiagramCoordinates(normalizedNodes),
+    nodes: shiftedNodes,
     edges: normalizedEdges,
+    ...(shiftedInk.length > 0 ? { ink: shiftedInk } : {}),
+    ...(shiftedPaths.length > 0 ? { paths: shiftedPaths } : {}),
+    ...(shiftedTables.length > 0 ? { tables: shiftedTables } : {}),
+    ...(shiftedArrows.length > 0 ? { arrows: shiftedArrows } : {}),
+    ...(prunedOrder.length > 0 ? { z: prunedOrder } : {}),
   });
   if (!parsed.success) {
     return { ok: false, error: 'This diagram could not be prepared. Simplify it and try again.' };
