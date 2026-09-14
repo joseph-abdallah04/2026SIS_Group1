@@ -311,6 +311,7 @@ import { arrowTargets } from '../studio/studioArrowTargets';
 import { StudioArrowView } from '../studio/StudioArrowView';
 import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
+import { useReportStudioStatus } from '../StudioOverlay';
 
 /**
  * What a press on empty canvas does. Shapes, arrows and selection are unchanged
@@ -1001,6 +1002,20 @@ export function DiagramEditor() {
   const ink = history.snapshot.ink ?? [];
   const paths = history.snapshot.paths ?? [];
   const arrows = history.snapshot.arrows ?? [];
+  // Worded as the footer words them, for the bar the studio minimises to when
+  // somebody peeks at the board. Connections and standalone arrows are one
+  // count, as they are to whoever drew them.
+  const plural = (count: number, one: string, many: string) =>
+    `${count} ${count === 1 ? one : many}`;
+  useReportStudioStatus(
+    [
+      plural(nodes.length, 'element', 'elements'),
+      plural(edges.length + arrows.length, 'arrow', 'arrows'),
+      ...(ink.length > 0 ? [plural(ink.length, 'stroke', 'strokes')] : []),
+      ...(paths.length > 0 ? [plural(paths.length, 'path', 'paths')] : []),
+    ],
+    history.isDirty,
+  );
   const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);

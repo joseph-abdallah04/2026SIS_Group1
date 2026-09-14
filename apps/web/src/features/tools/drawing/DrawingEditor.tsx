@@ -40,6 +40,7 @@ import {
   type PenWidth,
 } from './drawingModel';
 import { useDrawingHistory } from './useDrawingHistory';
+import { useReportStudioStatus } from '../StudioOverlay';
 
 type DrawingMode = 'pen' | 'eraser';
 
@@ -75,6 +76,12 @@ export function DrawingEditor() {
       : [];
   const { strokes, strokesRef, canUndo, canRedo, commit, preview, recordPreview, undo, redo } =
     useDrawingHistory(sourceStrokes);
+  // For the bar the studio minimises to. Unsaved once anything has been drawn
+  // or undone since it opened, which is what there is to lose.
+  useReportStudioStatus(
+    [`${strokes.length} ${strokes.length === 1 ? 'stroke' : 'strokes'}`],
+    canUndo,
+  );
   const [mode, setMode] = useState<DrawingMode>('pen');
   const [ink, setInk] = useState<DrawingInk>('ink');
   const [penWidth, setPenWidth] = useState<PenWidth>(8);

@@ -376,6 +376,156 @@ body {
 }
 
 /*
+ * The studio stepping aside for the board, and coming back. It slides down out
+ * of view like a sheet pulled down to the bar waiting at the bottom, and slides
+ * back up the same way, which is also how it arrives when a tool opens it. Far
+ * enough to clear the bottom of the window from wherever it sits. The dimming
+ * behind it fades with it. Held under the studio's own limit on motion.
+ */
+@keyframes rt-studio-minimise {
+  from {
+    transform: none;
+  }
+  to {
+    transform: translateY(calc(100% + 4rem));
+  }
+}
+
+@keyframes rt-studio-restore {
+  from {
+    transform: translateY(calc(100% + 4rem));
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes rt-studio-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rt-studio-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rt-studio-dock-rise {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rt-studio-dock-drop {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+.rt-studio-minimise {
+  animation: rt-studio-minimise 180ms cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+.rt-studio-minimise::backdrop {
+  animation: rt-studio-backdrop-out 180ms ease-in forwards;
+}
+
+.rt-studio-restore {
+  animation: rt-studio-restore 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * Opening from a tool and leaving by the back arrow: the same fade the sticky
+ * popup makes, a small lift in and a small settle out, grown from and gathered
+ * toward its bottom edge. The rise is held to the studio's 180ms limit where the
+ * sticky's takes 220ms; the movement and easing are the same.
+ */
+@keyframes rt-studio-appear {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-studio-appear {
+  transform-origin: bottom center;
+  animation: rt-studio-appear 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-studio-leave {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.rt-studio-leave {
+  transform-origin: bottom center;
+  animation: rt-studio-leave 150ms ease-in forwards;
+}
+
+.rt-studio-leave::backdrop {
+  animation: rt-studio-backdrop-out 150ms ease-in forwards;
+}
+
+.rt-studio-appear::backdrop {
+  animation: rt-studio-backdrop-in 180ms ease-out;
+}
+
+.rt-studio-restore::backdrop {
+  animation: rt-studio-backdrop-in 180ms ease-out;
+}
+
+.rt-studio-dock-rise {
+  animation: rt-studio-dock-rise 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rt-studio-dock-drop {
+  animation: rt-studio-dock-drop 140ms ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-studio-minimise,
+  .rt-studio-minimise::backdrop,
+  .rt-studio-restore,
+  .rt-studio-restore::backdrop,
+  .rt-studio-appear,
+  .rt-studio-appear::backdrop,
+  .rt-studio-leave,
+  .rt-studio-leave::backdrop,
+  .rt-studio-dock-rise,
+  .rt-studio-dock-drop {
+    animation: none;
+  }
+}
+
+/*
  * F13 participant rail. The bubble is the waiting room's head at rail size —
  * same initials, same hashed swatch — with two states added on top: a ring
  * while someone is talking, and F12's red-slash mic while they are muted.

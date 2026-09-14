@@ -6,7 +6,7 @@ import { TOOL_LABELS } from './toolRegistry';
 import { useCreativeTools } from './CreativeToolsContext';
 
 export function CreativeStudio() {
-  const { activeTool, closeTool, draftScope, editSource, extensionSource, isReusingOwn, isLive } =
+  const { activeTool, closeTool, draftScope, editSource, extensionSource, isReusingOwn } =
     useCreativeTools();
   if (!activeTool) return null;
 
@@ -36,7 +36,7 @@ export function CreativeStudio() {
   const title = `${action} ${TOOL_LABELS[activeTool].toLowerCase()}`;
 
   return (
-    <StudioOverlay isLive={isLive} onClose={closeTool} title={title}>
+    <StudioOverlay onClose={closeTool} title={title}>
       {activeTool === 'drawing' ? <DrawingEditor /> : null}
       {activeTool === 'diagram' ? <DiagramEditor /> : null}
     </StudioOverlay>
