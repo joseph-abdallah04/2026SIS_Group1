@@ -38,6 +38,11 @@ export function draftKeyFor(sessionId: string, userId: string): string {
  *
  * Stored data outlives the code that wrote it, so it is checked rather than
  * trusted, and a note saved under a longer limit is cut to today's.
+ *
+ * Trimmed at both ends, as the note would be when proposed. A draft saved
+ * while Enter was held down came back as a stack of empty lines, and the popup,
+ * which grows to fit what it holds, opened far taller than the window and
+ * reached up off the top of it.
  */
 export function readStickyDraft(key: string): StickyDraft | null {
   try {
@@ -47,7 +52,8 @@ export function readStickyDraft(key: string): StickyDraft | null {
     if (typeof parsed !== 'object' || parsed === null) return null;
     const { text, color } = parsed as Record<string, unknown>;
     if (typeof text !== 'string' || !COLORS.includes(color as StickyColor)) return null;
-    return { text: text.slice(0, STICKY_TEXT_LIMIT), color: color as StickyColor };
+    const note = text.trim().slice(0, STICKY_TEXT_LIMIT);
+    return note ? { text: note, color: color as StickyColor } : null;
   } catch {
     return null;
   }

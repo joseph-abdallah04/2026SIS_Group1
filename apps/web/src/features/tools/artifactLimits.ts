@@ -4,11 +4,12 @@
  * Measured in Chrome with Inter: nine lines at a sticky's width hold at most
  * 275 characters of real prose, and ten hold at least 307. A cap between the
  * two means a note at the cap needs all ten lines, so it ends at the bottom of
- * the largest square, and never needs an eleventh. Set low in that window, so
- * prose whose words wrap badly still runs out of count before it runs out of
- * paper, and the counter is what tells somebody their note is full.
+ * the largest square, and never needs an eleventh. Set in the middle of that
+ * window, clear of both ends: well above the most nine lines hold, and far
+ * enough under the least ten hold that prose whose words wrap badly still runs
+ * out of count before it runs out of paper.
  */
-export const STICKY_TEXT_LIMIT = 280;
+export const STICKY_TEXT_LIMIT = 290;
 export const DRAWING_SVG_LIMIT = 100_000;
 export const DIAGRAM_NODE_LIMIT = 100;
 export const DIAGRAM_EDGE_LIMIT = 200;

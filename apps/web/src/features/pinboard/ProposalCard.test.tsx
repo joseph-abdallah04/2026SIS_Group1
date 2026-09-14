@@ -115,6 +115,25 @@ describe('diagram proposal card', () => {
   });
 });
 
+describe('sticky card', () => {
+  // A note written in lines lands in those lines, rather than run together.
+  it('keeps the line breaks the note was written with', () => {
+    render(
+      <ProposalCard
+        item={{
+          ...diagramItem([]),
+          type: 'sticky',
+          artifactJson: { type: 'sticky', text: 'Ship the API\nThen the UI', color: 'yellow' },
+        }}
+      />,
+    );
+
+    const note = screen.getByText(/Ship the API/);
+    expect(note.textContent).toBe('Ship the API\nThen the UI');
+    expect(note).toHaveClass('whitespace-pre-line');
+  });
+});
+
 describe('card layout', () => {
   // The artifact opens the card and the attribution closes it. The byline sits
   // bottom-right, clear of both things the board draws over this card: the

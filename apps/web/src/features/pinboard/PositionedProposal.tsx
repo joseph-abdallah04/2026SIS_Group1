@@ -93,8 +93,9 @@ interface PositionedProposalProps {
  *
  * The length rule is the same one the tool enforces when a sticky is written,
  * and comes from the same place. Editing used to stop only at the schema's
- * outer bound, so a note capped at 280 characters on the way in could be grown
- * to 2000 immediately afterwards, on a card the size of a postcard.
+ * outer bound, so a note capped at the tool's limit on the way in could be
+ * grown to 2000 characters immediately afterwards, on a card the size of a
+ * postcard.
  */
 function StickyTextEditor({
   artifact,
@@ -118,6 +119,7 @@ function StickyTextEditor({
   }, []);
 
   const trimmed = text.trim();
+  const noteFull = text.length >= STICKY_TEXT_LIMIT || paperFull;
   const unchanged = trimmed === artifact.text.trim();
   const prepared = prepareStickyText(text);
   const submittable = !saving && !unchanged && prepared.ok;
@@ -172,10 +174,18 @@ function StickyTextEditor({
           // The same refusal the tool makes while a sticky is written: a note
           // is not allowed to outgrow the largest square by being rewritten.
           if (next.length > text.length && !stickyFits(next)) {
-            setPaperFull(true);
+            // Full once what was typed will not go in. A line break is the
+            // exception: the sticky can run out of lines while the last line
+            // still has room for words, and then the note is not full, the
+            // Enter just does not happen.
+            const onlyLineBreaks = next.replace(/\n/g, '') === text.replace(/\n/g, '');
+            setPaperFull(onlyLineBreaks ? !stickyFits(`${text}a`) : true);
             return;
           }
-          setPaperFull(false);
+          // Still full after trailing spaces go in: they take no room, so
+          // the note is no less full for them. Anything else changes what the
+          // paper holds, and the next refusal will say so if it is still full.
+          if (next.trim() !== text.trim()) setPaperFull(false);
           setText(next);
         }}
         onKeyDown={(e) => {
@@ -226,16 +236,16 @@ function StickyTextEditor({
             the ceiling does not appear to move between writing and editing.
             Every character counts, spaces at either end included: the box
             itself stops at that many, so a count that skipped them could read
-            short of the limit while refusing the next keystroke. */}
+            short of the limit while refusing the next keystroke. And like the
+            tool, it reads "Full" once nothing more will go in, whichever
+            limit stopped it. */}
         <span
           aria-live="polite"
           className={`ml-auto text-[10px] tabular-nums ${
-            text.length >= STICKY_TEXT_LIMIT || paperFull
-              ? 'text-rt-secondary-deep'
-              : 'text-rt-ink-faint'
+            noteFull ? 'font-semibold text-rt-secondary-deep' : 'text-rt-ink-faint'
           }`}
         >
-          {text.length}/{STICKY_TEXT_LIMIT}
+          {noteFull ? 'Full' : `${text.length}/${STICKY_TEXT_LIMIT}`}
         </span>
       </div>
     </div>

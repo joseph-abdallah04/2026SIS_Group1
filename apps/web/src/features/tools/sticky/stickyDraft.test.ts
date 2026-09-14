@@ -60,6 +60,23 @@ describe('sticky draft', () => {
     expect(readStickyDraft(KEY)).toBeNull();
   });
 
+  // Enter held down before line breaks were counted saved hundreds of them,
+  // and the popup opened tall enough to reach off the top of the window.
+  it('comes back without the empty lines either side of the note', () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({ text: `${'\n'.repeat(200)}Idea${'\n'.repeat(50)}`, color: 'pink' }),
+    );
+
+    expect(readStickyDraft(KEY)).toEqual({ text: 'Idea', color: 'pink' });
+  });
+
+  it('has nothing to give back when the draft was only empty lines', () => {
+    localStorage.setItem(KEY, JSON.stringify({ text: '\n'.repeat(100), color: 'pink' }));
+
+    expect(readStickyDraft(KEY)).toBeNull();
+  });
+
   it('cuts a draft saved under a longer limit to the current one', () => {
     localStorage.setItem(KEY, JSON.stringify({ text: 'a'.repeat(400), color: 'blue' }));
 

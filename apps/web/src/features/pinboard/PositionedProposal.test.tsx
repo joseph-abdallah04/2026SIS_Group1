@@ -91,6 +91,14 @@ describe('editing a sticky in place', () => {
 
   // The box stops at the limit counting every character, so the count has to
   // as well, or it reads short of the limit while refusing the next key.
+  it('reads Full at the character limit rather than a count', async () => {
+    renderOwnSticky('x'.repeat(STICKY_TEXT_LIMIT));
+
+    await openEditor();
+
+    expect(screen.getByText('Full')).toBeTruthy();
+  });
+
   it('counts spaces at the end of the note', async () => {
     renderOwnSticky('Hello');
 
@@ -133,6 +141,41 @@ describe('editing a sticky in place', () => {
 
       // Trailing spaces still go in: they take no room, and saving trims them.
       expect((box as HTMLTextAreaElement).value.trim()).toBe('Ship the bet');
+      // And the count says so, rather than showing room that is not there.
+      expect(screen.getByText('Full')).toBeTruthy();
+
+      // Taking text out makes room, and the count comes back.
+      await userEvent.clear(box);
+      expect(screen.getByText(`0/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it('refuses a new line past the last one without calling the note full', async () => {
+    // A stand-in layout: twenty characters to a line and ten lines to the
+    // largest sticky, so running out of lines and running out of room on the
+    // last line are different moments.
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const note = this.querySelector('p')?.textContent ?? '';
+        const width = parseFloat(this.style.width) || 0;
+        const lines = note
+          .split('\n')
+          .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 20)), 0);
+        return { width, height: lines > 10 ? width + 50 : 100 } as DOMRect;
+      });
+    try {
+      renderOwnSticky('Idea');
+      const box = await openEditor();
+      await userEvent.type(box, `{End}${'{Shift>}{Enter}{/Shift}'.repeat(20)}`);
+
+      expect((box as HTMLTextAreaElement).value.split('\n')).toHaveLength(10);
+      expect(screen.queryByText('Full')).toBeNull();
+
+      await userEvent.type(box, 'x'.repeat(30));
+      expect(screen.getByText('Full')).toBeTruthy();
     } finally {
       rect.mockRestore();
     }

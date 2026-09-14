@@ -6,6 +6,7 @@ import type { ProposalCreateInput } from '@roundtable/shared/schemas';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
+import { STICKY_TEXT_LIMIT } from './artifactLimits';
 import { CreativeStudio } from './CreativeStudio';
 import { useCreativeTools } from './CreativeToolsContext';
 import { CreativeToolsProvider } from './CreativeToolsProvider';
@@ -148,6 +149,48 @@ describe('creative sticky flow', () => {
       expect((screen.getByLabelText('Note') as HTMLTextAreaElement).value.trim()).toBe(
         'Keep the ide',
       );
+      // Not "22 / 290": nothing more will go in, whatever the count says.
+      expect(screen.getByText('Full')).toBeInTheDocument();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  // Line breaks take room on the paper now, so Enter held down stops where the
+  // note would outgrow the largest sticky, instead of growing the popup forever.
+  // Running out of lines is not the note being full, though: the last line can
+  // still take words, so the count stays a count until it cannot.
+  it('stops taking line breaks at the last line, and says Full only once that line is full', async () => {
+    // A stand-in layout: twenty characters to a line and ten lines to the
+    // largest sticky, so running out of lines and running out of room on the
+    // last line are different moments.
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const note = this.querySelector('p')?.textContent ?? '';
+        const width = parseFloat(this.style.width) || 0;
+        const lines = note
+          .split('\n')
+          .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 20)), 0);
+        return { width, height: lines > 10 ? width + 50 : 100 } as DOMRect;
+      });
+    try {
+      const user = userEvent.setup();
+      render(<Harness propose={vi.fn(async () => undefined)} />);
+      const note = () => screen.getByLabelText('Note') as HTMLTextAreaElement;
+
+      await user.click(screen.getByRole('button', { name: 'New sticky' }));
+      await user.type(note(), `Idea${'{Enter}'.repeat(30)}`);
+
+      expect(note().value.split('\n')).toHaveLength(10);
+      expect(screen.queryByText('Full')).toBeNull();
+      expect(screen.getByText(`${note().value.length} / ${STICKY_TEXT_LIMIT}`)).toBeInTheDocument();
+
+      await user.type(note(), 'x'.repeat(30));
+
+      expect(note().value.endsWith('x'.repeat(20))).toBe(true);
+      expect(note().value.endsWith('x'.repeat(21))).toBe(false);
+      expect(screen.getByText('Full')).toBeInTheDocument();
     } finally {
       rect.mockRestore();
     }

@@ -16,7 +16,7 @@ import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinb
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
 import { clearStickyDraft, readStickyDraft, writeStickyDraft } from './stickyDraft';
-import { stickyFits } from './stickyPresentation';
+import { fitToSticky, stickyFits } from './stickyPresentation';
 import { useNoteAutoGrow } from './useNoteAutoGrow';
 
 const STICKY_COLORS: StickyColor[] = ['yellow', 'pink', 'blue', 'green'];
@@ -131,7 +131,12 @@ export function StickyEditor() {
    * the draft.
    */
   const [draftKey] = useState(() => (editSource || extensionSource ? null : stickyDraftKey));
-  const [saved] = useState(() => (draftKey ? readStickyDraft(draftKey) : null));
+  // Cut to what the largest sticky holds before it is shown: a draft saved
+  // under older rules could be far taller than the popup can sensibly be.
+  const [saved] = useState(() => {
+    const draft = draftKey ? readStickyDraft(draftKey) : null;
+    return draft ? { ...draft, text: fitToSticky(draft.text) } : null;
+  });
   const [text, setText] = useState(sourceArtifact?.text ?? saved?.text ?? '');
   const [color, setColor] = useState<StickyColor>(
     sourceArtifact?.color ?? saved?.color ?? 'yellow',
@@ -276,6 +281,7 @@ export function StickyEditor() {
   }
 
   const error = validationError ?? submissionError;
+  const noteFull = text.length >= STICKY_TEXT_LIMIT || paperFull;
   const label = editSource
     ? 'Edit sticky'
     : extensionSource
@@ -349,10 +355,18 @@ export function StickyEditor() {
             // Refused only when it adds text, so deleting always works, even
             // on a note that arrived too long for its paper.
             if (next.length > text.length && !stickyFits(next)) {
-              setPaperFull(true);
+              // Full once what was typed will not go in. A line break is the
+              // exception: the sticky can run out of lines while the last line
+              // still has room for words, and then the note is not full, the
+              // Enter just does not happen.
+              const onlyLineBreaks = next.replace(/\n/g, '') === text.replace(/\n/g, '');
+              setPaperFull(onlyLineBreaks ? !stickyFits(`${text}a`) : true);
               return;
             }
-            setPaperFull(false);
+            // Still full after trailing spaces go in: they take no room, so
+            // the note is no less full for them. Anything else changes what the
+            // paper holds, and the next refusal will say so if it is still full.
+            if (next.trim() !== text.trim()) setPaperFull(false);
             setText(next);
             setValidationError(null);
             if (submissionError) resetSubmission();
@@ -394,15 +408,17 @@ export function StickyEditor() {
             })}
           </fieldset>
 
+          {/* "Full" once nothing more will go in, whichever limit stopped it.
+              Wide letters fill the paper before the count runs out, and a
+              count reading 280 of 290 on a note that takes no more says there
+              is room that is not there. */}
           <span
             className={`ml-auto text-[12px] tabular-nums ${
-              text.length >= STICKY_TEXT_LIMIT || paperFull
-                ? 'text-rt-secondary-deep'
-                : 'text-rt-ink/55'
+              noteFull ? 'font-semibold text-rt-secondary-deep' : 'text-rt-ink/55'
             }`}
             aria-live="polite"
           >
-            {text.length} / {STICKY_TEXT_LIMIT}
+            {noteFull ? 'Full' : `${text.length} / ${STICKY_TEXT_LIMIT}`}
           </span>
 
           <Button

@@ -14,7 +14,15 @@ import { CARD_FOOT_CLASS } from '../../pinboard/pinboardTokens';
  */
 export const STICKY_FONT_SIZE = 14;
 export const STICKY_LINE_HEIGHT = 1.45;
-export const STICKY_NOTE_CLASS = 'min-h-0 flex-1 wrap-break-word font-medium text-rt-ink';
+/**
+ * Line breaks are kept, so a note laid out in lines on the popup lands in those
+ * lines on the board. They used to collapse, which meant a line break took no
+ * room on the paper and nothing counted it: pressing Enter over and over grew
+ * the popup without end while the note stayed "fitting". Runs of spaces still
+ * collapse, as they do everywhere else on the page.
+ */
+export const STICKY_NOTE_CLASS =
+  'min-h-0 flex-1 wrap-break-word whitespace-pre-line font-medium text-rt-ink';
 export const STICKY_NOTE_PADDING = '14px 14px 6px';
 
 /**
@@ -168,7 +176,17 @@ export function stickyFits(text: string): boolean {
   if (typeof document === 'undefined') return true;
 
   const { card, note } = getProbe();
-  note.textContent = text.trim();
+  // Untrimmed. Line breaks at either end are trimmed when the note is saved,
+  // but they are on the paper while it is being written, and a check that
+  // ignored them would let Enter grow the popup forever.
+  //
+  // A line break at the very end draws no line of its own in a paragraph, yet
+  // in the box being typed into it has moved the cursor onto a new one. Left
+  // uncounted, the Enter on the last line was taken and put the cursor on a
+  // line the sticky does not have, where nothing more could be written. A
+  // zero-width space gives that empty line a height, so it is the Enter that
+  // is refused and the cursor stays where there is still room.
+  note.textContent = text.endsWith('\n') ? `${text}\u200b` : text;
   try {
     card.style.width = `${STICKY_MAX_SIZE}px`;
     const height = card.getBoundingClientRect().height;
@@ -177,4 +195,34 @@ export function stickyFits(text: string): boolean {
   } finally {
     note.textContent = '';
   }
+}
+
+/**
+ * A note cut down to what the largest sticky can hold, keeping the words.
+ *
+ * For text that did not come through the editor's own refusal: a draft saved
+ * before line breaks were counted could hold hundreds of empty lines, and the
+ * popup, which grows to fit what it holds, opened thousands of pixels tall
+ * with its top and its close button far off the window.
+ *
+ * A note that fits is returned as it is. One that does not first has its runs
+ * of blank lines closed up to a single blank line, which is nearly always what
+ * made it too tall and costs no words. Only if that is still too much is it cut
+ * to the longest start that fits; adding to a note never makes it shorter, so
+ * that length can be found by halving.
+ */
+export function fitToSticky(text: string): string {
+  if (stickyFits(text)) return text;
+
+  const closedUp = text.replace(/\n{3,}/g, '\n\n');
+  if (stickyFits(closedUp)) return closedUp;
+
+  let fits = 0;
+  let overflows = closedUp.length;
+  while (overflows - fits > 1) {
+    const middle = Math.floor((fits + overflows) / 2);
+    if (stickyFits(closedUp.slice(0, middle))) fits = middle;
+    else overflows = middle;
+  }
+  return closedUp.slice(0, fits);
 }
