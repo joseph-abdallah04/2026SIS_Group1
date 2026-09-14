@@ -54,8 +54,53 @@ body {
   animation: rt-proposal-arrive 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/*
+ * The sticky popup rising off the toolbar it was opened from. Grown from its
+ * bottom edge, so it comes up out of the footer rather than swelling from its
+ * middle, and on the same easing as a card arriving on the board.
+ */
+@keyframes rt-sticky-popup-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-sticky-popup-rise {
+  transform-origin: bottom center;
+  animation: rt-sticky-popup-rise 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * And fading back out when it closes, settling a few pixels toward the toolbar
+ * it came from. Quicker than the rise: an opening is something to notice, a
+ * closing should get out of the way. Held at the end so the popup cannot flash
+ * back before it is removed. The duration is mirrored in StickyEditor.
+ */
+@keyframes rt-sticky-popup-fade {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.rt-sticky-popup-fade {
+  transform-origin: bottom center;
+  animation: rt-sticky-popup-fade 150ms ease-in forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rt-proposal-arrive {
+  .rt-proposal-arrive,
+  .rt-sticky-popup-rise,
+  .rt-sticky-popup-fade {
     animation: none;
   }
 }

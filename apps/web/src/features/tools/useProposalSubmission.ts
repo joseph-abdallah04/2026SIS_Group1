@@ -60,7 +60,7 @@ export function useProposalSubmission({
         await propose({
           type: artifactJson.type,
           artifactJson,
-          ...findOpenProposalPosition(proposals, artifactJson.type),
+          ...findOpenProposalPosition(proposals, artifactJson),
           ...(extensionSource ? { extendsProposalId: extensionSource.id } : {}),
         });
       }

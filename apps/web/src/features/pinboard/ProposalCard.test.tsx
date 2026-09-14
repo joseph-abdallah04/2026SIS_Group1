@@ -115,6 +115,27 @@ describe('diagram proposal card', () => {
   });
 });
 
+describe('sticky card', () => {
+  // A note written in lines lands in those lines, rather than run together.
+  it('shows the note exactly as written, line breaks and runs of spaces included', () => {
+    const text = 'Ship the API\n\n    then   the UI';
+    render(
+      <ProposalCard
+        item={{
+          ...diagramItem([]),
+          type: 'sticky',
+          artifactJson: { type: 'sticky', text, color: 'yellow' },
+        }}
+      />,
+    );
+
+    const note = screen.getByText(/Ship the API/);
+    expect(note.textContent).toBe(text);
+    // Preserves spaces as well as breaks; pre-line would collapse the spaces.
+    expect(note).toHaveClass('whitespace-pre-wrap');
+  });
+});
+
 describe('studio proposal card (v4)', () => {
   // Packed `[x0, y0, x1, y1]`, the form a stroke is stored and broadcast in.
   const stroke = {

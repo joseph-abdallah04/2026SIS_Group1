@@ -27,6 +27,11 @@ export interface CreativeToolsContextValue {
    */
   editSource: BoardItem | null;
   isLive: boolean;
+  /**
+   * Where this viewer's unproposed sticky for the current question is kept, or
+   * null where there is no session, question or signed-in viewer to keep it for.
+   */
+  stickyDraftKey: string | null;
   submissionStatus: ProposalSubmissionStatus;
   submissionError: string | null;
   openTool: (tool: ToolKind) => void;
