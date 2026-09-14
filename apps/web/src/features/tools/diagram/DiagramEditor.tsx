@@ -14,7 +14,6 @@ import {
   ArrowDownFromLine,
   ArrowRight,
   ArrowUpFromLine,
-  CheckCircle2,
   Columns3,
   Circle,
   Database,
@@ -4852,23 +4851,6 @@ export function DiagramEditor() {
     const sent = await submitArtifact(prepared.artifact);
     // The work is on the board now, so the copy held against losing it is done.
     if (sent) clearStudioDraft(draftStorage, draftKeyScope);
-  }
-
-  if (submissionStatus === 'success') {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 bg-rt-surface-sunken px-6 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rt-primary-tint text-rt-primary-deep">
-          <CheckCircle2 aria-hidden="true" size={28} strokeWidth={1.7} />
-        </span>
-        <div>
-          <h2 className="text-[20px] font-semibold text-rt-ink">Studio canvas proposed</h2>
-          <p role="status" className="mt-1 text-[13px] text-rt-ink-muted">
-            It is now on the shared pinboard.
-          </p>
-        </div>
-        <Button onClick={closeTool}>Back to pinboard</Button>
-      </div>
-    );
   }
 
   const error = validationError ?? submissionError;

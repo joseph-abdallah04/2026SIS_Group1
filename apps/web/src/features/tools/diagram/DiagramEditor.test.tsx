@@ -1,4 +1,12 @@
-import { cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
@@ -55,6 +63,14 @@ function nextShapeSlot() {
  * Picking a shape only picks it up, so this presses the canvas afterwards to put
  * it down — one call still means one element on the board.
  */
+/**
+ * A proposal that went through closes the studio, back to the pinboard, the way
+ * the sticky popup closes. Nothing is left open to say so.
+ */
+async function proposedAndClosed() {
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+}
+
 async function clickInRailMenu(
   user: ReturnType<typeof userEvent.setup>,
   menu: string,
@@ -374,9 +390,7 @@ describe('diagram editor', () => {
       x: 32,
       y: 32,
     });
-    expect(
-      await screen.findByRole('heading', { name: 'Studio canvas proposed' }),
-    ).toBeInTheDocument();
+    await proposedAndClosed();
   });
 
   it('blocks an empty diagram before the pinboard write path', async () => {
@@ -996,9 +1010,7 @@ describe('diagram editor', () => {
     await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
-    const backButtons = screen.getAllByRole('button', { name: 'Back to pinboard' });
-    await user.click(backButtons.at(-1)!);
+    await proposedAndClosed();
 
     expect(confirm).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -2125,7 +2137,7 @@ describe('studio canvas', () => {
     expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     // One artifact carrying both, which is the whole point of the studio.
@@ -2146,7 +2158,7 @@ describe('studio canvas', () => {
     drawStroke(canvas, 91, { x: 200, y: 200 }, { x: 320, y: 300 });
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     expect(artifact.nodes).toHaveLength(0);
     expect(artifact.ink).toHaveLength(1);
@@ -2244,7 +2256,7 @@ describe('studio canvas', () => {
     await user.click(screen.getByRole('button', { name: 'Send selection to back' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     const order = artifact.z!;
@@ -2345,7 +2357,7 @@ describe('studio canvas', () => {
     expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     expect(artifact.ink).toHaveLength(1);
@@ -2387,7 +2399,7 @@ describe('studio pen and line', () => {
     expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     expect(artifact.paths).toHaveLength(1);
@@ -2427,7 +2439,7 @@ describe('studio pen and line', () => {
     clickAt(canvas, 223, 100, 100);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     expect(artifact.paths![0]!.closed).toBe(true);
@@ -2449,7 +2461,7 @@ describe('studio pen and line', () => {
     expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     expect(artifact.paths![0]!.anchors).toHaveLength(2);
@@ -2468,7 +2480,7 @@ describe('studio pen and line', () => {
     fireEvent.pointerUp(canvas, { pointerId: 240, clientX: 400, clientY: 216, shiftKey: true });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const [start, end] = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
     // The 16px of vertical drift is snapped away entirely.
@@ -2491,7 +2503,7 @@ describe('studio pen and line', () => {
     await user.keyboard('{Enter}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const anchors = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
     const dragged = anchors.at(-1)!;
@@ -2603,7 +2615,7 @@ describe('studio path editing', () => {
     fireEvent.pointerUp(canvas, { pointerId: 315, clientX: 500, clientY: 400 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const anchors = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
     expect(anchors[1]!.y).toBeGreaterThan(anchors[0]!.y);
@@ -2666,7 +2678,7 @@ describe('studio path editing', () => {
     fireEvent.pointerUp(canvas, { pointerId: 345, clientX: 220, clientY: 120 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const anchor = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors[0]!;
     expect(anchor.out).toBeDefined();
@@ -2693,7 +2705,7 @@ describe('studio path editing', () => {
     fireEvent.pointerUp(canvas, { pointerId: 355, clientX: 220, clientY: 120, altKey: true });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const anchor = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors[0]!;
     // A cusp: the two sides no longer mirror each other.
@@ -2793,7 +2805,7 @@ describe('studio tables', () => {
     expect(screen.getByRole('button', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     expect(table.rowHeights).toHaveLength(2);
@@ -2812,7 +2824,7 @@ describe('studio tables', () => {
     await placeTable(user, canvas, 405);
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     expect(artifact.nodes).toHaveLength(0);
     expect(artifact.tables).toHaveLength(1);
@@ -2834,7 +2846,7 @@ describe('studio tables', () => {
     await user.type(input, 'Question{Tab}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     expect(table.cells[0]!.text).toBe('Question');
@@ -2855,7 +2867,7 @@ describe('studio tables', () => {
     await user.type(input, 'Middle{Enter}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     // Row 2, column 2 of a 3x3 grid is index 4.
@@ -2913,7 +2925,7 @@ describe('studio tables', () => {
     await user.type(screen.getByRole('textbox', { name: 'Cell row 1 column 1' }), 'draft{Escape}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     expect(table.cells[0]!.text).toBeUndefined();
@@ -2956,7 +2968,7 @@ describe('studio tables', () => {
     await user.click(screen.getByRole('button', { name: 'Insert a row above row 1' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     expect(table.rowHeights).toHaveLength(4);
@@ -2988,7 +3000,7 @@ describe('studio tables', () => {
     await user.click(screen.getByRole('button', { name: 'Add a column' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     expect(table.colWidths).toHaveLength(4);
@@ -3014,7 +3026,7 @@ describe('studio tables', () => {
     await user.click(screen.getByRole('button', { name: 'blue cell fill' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     // A 2x2 block of a 3-wide grid: indices 0, 1, 3, 4.
@@ -3045,7 +3057,7 @@ describe('studio tables', () => {
     fireEvent.pointerUp(canvas, { pointerId: 445, clientX: 520, clientY: 300 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     expect(table.colWidths[0]).toBeGreaterThan(96);
@@ -3097,7 +3109,7 @@ describe('studio element moving', () => {
     fireEvent.pointerUp(canvas, { pointerId: 505, clientX: 260, clientY: 300 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const anchors = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!.anchors;
     // Both ends moved by the same amount: the shape is rigid, not stretched.
@@ -3150,7 +3162,7 @@ describe('studio element moving', () => {
     fireEvent.pointerUp(canvas, { pointerId: 525, clientX: 440, clientY: 340 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     // The grid is intact and nothing was typed into it — it only moved.
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
@@ -3224,7 +3236,7 @@ describe('studio pen feedback and styling', () => {
     await user.keyboard('{Enter}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
     expect(path.strokeColor).toBe('rose');
@@ -3247,7 +3259,7 @@ describe('studio pen feedback and styling', () => {
     clickAt(canvas, 553, 100, 100);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
     expect(path.closed).toBe(true);
@@ -3276,7 +3288,7 @@ describe('studio pen feedback and styling', () => {
     await user.click(screen.getByRole('button', { name: 'Dashed style' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
     expect(path.strokeColor).toBe('amber');
@@ -3344,7 +3356,7 @@ describe('studio table cell text', () => {
     await user.click(screen.getByRole('button', { name: 'rose cell text' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const cell = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[0]!;
     expect(cell.fontSizePreset).toBe('large');
@@ -3429,7 +3441,7 @@ describe('studio multi-selection', () => {
     fireEvent.pointerUp(canvas, { pointerId: 635, clientX: 570, clientY: 440 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     // Everything is still there: a group move moves, it does not destroy.
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
@@ -3520,7 +3532,7 @@ describe('studio multi-selection', () => {
     fireEvent.pointerUp(canvas, { pointerId: 665, clientX: 380, clientY: 360 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     // Still one stroke, and it kept its shape while being carried.
     const ink = diagramArtifactOf(propose.mock.calls[0]![0]).ink!;
@@ -3628,7 +3640,7 @@ describe('studio clipboard and snapping', () => {
     expect(screen.getAllByTestId('studio-path')).toHaveLength(2);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const paths = diagramArtifactOf(propose.mock.calls[0]![0]).paths!;
     expect(paths).toHaveLength(2);
@@ -3665,7 +3677,7 @@ describe('studio clipboard and snapping', () => {
     await user.keyboard('{Control>}v{/Control}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const tables = diagramArtifactOf(propose.mock.calls[0]![0]).tables!;
     expect(tables).toHaveLength(2);
@@ -3929,7 +3941,7 @@ describe('studio drag fidelity and selection', () => {
     fireEvent.pointerUp(canvas, { pointerId: 850, clientX: 432, clientY: 322 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
     // Moved, and nothing was typed into it on the way.
@@ -4019,7 +4031,7 @@ describe('studio pen finishing', () => {
     fireEvent.pointerUp(canvas, { pointerId: 905, clientX: 232, clientY: 182 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
     expect(path.closed).toBe(true);
@@ -4046,7 +4058,7 @@ describe('studio pen finishing', () => {
     expect(screen.queryByTestId('path-draft')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
     expect(path.closed).toBe(true);
@@ -4069,7 +4081,7 @@ describe('studio pen finishing', () => {
     clickAt(canvas, 923, 104, 104);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const path = diagramArtifactOf(propose.mock.calls[0]![0]).paths![0]!;
     expect(path.closed).toBe(true);
@@ -4549,10 +4561,8 @@ describe('keeping an unfinished canvas', () => {
 
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
-    // The confirmation screen has its own way back, beside the header's.
-    await user.click(screen.getAllByRole('button', { name: 'Back to pinboard' })[0]!);
     await user.click(screen.getByRole('button', { name: /^Studio$/ }));
     expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
   });
@@ -4821,7 +4831,7 @@ describe('formatting text', () => {
     await user.click(screen.getByRole('button', { name: 'rose cell text' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const input = send.mock.calls[0]?.[0];
     expect(proposalCreateSchema.safeParse(input).success).toBe(true);
@@ -4867,7 +4877,7 @@ describe('formatting text', () => {
     await user.click(screen.getByRole('button', { name: 'xlarge text' }));
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const input = send.mock.calls[0]?.[0];
     expect(proposalCreateSchema.safeParse(input).success).toBe(true);
@@ -4907,7 +4917,7 @@ describe('what paints on top', () => {
     await placeText(user, canvas, 304, [300, 260], 'On top');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
-    await screen.findByRole('heading', { name: 'Studio canvas proposed' });
+    await proposedAndClosed();
 
     const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
     const textNode = artifact.nodes.find((node) => node.shape === 'text');

@@ -6,17 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
-import {
-  Check,
-  CheckCircle2,
-  Eraser,
-  LoaderCircle,
-  Pencil,
-  Redo2,
-  Send,
-  Trash2,
-  Undo2,
-} from 'lucide-react';
+import { Check, Eraser, LoaderCircle, Pencil, Redo2, Send, Trash2, Undo2 } from 'lucide-react';
 
 import { Button } from '../../../components/ui/Button';
 import { IconButton } from '../../../components/ui/IconButton';
@@ -224,23 +214,6 @@ export function DrawingEditor() {
       event.preventDefault();
       event.currentTarget.requestSubmit();
     }
-  }
-
-  if (submissionStatus === 'success') {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 bg-rt-surface-sunken px-6 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rt-primary-tint text-rt-primary-deep">
-          <CheckCircle2 aria-hidden="true" size={28} strokeWidth={1.7} />
-        </span>
-        <div>
-          <h2 className="text-[20px] font-semibold text-rt-ink">Drawing proposed</h2>
-          <p role="status" className="mt-1 text-[13px] text-rt-ink-muted">
-            It is now on the shared pinboard.
-          </p>
-        </div>
-        <Button onClick={closeTool}>Back to pinboard</Button>
-      </div>
-    );
   }
 
   const error = validationError ?? submissionError;

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,7 @@ function Canvas() {
 
 function renderStudio({ withBoard = false }: { withBoard?: boolean } = {}) {
   const onClose = vi.fn();
-  render(
+  const page = (proposed: boolean) => (
     <div>
       <label>
         Board note
@@ -30,29 +30,59 @@ function renderStudio({ withBoard = false }: { withBoard?: boolean } = {}) {
           <div data-board-frame data-testid="board-frame" />
         </div>
       ) : null}
-      <StudioOverlay onClose={onClose} title="New studio">
+      <StudioOverlay onClose={onClose} proposed={proposed} title="New studio">
         <Canvas />
       </StudioOverlay>
-    </div>,
+    </div>
   );
+  const view = render(page(false));
   const studio = screen.getByRole('dialog', { name: 'New studio' }) as HTMLDialogElement;
-  return { onClose, studio };
+  /** Tells the same studio that what was made has gone onto the board. */
+  const propose = () => view.rerender(page(true));
+  return { onClose, propose, studio };
 }
 
+/** The face that rests on the board, only there while the studio is down. */
 const bar = () => screen.queryByRole('region', { name: 'Minimised studio' });
+
+const phaseOf = (studio: HTMLElement) => studio.getAttribute('data-phase');
+
+/**
+ * Where a studio resting at the bottom has been drawn: its open position, and
+ * where it has been slid down to. jsdom lays nothing out, so a drag has nothing
+ * to measure without this.
+ */
+function restAt(
+  studio: HTMLElement,
+  { openTop, restingTop }: { openTop: number; restingTop: number },
+) {
+  Object.defineProperty(studio, 'offsetTop', { configurable: true, get: () => openTop });
+  vi.spyOn(studio, 'getBoundingClientRect').mockReturnValue({
+    top: restingTop,
+    left: 0,
+    width: 900,
+    height: 700,
+    right: 900,
+    bottom: restingTop + 700,
+    x: 0,
+    y: restingTop,
+    toJSON: () => ({}),
+  });
+}
 
 describe('studio overlay', () => {
   it('opens over the board with a way to peek at it', () => {
     const { studio } = renderStudio();
 
     expect(studio.open).toBe(true);
+    expect(phaseOf(studio)).toBe('open');
     expect(screen.getByRole('button', { name: 'Peek at board' })).toBeInTheDocument();
     expect(bar()).toBeNull();
   });
 
   // Peeking steps aside for the board; it does not close anything. The canvas
   // keeps its undo history, zoom and selection only if it is never unmounted.
-  it('minimises to a bar that says what is waiting, and keeps the canvas as it was', async () => {
+  it('rests at the bottom saying what is waiting, and keeps the canvas as it was', async () => {
     const user = userEvent.setup();
     const { studio } = renderStudio();
 
@@ -60,21 +90,28 @@ describe('studio overlay', () => {
     await user.click(screen.getByRole('button', { name: 'Add element (1)' }));
     await user.click(screen.getByRole('button', { name: 'Peek at board' }));
 
-    expect(studio.open).toBe(false);
+    expect(phaseOf(studio)).toBe('peeking');
+    expect(studio).toHaveClass('rt-studio-peeked');
     const minimised = bar();
     expect(minimised).not.toBeNull();
     expect(minimised!.textContent).toContain('Creative studio · Minimised');
     expect(minimised!.textContent).toContain('New studio');
     expect(minimised!.textContent).toContain('2 elements, 1 arrow · unsaved');
+    // The canvas below the bottom of the window is out of reach meanwhile.
+    expect(
+      screen.getByRole('button', { name: 'Add element (2)' }).closest('[inert]'),
+    ).not.toBeNull();
     // The way back is focused, so it is one key away.
     expect(within(minimised!).getByRole('button', { name: /Back to studio/ })).toHaveFocus();
 
     await user.click(within(minimised!).getByRole('button', { name: /Back to studio/ }));
 
+    expect(phaseOf(studio)).toBe('open');
     expect(studio.open).toBe(true);
     expect(bar()).toBeNull();
     // Still the same canvas, never remounted, so its count is where it was.
-    expect(screen.getByRole('button', { name: 'Add element (2)' })).toBeInTheDocument();
+    const canvas = screen.getByRole('button', { name: 'Add element (2)' });
+    expect(canvas.closest('[inert]')).toBeNull();
     // And focus is back where it was when the studio stepped aside: on Peek.
     expect(screen.getByRole('button', { name: 'Peek at board' })).toHaveFocus();
   });
@@ -96,7 +133,7 @@ describe('studio overlay', () => {
     await user.click(screen.getByRole('button', { name: 'Peek at board' }));
     await user.keyboard('{Escape}');
 
-    expect(studio.open).toBe(true);
+    expect(phaseOf(studio)).toBe('open');
     expect(bar()).toBeNull();
   });
 
@@ -110,7 +147,7 @@ describe('studio overlay', () => {
     await user.click(screen.getByRole('textbox', { name: 'Board note' }));
     await user.keyboard('{Escape}');
 
-    expect(studio.open).toBe(false);
+    expect(phaseOf(studio)).toBe('peeking');
     expect(bar()).not.toBeNull();
   });
 
@@ -124,8 +161,20 @@ describe('studio overlay', () => {
     await user.keyboard('{Escape}{Escape}{Escape}');
 
     expect(studio.open).toBe(true);
+    expect(phaseOf(studio)).toBe('open');
     expect(onClose).not.toHaveBeenCalled();
     expect(bar()).toBeNull();
+  });
+
+  // Like the sticky popup, the studio is done once its work is on the board. It
+  // goes back to the board by itself rather than stopping to say so.
+  it('closes by itself once what was made has been proposed', () => {
+    const { onClose, propose } = renderStudio();
+    expect(onClose).not.toHaveBeenCalled();
+
+    propose();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the board through Back to pinboard, as before', async () => {
@@ -137,11 +186,12 @@ describe('studio overlay', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  // The pinboard sits beside the agenda. The bar sits at the very bottom of the
-  // window, but only as wide as the board, so the agenda stays uncovered.
-  it('sits at the bottom, as wide as the board and clear of the agenda', async () => {
+  // The pinboard sits beside the agenda. Up, the studio is wide and centred on
+  // the window; resting at the bottom, it narrows into the board's own column
+  // so the agenda stays uncovered while the board is looked at.
+  it('rests in the column of the board, and opens wide and centred', async () => {
     const user = userEvent.setup();
-    renderStudio({ withBoard: true });
+    const { studio } = renderStudio({ withBoard: true });
     vi.spyOn(screen.getByTestId('board-frame'), 'getBoundingClientRect').mockReturnValue({
       left: 288,
       width: 900,
@@ -156,10 +206,83 @@ describe('studio overlay', () => {
 
     await user.click(screen.getByRole('button', { name: 'Peek at board' }));
 
-    const minimised = bar()!;
-    expect(minimised).toHaveClass('fixed', 'bottom-0');
-    expect(minimised).toHaveStyle({ left: '288px', width: '900px' });
-    expect(screen.getByTestId('agenda')).not.toContainElement(minimised);
+    expect(studio).toHaveClass('rt-studio-columned', 'rt-studio-peeked');
+    // A 12px gutter either side of the 900px board.
+    expect(studio.style.getPropertyValue('--studio-rest-left')).toBe('300px');
+    expect(studio.style.getPropertyValue('--studio-rest-width')).toBe('876px');
+    expect(studio).toContainElement(bar());
+    expect(screen.getByTestId('agenda')).not.toContainElement(studio);
+
+    await user.click(within(bar()!).getByRole('button', { name: /Back to studio/ }));
+
+    // Up again, centred on the window rather than held to the board's column.
+    expect(studio).toHaveClass('rt-studio-columned');
+    expect(studio).not.toHaveClass('rt-studio-peeked');
+  });
+});
+
+describe('dragging the studio up', () => {
+  async function peeked() {
+    const user = userEvent.setup();
+    const rendered = renderStudio();
+    await user.click(screen.getByRole('button', { name: 'Peek at board' }));
+    // Up, it sits 32px from the top; resting, it has slid down to 700px.
+    restAt(rendered.studio, { openTop: 32, restingTop: 700 });
+    return rendered;
+  }
+
+  it('follows the pointer, and comes up when let go a third of the way', async () => {
+    const { studio } = await peeked();
+    const face = bar()!;
+
+    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 600 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 480 });
+
+    expect(phaseOf(studio)).toBe('dragging');
+    // 240px of the 668px between resting and up.
+    expect(Number(studio.style.getPropertyValue('--studio-lift'))).toBeCloseTo(240 / 668);
+
+    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 480 });
+
+    expect(phaseOf(studio)).toBe('open');
+    expect(studio.style.getPropertyValue('--studio-lift')).toBe('');
+    expect(bar()).toBeNull();
+  });
+
+  it('settles back down when lifted a little and lowered again', async () => {
+    const { studio } = await peeked();
+    const face = bar()!;
+
+    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 660 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 690 });
+    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 690 });
+
+    expect(phaseOf(studio)).toBe('peeking');
+    expect(studio.style.getPropertyValue('--studio-lift')).toBe('');
+    expect(bar()).not.toBeNull();
+  });
+
+  it('is not a drag when the press never moves', async () => {
+    const { studio } = await peeked();
+    const face = bar()!;
+
+    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 718 });
+    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 718 });
+
+    expect(phaseOf(studio)).toBe('peeking');
+  });
+
+  it('leaves a press on Back to studio to the button', async () => {
+    const { studio } = await peeked();
+    const button = within(bar()!).getByRole('button', { name: /Back to studio/ });
+
+    fireEvent.pointerDown(button, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
+    fireEvent.pointerMove(button, { pointerId: 1, isPrimary: true, clientY: 400 });
+
+    expect(phaseOf(studio)).toBe('peeking');
   });
 });
 
@@ -190,37 +313,59 @@ describe('studio overlay motion', () => {
 
     expect(studio.open).toBe(true);
     expect(studio).toHaveClass('rt-studio-appear');
-    expect(studio).not.toHaveClass('rt-studio-restore');
+    expect(studio).not.toHaveClass('rt-studio-slide');
 
     await waitFor(() => expect(studio).not.toHaveClass('rt-studio-appear'));
   });
 
-  // Sliding down toward the bar is what says where the studio went, and it can
-  // only be seen while the dialog is still open.
-  it('slides the studio down to the bar, and back up out of it', async () => {
+  // Sliding down to rest is what says where the studio went, and the board face
+  // only takes over once it has arrived.
+  it('slides the studio down to rest, and back up again', async () => {
     motion({ reduced: false });
     const user = userEvent.setup();
     const { studio } = renderStudio();
 
     await user.click(screen.getByRole('button', { name: 'Peek at board' }));
 
-    expect(studio.open).toBe(true);
-    expect(studio).toHaveClass('rt-studio-minimise');
+    expect(phaseOf(studio)).toBe('minimising');
+    expect(studio).toHaveClass('rt-studio-peeked', 'rt-studio-slide');
     expect(bar()).toBeNull();
 
     await waitFor(() => expect(bar()).not.toBeNull());
-    expect(studio.open).toBe(false);
-    expect(bar()).toHaveClass('rt-studio-dock-rise');
+    expect(phaseOf(studio)).toBe('peeking');
+    expect(studio).not.toHaveClass('rt-studio-slide');
 
     await user.click(within(bar()!).getByRole('button', { name: /Back to studio/ }));
 
-    // Open at once and sliding back up, while the bar slides away underneath.
-    expect(studio.open).toBe(true);
-    expect(studio).toHaveClass('rt-studio-restore');
-    expect(bar()).toHaveClass('rt-studio-dock-drop');
+    expect(phaseOf(studio)).toBe('restoring');
+    expect(studio).toHaveClass('rt-studio-slide');
+    expect(studio).not.toHaveClass('rt-studio-peeked');
+    // From the button it starts from rest, so it eases in as well as out.
+    expect(studio).not.toHaveClass('rt-studio-released');
 
-    await waitFor(() => expect(bar()).toBeNull());
-    expect(studio).not.toHaveClass('rt-studio-restore');
+    await waitFor(() => expect(phaseOf(studio)).toBe('open'));
+    expect(studio).not.toHaveClass('rt-studio-slide');
+  });
+
+  // Let go too low, it slides back down rather than jumping there.
+  it('slides back down to rest when a drag is let go too low', async () => {
+    motion({ reduced: false });
+    const user = userEvent.setup();
+    const { studio } = renderStudio();
+    await user.click(screen.getByRole('button', { name: 'Peek at board' }));
+    await waitFor(() => expect(phaseOf(studio)).toBe('peeking'));
+    restAt(studio, { openTop: 32, restingTop: 700 });
+
+    const face = bar()!;
+    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 700 });
+    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 710 });
+    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 710 });
+
+    expect(phaseOf(studio)).toBe('dropping');
+    // Already moving when let go, so it eases out from there.
+    expect(studio).toHaveClass('rt-studio-peeked', 'rt-studio-slide', 'rt-studio-released');
+    await waitFor(() => expect(phaseOf(studio)).toBe('peeking'));
   });
 
   // Leaving fades out as the sticky popup does. The tool closes after the fade,
@@ -231,6 +376,18 @@ describe('studio overlay motion', () => {
     const { studio, onClose } = renderStudio();
 
     await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
+
+    expect(studio).toHaveClass('rt-studio-leave');
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('fades out back to the board once what was made has been proposed', async () => {
+    motion({ reduced: false });
+    const { studio, onClose, propose } = renderStudio();
+    await waitFor(() => expect(phaseOf(studio)).toBe('open'));
+
+    propose();
 
     expect(studio).toHaveClass('rt-studio-leave');
     expect(onClose).not.toHaveBeenCalled();
@@ -258,14 +415,14 @@ describe('studio overlay motion', () => {
 
     await user.click(screen.getByRole('button', { name: 'Peek at board' }));
 
-    expect(studio.open).toBe(false);
+    expect(phaseOf(studio)).toBe('peeking');
     expect(bar()).not.toBeNull();
-    expect(studio).not.toHaveClass('rt-studio-minimise');
+    expect(studio).not.toHaveClass('rt-studio-slide');
 
     await user.click(within(bar()!).getByRole('button', { name: /Back to studio/ }));
 
-    expect(studio.open).toBe(true);
+    expect(phaseOf(studio)).toBe('open');
     expect(bar()).toBeNull();
-    expect(studio).not.toHaveClass('rt-studio-restore');
+    expect(studio).not.toHaveClass('rt-studio-slide');
   });
 });

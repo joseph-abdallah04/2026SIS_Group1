@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
@@ -111,7 +111,8 @@ describe('drawing editor', () => {
     }
     expect(payload.artifactJson.svg).toContain('stroke="#4D6A74"');
     expect(payload.artifactJson.svg).toContain('stroke-width="14"');
-    expect(await screen.findByRole('heading', { name: 'Drawing proposed' })).toBeInTheDocument();
+    // Proposed, so the studio has closed back to the pinboard.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('rejects an empty sketch before calling the pinboard write path', async () => {
