@@ -52,7 +52,7 @@ describe('creative sticky flow', () => {
     const propose = vi.fn(async () => undefined);
     render(<Harness propose={propose} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(screen.getByLabelText('Note'), '  Keep the idea focused.  ');
     await user.click(screen.getByRole('button', { name: 'pink sticky' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
@@ -81,7 +81,7 @@ describe('creative sticky flow', () => {
     );
     render(<Harness propose={propose} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(screen.getByLabelText('Note'), 'Only submit this once');
     const proposeButton = screen.getByRole('button', { name: 'Propose' });
     await user.click(proposeButton);
@@ -105,23 +105,23 @@ describe('creative sticky flow', () => {
     );
     render(<Harness propose={propose} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(screen.getByLabelText('Note'), 'Keep this write locked');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
 
-    expect(screen.getByRole('button', { name: 'New sticky' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sticky' })).toBeDisabled();
     expect(propose).toHaveBeenCalledTimes(1);
 
     await act(async () => finishProposal?.());
-    expect(screen.getByRole('button', { name: 'New sticky' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Sticky' })).toBeEnabled();
   });
 
   it('disables creation while offline', () => {
     const propose = vi.fn(async () => undefined);
     render(<Harness isLive={false} propose={propose} />);
 
-    expect(screen.getByRole('button', { name: 'New sticky' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sticky' })).toBeDisabled();
   });
 
   it('turns a server acknowledgement code into actionable copy', async () => {
@@ -129,7 +129,7 @@ describe('creative sticky flow', () => {
     const propose = vi.fn(async () => Promise.reject({ code: 'QUESTION_CLOSED' }));
     render(<Harness propose={propose} />);
 
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
     await user.type(screen.getByLabelText('Note'), 'A late idea');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
