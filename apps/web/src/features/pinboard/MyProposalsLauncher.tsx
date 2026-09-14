@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { History } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 
+import { TOOL_BUTTON_PAD, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { MyProposalsPanel } from './MyProposalsPanel';
 import { useMyProposals } from './useMyProposals';
@@ -99,13 +100,14 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
         disabled={disabled}
         onClick={() => setOpen((wasOpen) => !wasOpen)}
         title={reason}
-        className="flex h-9 items-center gap-2 rounded-full px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-secondary-wash hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none aria-expanded:bg-rt-secondary-wash aria-expanded:text-rt-ink disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-rt-ink-muted sm:px-3.5"
+        aria-label="Reuse"
+        className={`flex h-9 items-center gap-2 rounded-full text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-secondary-wash hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none aria-expanded:bg-rt-secondary-wash aria-expanded:text-rt-ink disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-rt-ink-muted ${TOOL_BUTTON_PAD}`}
       >
         <History aria-hidden="true" size={17} strokeWidth={1.8} />
-        <span className="hidden sm:inline">Reuse</span>
+        <span className={TOOL_LABEL}>Reuse</span>
       </button>
 
-      {/* Opens upward, because the toolbar sits on the floor of the board.
+      {/* Opens upward, because the toolbar floats at the foot of the board.
           No portal is needed: unlike a card, this is outside the canvas's
           scale transform, so it is positioned against the page already. */}
       {/* Derived rather than closed by a state write during render: if the

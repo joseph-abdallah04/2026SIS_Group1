@@ -80,7 +80,7 @@ describe('drawing editor', () => {
       within(toolbar)
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['New sticky', 'Studio']);
+    ).toEqual(['Sticky', 'Studio']);
   });
 
   it('opens from the drawing entry point and proposes a shared-schema drawing payload', async () => {
