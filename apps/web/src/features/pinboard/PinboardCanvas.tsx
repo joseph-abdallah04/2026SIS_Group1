@@ -9,6 +9,7 @@ import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
+import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
@@ -16,7 +17,6 @@ import { useProposalDrag } from './useProposalDrag';
 import {
   DESK_MARGIN,
   BOARD_SIZE,
-  CARD_WIDTH,
   DOT_COLOR,
   DOT_RADIUS,
   DOT_SPACING,
@@ -269,6 +269,24 @@ export function PinboardCanvas({
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
   const scale = ZOOM_SCALE[zoom];
+
+  /**
+   * One more render once the page's fonts have arrived. A sticky's size is
+   * measured by laying its note out, and a board that rendered while Inter was
+   * still loading measured every note in the fallback face, which wraps
+   * differently. Those measurements are not kept, so this render redoes them in
+   * the real one.
+   */
+  const [fontsSettled, setFontsSettled] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) setFontsSettled(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const isEmpty = board.items.length === 0;
   // `isLeader` arrives as a prop rather than being derived from
   // `viewerId === board.leaderId` here: the header needs it to choose between
@@ -337,7 +355,15 @@ export function PinboardCanvas({
     overflowX,
     overflowY,
     panHandlers,
-  } = useCanvasPan({ contentWidth, contentHeight, onZoom });
+  } = useCanvasPan({
+    contentWidth,
+    contentHeight,
+    onZoom,
+    // The ballot takes the board's place while people vote. With no board on
+    // screen there is nothing for a zoom to zoom, so the gesture is the
+    // browser's again.
+    zoomEnabled: !ballot,
+  });
 
   /**
    * The furthest out the board may be zoomed: the point where it still covers
@@ -502,11 +528,14 @@ export function PinboardCanvas({
       const at = positionOf(item);
       minX = Math.min(minX, at.x);
       minY = Math.min(minY, at.y);
-      maxX = Math.max(maxX, at.x + CARD_WIDTH[item.type]);
+      maxX = Math.max(maxX, at.x + cardWidth(item));
       maxY = Math.max(maxY, at.y + CARD_FOOTPRINT_H);
     }
     return { minX, minY, width: maxX - minX, height: maxY - minY };
-  }, [board.items, positionOf]);
+    // `fontsSettled` is not read here, but a sticky's width is measured in the
+    // page's font: bounds worked out before Inter arrived used the fallback
+    // face, and Fit would frame those widths until something else moved.
+  }, [board.items, positionOf, fontsSettled]);
 
   /**
    * Frame the proposals, not the sheet.
@@ -849,8 +878,15 @@ export function PinboardCanvas({
                   meets the nav bar (~181px, 24px in from the edge, 16px gap)
                   on a board narrower than ~732px, so 48rem leaves a margin.
                   `bottom-6` clears the horizontal scrollbar. On a board too
-                  narrow even for icons (~320px) the two can still touch. */}
-            <div className="absolute inset-x-0 bottom-6 flex justify-center px-6 @max-[48rem]/board:justify-start">
+                  narrow even for icons (~320px) the two can still touch.
+
+                  Marked so the sticky popup can centre itself over the board
+                  this row spans, rather than over a window the side panels
+                  make lopsided, and rest just above the toolbar. */}
+            <div
+              data-board-toolbar
+              className="absolute inset-x-0 bottom-6 flex justify-center px-6 @max-[48rem]/board:justify-start"
+            >
               <div className="pointer-events-auto min-w-0">
                 {boardOpen ? (
                   // Reuse sits in the same pill as the tools that start from

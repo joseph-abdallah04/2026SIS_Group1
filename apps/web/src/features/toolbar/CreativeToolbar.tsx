@@ -50,7 +50,12 @@ export function CreativeToolbar({ children }: CreativeToolbarProps) {
   const disabled = !isLive || submissionStatus === 'submitting';
 
   return (
-    <nav aria-label="Creative tools" className={FLOATING_BAR}>
+    <nav
+      // The sticky popup rises from here, so it measures where "here" is.
+      data-creative-toolbar
+      aria-label="Creative tools"
+      className={FLOATING_BAR}
+    >
       <button
         type="button"
         aria-pressed={activeTool === 'sticky'}

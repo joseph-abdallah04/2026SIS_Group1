@@ -4,11 +4,13 @@ import type { BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { CreativeToolsContext } from './CreativeToolsContext';
+import { draftKeyFor } from './sticky/stickyDraft';
 import { parseToolKind, type ToolKind } from './toolRegistry';
 import { useProposalSubmission } from './useProposalSubmission';
 
 interface CreativeToolsProviderProps {
   children: ReactNode;
+  /** Which session the tools are writing into, so a draft stays with it. */
   sessionId: string;
   /** The question the board is on; a draft is kept per question. */
   questionId: string;
@@ -106,6 +108,8 @@ export function CreativeToolsProvider({
         isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,
         isLive,
+        stickyDraftKey:
+          sessionId && questionId && viewerId ? draftKeyFor(sessionId, questionId, viewerId) : null,
         submissionStatus: submission.status,
         submissionError: submission.error,
         openTool,
