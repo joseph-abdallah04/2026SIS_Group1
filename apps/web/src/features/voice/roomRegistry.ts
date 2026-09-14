@@ -36,6 +36,17 @@ interface Entry {
   identity: string | null;
   /** Whether the mic was on when released, so re-acquiring can restore it. */
   micWasEnabled: boolean;
+  /**
+   * The join currently in flight, if any.
+   *
+   * A room is only reusable-as-is once it is `Connected`; between acquiring it
+   * and reaching that, there is a window where a remount would otherwise start
+   * a second `connect()` on the same object. LiveKit is not a queue — two
+   * overlapping joins on one `Room` throw, no-op, or land a connection the
+   * abandoned half then tears down. Whoever remounts into this window waits on
+   * the join already running instead of racing it.
+   */
+  join?: Promise<void>;
 }
 
 const rooms = new Map<string, Entry>();
@@ -46,6 +57,11 @@ export interface AcquiredVoiceRoom {
   /** True when this room was still alive from a previous mount. */
   reused: boolean;
   identity: string | null;
+  /**
+   * A join already in flight on this room, to be awaited rather than repeated.
+   * Null when the room is fresh, or is connected and can simply be picked up.
+   */
+  join: Promise<void> | null;
 }
 
 function createEntry(sessionId: string): Entry {
@@ -95,6 +111,7 @@ export function acquireVoiceRoom(sessionId: string): AcquiredVoiceRoom {
       audioContainer: existing.audioContainer,
       reused: true,
       identity: existing.identity,
+      join: existing.join ?? null,
     };
   }
 
@@ -105,7 +122,23 @@ export function acquireVoiceRoom(sessionId: string): AcquiredVoiceRoom {
     audioContainer: entry.audioContainer,
     reused: false,
     identity: null,
+    join: null,
   };
+}
+
+/**
+ * Record the join running against this room, so a view that mounts mid-join
+ * can wait on it instead of starting a competing one. Cleared when it settles.
+ */
+export function setVoiceRoomJoin(sessionId: string, join: Promise<void>): void {
+  const entry = rooms.get(sessionId);
+  if (!entry) return;
+  entry.join = join;
+  void join
+    .catch(() => {})
+    .finally(() => {
+      if (entry.join === join) entry.join = undefined;
+    });
 }
 
 /** Record the identity a fresh connection was issued, for a later reuse. */
@@ -135,6 +168,7 @@ export function releaseVoiceRoom(sessionId: string): void {
     // Dropped before disconnecting, never after: an acquire that arrives while
     // the room is tearing down must build a new one.
     rooms.delete(sessionId);
+    entry.join = undefined;
     void entry.room.disconnect();
     entry.audioContainer.remove();
   }, DISCONNECT_GRACE_MS);
@@ -157,6 +191,7 @@ export function disconnectAllVoiceRooms(): void {
   for (const [sessionId, entry] of rooms) {
     if (entry.teardown !== undefined) clearTimeout(entry.teardown);
     rooms.delete(sessionId);
+    entry.join = undefined;
     void entry.room.disconnect();
     entry.audioContainer.remove();
   }

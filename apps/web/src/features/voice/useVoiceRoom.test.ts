@@ -8,6 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 let acquireError: Error | null = null;
 
+/**
+ * Whether the next join should hang, as a handshake still in flight does.
+ * Module-level for the same reason as `acquireError`: set from inside a test,
+ * the join has already landed before the assignment runs, and the mid-join
+ * window — the one the registry exists to cover — is never entered.
+ */
+let hangNextJoin = false;
+
 /** A refused permission prompt, as the browser throws it. */
 function refusal(): Error {
   return Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
@@ -97,11 +105,39 @@ class FakeRoom {
     for (const handler of this.handlers.get(event) ?? []) handler(...args);
   }
 
+  /** How many joins have been started against this one room. */
+  connects = 0;
+  private hangingConnect: (() => void) | null = null;
+
+  /** Let a hung join finish. */
+  releaseConnect(): void {
+    const resume = this.hangingConnect;
+    this.hangingConnect = null;
+    resume?.();
+  }
+
   async connect(): Promise<void> {
+    this.connects += 1;
+    if (hangNextJoin) {
+      hangNextJoin = false;
+      await new Promise<void>((resolve) => {
+        this.hangingConnect = resolve;
+      });
+    }
     this.state = 'connected';
   }
+
+  /** How many times this room has been torn down. */
+  disconnects = 0;
+
   async disconnect(): Promise<void> {
+    this.disconnects += 1;
+    const wasConnected = this.state === 'connected';
     this.state = 'disconnected';
+    // The real SDK announces this, and the hook treats CLIENT_INITIATED as
+    // terminal. Without it here, a stray disconnect of a shared room looks
+    // harmless in tests and is anything but in a browser.
+    if (wasConnected) this.emit('disconnected', DisconnectReason.CLIENT_INITIATED);
   }
   async startAudio(): Promise<void> {}
 }
@@ -147,6 +183,7 @@ describe('useVoiceRoom mute (F12)', () => {
     localStorage.clear();
     FakeRoom.last = null;
     acquireError = null;
+    hangNextJoin = false;
   });
 
   /** Let pending timers and promises run for `ms`. */
@@ -336,6 +373,7 @@ describe('useVoiceRoom when the server has no LiveKit credentials', () => {
     localStorage.clear();
     FakeRoom.last = null;
     acquireError = null;
+    hangNextJoin = false;
     tokenFetch.mockClear();
   });
 
@@ -390,6 +428,7 @@ describe('useVoiceRoom across the lobby -> board handover', () => {
     localStorage.clear();
     FakeRoom.last = null;
     acquireError = null;
+    hangNextJoin = false;
     tokenFetch.mockClear();
   });
 
@@ -430,5 +469,111 @@ describe('useVoiceRoom across the lobby -> board handover', () => {
     // key the mute preference is stored under, so a wrong one would silently
     // write to the wrong session.
     expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBe('1');
+  });
+});
+
+describe('useVoiceRoom when the handover lands mid-join', () => {
+  beforeEach(() => {
+    disconnectAllVoiceRooms();
+    localStorage.clear();
+    FakeRoom.last = null;
+    acquireError = null;
+    hangNextJoin = false;
+    tokenFetch.mockClear();
+  });
+
+  afterEach(() => {
+    disconnectAllVoiceRooms();
+  });
+
+  /**
+   * Mount with the join hung, and wait until it is genuinely in flight — the
+   * room built and `connect()` entered, but not resolved.
+   */
+  async function mountMidJoin() {
+    hangNextJoin = true;
+    const view = renderHook(() => useVoiceRoom('session-1'));
+    await waitFor(() => expect(FakeRoom.last?.connects).toBe(1));
+    await waitFor(() => expect(FakeRoom.last?.state).toBe('disconnected'));
+    return view;
+  }
+
+  it('does not disconnect a room the next view has already picked up', async () => {
+    // The leader hits Start while someone is still connecting: the lobby
+    // unmounts mid-handshake, the board mounts onto the same room.
+    const lobby = await mountMidJoin();
+    const room = FakeRoom.last!;
+    lobby.unmount();
+
+    const board = renderHook(() => useVoiceRoom('session-1'));
+    room.releaseConnect();
+
+    await waitFor(() => expect(board.result.current.status).toBe('connected'));
+    // Asserted on the teardown itself, not the end state: the abandoned half
+    // disconnecting the shared room fires CLIENT_INITIATED at the board, which
+    // is terminal — and the board then quietly rejoins, so it ends up
+    // `connected` either way. The dead air at Start is the whole bug and it
+    // hides completely behind that recovery.
+    expect(room.disconnects).toBe(0);
+    expect(room.state).toBe('connected');
+    board.unmount();
+  });
+
+  it('waits on the join already running instead of starting a second one', async () => {
+    const lobby = await mountMidJoin();
+    const room = FakeRoom.last!;
+    lobby.unmount();
+    const board = renderHook(() => useVoiceRoom('session-1'));
+    room.releaseConnect();
+
+    await waitFor(() => expect(board.result.current.status).toBe('connected'));
+    // Two overlapping joins on one Room throw, no-op, or land a connection the
+    // abandoned half tears down. There must only ever have been one.
+    expect(room.connects).toBe(1);
+    expect(FakeRoom.last).toBe(room);
+    board.unmount();
+  });
+
+  it('still opens the microphone on a join it adopted rather than started', async () => {
+    const lobby = await mountMidJoin();
+    const room = FakeRoom.last!;
+    lobby.unmount();
+    const board = renderHook(() => useVoiceRoom('session-1'));
+    room.releaseConnect();
+
+    await waitFor(() => expect(board.result.current.status).toBe('connected'));
+    // The view that started the join returned early when it was cancelled, so
+    // it never ran the mic step. Whoever adopts the join owes it — otherwise
+    // you land on the board connected and permanently silent.
+    await waitFor(() => expect(board.result.current.micEnabled).toBe(true));
+    expect(room.localParticipant.published).toBe(true);
+    board.unmount();
+  });
+
+  it('does not leave the microphone open when the prompt answers after you leave', async () => {
+    const view = await joinRoom();
+    await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+    const participant = FakeRoom.last!.localParticipant;
+
+    // Mute, then start an unmute that hangs the way an open permission prompt
+    // does, and leave while it is still hanging.
+    await act(async () => {
+      await view.result.current.toggleMic();
+    });
+    participant.hangNext = true;
+    act(() => {
+      void view.result.current.toggleMic();
+    });
+    view.unmount();
+
+    // The release muted a device we did not hold yet; this is the call that
+    // lands afterwards and used to relight the recording indicator until the
+    // grace timer fired.
+    await act(async () => {
+      participant.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(participant.isMicrophoneEnabled).toBe(false));
   });
 });
