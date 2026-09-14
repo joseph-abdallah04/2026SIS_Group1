@@ -354,7 +354,9 @@ export function DrawingEditor() {
           }}
         >
           <svg
-            role="img"
+            // A drawable surface is an interactive widget, not an image: `img`
+            // tells a screen reader there is nothing here to operate.
+            role="application"
             aria-label="Drawing canvas"
             tabIndex={0}
             viewBox={`0 0 ${DRAWING_VIEWBOX_WIDTH} ${DRAWING_VIEWBOX_HEIGHT}`}
@@ -363,6 +365,9 @@ export function DrawingEditor() {
             onPointerMove={onPointerMove}
             onPointerUp={finishPointer}
             onPointerCancel={finishPointer}
+            // Capture can be lost without a pointerup — a browser gesture, a
+            // dragged-away touch — and the stroke in hand must still be kept.
+            onLostPointerCapture={finishPointer}
           >
             {strokes.map((stroke) => (
               <path

@@ -12,6 +12,7 @@ import {
   DIAGRAM_FILL_KEYS,
   DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
+  DIAGRAM_TEXT_ALIGNS,
   DIAGRAM_MAX_NODE_HEIGHT,
   DIAGRAM_MAX_NODE_WIDTH,
   DIAGRAM_MIN_NODE_HEIGHT,
@@ -20,7 +21,33 @@ import {
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
   diagramCanParent,
+  diagramIsAncestor,
 } from './diagramContract.js';
+import {
+  ARROW_CAPS,
+  ARROW_LABEL_LIMIT,
+  ARROW_LABEL_SIDES,
+  ARROW_MAX_BEND,
+  ARROW_ROUTES,
+  DIAGRAM_ARROW_LIMIT,
+} from './studioArrows.js';
+import {
+  DIAGRAM_INK_LIMIT,
+  DIAGRAM_INK_POINT_LIMIT,
+  DIAGRAM_PATH_ANCHOR_LIMIT,
+  DIAGRAM_PATH_LIMIT,
+  DIAGRAM_TABLE_LIMIT,
+  TABLE_CELL_ALIGNS,
+  TABLE_CELL_TEXT_LIMIT,
+  TABLE_MAX_COLS,
+  TABLE_MAX_COL_WIDTH,
+  TABLE_MAX_ROWS,
+  TABLE_MAX_ROW_HEIGHT,
+  TABLE_MIN_COL_WIDTH,
+  TABLE_MIN_ROW_HEIGHT,
+  DIAGRAM_Z_LIMIT,
+  diagramEdgeKey,
+} from './studioElements.js';
 
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
 // Use on REST bodies (server) and forms (web). Add your module's schemas under its label.
@@ -299,6 +326,11 @@ export const diagramNodeSchema = z.object({
   strokeColor: diagramStrokeKeySchema.optional(),
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
   fontSizePreset: diagramFontSizePresetSchema.optional(),
+  // Label styling, all optional: a node written before it existed still parses,
+  // and reads as the plain centred label it has always been.
+  labelBold: z.boolean().optional(),
+  labelColor: diagramStrokeKeySchema.optional(),
+  labelAlign: z.enum(DIAGRAM_TEXT_ALIGNS).optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -308,6 +340,103 @@ export const diagramEdgeSchema = z.object({
   strokeColor: diagramStrokeKeySchema.optional(),
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
   strokeStyle: diagramStrokeStyleSchema.optional(),
+});
+
+// v4 ink. Both style fields are optional so a stroke written by a build with a
+// wider palette still loads with the default appearance, exactly as nodes do.
+export const inkElementSchema = z.object({
+  id: z.string().min(1),
+  // Packed `[x0, y0, x1, y1, …]`, like the drawing artifact's strokes: half the
+  // characters for the same path, out of one shared artifact budget.
+  points: z.array(z.number()).min(2).max(DIAGRAM_INK_POINT_LIMIT),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+});
+
+const pathHandleSchema = z.object({ x: z.number(), y: z.number() });
+
+// v4 paths: the pen and line tools. Decoration only — a path never takes part
+// in routing, layout or grouping the way a semantic `edge` does.
+export const pathAnchorSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  in: pathHandleSchema.optional(),
+  out: pathHandleSchema.optional(),
+});
+
+export const pathElementSchema = z.object({
+  id: z.string().min(1),
+  // Two anchors is the minimum that draws anything: that is the line tool.
+  anchors: z.array(pathAnchorSchema).min(2).max(DIAGRAM_PATH_ANCHOR_LIMIT),
+  closed: z.boolean().optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  strokeStyle: diagramStrokeStyleSchema.optional(),
+  fillColor: diagramFillKeySchema.optional(),
+});
+
+// v4.2 arrows. An endpoint always carries a point and may also name the element
+// it is bound to; the binding decides where the arrow is drawn, and the point is
+// where it falls back to when that element is deleted.
+const arrowEndpointSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  elementId: z.string().min(1).optional(),
+  // Where on the bound element to attach, as a fraction of its box. Bounded to
+  // the box itself: a fraction outside it would put the arrow somewhere the
+  // element is not, which no editor gesture can produce.
+  at: z.object({ u: z.number().min(0).max(1), v: z.number().min(0).max(1) }).optional(),
+});
+
+export const arrowElementSchema = z.object({
+  id: z.string().min(1),
+  from: arrowEndpointSchema,
+  to: arrowEndpointSchema,
+  route: z.enum(ARROW_ROUTES).optional(),
+  bend: z.number().min(-ARROW_MAX_BEND).max(ARROW_MAX_BEND).optional(),
+  startCap: z.enum(ARROW_CAPS).optional(),
+  endCap: z.enum(ARROW_CAPS).optional(),
+  label: z.string().max(ARROW_LABEL_LIMIT).optional(),
+  // A fraction of the route's length, so it holds its place when the arrow is
+  // re-routed. Outside 0..1 would put the label off the end of its own line.
+  labelT: z.number().min(0).max(1).optional(),
+  labelSide: z.enum(ARROW_LABEL_SIDES).optional(),
+  labelBold: z.boolean().optional(),
+  labelColor: diagramStrokeKeySchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  strokeStyle: diagramStrokeStyleSchema.optional(),
+});
+
+export const tableCellSchema = z.object({
+  text: z.string().max(TABLE_CELL_TEXT_LIMIT).optional(),
+  fill: diagramFillKeySchema.optional(),
+  align: z.enum(TABLE_CELL_ALIGNS).optional(),
+  bold: z.boolean().optional(),
+  color: diagramStrokeKeySchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
+});
+
+// v4 tables. The cell array's length against the grid's dimensions is a write
+// invariant rather than a shape rule, since it spans three fields.
+export const tableElementSchema = z.object({
+  id: z.string().min(1),
+  x: z.number(),
+  y: z.number(),
+  colWidths: z
+    .array(z.number().min(TABLE_MIN_COL_WIDTH).max(TABLE_MAX_COL_WIDTH))
+    .min(1)
+    .max(TABLE_MAX_COLS),
+  rowHeights: z
+    .array(z.number().min(TABLE_MIN_ROW_HEIGHT).max(TABLE_MAX_ROW_HEIGHT))
+    .min(1)
+    .max(TABLE_MAX_ROWS),
+  cells: z.array(tableCellSchema).max(TABLE_MAX_ROWS * TABLE_MAX_COLS),
+  headerRow: z.boolean().optional(),
+  strokeColor: diagramStrokeKeySchema.optional(),
+  strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  fontSizePreset: diagramFontSizePresetSchema.optional(),
 });
 
 /**
@@ -325,6 +454,34 @@ function lenient<T extends z.ZodTypeAny>(schema: T) {
   return schema.optional().catch(undefined);
 }
 
+/**
+ * A v4 collection, read so that one unreadable element costs only itself.
+ *
+ * `z.array(x).catch(undefined)` drops the *array* when any element fails, so a
+ * single stroke written by a build with a wider palette took every other stroke
+ * on the canvas with it. That is the same shape of loss as the stroke that
+ * exceeded the point cap and erased a whole drawing, and it is the one thing
+ * the lenient read exists to prevent.
+ *
+ * The cap is still all-or-nothing: an array longer than the contract allows is
+ * a payload no editor produced, so there is nothing to salvage from it.
+ */
+function lenientCollection<T extends z.ZodTypeAny>(schema: T, max: number) {
+  return z
+    .array(z.unknown())
+    .max(max)
+    .optional()
+    .catch(undefined)
+    .transform((items) =>
+      items === undefined
+        ? undefined
+        : items.flatMap((item) => {
+            const parsed = schema.safeParse(item);
+            return parsed.success ? [parsed.data as z.infer<T>] : [];
+          }),
+    );
+}
+
 const diagramReadNodeSchema = diagramNodeSchema.extend({
   shape: lenient(z.enum(DIAGRAM_NODE_SHAPE_KEYS)),
   parentId: lenient(z.string().min(1)),
@@ -334,6 +491,13 @@ const diagramReadNodeSchema = diagramNodeSchema.extend({
   strokeColor: lenient(diagramStrokeKeySchema),
   strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
   fontSizePreset: lenient(diagramFontSizePresetSchema),
+  // v4.1 label styling, lenient for the same reason everything above it is —
+  // and more urgently, because `nodes` is the one collection with no fallback
+  // of its own. A label alignment this build did not recognise failed the node,
+  // which failed the whole artifact, which took the board card with it.
+  labelBold: lenient(z.boolean()),
+  labelColor: lenient(diagramStrokeKeySchema),
+  labelAlign: lenient(z.enum(DIAGRAM_TEXT_ALIGNS)),
 });
 
 const diagramReadEdgeSchema = diagramEdgeSchema.extend({
@@ -342,11 +506,60 @@ const diagramReadEdgeSchema = diagramEdgeSchema.extend({
   strokeStyle: lenient(diagramStrokeStyleSchema),
 });
 
+const diagramReadTableSchema = tableElementSchema.extend({
+  cells: z.array(
+    tableCellSchema.extend({
+      fill: lenient(diagramFillKeySchema),
+      align: lenient(z.enum(TABLE_CELL_ALIGNS)),
+      bold: lenient(z.boolean()),
+      color: lenient(diagramStrokeKeySchema),
+      fontSizePreset: lenient(diagramFontSizePresetSchema),
+    }),
+  ),
+  headerRow: lenient(z.boolean()),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  fontSizePreset: lenient(diagramFontSizePresetSchema),
+});
+
+const diagramReadPathSchema = pathElementSchema.extend({
+  closed: lenient(z.boolean()),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  strokeStyle: lenient(diagramStrokeStyleSchema),
+  fillColor: lenient(diagramFillKeySchema),
+});
+
+const diagramReadArrowSchema = arrowElementSchema.extend({
+  route: lenient(z.enum(ARROW_ROUTES)),
+  labelSide: lenient(z.enum(ARROW_LABEL_SIDES)),
+  startCap: lenient(z.enum(ARROW_CAPS)),
+  endCap: lenient(z.enum(ARROW_CAPS)),
+  labelColor: lenient(diagramStrokeKeySchema),
+  fontSizePreset: lenient(diagramFontSizePresetSchema),
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  strokeStyle: lenient(diagramStrokeStyleSchema),
+});
+
+const diagramReadInkSchema = inkElementSchema.extend({
+  strokeColor: lenient(diagramStrokeKeySchema),
+  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+});
+
 /** Read shape. Stays a plain object so it can join a discriminated union. */
 export const diagramArtifactSchema = z.object({
   type: z.literal('diagram'),
   nodes: z.array(diagramReadNodeSchema).max(100),
   edges: z.array(diagramReadEdgeSchema).max(200),
+  // v4, and tolerant like everything else on the read path: ink or an order
+  // this build cannot make sense of degrades to "no ink" / "legacy order"
+  // rather than failing the parse and taking the whole board down.
+  ink: lenientCollection(diagramReadInkSchema, DIAGRAM_INK_LIMIT),
+  paths: lenientCollection(diagramReadPathSchema, DIAGRAM_PATH_LIMIT),
+  tables: lenientCollection(diagramReadTableSchema, DIAGRAM_TABLE_LIMIT),
+  arrows: lenientCollection(diagramReadArrowSchema, DIAGRAM_ARROW_LIMIT),
+  z: z.array(z.string()).max(DIAGRAM_Z_LIMIT).optional().catch(undefined),
 });
 
 /** Write shape: every field must be one this build actually understands. */
@@ -354,10 +567,17 @@ const diagramStrictArtifactSchema = z.object({
   type: z.literal('diagram'),
   nodes: z.array(diagramNodeSchema).max(100),
   edges: z.array(diagramEdgeSchema).max(200),
+  ink: z.array(inkElementSchema).max(DIAGRAM_INK_LIMIT).optional(),
+  paths: z.array(pathElementSchema).max(DIAGRAM_PATH_LIMIT).optional(),
+  tables: z.array(tableElementSchema).max(DIAGRAM_TABLE_LIMIT).optional(),
+  arrows: z.array(arrowElementSchema).max(DIAGRAM_ARROW_LIMIT).optional(),
+  z: z.array(z.string().min(1)).max(DIAGRAM_Z_LIMIT).optional(),
 });
 
 export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefine(
-  ({ nodes, edges }, context) => {
+  // `z` is destructured under another name: it would otherwise shadow the zod
+  // import for the whole refinement.
+  ({ nodes, edges, ink, paths, tables, arrows, z: paintOrder }, context) => {
     const shapeById = new Map(nodes.map((node) => [node.id, node.shape]));
 
     nodes.forEach((node, index) => {
@@ -465,7 +685,7 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
         });
       }
 
-      const key = JSON.stringify([edge.from, edge.to]);
+      const key = diagramEdgeKey(edge);
       if (edgeKeys.has(key)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -475,6 +695,176 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
       }
       edgeKeys.add(key);
     });
+
+    // --- v4 invariants ----------------------------------------------------
+    //
+    // `z` is one flat order over three kinds of element, so their keys have to
+    // be unique as a set, not just within each kind.
+
+    const inkIds = new Set<string>();
+    (ink ?? []).forEach((stroke, index) => {
+      if (inkIds.has(stroke.id) || nodeIds.has(stroke.id) || edgeKeys.has(stroke.id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across nodes, edges and ink',
+          path: ['ink', index, 'id'],
+        });
+      }
+      inkIds.add(stroke.id);
+    });
+
+    const pathIds = new Set<string>();
+    (paths ?? []).forEach((path, index) => {
+      if (
+        pathIds.has(path.id) ||
+        nodeIds.has(path.id) ||
+        edgeKeys.has(path.id) ||
+        inkIds.has(path.id)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across nodes, edges, ink and paths',
+          path: ['paths', index, 'id'],
+        });
+      }
+      pathIds.add(path.id);
+
+      // An open path has nothing to fill, so a fill on one is a payload that
+      // could not have come from the editor.
+      if (path.fillColor !== undefined && path.closed !== true) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Only a closed path can carry a fill',
+          path: ['paths', index, 'fillColor'],
+        });
+      }
+    });
+
+    const tableIds = new Set<string>();
+    (tables ?? []).forEach((table, index) => {
+      if (
+        tableIds.has(table.id) ||
+        nodeIds.has(table.id) ||
+        edgeKeys.has(table.id) ||
+        inkIds.has(table.id) ||
+        pathIds.has(table.id)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across every kind of element',
+          path: ['tables', index, 'id'],
+        });
+      }
+      tableIds.add(table.id);
+
+      // The cell array is the grid: a mismatch would leave rows without cells
+      // or cells without a row, and every reader would disagree about which.
+      const expected = table.rowHeights.length * table.colWidths.length;
+      if (table.cells.length !== expected) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `A table needs exactly one cell per column per row (expected ${expected})`,
+          path: ['tables', index, 'cells'],
+        });
+      }
+    });
+
+    const arrowIds = new Set<string>();
+    (arrows ?? []).forEach((arrow, index) => {
+      if (
+        arrowIds.has(arrow.id) ||
+        nodeIds.has(arrow.id) ||
+        edgeKeys.has(arrow.id) ||
+        inkIds.has(arrow.id) ||
+        pathIds.has(arrow.id) ||
+        tableIds.has(arrow.id)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Element ids must be unique across every kind of element',
+          path: ['arrows', index, 'id'],
+        });
+      }
+      arrowIds.add(arrow.id);
+
+      // An arrow may bind to anything with an outline to land on. It may not
+      // bind to another arrow: two arrows bound to each other would each need
+      // the other's route resolved first, and nothing could draw either.
+      const bindable = new Set<string>([...nodeIds, ...inkIds, ...pathIds, ...tableIds]);
+      for (const end of ['from', 'to'] as const) {
+        const elementId = arrow[end].elementId;
+        if (elementId !== undefined && !bindable.has(elementId)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'An arrow endpoint must be bound to an element this diagram contains',
+            path: ['arrows', index, end, 'elementId'],
+          });
+        }
+      }
+
+      // Both ends on one element is a self-loop: it draws as a loop around
+      // that element rather than a line across it, which is an ordinary thing
+      // to want to say about a thing, so it is deliberately allowed.
+
+      // `bend` slides an elbow's middle leg. A straight arrow has no middle
+      // leg, so a bend on one is a value no editor gesture can produce.
+      if (arrow.bend !== undefined && arrow.route !== 'elbow') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Only an elbowed arrow can carry a bend',
+          path: ['arrows', index, 'bend'],
+        });
+      }
+    });
+
+    if (paintOrder !== undefined) {
+      const known = new Set<string>([
+        ...nodeIds,
+        ...edgeKeys,
+        ...inkIds,
+        ...pathIds,
+        ...tableIds,
+        ...arrowIds,
+      ]);
+      const seen = new Set<string>();
+
+      paintOrder.forEach((key, index) => {
+        if (!known.has(key)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Paint order must only name elements this diagram contains',
+            path: ['z', index],
+          });
+        }
+        if (seen.has(key)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'An element may appear in the paint order only once',
+            path: ['z', index],
+          });
+        }
+        seen.add(key);
+      });
+
+      // A container is a backdrop for what it holds. Painting one after its own
+      // descendant would cover the descendant up, which no editor gesture can
+      // produce but a crafted payload can. `studioPaintOrder` appends anything
+      // `z` omits, so only pairs `z` actually names can be checked here.
+      const rank = new Map(paintOrder.map((key, index) => [key, index]));
+      nodes.forEach((node, index) => {
+        const nodeRank = rank.get(node.id);
+        if (nodeRank === undefined || !node.parentId) return;
+        const parentRank = rank.get(node.parentId);
+        if (parentRank === undefined) return;
+        if (parentRank > nodeRank && diagramIsAncestor(nodes, node.parentId, node.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'A container must be painted before the nodes it holds',
+            path: ['nodes', index, 'parentId'],
+          });
+        }
+      });
+    }
   },
 );
 
