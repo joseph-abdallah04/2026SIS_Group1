@@ -97,6 +97,34 @@ describe('resizeFrom', () => {
     expect(sw.x + sw.width).toBe(panel.x + panel.width);
   });
 
+  // Sides are the bug this was extended for: three of the four handles used to be painted
+  // over by the header and composer, so only the top-left corner ever worked.
+  it('moves only the edge you grabbed, leaving the other axis alone', () => {
+    const north = resizeFrom(panel, 'n', 9999, 100);
+    expect(north).toMatchObject({ x: panel.x, width: panel.width, y: 100 });
+    expect(north.y + north.height).toBe(panel.y + panel.height);
+
+    const south = resizeFrom(panel, 's', -9999, 800);
+    expect(south).toMatchObject({ x: panel.x, width: panel.width, y: panel.y, height: 600 });
+
+    const west = resizeFrom(panel, 'w', 300, 9999);
+    expect(west).toMatchObject({ y: panel.y, height: panel.height, x: 300 });
+    expect(west.x + west.width).toBe(panel.x + panel.width);
+
+    const east = resizeFrom(panel, 'e', 900, -9999);
+    expect(east).toMatchObject({ x: panel.x, y: panel.y, height: panel.height, width: 500 });
+  });
+
+  it('stops a side at the minimum without dragging the panel along', () => {
+    const north = resizeFrom(panel, 'n', 0, 5000);
+    expect(north.height).toBe(MIN_HEIGHT);
+    expect(north.y + north.height).toBe(panel.y + panel.height);
+
+    const west = resizeFrom(panel, 'w', 5000, 0);
+    expect(west.width).toBe(MIN_WIDTH);
+    expect(west.x + west.width).toBe(panel.x + panel.width);
+  });
+
   // Dragging a west or north corner past the minimum must stop dead. If the anchor drifted
   // instead, the panel would crawl across the screen as you kept pulling.
   it('pins the far edge when you drag past the minimum size', () => {
