@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
@@ -55,7 +55,7 @@ function ExtendButton({ proposal }: { proposal: BoardItem }) {
 }
 
 describe('creative sticky flow', () => {
-  it('trims and proposes a coloured sticky through the existing write contract', async () => {
+  it('proposes a coloured sticky exactly as typed through the existing write contract', async () => {
     const user = userEvent.setup();
     const propose = vi.fn(async () => undefined);
     render(<Harness propose={propose} />);
@@ -69,7 +69,8 @@ describe('creative sticky flow', () => {
       type: 'sticky',
       artifactJson: {
         type: 'sticky',
-        text: 'Keep the idea focused.',
+        // Spaces and all: whitespace may be deliberate, so none of it is tidied.
+        text: '  Keep the idea focused.  ',
         color: 'pink',
       },
       x: 32,
@@ -146,7 +147,7 @@ describe('creative sticky flow', () => {
       await user.click(screen.getByRole('button', { name: 'New sticky' }));
       await user.type(screen.getByLabelText('Note'), 'Keep the idea focused.');
 
-      // Trailing spaces still go in: they take no room, and proposing trims them.
+      // Only visible text is refused; spaces at the end of a line take no room.
       expect((screen.getByLabelText('Note') as HTMLTextAreaElement).value.trim()).toBe(
         'Keep the ide',
       );
@@ -493,8 +494,17 @@ describe('closing the sticky popup', () => {
 
     await user.click(screen.getByRole('button', { name: 'New sticky' }));
     await user.type(note()!, 'Wait');
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-    await user.click(screen.getByRole('button', { name: 'New sticky' }));
+
+    // Close, then press New sticky straight after, with nothing awaited in
+    // between: no timer can run until this yields, so the fade cannot finish
+    // between the two however busy the machine is. Awaited presses made this
+    // fail whenever the whole suite ran at once.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const newSticky = screen.getByRole('button', { name: 'New sticky' });
+    fireEvent.pointerDown(newSticky);
+    fireEvent.click(newSticky);
+
+    // Well past the fade: a close that was not cancelled would have landed.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     expect(note()).toHaveValue('Wait');

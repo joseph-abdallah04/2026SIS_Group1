@@ -118,9 +118,9 @@ function StickyTextEditor({
     ref.current?.select();
   }, []);
 
-  const trimmed = text.trim();
   const noteFull = text.length >= STICKY_TEXT_LIMIT || paperFull;
-  const unchanged = trimmed === artifact.text.trim();
+  // Whitespace counts as a change: adding a blank line is an edit like any other.
+  const unchanged = text === artifact.text;
   const prepared = prepareStickyText(text);
   const submittable = !saving && !unchanged && prepared.ok;
   /**
@@ -131,7 +131,7 @@ function StickyTextEditor({
    * the field stops at the limit — but a note written before the limit
    * existed, or through another client, opens over it.
    */
-  const tooLong = !prepared.ok && trimmed.length > STICKY_TEXT_LIMIT ? prepared.error : null;
+  const tooLong = !prepared.ok && text.length > STICKY_TEXT_LIMIT ? prepared.error : null;
 
   // The editor grows with the note for the same reason the card does, and
   // raises its floor rather than setting its height: the paper around it is a
@@ -141,7 +141,7 @@ function StickyTextEditor({
   const submit = () => {
     if (!submittable) return;
     setSaving(true);
-    void onSave(trimmed)
+    void onSave(text)
       .then(() => {
         // Parent closes the editor on success.
       })

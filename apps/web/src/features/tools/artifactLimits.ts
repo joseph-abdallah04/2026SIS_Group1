@@ -16,10 +16,18 @@ export const DIAGRAM_EDGE_LIMIT = 200;
 
 export type PreparedStickyText = { ok: true; text: string } | { ok: false; error: string };
 
+/**
+ * Checks a sticky before it is proposed, and hands back exactly what was typed.
+ *
+ * Whitespace is the writer's to decide: spaces lining words up, a blank line
+ * between two thoughts, an indent, a gap left on purpose. None of it is trimmed
+ * or collapsed. The one thing refused is a note of nothing but whitespace,
+ * which would land on the board as a blank sticky.
+ */
 export function prepareStickyText(value: string): PreparedStickyText {
-  const text = value.trim();
+  const text = value;
 
-  if (!text) {
+  if (!text.trim()) {
     return { ok: false, error: 'Write something before proposing this sticky.' };
   }
 

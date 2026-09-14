@@ -3,11 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { prepareStickyText, STICKY_TEXT_LIMIT } from './artifactLimits';
 
 describe('prepareStickyText', () => {
-  it('trims a valid sticky before submission', () => {
-    expect(prepareStickyText('  Keep the scope focused.  ')).toEqual({
-      ok: true,
-      text: 'Keep the scope focused.',
-    });
+  // Whitespace may be deliberate, so it is handed back untouched.
+  it('keeps a sticky exactly as typed, whitespace included', () => {
+    const typed = `  Keep the scope focused.  \n\n    and indented  `;
+    expect(prepareStickyText(typed)).toEqual({ ok: true, text: typed });
   });
 
   it('rejects a blank sticky', () => {

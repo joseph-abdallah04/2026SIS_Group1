@@ -62,13 +62,12 @@ describe('sticky draft', () => {
 
   // Enter held down before line breaks were counted saved hundreds of them,
   // and the popup opened tall enough to reach off the top of the window.
-  it('comes back without the empty lines either side of the note', () => {
-    localStorage.setItem(
-      KEY,
-      JSON.stringify({ text: `${'\n'.repeat(200)}Idea${'\n'.repeat(50)}`, color: 'pink' }),
-    );
+  // Whitespace may be deliberate, so a draft is not tidied on its way back.
+  it('comes back exactly as it was written, whitespace included', () => {
+    const text = `  Idea\n\n    indented  \n`;
+    localStorage.setItem(KEY, JSON.stringify({ text, color: 'pink' }));
 
-    expect(readStickyDraft(KEY)).toEqual({ text: 'Idea', color: 'pink' });
+    expect(readStickyDraft(KEY)).toEqual({ text, color: 'pink' });
   });
 
   it('has nothing to give back when the draft was only empty lines', () => {

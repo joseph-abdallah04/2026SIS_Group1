@@ -15,14 +15,14 @@ import { CARD_FOOT_CLASS } from '../../pinboard/pinboardTokens';
 export const STICKY_FONT_SIZE = 14;
 export const STICKY_LINE_HEIGHT = 1.45;
 /**
- * Line breaks are kept, so a note laid out in lines on the popup lands in those
- * lines on the board. They used to collapse, which meant a line break took no
- * room on the paper and nothing counted it: pressing Enter over and over grew
- * the popup without end while the note stayed "fitting". Runs of spaces still
- * collapse, as they do everywhere else on the page.
+ * Whitespace is shown exactly as it was typed: line breaks, blank lines, runs
+ * of spaces and indents. It may well be deliberate, and a board that tidied it
+ * would be rewriting somebody's note. It also takes the room it takes, so the
+ * size a note is given and the check that stops it outgrowing the paper both
+ * count it, which is what stops Enter from growing the popup without end.
  */
 export const STICKY_NOTE_CLASS =
-  'min-h-0 flex-1 wrap-break-word whitespace-pre-line font-medium text-rt-ink';
+  'min-h-0 flex-1 wrap-break-word whitespace-pre-wrap font-medium text-rt-ink';
 export const STICKY_NOTE_PADDING = '14px 14px 6px';
 
 /**
@@ -149,7 +149,8 @@ const MEASURED_LIMIT = 1000;
  * size after the font arrived.
  */
 export function stickySize(text: string): number {
-  const note = text.trim();
+  // Measured as written, since that is how the card shows it.
+  const note = text;
   const known = measured.get(note);
   if (known !== undefined) return known;
 
@@ -205,11 +206,12 @@ export function stickyFits(text: string): boolean {
  * popup, which grows to fit what it holds, opened thousands of pixels tall
  * with its top and its close button far off the window.
  *
- * A note that fits is returned as it is. One that does not first has its runs
- * of blank lines closed up to a single blank line, which is nearly always what
- * made it too tall and costs no words. Only if that is still too much is it cut
- * to the longest start that fits; adding to a note never makes it shorter, so
- * that length can be found by halving.
+ * A note that fits is returned exactly as it is, whitespace and all: this never
+ * tidies a note that can be shown. Only one that cannot fit on any sticky is
+ * changed, first by closing its runs of blank lines up to a single blank line,
+ * which is nearly always what made it too tall and costs no words, and only if
+ * that is still too much by cutting it to the longest start that fits. Adding
+ * to a note never makes it shorter, so that length can be found by halving.
  */
 export function fitToSticky(text: string): string {
   if (stickyFits(text)) return text;

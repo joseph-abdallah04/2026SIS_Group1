@@ -71,6 +71,18 @@ describe('editing a sticky in place', () => {
     expect(onEditText).toHaveBeenCalledWith(expect.anything(), 'Ship the beta on Friday');
   });
 
+  // Whitespace may be deliberate: a blank line between thoughts, an indent.
+  it('saves the note exactly as typed, whitespace included', async () => {
+    const { onEditText } = renderOwnSticky();
+
+    const box = await openEditor();
+    await userEvent.clear(box);
+    await userEvent.type(box, '  Ship it{Shift>}{Enter}{Enter}{/Shift}    then celebrate  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onEditText).toHaveBeenCalledWith(expect.anything(), '  Ship it\n\n    then celebrate  ');
+  });
+
   // The rule that applies when a sticky is written has to apply when it is
   // rewritten, or the cap is a formality that one click undoes.
   it('stops typing at the same limit the tool enforces', async () => {
@@ -139,7 +151,7 @@ describe('editing a sticky in place', () => {
       await userEvent.clear(box);
       await userEvent.type(box, 'Ship the beta on Friday');
 
-      // Trailing spaces still go in: they take no room, and saving trims them.
+      // Only visible text is refused; spaces at the end of a line take no room.
       expect((box as HTMLTextAreaElement).value.trim()).toBe('Ship the bet');
       // And the count says so, rather than showing room that is not there.
       expect(screen.getByText('Full')).toBeTruthy();

@@ -40,8 +40,10 @@ describe('stickySize without a layout engine', () => {
     expect(stickySize('a'.repeat(300))).toBe(258);
   });
 
-  it('measures the trimmed note', () => {
-    expect(stickySize(`   ${'a'.repeat(200)}   `)).toBe(217);
+  // The card shows whitespace as written, so the size has to count it.
+  it('measures the note as written, spaces included', () => {
+    expect(stickySize('a'.repeat(205))).toBe(217);
+    expect(stickySize(`${'a'.repeat(205)}${' '.repeat(10)}`)).toBe(238);
   });
 
   it('fits a note at the cap on the largest square', () => {
@@ -117,9 +119,8 @@ describe('stickySize with a layout engine', () => {
     expect(stickyFits('W'.repeat(100))).toBe(true);
   });
 
-  // Enter held down at the end of a note: line breaks there are trimmed on
-  // save, but they are on the paper while writing, and ignoring them let the
-  // popup grow without end.
+  // Enter held down at the end of a note: those line breaks are on the paper,
+  // and ignoring them let the popup grow without end.
   it('counts line breaks, at the ends of the note too', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement,
