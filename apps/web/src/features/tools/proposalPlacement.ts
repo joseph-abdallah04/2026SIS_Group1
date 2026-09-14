@@ -1,29 +1,37 @@
-import type { BoardItem, ProposalType } from '@roundtable/shared';
+import type { ArtifactJson, BoardItem } from '@roundtable/shared';
 
 import { getBoardCentre } from '../pinboard/boardView';
+import { cardWidth } from '../pinboard/cardMetrics';
 import { BOARD_SIZE, CARD_WIDTH } from '../pinboard/pinboardTokens';
 
 const BOARD_INSET = 32;
 const CARD_GAP = 28;
+/** Tall enough for the largest sticky, which is as tall as it is wide. */
 const CARD_FOOTPRINT_HEIGHT = 260;
 const GRID_CELL_WIDTH = CARD_WIDTH.diagram + CARD_GAP;
 const GRID_CELL_HEIGHT = CARD_FOOTPRINT_HEIGHT + CARD_GAP;
 
-type PositionedProposal = Pick<BoardItem, 'type' | 'x' | 'y'>;
+type PositionedProposal = Pick<BoardItem, 'type' | 'artifactJson' | 'x' | 'y'>;
 
 interface ProposalPosition {
   x: number;
   y: number;
 }
 
+/**
+ * Widths are what each card actually is, not what its type usually is: a
+ * sticky grows with its note, and a check that took every sticky for the
+ * smallest would put a new card over the edge of a long one.
+ */
 function overlaps(
   candidate: ProposalPosition,
-  candidateType: ProposalType,
+  candidateWidth: number,
   item: PositionedProposal,
+  itemWidth: number,
 ): boolean {
   return !(
-    candidate.x + CARD_WIDTH[candidateType] + CARD_GAP <= item.x ||
-    item.x + CARD_WIDTH[item.type] + CARD_GAP <= candidate.x ||
+    candidate.x + candidateWidth + CARD_GAP <= item.x ||
+    item.x + itemWidth + CARD_GAP <= candidate.x ||
     candidate.y + CARD_FOOTPRINT_HEIGHT + CARD_GAP <= item.y ||
     item.y + CARD_FOOTPRINT_HEIGHT + CARD_GAP <= candidate.y
   );
@@ -61,16 +69,22 @@ const MAX_RINGS = 8;
  *
  * Falls back to the corner when there is no board on screen to ask — tool
  * previews and tests.
+ *
+ * Takes the artifact being proposed rather than only its type, because a
+ * sticky's width depends on what it says.
  */
 export function findOpenProposalPosition(
   items: readonly PositionedProposal[],
-  type: ProposalType,
+  artifact: ArtifactJson,
 ): ProposalPosition {
+  const width = cardWidth({ type: artifact.type, artifactJson: artifact });
+  // Measured once, not once per cell tried against each of them.
+  const widths = items.map((item) => cardWidth(item));
   const centre = getBoardCentre();
   const origin = centre
     ? {
         // Centre the card on the view, not its top-left corner on it.
-        x: centre.x - CARD_WIDTH[type] / 2,
+        x: centre.x - width / 2,
         y: centre.y - CARD_FOOTPRINT_HEIGHT / 2,
       }
     : { x: BOARD_INSET, y: BOARD_INSET };
@@ -80,10 +94,12 @@ export function findOpenProposalPosition(
       // Kept wholly on the sheet: a proposal placed past its edge would sit
       // somewhere nobody can pan to.
       const candidate = {
-        x: onSheet(origin.x + dx * GRID_CELL_WIDTH, BOARD_SIZE.width - CARD_WIDTH[type]),
+        x: onSheet(origin.x + dx * GRID_CELL_WIDTH, BOARD_SIZE.width - width),
         y: onSheet(origin.y + dy * GRID_CELL_HEIGHT, BOARD_SIZE.height - CARD_FOOTPRINT_HEIGHT),
       };
-      if (items.every((item) => !overlaps(candidate, type, item))) return candidate;
+      if (items.every((item, index) => !overlaps(candidate, width, item, widths[index]!))) {
+        return candidate;
+      }
     }
   }
 
@@ -93,7 +109,7 @@ export function findOpenProposalPosition(
     BOARD_INSET - GRID_CELL_HEIGHT,
   );
   return {
-    x: onSheet(origin.x, BOARD_SIZE.width - CARD_WIDTH[type]),
+    x: onSheet(origin.x, BOARD_SIZE.width - width),
     y: onSheet(lowestItem + GRID_CELL_HEIGHT, BOARD_SIZE.height - CARD_FOOTPRINT_HEIGHT),
   };
 }

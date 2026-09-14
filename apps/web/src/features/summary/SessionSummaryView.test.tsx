@@ -2,6 +2,7 @@ import type { BoardItem, SessionRecap } from '@roundtable/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
+import { cardWidth } from '../pinboard/cardMetrics';
 import { SessionSummaryView } from './SessionSummaryView';
 
 function sticky(id: string, text: string): BoardItem {
@@ -75,7 +76,30 @@ describe('SessionSummaryView', () => {
     expect(screen.getByText('Winner')).toBeInTheDocument();
     expect(screen.getByText('Skipped')).toBeInTheDocument();
     expect(screen.getByText('Nothing was shortlisted for this question.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Download Session Summary' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Download Session Summary' }),
+    ).not.toBeInTheDocument();
+  });
+
+  // A sticky grows with its note, so a slot sized for the smallest one let a
+  // long winning note spill out past its winner ring.
+  it('sizes each proposal’s slot, and its winner ring, to the card itself', () => {
+    const long = sticky('p1', 'a'.repeat(280));
+    render(
+      <SessionSummaryView
+        summary={{
+          ...RECAP,
+          questions: [{ ...RECAP.questions[0]!, proposals: [long, sticky('p2', 'The UI')] }],
+        }}
+        viewerId="u2"
+      />,
+    );
+
+    const slot = screen.getByText('Winner').closest('li')!;
+    expect(slot).toHaveStyle({ width: `${cardWidth(long)}px` });
+    expect(slot.querySelector('article')?.parentElement?.parentElement).toHaveStyle({
+      width: `${cardWidth(long)}px`,
+    });
   });
 
   it('labels a tie on every shortlisted proposal that shares the top score', () => {
