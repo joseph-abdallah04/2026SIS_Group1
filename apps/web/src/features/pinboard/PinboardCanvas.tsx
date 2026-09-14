@@ -258,7 +258,7 @@ export function PinboardCanvas({
    * differently. Those measurements are not kept, so this render redoes them in
    * the real one.
    */
-  const [, setFontsSettled] = useState(false);
+  const [fontsSettled, setFontsSettled] = useState(false);
   useEffect(() => {
     let live = true;
     void document.fonts?.ready.then(() => {
@@ -336,7 +336,15 @@ export function PinboardCanvas({
     overflowX,
     overflowY,
     panHandlers,
-  } = useCanvasPan({ contentWidth, contentHeight, onZoom });
+  } = useCanvasPan({
+    contentWidth,
+    contentHeight,
+    onZoom,
+    // The ballot takes the board's place while people vote. With no board on
+    // screen there is nothing for a zoom to zoom, so the gesture is the
+    // browser's again.
+    zoomEnabled: !ballot,
+  });
 
   /**
    * The furthest out the board may be zoomed: the point where it still covers
@@ -505,7 +513,10 @@ export function PinboardCanvas({
       maxY = Math.max(maxY, at.y + CARD_FOOTPRINT_H);
     }
     return { minX, minY, width: maxX - minX, height: maxY - minY };
-  }, [board.items, positionOf]);
+    // `fontsSettled` is not read here, but a sticky's width is measured in the
+    // page's font: bounds worked out before Inter arrived used the fallback
+    // face, and Fit would frame those widths until something else moved.
+  }, [board.items, positionOf, fontsSettled]);
 
   /**
    * Frame the proposals, not the sheet.

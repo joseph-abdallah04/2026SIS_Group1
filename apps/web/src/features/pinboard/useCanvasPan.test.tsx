@@ -19,20 +19,36 @@ afterEach(() => {
 /** The board's viewport sits at (100, 50), 800 by 600, below a header. */
 const BOARD = { left: 100, top: 50, width: 800, height: 600 };
 
-function Page({ onZoom }: { onZoom: (direction: 'in' | 'out', anchor: Point) => void }) {
-  const { viewportRef } = useCanvasPan({ contentWidth: 4000, contentHeight: 3000, onZoom });
+function Page({
+  onZoom,
+  zoomEnabled,
+}: {
+  onZoom: (direction: 'in' | 'out', anchor: Point) => void;
+  zoomEnabled?: boolean;
+}) {
+  const { viewportRef } = useCanvasPan({
+    contentWidth: 4000,
+    contentHeight: 3000,
+    onZoom,
+    zoomEnabled,
+  });
   return (
     <div>
       <header>Session header</header>
       <div ref={viewportRef} data-testid="board" />
       <footer>Toolbar</footer>
+      <textarea aria-label="Note" />
+      <div role="dialog" aria-label="Sticky popup">
+        <p>Inside a dialog</p>
+      </div>
+      <div data-testid="studio" />
     </div>
   );
 }
 
-function renderPage() {
+function renderPage({ zoomEnabled }: { zoomEnabled?: boolean } = {}) {
   const onZoom = vi.fn();
-  render(<Page onZoom={onZoom} />);
+  render(<Page onZoom={onZoom} zoomEnabled={zoomEnabled} />);
   vi.spyOn(screen.getByTestId('board'), 'getBoundingClientRect').mockReturnValue({
     ...BOARD,
     right: BOARD.left + BOARD.width,
@@ -154,6 +170,68 @@ describe('zooming the board from the keyboard', () => {
     expect(press({ key: '-' })).toBe(false);
     fireEvent.keyDown(window, { key: '=' });
 
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+
+  // Keys typed into text belong to the text, and to the browser's own zoom.
+  it('leaves Ctrl and plus to the browser while typing', () => {
+    const { onZoom } = renderPage();
+    const note = screen.getByRole('textbox', { name: 'Note' });
+
+    const event = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: '=',
+    });
+    note.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+});
+
+describe('zoom that is not the board\u2019s to take', () => {
+  // A dialog, the sticky popup or the studio is not scaled with the board, and
+  // somebody may need to enlarge it.
+  it('leaves a zoom made inside a dialog to the browser', () => {
+    const { onZoom } = renderPage();
+
+    const stopped = wheel(screen.getByText('Inside a dialog'), { ctrlKey: true, deltaY: -100 });
+
+    expect(stopped).toBe(false);
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+
+  // The diagram studio zooms its own canvas on this gesture. Taken twice, a
+  // pinch zoomed the diagram and the hidden board underneath it together.
+  it('leaves a zoom another handler has already taken', () => {
+    const { onZoom } = renderPage();
+    const studio = screen.getByTestId('studio');
+    const zoomStudio = vi.fn((event: WheelEvent) => event.preventDefault());
+    studio.addEventListener('wheel', zoomStudio);
+
+    wheel(studio, { ctrlKey: true, deltaY: -100 });
+
+    expect(zoomStudio).toHaveBeenCalledTimes(1);
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+
+  // While the ballot takes the board's place there is no board on screen.
+  it('takes no zoom at all while the board is off screen', () => {
+    const { onZoom } = renderPage({ zoomEnabled: false });
+
+    const stopped = wheel(screen.getByText('Toolbar'), { ctrlKey: true, deltaY: -100 });
+    const event = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: '=',
+    });
+    window.dispatchEvent(event);
+
+    expect(stopped).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
     expect(onZoom).not.toHaveBeenCalled();
   });
 });

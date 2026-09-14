@@ -15,6 +15,29 @@ interface UseCanvasPanArgs {
    * hold that point of the board still while the scale changes.
    */
   onZoom: (direction: 'in' | 'out', anchor: Point) => void;
+  /**
+   * Whether zoom gestures made anywhere on the page go to the board. Off while
+   * something else fills the board's place, when there is no board on screen.
+   */
+  zoomEnabled?: boolean;
+}
+
+/** Typing into something, where a key belongs to the text and not the board. */
+function isTyping(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+  );
+}
+
+/**
+ * Inside something that is not the board: a dialog, the sticky popup, the
+ * studio, a popover. None of them is scaled with the board, so zooming the
+ * board from inside one moves something the viewer is not looking at, and
+ * someone trying to enlarge what they are reading could not.
+ */
+function insideDialog(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('dialog, [role="dialog"]') !== null;
 }
 
 /**
@@ -31,7 +54,12 @@ interface UseCanvasPanArgs {
  * lost my board" after that; a bounded range keeps the horizontal scrollbar
  * meaningful and keeps Fit able to bring everything back.
  */
-export function useCanvasPan({ contentWidth, contentHeight, onZoom }: UseCanvasPanArgs) {
+export function useCanvasPan({
+  contentWidth,
+  contentHeight,
+  onZoom,
+  zoomEnabled = true,
+}: UseCanvasPanArgs) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
@@ -156,16 +184,27 @@ export function useCanvasPan({ contentWidth, contentHeight, onZoom }: UseCanvasP
    * point on the board under the pointer, so it zooms about the middle of the
    * view. Ctrl/Cmd + 0 is left to the browser, so a page that was already
    * zoomed before arriving here can always be put back.
+   *
+   * The browser's own zoom is only taken when the board is what gets zoomed.
+   * Not while typing, where the keys belong to the text; not inside a dialog,
+   * the sticky popup or the studio, which someone may need to enlarge and
+   * which are not scaled with the board; not when another handler has already
+   * taken the gesture, as the diagram studio does to zoom its own canvas; and
+   * not while the board is off screen. Each of those used to be swallowed:
+   * a pinch over the diagram studio zoomed the diagram and the hidden board
+   * underneath it together.
    */
   useEffect(() => {
+    if (!zoomEnabled) return;
     const middle = (rect: DOMRect): Point => ({ x: rect.width / 2, y: rect.height / 2 });
 
     const onZoomWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
-      event.preventDefault();
+      if (event.defaultPrevented || insideDialog(event.target)) return;
       const element = viewportRef.current;
       // A pinch with no vertical travel carries no direction to zoom in.
       if (!element || event.deltaY === 0) return;
+      event.preventDefault();
 
       const rect = element.getBoundingClientRect();
       const overBoard =
@@ -190,9 +229,11 @@ export function useCanvasPan({ contentWidth, contentHeight, onZoom }: UseCanvasP
             ? 'out'
             : null;
       if (!direction) return;
-      event.preventDefault();
+      if (event.defaultPrevented || isTyping(event.target) || insideDialog(event.target)) return;
       const element = viewportRef.current;
-      if (element) onZoom(direction, middle(element.getBoundingClientRect()));
+      if (!element) return;
+      event.preventDefault();
+      onZoom(direction, middle(element.getBoundingClientRect()));
     };
 
     window.addEventListener('wheel', onZoomWheel, { passive: false });
@@ -201,15 +242,11 @@ export function useCanvasPan({ contentWidth, contentHeight, onZoom }: UseCanvasP
       window.removeEventListener('wheel', onZoomWheel);
       window.removeEventListener('keydown', onZoomKey);
     };
-  }, [onZoom]);
+  }, [onZoom, zoomEnabled]);
 
   // Space is held on the window, not the canvas: the canvas is rarely the
   // focused element, and the gesture has to work wherever the pointer is.
   useEffect(() => {
-    const isTyping = (target: EventTarget | null) =>
-      target instanceof HTMLElement &&
-      (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName));
-
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.code !== 'Space' || isTyping(event.target)) return;
       // Space would otherwise scroll the page and, worse, activate whichever
