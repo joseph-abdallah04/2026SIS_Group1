@@ -42,6 +42,11 @@ function emptyMessage(status: VoiceStatus): string {
       return 'Reconnecting…';
     case 'failed':
       return 'Voice is offline, so nobody can be listed here.';
+    // Unreachable while the component returns null for this status, but the
+    // union should not quietly fall through to "not connected", which reads
+    // as a problem you could fix.
+    case 'unavailable':
+      return 'Voice is not available on this server.';
     default:
       return 'Not connected to voice.';
   }
@@ -95,6 +100,10 @@ export function ParticipantCluster({ participants, status }: ParticipantClusterP
     if (rect) setAnchor(rect);
     setOpen((wasOpen) => !wasOpen);
   }, []);
+
+  // Same reasoning as `MicToggle`: with no room to be in, an empty roster chip
+  // explaining its own emptiness is worse than no chip.
+  if (status === 'unavailable') return null;
 
   if (seats.length === 0) {
     return (

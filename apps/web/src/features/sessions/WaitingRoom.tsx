@@ -1,4 +1,5 @@
 import { CopyField } from '../../components/ui/CopyField';
+import { MicToggle, VoiceNotice, localName, useVoiceRoom } from '../voice';
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
@@ -23,6 +24,11 @@ interface WaitingRoomProps {
  */
 export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
   const { participants, loading, error, isLive } = useWaitingRoom(session.id, onStarted);
+  // F13: the lobby is a room people are sitting in, so they can talk in it.
+  // The connection survives the leader pressing Start — the registry hands the
+  // same room to the board (features/voice/roomRegistry.ts) — so this is the
+  // start of the call, not a preview of one.
+  const voice = useVoiceRoom(session.id);
   const { start, starting, error: startError } = useStartSession(session.id);
   const isLeader = session.leaderId === useCurrentUserId();
   const joinLink = session.code ? `${window.location.origin}/join/${session.code}` : null;
@@ -32,7 +38,15 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
       <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-[13px] text-rt-ink">
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Waiting room</span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <MicToggle
+            name={localName(voice.participants)}
+            micEnabled={voice.micEnabled}
+            micStatus={voice.micStatus}
+            status={voice.status}
+            busy={voice.micBusy}
+            toggle={voice.toggleMic}
+          />
           {isLeader ? (
             <EndSessionControl sessionId={session.id} />
           ) : (
@@ -41,7 +55,20 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+      {/* `relative` for `VoiceNotice`, which is absolutely positioned. Anchored
+          to the content row rather than the page, so the banner hangs just
+          under the header instead of on top of it. */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+        <VoiceNotice
+          status={voice.status}
+          micStatus={voice.micStatus}
+          micPermissionDenied={voice.micPermissionDenied}
+          error={voice.error}
+          audioBlocked={voice.audioBlocked}
+          retry={voice.retry}
+          requestMicrophone={voice.requestMicrophone}
+          unlockAudio={voice.unlockAudio}
+        />
         <aside className="flex max-h-[40%] min-h-0 w-full shrink-0 items-center overflow-y-auto px-5 py-5 lg:max-h-none lg:w-[22rem]">
           <div className="rt-lobby-panel flex flex-col gap-4">
             <div>
@@ -67,7 +94,11 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
           </div>
         </aside>
 
-        <WaitingRoomTable participants={participants} leaderId={session.leaderId}>
+        <WaitingRoomTable
+          participants={participants}
+          leaderId={session.leaderId}
+          voiceParticipants={voice.participants}
+        >
           {isLeader ? (
             <div className="flex flex-col items-center gap-2">
               <button
@@ -81,7 +112,9 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
               {startError && <p className="text-[12px] text-red-600">{startError}</p>}
             </div>
           ) : (
-            <p className="rt-waiting-wait">The table’s set. Waiting on the leader to kick things off.</p>
+            <p className="rt-waiting-wait">
+              The table’s set. Waiting on the leader to kick things off.
+            </p>
           )}
         </WaitingRoomTable>
 

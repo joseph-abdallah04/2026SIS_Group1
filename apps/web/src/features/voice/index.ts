@@ -1,8 +1,12 @@
 // Public surface of the voice feature (F11, F12, F13). The session view
-// renders `VoiceNotice`, `MicToggle` and `ParticipantCluster`; everything else
-// in this folder is internal to them.
+// renders `VoiceNotice`, `MicToggle` and `ParticipantCluster`; the waiting
+// room additionally layers voice onto the seats it already draws, which is
+// what the helpers below are for. Everything else here is internal.
 export { MicToggle } from './MicToggle';
 export { ParticipantCluster } from './ParticipantCluster';
+export { localName, voiceStateByIdentity } from './participantList';
+export { disconnectAllVoiceRooms } from './roomRegistry';
+export { useSustainedSpeaking } from './useSustainedSpeaking';
 export {
   useVoiceRoom,
   type MicStatus,

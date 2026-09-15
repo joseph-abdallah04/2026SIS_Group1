@@ -136,3 +136,33 @@ export function splitForHeader(
 
   return { visible, hidden };
 }
+
+/**
+ * Voice state keyed by identity, for a view that already has its own roster.
+ *
+ * The waiting room draws seats from socket presence, which is a different set
+ * from who is in the LiveKit room: someone can be seated while still
+ * connecting, with a blocked microphone, or on a deployment with no voice at
+ * all. LiveKit's identity is the user id (apps/server/src/modules/voice/
+ * service.ts), which is what seats are keyed by, so the two join directly.
+ *
+ * Absence means "we do not know", and callers must render that as a plain
+ * seat — showing it as muted would state something about a microphone nobody
+ * has heard from.
+ */
+export function voiceStateByIdentity(
+  participants: readonly VoiceParticipant[],
+): ReadonlyMap<string, { isMuted: boolean }> {
+  return new Map(participants.map((p) => [p.identity, { isMuted: p.isMuted }]));
+}
+
+/**
+ * Your own display name, as the room minted it.
+ *
+ * Read from the room rather than the auth store on purpose: this is the name
+ * everyone else in the call sees, and a control that names you should agree
+ * with what they are looking at.
+ */
+export function localName(participants: readonly VoiceParticipant[]): string | null {
+  return participants.find((p) => p.isLocal)?.name ?? null;
+}

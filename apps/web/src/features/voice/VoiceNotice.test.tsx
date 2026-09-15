@@ -95,4 +95,21 @@ describe('VoiceNotice', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Reconnecting to the room');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+
+  it('says nothing when the server has no voice, even with a stale mic state', () => {
+    // `micStatus` can still hold a `blocked` from an earlier connected period.
+    // Surfacing it here would raise a microphone banner about a room that does
+    // not exist, alongside a Reconnect that could never work.
+    render(
+      <VoiceNotice
+        {...healthyProps()}
+        status="unavailable"
+        micStatus="blocked"
+        micPermissionDenied
+        error="Lost the voice connection. Reconnect to rejoin."
+      />,
+    );
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
 });
