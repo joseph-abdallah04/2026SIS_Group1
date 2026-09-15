@@ -624,26 +624,40 @@ describe('diagram editor', () => {
     expect(screen.getByRole('button', { name: 'Arrow from Client to Server' })).toBeInTheDocument();
   });
 
-  it('keeps a dirty diagram open when discard confirmation is declined', async () => {
+  // Clearing is one step Undo brings back, so it does not ask first, and it
+  // leaves the studio open: leaving is the back arrow.
+  it('clears the canvas in one step that Undo brings back, and stays open', async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const confirm = vi.spyOn(window, 'confirm');
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
     await openDiagram();
+    expect(screen.getByRole('button', { name: 'Clear canvas' })).toBeDisabled();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
 
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Clear canvas' }));
 
-    // Cancel is the only exit that destroys anything now, so it is the only one
-    // that asks — and declining leaves the canvas exactly as it was.
-    expect(confirm).toHaveBeenCalledWith('Discard this canvas?');
+    expect(confirm).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: /rectangle:/ })).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Clear canvas' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+
     expect(
       screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
     ).toBeInTheDocument();
     confirm.mockRestore();
+  });
+
+  it('has no Cancel beside Propose', async () => {
+    render(<Harness propose={vi.fn(async () => undefined)} />);
+    await openDiagram();
+
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeInTheDocument();
   });
 
   it('keeps a closed canvas rather than asking about it', async () => {
@@ -706,14 +720,17 @@ describe('diagram editor', () => {
     );
   });
 
-  it('discards nodes when cancelled', async () => {
+  // An empty canvas is not kept as a draft, so clearing and then leaving is how
+  // a canvas is thrown away.
+  it('throws a canvas away when it is cleared and then left', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
     const first = await openDiagram();
     await clickInRailMenu(first.user, 'Shapes', 'Add rounded rectangle');
-    await first.user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await first.user.click(screen.getByRole('button', { name: 'Clear canvas' }));
+    await first.user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     await first.user.click(screen.getByRole('button', { name: /^Studio$/ }));

@@ -487,10 +487,14 @@ body {
 }
 
 /*
- * Opening from a tool and leaving by the back arrow: the same fade the sticky
- * popup makes, a small lift in and a small settle out, grown from and gathered
- * toward its bottom edge. The rise is held to the studio's 180ms limit where the
- * sticky's takes 220ms; the movement and easing are the same.
+ * Opening from a tool: the same fade the sticky popup makes, a small lift in,
+ * grown from its bottom edge. The rise is held to the studio's 180ms limit where
+ * the sticky's takes 220ms; the movement and easing are the same.
+ *
+ * Leaving, by the back arrow or once proposed, is a plain fade with a short
+ * settle down. It does not shrink as the sticky does: the studio is most of the
+ * window tall, and the same small scale dropped its top edge far enough in one
+ * go to read as a jolt.
  */
 @keyframes rt-studio-appear {
   from {
@@ -515,17 +519,16 @@ body {
   }
   to {
     opacity: 0;
-    transform: translateY(4px) scale(0.98);
+    transform: translateY(8px);
   }
 }
 
 .rt-studio-leave {
-  transform-origin: bottom center;
-  animation: rt-studio-leave 150ms ease-in forwards;
+  animation: rt-studio-leave 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .rt-studio-leave::backdrop {
-  animation: rt-studio-backdrop-out 150ms ease-in forwards;
+  animation: rt-studio-backdrop-out 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .rt-studio-appear::backdrop {

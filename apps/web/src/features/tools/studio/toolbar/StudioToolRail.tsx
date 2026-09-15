@@ -9,6 +9,7 @@ import {
   Redo2,
   Shapes,
   Table,
+  Trash2,
   Type,
   Undo2,
   Workflow,
@@ -123,6 +124,13 @@ interface StudioToolRailProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  /**
+   * Empties the canvas, beside Undo, which brings it back. Left off the rail
+   * when not given.
+   */
+  onClear?: () => void;
+  /** Something is on the canvas to clear. */
+  canClear?: boolean;
 }
 
 const RAIL_BUTTON = `flex h-8 w-8 items-center justify-center max-sm:h-11 max-sm:w-11 rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
@@ -234,6 +242,8 @@ export function StudioToolRail({
   canRedo,
   onUndo,
   onRedo,
+  onClear,
+  canClear = false,
 }: StudioToolRailProps) {
   const [openMenu, setOpenMenu] = useState<RailSlot | null>(null);
   // Which button to hand focus back to when the panel closes. A single mutable
@@ -457,6 +467,14 @@ export function StudioToolRail({
             disabled={!canRedo || disabled}
             onClick={onRedo}
           />
+          {onClear ? (
+            <RailButton
+              label="Clear canvas"
+              Icon={Trash2}
+              disabled={!canClear || disabled}
+              onClick={onClear}
+            />
+          ) : null}
         </RailGroup>
       </div>
     </div>

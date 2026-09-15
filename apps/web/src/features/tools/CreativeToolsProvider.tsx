@@ -89,14 +89,15 @@ export function CreativeToolsProvider({
     setToolParam(proposal.type, activeTool !== null);
   }
 
-  function closeTool() {
-    if (closeGuardRef.current && !closeGuardRef.current()) return;
+  function closeTool(): boolean {
+    if (closeGuardRef.current && !closeGuardRef.current()) return false;
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('tool');
     setSearchParams(nextParams, { replace: true });
     setExtensionSource(null);
     setEditSource(null);
     if (submission.status !== 'submitting') submission.reset();
+    return true;
   }
 
   return (

@@ -10,14 +10,16 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { ArrowLeft, ArrowUp } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, ArrowUp, LoaderCircle } from 'lucide-react';
 
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
 
 interface StudioOverlayProps {
   children: ReactNode;
-  onClose: () => void;
+  /** Closes the tool; false if it declined to close. */
+  onClose: () => boolean | void;
   /** What was made has gone onto the board, so the studio is done. */
   proposed?: boolean;
   title: string;
@@ -38,6 +40,83 @@ export interface StudioStatus {
 
 const ReportStudioStatus = createContext<(status: StudioStatus) => void>(() => undefined);
 
+/** Where in the studio's header an editor's own actions go. */
+const StudioActionsSlot = createContext<HTMLElement | null>(null);
+
+const FALLBACK_FOOTER_CLASS =
+  'flex shrink-0 flex-wrap items-center gap-3 border-t border-rt-tertiary bg-rt-surface px-4 py-3 sm:px-6';
+
+interface StudioActionsProps {
+  /** Cancel and Propose, or whatever the editor finishes with. */
+  children: ReactNode;
+  /** Why the last proposal did not go through; said in place of the summary. */
+  error?: string | null;
+  /** What the canvas holds, as the editor words it. */
+  summary: ReactNode;
+  /** The footer's classes outside the studio, where there is no header. */
+  footerClassName?: string;
+}
+
+/**
+ * An editor's own actions — what it holds, Cancel and Propose — in the studio's
+ * header rather than a footer under the canvas, so the canvas has that height.
+ *
+ * Outside the studio, as in an editor rendered on its own, there is no header to
+ * go into, and they stay in a footer beneath it.
+ */
+export function StudioActions({
+  children,
+  error,
+  summary,
+  footerClassName = FALLBACK_FOOTER_CLASS,
+}: StudioActionsProps) {
+  const slot = useContext(StudioActionsSlot);
+
+  if (!slot) {
+    return (
+      <footer className={footerClassName}>
+        <div className="min-w-0 flex-1">
+          {error ? (
+            <p role="alert" className="text-[12px] text-rt-secondary-deep">
+              {error}
+            </p>
+          ) : (
+            <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
+              {summary}
+            </p>
+          )}
+        </div>
+        {children}
+      </footer>
+    );
+  }
+
+  return createPortal(
+    <>
+      <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-rt-secondary-deep/25" />
+      {error ? (
+        <p
+          role="alert"
+          className="line-clamp-2 max-w-64 min-w-0 text-right text-[12px] leading-snug text-rt-secondary-deep"
+        >
+          {error}
+        </p>
+      ) : (
+        // Left out where the header is short of room: the minimised studio
+        // says the same, and the canvas itself shows what is on it.
+        <p
+          aria-live="polite"
+          className="hidden text-[11px] whitespace-nowrap text-rt-ink-muted lg:block"
+        >
+          {summary}
+        </p>
+      )}
+      {children}
+    </>,
+    slot,
+  );
+}
+
 /**
  * Tells the studio what the editor's canvas holds, so its minimised face can
  * say so. A no-op outside the studio, as in an editor rendered on its own.
@@ -50,6 +129,45 @@ export function useReportStudioStatus(parts: readonly string[], unsaved: boolean
   useEffect(() => {
     report({ parts: JSON.parse(wording) as string[], unsaved });
   }, [report, wording, unsaved]);
+}
+
+interface StudioProposeButtonProps {
+  /** The editor's form, which the button submits from the header. */
+  form: string;
+  disabled: boolean;
+  /** On its way for long enough to say so; see `useSlowSubmission`. */
+  sending: boolean;
+  title: string;
+}
+
+/**
+ * Propose, in the studio's header.
+ *
+ * The same size whatever it is doing: while a slow send is waiting, the label
+ * is covered by a spinner rather than replaced by a longer one, so nothing else
+ * in the header moves.
+ */
+export function StudioProposeButton({ form, disabled, sending, title }: StudioProposeButtonProps) {
+  return (
+    <Button
+      type="submit"
+      form={form}
+      className="relative shrink-0"
+      disabled={disabled}
+      aria-busy={sending || undefined}
+      title={title}
+    >
+      <span aria-hidden={sending || undefined} className={sending ? 'invisible' : undefined}>
+        Propose
+      </span>
+      {sending ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
+          <span className="sr-only">Proposing</span>
+        </span>
+      ) : null}
+    </Button>
+  );
 }
 
 /** Typing into something, where Escape belongs to the text. */
@@ -72,8 +190,8 @@ function isTyping(target: EventTarget | null): boolean {
 const SLIDE_MS = 300;
 /** How long it takes to fade in when a tool opens it; `.rt-studio-appear`. */
 const APPEAR_MS = 180;
-/** How long it fades out when left by the back arrow; `.rt-studio-leave`. */
-const LEAVE_MS = 150;
+/** How long it fades out when it leaves; `.rt-studio-leave`. */
+const LEAVE_MS = 180;
 
 /** How far a press has to travel before it is a drag rather than a press. */
 const DRAG_SLOP_PX = 4;
@@ -224,6 +342,7 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
   // Let go mid-drag, so already moving when the slide takes over.
   const [released, setReleased] = useState(false);
   const [column, remeasureColumn] = useStudioColumn();
+  const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -382,7 +501,10 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
    * does, then closes it.
    *
    * The studio is gone the moment the tool closes, so the close waits for the
-   * fade. If the tool then declines to close, the studio is simply shown again
+   * fade. It then stays faded out until it is gone: the router applies the
+   * close as a transition, a render or more after this, and setting the studio
+   * back to showing in the meantime flashed it up at full strength for a frame
+   * after every close. Only if the tool declines to close is it shown again,
    * rather than left faded out and unreachable.
    */
   const leave = useCallback(() => {
@@ -392,8 +514,7 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
     }
     setPhase('leaving');
     after(LEAVE_MS, () => {
-      onClose();
-      setPhase('open');
+      if (onClose() === false) setPhase('open');
     });
   }, [after, onClose]);
 
@@ -556,14 +677,14 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
                   {title}
                 </h1>
               </div>
-              <div className="ml-auto flex shrink-0 items-center gap-2">
+              <div className="ml-auto flex min-w-0 items-center gap-2">
                 <button
                   ref={peekButtonRef}
                   type="button"
                   onClick={peek}
                   aria-label="Peek at board"
                   title="Minimise the studio to look at the board. Nothing is lost."
-                  className="flex h-9 items-center rounded-full border border-rt-secondary-deep/50 px-3.5 text-[13px] font-semibold text-rt-ink transition-colors hover:bg-white/60 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none sm:px-4"
+                  className="flex h-9 shrink-0 items-center rounded-full border border-rt-secondary-deep/50 px-3.5 text-[13px] font-semibold text-rt-ink transition-colors hover:bg-white/60 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none sm:px-4"
                 >
                   <span aria-hidden="true" className="sm:hidden">
                     Peek
@@ -572,6 +693,11 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
                     Peek at board
                   </span>
                 </button>
+                {/* The editor's actions, from `StudioActions`. */}
+                <div
+                  ref={setActionsSlot}
+                  className="flex min-w-0 items-center gap-2 empty:hidden"
+                />
               </div>
             </header>
 
@@ -609,7 +735,7 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
             </section>
           </div>
           <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col">
-            {children}
+            <StudioActionsSlot.Provider value={actionsSlot}>{children}</StudioActionsSlot.Provider>
           </div>
         </div>
       </ReportStudioStatus.Provider>

@@ -1,4 +1,5 @@
 import {
+  useId,
   useMemo,
   useRef,
   useState,
@@ -6,9 +7,8 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
-import { Check, Eraser, LoaderCircle, Pencil, Redo2, Send, Trash2, Undo2 } from 'lucide-react';
+import { Check, Eraser, Pencil, Redo2, Trash2, Undo2 } from 'lucide-react';
 
-import { Button } from '../../../components/ui/Button';
 import { IconButton } from '../../../components/ui/IconButton';
 import { DRAWING_SVG_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
@@ -30,7 +30,8 @@ import {
   type PenWidth,
 } from './drawingModel';
 import { useDrawingHistory } from './useDrawingHistory';
-import { useReportStudioStatus } from '../StudioOverlay';
+import { StudioActions, StudioProposeButton, useReportStudioStatus } from '../StudioOverlay';
+import { useSlowSubmission } from '../useProposalSubmission';
 
 type DrawingMode = 'pen' | 'eraser';
 
@@ -45,8 +46,9 @@ function formatArtifactSize(length: number): string {
 }
 
 export function DrawingEditor() {
+  // Propose sits in the studio's header, outside the form, and submits it by id.
+  const formId = useId();
   const {
-    closeTool,
     editSource,
     extensionSource,
     isLive,
@@ -218,9 +220,13 @@ export function DrawingEditor() {
 
   const error = validationError ?? submissionError;
   const isSubmitting = submissionStatus === 'submitting';
+  // Controls grey out only for a send that is taking a while; see
+  // `useSlowSubmission`. `isSubmitting` still refuses input from the start.
+  const showSubmitting = useSlowSubmission(isSubmitting);
 
   return (
     <form
+      id={formId}
       className="flex min-h-0 flex-1 flex-col bg-rt-surface-sunken"
       onKeyDown={onEditorKeyDown}
       onSubmit={(event) => void onSubmit(event)}
@@ -304,15 +310,15 @@ export function DrawingEditor() {
         </fieldset>
 
         <div className="ml-auto flex items-center gap-1">
-          <IconButton label="Undo" disabled={!canUndo || isSubmitting} onClick={undo}>
+          <IconButton label="Undo" disabled={!canUndo || showSubmitting} onClick={undo}>
             <Undo2 aria-hidden="true" size={17} />
           </IconButton>
-          <IconButton label="Redo" disabled={!canRedo || isSubmitting} onClick={redo}>
+          <IconButton label="Redo" disabled={!canRedo || showSubmitting} onClick={redo}>
             <Redo2 aria-hidden="true" size={17} />
           </IconButton>
           <IconButton
             label="Clear drawing"
-            disabled={strokes.length === 0 || isSubmitting}
+            disabled={strokes.length === 0 || showSubmitting}
             onClick={clearDrawing}
           >
             <Trash2 aria-hidden="true" size={17} />
@@ -340,7 +346,8 @@ export function DrawingEditor() {
             aria-label="Drawing canvas"
             tabIndex={0}
             viewBox={`0 0 ${DRAWING_VIEWBOX_WIDTH} ${DRAWING_VIEWBOX_HEIGHT}`}
-            className={`absolute inset-0 h-full w-full touch-none select-none ${mode === 'pen' ? 'cursor-crosshair' : 'cursor-cell'}`}
+            // No browser outline round the whole canvas when a press focuses it.
+            className={`absolute inset-0 h-full w-full touch-none outline-none select-none ${mode === 'pen' ? 'cursor-crosshair' : 'cursor-cell'}`}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={finishPointer}
@@ -374,35 +381,22 @@ export function DrawingEditor() {
         </div>
       </div>
 
-      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t border-rt-tertiary bg-rt-surface px-4 py-3 sm:px-6">
-        <div className="min-w-0 flex-1">
-          {error ? (
-            <p role="alert" className="text-[12px] text-rt-secondary-deep">
-              {error}
-            </p>
-          ) : (
-            <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
-              {strokes.length} {strokes.length === 1 ? 'stroke' : 'strokes'} ·{' '}
-              {formatArtifactSize(artifactSize)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
-            </p>
-          )}
-        </div>
-        <Button variant="secondary" onClick={closeTool}>
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-          disabled={!isLive || isSubmitting}
+      <StudioActions
+        error={error}
+        summary={
+          <>
+            {strokes.length} {strokes.length === 1 ? 'stroke' : 'strokes'} ·{' '}
+            {formatArtifactSize(artifactSize)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
+          </>
+        }
+      >
+        <StudioProposeButton
+          form={formId}
+          disabled={!isLive}
+          sending={showSubmitting}
           title={isLive ? 'Propose drawing (Ctrl+Enter)' : 'Reconnect before proposing'}
-        >
-          {isSubmitting ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
-          ) : (
-            <Send aria-hidden="true" size={16} />
-          )}
-          {isSubmitting ? 'Proposing' : 'Propose'}
-        </Button>
-      </footer>
+        />
+      </StudioActions>
     </form>
   );
 }

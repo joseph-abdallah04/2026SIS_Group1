@@ -171,13 +171,13 @@ describe('drawing editor', () => {
     );
   });
 
-  it('discards the drawing when cancelled', async () => {
+  it('discards the drawing when the studio is left', async () => {
     const propose = vi.fn(async () => undefined);
     render(<Harness propose={propose} />);
     const first = await openDrawing();
     drawStroke(first.canvas);
 
-    await first.user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await first.user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await first.user.click(screen.getByRole('button', { name: 'Draw' }));
 

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { StudioOverlay, useReportStudioStatus } from './StudioOverlay';
+import { StudioActions, StudioOverlay, useReportStudioStatus } from './StudioOverlay';
 
 /** An editor with state of its own, to show peeking does not throw it away. */
 function Canvas() {
@@ -16,8 +16,11 @@ function Canvas() {
   );
 }
 
-function renderStudio({ withBoard = false }: { withBoard?: boolean } = {}) {
-  const onClose = vi.fn();
+function renderStudio({
+  withBoard = false,
+  declinesToClose = false,
+}: { withBoard?: boolean; declinesToClose?: boolean } = {}) {
+  const onClose = vi.fn(() => (declinesToClose ? false : undefined));
   const page = (proposed: boolean) => (
     <div>
       <label>
@@ -221,6 +224,51 @@ describe('studio overlay', () => {
   });
 });
 
+describe("the editor's actions", () => {
+  function Actions({ error = null }: { error?: string | null }) {
+    return (
+      <StudioActions error={error} summary="2 elements · 1 arrow">
+        <button type="submit">Propose</button>
+      </StudioActions>
+    );
+  }
+
+  // In the header rather than a footer under the canvas, so the canvas has
+  // that height.
+  it('go in the studio header, with what the canvas holds', () => {
+    render(
+      <StudioOverlay onClose={vi.fn()} title="New studio">
+        <Actions />
+      </StudioOverlay>,
+    );
+
+    const header = screen.getByRole('button', { name: 'Peek at board' }).closest('header')!;
+    expect(within(header).getByRole('button', { name: 'Propose' })).toBeInTheDocument();
+    expect(within(header).getByText('2 elements · 1 arrow')).toBeInTheDocument();
+    expect(document.querySelector('footer')).toBeNull();
+  });
+
+  it('say why a proposal did not go through in place of the summary', () => {
+    render(
+      <StudioOverlay onClose={vi.fn()} title="New studio">
+        <Actions error="Add an element before proposing." />
+      </StudioOverlay>,
+    );
+
+    const header = screen.getByRole('button', { name: 'Peek at board' }).closest('header')!;
+    expect(within(header).getByRole('alert')).toHaveTextContent('Add an element before proposing.');
+    expect(within(header).queryByText('2 elements · 1 arrow')).toBeNull();
+  });
+
+  it('stay in a footer outside the studio, where there is no header', () => {
+    render(<Actions />);
+
+    const footer = document.querySelector('footer')!;
+    expect(within(footer).getByRole('button', { name: 'Propose' })).toBeInTheDocument();
+    expect(within(footer).getByText('2 elements · 1 arrow')).toBeInTheDocument();
+  });
+});
+
 describe('dragging the studio up', () => {
   async function peeked() {
     const user = userEvent.setup();
@@ -396,10 +444,25 @@ describe('studio overlay motion', () => {
 
   // If the tool declines to close, a faded-out studio would be left open and
   // invisible. It is shown again instead.
-  it('comes back into view if the tool declines to close', async () => {
+  // Closed, it stays faded out until it is gone. The router closes the tool a
+  // render or more later, and showing the studio again meanwhile flashed it up
+  // for a frame after every close.
+  it('stays faded out once it has closed the tool', async () => {
     motion({ reduced: false });
     const user = userEvent.setup();
     const { studio, onClose } = renderStudio();
+
+    await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+
+    expect(studio).toHaveClass('rt-studio-leave');
+    expect(phaseOf(studio)).toBe('leaving');
+  });
+
+  it('comes back into view if the tool declines to close', async () => {
+    motion({ reduced: false });
+    const user = userEvent.setup();
+    const { studio, onClose } = renderStudio({ declinesToClose: true });
 
     await user.click(screen.getByRole('button', { name: 'Back to pinboard' }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
