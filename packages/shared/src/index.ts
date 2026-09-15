@@ -169,6 +169,13 @@ export interface BoardItem {
   artifactJson: ArtifactJson;
   x: number;
   y: number;
+  /**
+   * Stacking order on the board: higher paints above lower, with creation
+   * order breaking ties. Only the leader rearranges it (bring to front / send
+   * to back), and it is shared, so every participant sees the same stack. It
+   * is not the list order — `compareBoardItems` stays chronological.
+   */
+  z: number;
   createdAt: string;
   /**
    * When this proposal's content was last rewritten, or null if it never has
@@ -177,6 +184,16 @@ export interface BoardItem {
    */
   editedAt: string | null;
   extendsProposalId: string | null;
+  /**
+   * Whose idea this one builds on (F23), or null when it builds on nobody's.
+   *
+   * Set only when the original is on the same question. Reuse (F38) records its
+   * source in `extendsProposalId` too, but that source is always from an earlier
+   * question, and bringing your own idea forward is not building on one — so
+   * the board marks extensions and leaves reuses unmarked. An original that has
+   * since been deleted still counts: the idea was still built on.
+   */
+  extendsFrom: { authorId: string | null; authorName: string } | null;
   /**
    * Emoji reactions left on this proposal (F18), only for emoji somebody has
    * actually used. The card offers the whole fixed set regardless, so an empty

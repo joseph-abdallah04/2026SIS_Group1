@@ -1,8 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { BoardItem, DiagramNode, StickyMark } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
+
+/** The word a byline mark shows, as opposed to the explanation it carries. */
+function markLabelled(label: string | RegExp): HTMLElement | null {
+  const shown = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-foot-mark] > [aria-hidden="true"]'),
+  );
+  return (
+    shown.find((node) =>
+      typeof label === 'string' ? node.textContent === label : label.test(node.textContent ?? ''),
+    ) ?? null
+  );
+}
 
 function diagramItem(nodes: DiagramNode[]): BoardItem {
   return {
@@ -15,8 +28,10 @@ function diagramItem(nodes: DiagramNode[]): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-03T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -516,9 +531,207 @@ describe('card layout', () => {
   it('marks a card whose content was rewritten, and says when', () => {
     render(<ProposalCard item={{ ...diagramItem([]), editedAt: '2026-09-03T04:30:00.000Z' }} />);
 
-    const mark = screen.getByText(/Edited/);
-    expect(mark).toBeTruthy();
-    expect(mark.getAttribute('title')).toMatch(/^Edited at /);
+    const mark = markLabelled(/^Edited$/);
+    expect(mark).not.toBeNull();
+    // Explained to screen readers as text, and on hover as a tooltip.
+    expect(mark?.closest('[data-foot-mark]')?.textContent).toMatch(/Edited at /);
+    // Kept on the right, beside the time.
+    expect(
+      mark?.closest('span.shrink-0:not([data-foot-mark])')?.querySelector('time'),
+    ).not.toBeNull();
+  });
+
+  it('says nothing about extending on a card that builds on nobody', () => {
+    render(<ProposalCard item={diagramItem([])} />);
+
+    expect(screen.queryByText('Extended')).toBeNull();
+  });
+
+  // A reuse records its source too, but the server leaves `extendsFrom` empty
+  // for it, so the card is quiet about it.
+  it('says nothing for a reuse, whose lineage points at an earlier question', () => {
+    render(<ProposalCard item={{ ...diagramItem([]), extendsProposalId: 'from-q1' }} />);
+
+    expect(screen.queryByText('Extended')).toBeNull();
+  });
+
+  it('marks an extension, and names whose idea it builds on', () => {
+    render(
+      <ProposalCard
+        viewerId="user-9"
+        item={{
+          ...diagramItem([]),
+          extendsProposalId: 'original',
+          extendsFrom: { authorId: 'user-2', authorName: 'Bob' },
+        }}
+      />,
+    );
+
+    const mark = markLabelled('Extended');
+    expect(mark?.closest('[data-foot-mark]')?.textContent).toContain(
+      "Extended: builds on Bob's idea",
+    );
+    // Beside the author's name, not over on the right with the time.
+    expect(screen.getByText('Alice').parentElement?.contains(mark ?? null)).toBe(true);
+  });
+
+  it('says "your idea" when the viewer wrote the original', () => {
+    render(
+      <ProposalCard
+        viewerId="user-2"
+        item={{
+          ...diagramItem([]),
+          extendsProposalId: 'original',
+          extendsFrom: { authorId: 'user-2', authorName: 'Bob' },
+        }}
+      />,
+    );
+
+    expect(markLabelled('Extended')?.closest('[data-foot-mark]')?.textContent).toContain(
+      'Extended: builds on your idea',
+    );
+  });
+
+  describe('when the byline is short of room', () => {
+    const extended = {
+      ...diagramItem([]),
+      extendsProposalId: 'original',
+      extendsFrom: { authorId: 'user-2', authorName: 'Bob' },
+    };
+
+    /**
+     * jsdom lays nothing out, so the byline is given widths: the footer's
+     * inner width, the name's natural width, the right-hand side's width and
+     * the full word's.
+     */
+    function layOut({ foot, name }: { foot: number; name: number }) {
+      const restore = [
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          return this.tagName === 'FOOTER' ? foot : 0;
+        }),
+        vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          return this.classList.contains('truncate') ? name : 0;
+        }),
+        vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          if (this.tagName === 'SPAN' && this.querySelector('time')) return 40; // time
+          if (this.textContent === 'Extended' && this.classList.contains('invisible')) return 44;
+          return 0;
+        }),
+      ];
+      return () => restore.forEach((spy) => spy.mockRestore());
+    }
+
+    it('keeps the whole word while there is a comfortable gap', () => {
+      const restore = layOut({ foot: 200, name: 60 });
+      try {
+        render(<ProposalCard item={extended} />);
+        expect(markLabelled('Extended')).not.toBeNull();
+      } finally {
+        restore();
+      }
+    });
+
+    // Shortened before the two sides meet, not at the last pixel.
+    it('shortens to "Ext." before the gap closes completely', () => {
+      // 60 + 44 + 40 = 144 of 160: a gap remains, but a narrow one.
+      const restore = layOut({ foot: 160, name: 60 });
+      try {
+        render(<ProposalCard item={extended} />);
+        expect(markLabelled('Ext.')).not.toBeNull();
+        expect(markLabelled('Extended')).toBeNull();
+      } finally {
+        restore();
+      }
+    });
+
+    it('shortens for a long name on a roomy card', () => {
+      const restore = layOut({ foot: 260, name: 190 });
+      try {
+        render(<ProposalCard item={extended} />);
+        expect(markLabelled('Ext.')).not.toBeNull();
+      } finally {
+        restore();
+      }
+    });
+
+    it('explains "Ext." on hover', async () => {
+      const restore = layOut({ foot: 160, name: 60 });
+      try {
+        render(<ProposalCard item={extended} />);
+        const mark = markLabelled('Ext.')!.closest('[data-foot-mark]')!;
+
+        await userEvent.hover(mark);
+        expect(await screen.findByRole('presentation', { hidden: true })).toHaveTextContent(
+          "Extended: builds on Bob's idea",
+        );
+
+        await userEvent.unhover(mark);
+        expect(screen.queryByRole('presentation', { hidden: true })).toBeNull();
+      } finally {
+        restore();
+      }
+    });
+  });
+
+  describe('where the explanation appears', () => {
+    const edited = { ...diagramItem([]), editedAt: '2026-09-03T04:30:00.000Z' };
+
+    function hoverMarkAt(top: number) {
+      render(<ProposalCard item={edited} />);
+      const mark = markLabelled('Edited')!.closest<HTMLElement>('[data-foot-mark]')!;
+      vi.spyOn(mark, 'getBoundingClientRect').mockReturnValue({
+        top,
+        bottom: top + 14,
+        left: 100,
+        right: 130,
+        width: 30,
+        height: 14,
+      } as DOMRect);
+      return mark;
+    }
+
+    it('sits above its mark where there is room', async () => {
+      await userEvent.hover(hoverMarkAt(400));
+      const tip = await screen.findByRole('presentation', { hidden: true });
+      expect(tip.getAttribute('data-placement')).toBe('above');
+    });
+
+    // A card near the top of the window would push it off the screen.
+    it('drops below its mark near the top of the window', async () => {
+      await userEvent.hover(hoverMarkAt(10));
+      const tip = await screen.findByRole('presentation', { hidden: true });
+      expect(tip.getAttribute('data-placement')).toBe('below');
+      expect(tip.style.top).toBe('30px');
+    });
+  });
+
+  // The byline mixes text sizes; centring them leaves each word at a slightly
+  // different height, so every level of it lines up on the text baseline.
+  it('sets the whole byline on one baseline', () => {
+    render(
+      <ProposalCard
+        item={{
+          ...diagramItem([]),
+          editedAt: '2026-09-03T04:30:00.000Z',
+          extendsProposalId: 'original',
+          extendsFrom: { authorId: 'user-2', authorName: 'Bob' },
+        }}
+      />,
+    );
+
+    const footer = screen.getByText('Alice').closest('footer')!;
+    const rows = [footer, ...footer.querySelectorAll(':scope > span')];
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row).toHaveClass('items-baseline');
+      expect(row).not.toHaveClass('items-center');
+    }
   });
 
   it('carries the author and the time in that footer', () => {

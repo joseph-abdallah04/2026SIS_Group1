@@ -12,9 +12,11 @@ import { LoaderCircle, X } from 'lucide-react';
 import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
+import { closingFades } from '../../../lib/motion';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
+import { EXTEND_UNCHANGED_HINT } from '../proposeErrors';
 import {
   NO_STICKY_FORMAT,
   RichStickyField,
@@ -54,19 +56,6 @@ const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
  * enough that the popup and its close button stay on a small laptop's screen.
  */
 const NOTE_MAX_HEIGHT_PX = 360;
-
-/**
- * Whether closing fades. Not for anyone who has asked for less motion, and not
- * where there is no way to ask, which is only ever an environment with no
- * rendering at all: there, a close that waited on an animation would wait on
- * nothing.
- */
-function closingFades(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 /** With no toolbar to rest on, as in the tools workbench: the middle of the window. */
 const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
@@ -125,7 +114,8 @@ export function StickyEditor() {
   const {
     closeTool,
     extensionSource,
-    isReusingOwn,
+    isReusing,
+    isExtendingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -160,6 +150,9 @@ export function StickyEditor() {
       : stickyDraftKey,
   );
   const [editing] = useState(() => editSource !== null);
+  // Decided once for the same reason: closing clears what the popup was opened
+  // from a render before the popup goes.
+  const [reusing] = useState(() => isReusing);
   const [source] = useState(() => sourceArtifact);
   const [saved] = useState(() => (draftKey ? readStickyDraft(draftKey) : null));
   // A kept draft is what was last written, so it wins over the proposal it was
@@ -169,6 +162,16 @@ export function StickyEditor() {
   const [validationError, setValidationError] = useState<string | null>(null);
   // What the selection is set in, for the toolbar.
   const [format, setFormat] = useState<StickyFormat>(NO_STICKY_FORMAT);
+  /**
+   * An extension that still says exactly what its original says, set the same
+   * way. Proposing it would put an identical card on the board marked as
+   * building on the first, so Propose waits for a change — the words, their
+   * formatting, or the colour. Reuse is exempt: bringing your idea to a new
+   * question unchanged is the point of it. Measured against the source as it
+   * was when the popup opened, which closing does not clear.
+   */
+  const unchangedExtension =
+    !editing && !reusing && source !== null && color === source.color && sameNote(note, source);
 
   const theme = STICKY_THEMES[color];
   const [placement, setPlacement] = useState(placeAboveFooter);
@@ -301,6 +304,8 @@ export function StickyEditor() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Ctrl+Enter submits without going through the disabled button.
+    if (unchangedExtension) return;
     const prepared = prepareStickyText(note.text);
     if (!prepared.ok) {
       setValidationError(prepared.error);
@@ -336,10 +341,17 @@ export function StickyEditor() {
   const label = editSource
     ? 'Edit sticky'
     : extensionSource
-      ? isReusingOwn
+      ? isReusing
         ? 'Reusing your sticky'
-        : `Extending ${extensionSource.authorName}'s sticky`
+        : isExtendingOwn
+          ? 'Extending your sticky'
+          : `Extending ${extensionSource.authorName}'s sticky`
       : 'New sticky';
+  const proposeTitle = !isLive
+    ? `Reconnect before ${editing ? 'updating' : 'proposing'}`
+    : unchangedExtension
+      ? EXTEND_UNCHANGED_HINT
+      : `${editing ? 'Update proposal' : 'Propose sticky'} (Ctrl+Enter)`;
 
   // Portalled to the body, like the board's other popovers, so the canvas's
   // scale transform is not its containing block and it is placed against the
@@ -428,6 +440,10 @@ export function StickyEditor() {
           <p role="alert" className="mb-1 text-[12px] leading-relaxed text-rt-secondary-deep">
             {error}
           </p>
+        ) : unchangedExtension ? (
+          // Said on the paper rather than only in a tooltip: a Propose button
+          // that is dead for no visible reason looks broken.
+          <p className="mb-1 text-[12px] leading-relaxed text-rt-ink/60">{EXTEND_UNCHANGED_HINT}</p>
         ) : null}
 
         {/* Torn along the same line the paper would tear: the note above it,
@@ -477,12 +493,8 @@ export function StickyEditor() {
               rather than offering to propose it again. */}
           <Button
             type="submit"
-            disabled={!isLive || submissionStatus === 'submitting'}
-            title={
-              isLive
-                ? `${editing ? 'Update proposal' : 'Propose sticky'} (Ctrl+Enter)`
-                : `Reconnect before ${editing ? 'updating' : 'proposing'}`
-            }
+            disabled={!isLive || unchangedExtension || submissionStatus === 'submitting'}
+            title={proposeTitle}
           >
             {submissionStatus === 'submitting' ? (
               <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />

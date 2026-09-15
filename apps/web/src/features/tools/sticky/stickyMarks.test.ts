@@ -18,6 +18,7 @@ import {
   sameNote,
   segmentStyle,
   setLink,
+  stickyPlainText,
   stickyBlocks,
   stickySegments,
   stylesForCaret,
@@ -461,5 +462,45 @@ describe('links', () => {
     expect(formatForArtifact(setLink(note, 0, 4, href))).toEqual({
       links: [{ from: 0, to: 4, href }],
     });
+  });
+});
+
+describe('stickyPlainText', () => {
+  it('keeps a note with no lists exactly as written', () => {
+    expect(stickyPlainText({ text: 'Ship it\n\nthen celebrate' })).toBe(
+      'Ship it\n\nthen celebrate',
+    );
+  });
+
+  it('writes the bullets and numbers a card draws, which the words alone do not carry', () => {
+    const text = ['Plan', 'Build', 'Ship', 'Notes', 'Read spec', 'Ask'].join('\n');
+    expect(
+      stickyPlainText({
+        text,
+        lines: ['number', 'number', 'number', null, 'bullet', 'bullet'],
+      }),
+    ).toBe(['1. Plan', '2. Build', '3. Ship', 'Notes', '• Read spec', '• Ask'].join('\n'));
+  });
+
+  // Counted the way the card counts: again from 1 after a plain line, and on
+  // its own at each depth, marked 1 / a / i as the depths are.
+  it('restarts numbering after a plain line and indents nested items', () => {
+    const text = ['One', 'Sub', 'Sub two', 'Two', 'Break', 'Again'].join('\n');
+    expect(
+      stickyPlainText({
+        text,
+        lines: ['number', 'number', 'number', 'number', null, 'number'],
+        levels: [0, 1, 1, 0, 0, 0],
+      }),
+    ).toBe(['1. One', '  a. Sub', '  b. Sub two', '2. Two', 'Break', '1. Again'].join('\n'));
+  });
+
+  it('keeps the words of a link and leaves its address behind', () => {
+    expect(
+      stickyPlainText({
+        text: 'Read the spec',
+        links: [{ from: 9, to: 13, href: 'https://example.com/spec' }],
+      }),
+    ).toBe('Read the spec');
   });
 });

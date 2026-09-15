@@ -10,6 +10,13 @@ import {
 
 import { ApiClientError } from '../../lib/api';
 import { readMicMuted, writeMicMuted } from './micPreference';
+import {
+  acquireVoiceRoom,
+  isVoiceRoomConnected,
+  releaseVoiceRoom,
+  rememberVoiceIdentity,
+  setVoiceRoomJoin,
+} from './roomRegistry';
 import { fetchVoiceToken } from './voiceApi';
 
 /**
@@ -19,7 +26,20 @@ import { fetchVoiceToken } from './voiceApi';
  * and "the SDK is negotiating" are the same thing to a user, and `failed` here
  * means we gave up, which no single SDK state expresses.
  */
-export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
+export type VoiceStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
+  /**
+   * This deployment has no LiveKit credentials, so there is no room to join
+   * and there will not be one until the server is reconfigured. Distinct from
+   * `failed`, which means "something that exists was lost and you can retry
+   * into it" — retrying this just repeats the same 503. Every piece of voice
+   * UI renders nothing in this state rather than offering a dead Reconnect.
+   */
+  | 'unavailable';
 
 /**
  * The microphone, tracked separately from the connection on purpose: voice is
@@ -191,8 +211,27 @@ export function useVoiceRoom(sessionId: string) {
       const op = (async () => {
         try {
           await room.localParticipant.setMicrophoneEnabled(enabled);
-          // The view was left, or the room was rebuilt, while this was in flight.
-          if (roomRef.current !== room) return;
+          // The view was left, or the room was rebuilt, while this was in
+          // flight.
+          if (roomRef.current !== room) {
+            // An unmute that lands now has just reopened a track behind the
+            // release — relighting the tab's recording indicator for someone
+            // who has already left, until the grace timer disconnects. Leaving
+            // with the permission prompt still open is the easy way to hit it.
+            // `releaseVoiceRoom`'s mute ran before the device was ours, so
+            // this is the one that has to stick.
+            //
+            // This fires for a remount too — `roomRef` is per hook instance,
+            // and this one's was nulled by its own cleanup, so a view that
+            // picked the room straight back up does not rescue the unmute.
+            // That is why the branch below prefers an in-flight join over a
+            // merely-connected room: the adopter re-runs `settleMic` and
+            // opens the microphone again.
+            if (enabled) {
+              await room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+            }
+            return;
+          }
 
           // Read back rather than assume: muting while nothing was ever
           // published is a no-op inside the SDK, and claiming `live` off the back
@@ -242,29 +281,22 @@ export function useVoiceRoom(sessionId: string) {
   useEffect(() => {
     if (!sessionId) return;
 
-    // A Room per effect run. Reusing one across StrictMode's double-mount (or a
-    // route change) means reconnecting an object that is mid-teardown, which
-    // surfaces as a phantom participant that never leaves.
-    const room = new Room({
-      // Audio only (F11): no adaptive stream or dynacast, both video concerns.
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    // The room outlives this effect, so that lobby -> board keeps one
+    // connection rather than dropping audio at the moment the session starts.
+    // The registry never hands back a room that is mid-teardown — reconnecting
+    // one surfaces as a phantom participant that never leaves.
+    const {
+      room,
+      audioContainer,
+      reused,
+      identity: knownIdentity,
+      join: joinInFlight,
+    } = acquireVoiceRoom(sessionId);
     roomRef.current = room;
+    if (knownIdentity) identityRef.current = knownIdentity;
 
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-
-    // Remote audio needs an element in the document to actually play. Kept in a
-    // hidden container the hook owns, so no caller has to remember to render
-    // one — forgetting it is a silent "nobody can hear anyone" bug.
-    const audioContainer = document.createElement('div');
-    audioContainer.style.display = 'none';
-    audioContainer.setAttribute('data-rt-voice-audio', sessionId);
-    document.body.appendChild(audioContainer);
 
     const syncParticipants = () => {
       if (cancelled) return;
@@ -300,7 +332,10 @@ export function useVoiceRoom(sessionId: string) {
       }
       attemptRef.current = attempt + 1;
       setStatus('reconnecting');
-      reconnectTimer = setTimeout(() => void connect(), RECONNECT_DELAYS_MS[attempt]);
+      reconnectTimer = setTimeout(
+        () => setVoiceRoomJoin(sessionId, connect()),
+        RECONNECT_DELAYS_MS[attempt],
+      );
     };
 
     const onDisconnected = (reason?: DisconnectReason) => {
@@ -322,6 +357,70 @@ export function useVoiceRoom(sessionId: string) {
       scheduleReconnect();
     };
 
+    /**
+     * Put the microphone where the user left it (F12), once we are in the room.
+     *
+     * Muted means the device is not touched at all — not acquired and muted,
+     * simply never opened. A refresh should not relight the browser's
+     * recording indicator for someone who chose silence, and it must not raise
+     * a permission prompt at somebody who has never granted one. Unmuting
+     * later acquires the device then, the same path a blocked-then-allowed mic
+     * takes.
+     *
+     * Shared with the adopted-join path below, which reaches a connected room
+     * without having run a handshake of its own: skipping this there is how a
+     * view lands on the board with the microphone never opened.
+     */
+    async function settleMic(identity: string | null): Promise<void> {
+      // A toggle can still be settling from before a drop — a permission
+      // prompt left open, say. It was aimed at a connection that no longer
+      // exists, and its guard would silently swallow the calls below, leaving
+      // us connected with no microphone and nothing to retry it.
+      if (micOpRef.current) await micOpRef.current.catch(() => {});
+      if (cancelled) return;
+
+      if (identity && readMicMuted(sessionId, identity)) {
+        // Normally there is nothing to mute and that is the point — the device
+        // is never opened. But if that settling toggle did publish one, it
+        // must not go out hot just because we skipped the acquire.
+        if (room.localParticipant.getTrackPublication(Track.Source.Microphone)) {
+          await applyMicEnabled(false);
+        } else {
+          setMicEnabledState(false);
+          setMicStatus('idle');
+        }
+      } else {
+        await applyMicEnabled(true);
+      }
+    }
+
+    /**
+     * Wait on the join a previous view started, rather than racing it.
+     *
+     * The window this covers is "reused, not yet connected": the handshake, or
+     * even the token fetch, is still running on this room. Calling `connect()`
+     * again there would be a second join on one `Room`.
+     */
+    async function adoptJoin(pending: Promise<void>): Promise<void> {
+      if (cancelled) return;
+      setStatus((prev) => (prev === 'reconnecting' ? prev : 'connecting'));
+      await pending.catch(() => {});
+      if (cancelled) return;
+
+      if (!isVoiceRoomConnected(room)) {
+        // That join did not land — refused, dropped, or a server with no
+        // voice. Start a clean one rather than inherit half of it.
+        setVoiceRoomJoin(sessionId, connect());
+        return;
+      }
+
+      attemptRef.current = 0;
+      setStatus('connected');
+      setError(null);
+      syncParticipants();
+      await settleMic(identityRef.current);
+    }
+
     async function connect(): Promise<void> {
       if (cancelled) return;
       setStatus((prev) => (prev === 'reconnecting' ? prev : 'connecting'));
@@ -330,48 +429,38 @@ export function useVoiceRoom(sessionId: string) {
         const { url, token, identity } = await fetchVoiceToken(sessionId);
         if (cancelled) return;
         identityRef.current = identity;
+        rememberVoiceIdentity(sessionId, identity);
 
         await room.connect(url, token);
-        if (cancelled) {
-          // The view was left while the handshake was in flight; nothing will
-          // ever tear this down otherwise.
-          await room.disconnect();
-          return;
-        }
+        // The view was left while the handshake was in flight. The room is the
+        // registry's now, and a remount for this session may already be
+        // holding this very object — disconnecting it here would drop the call
+        // out from under the view that just picked it up, and
+        // `CLIENT_INITIATED` is terminal, so it would not even retry.
+        if (cancelled) return;
 
         attemptRef.current = 0;
         setStatus('connected');
         setError(null);
         syncParticipants();
 
-        // Rejoin the way you left (F12). Muted means the microphone is not
-        // touched at all — not acquired and muted, simply never opened. A
-        // refresh should not relight the browser's recording indicator for
-        // someone who chose silence, and it must not raise a permission prompt
-        // at somebody who has never granted one. Unmuting later acquires the
-        // device then, which is the same path a blocked-then-allowed mic takes.
-        // A toggle can still be settling from before a drop — a permission
-        // prompt left open, say. It was aimed at a connection that no longer
-        // exists, and its guard would silently swallow the calls below,
-        // leaving us connected with no microphone and nothing to retry it.
-        if (micOpRef.current) await micOpRef.current.catch(() => {});
-        if (cancelled) return;
-
-        if (readMicMuted(sessionId, identity)) {
-          // Normally there is nothing to mute and that is the point — the
-          // device is never opened. But if that settling toggle did publish
-          // one, it must not go out hot just because we skipped the acquire.
-          if (room.localParticipant.getTrackPublication(Track.Source.Microphone)) {
-            await applyMicEnabled(false);
-          } else {
-            setMicEnabledState(false);
-            setMicStatus('idle');
-          }
-        } else {
-          await applyMicEnabled(true);
-        }
+        await settleMic(identity);
       } catch (err) {
         if (cancelled) return;
+
+        // Not a blip and not a permission problem: the server has no LiveKit
+        // credentials. Keyed on the code rather than the 503 itself — a bare
+        // 503 is a load balancer or a mid-deploy restart, where retrying is
+        // right. Without this, `scheduleReconnect` fetches the same 503 five
+        // more times and then overwrites this with "Lost the voice
+        // connection", which is how a server that never had voice ends up
+        // offering a Reconnect button that cannot work.
+        if (err instanceof ApiClientError && err.code === 'VOICE_NOT_CONFIGURED') {
+          setStatus('unavailable');
+          // Nothing renders in this state, so there is no message to carry.
+          setError(null);
+          return;
+        }
 
         // A refusal is an answer, not a blip: retrying a 403 just repeats it.
         if (err instanceof ApiClientError && err.status >= 400 && err.status < 500) {
@@ -409,16 +498,41 @@ export function useVoiceRoom(sessionId: string) {
       .on(RoomEvent.Disconnected, onDisconnected)
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!room.canPlaybackAudio));
 
-    void connect();
+    if (reused && joinInFlight) {
+      // A join is still running on this room, so wait on it — even if LiveKit
+      // already says `Connected`. `connect()` does not settle until
+      // `settleMic` has finished, so "connected with a join still pending"
+      // means the microphone step is the part still in flight. Taking the
+      // picked-up branch there would skip it, while the abandoned view's
+      // in-flight unmute lands on a room it no longer holds and mutes — and
+      // the release recorded `micWasEnabled: false`, because the device was
+      // not ours yet, so nothing restores it. You arrive on the board
+      // connected and silent: exactly the gap this registry exists to close.
+      void adoptJoin(joinInFlight);
+    } else if (reused && isVoiceRoomConnected(room)) {
+      // Already in the room, with nothing outstanding — picked back up rather
+      // than rejoined. Resyncing from the room is the whole saving: no token,
+      // no negotiation, no gap. Remote tracks are still attached to the
+      // container the registry kept, so sound never stopped.
+      attemptRef.current = 0;
+      setStatus('connected');
+      setError(null);
+      syncParticipants();
+    } else {
+      setVoiceRoomJoin(sessionId, connect());
+    }
 
     return () => {
       cancelled = true;
       clearTimeout(reconnectTimer);
+      // Only this hook ever attaches listeners, so clearing them all is safe;
+      // the room itself stays with the registry.
       room.removeAllListeners();
       // Leaving the view leaves the call (F11 — "disconnect cleanly on
-      // leave/end"), which also stops the mic indicator in the browser tab.
-      void room.disconnect();
-      audioContainer.remove();
+      // leave/end"). The microphone closes now, which is what stops the tab's
+      // recording indicator; the connection is dropped after a short grace
+      // window, so a remount for this same session keeps it (roomRegistry.ts).
+      releaseVoiceRoom(sessionId);
       roomRef.current = null;
       if (permissionStatusRef.current) permissionStatusRef.current.onchange = null;
       permissionStatusRef.current = null;

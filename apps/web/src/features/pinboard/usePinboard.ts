@@ -6,7 +6,11 @@ import {
   type ReactionGroup,
 } from '@roundtable/shared';
 import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
-import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
+import type {
+  ProposalArrangeInput,
+  ProposalCreateInput,
+  ProposalUpdateInput,
+} from '@roundtable/shared/schemas';
 
 import { api } from '../../lib/api';
 import { getSocket, joinSessionRoom, scheduleLeaveSessionRoom } from '../../lib/socket';
@@ -151,6 +155,30 @@ export function usePinboard(sessionId: string) {
   }, []);
 
   /**
+   * Apply a change to a proposal already on the board: an edit, a move, a
+   * restack.
+   *
+   * Never adds one. A card arrives on `proposalCreated`; an update for a card
+   * this board does not have is one that has since been removed — its update
+   * and its removal were broadcast close together and arrived the other way
+   * round — and adding it would put a removed card back on the screen. A client
+   * that genuinely missed a creation was disconnected, and rejoining sends it
+   * the whole board.
+   */
+  const replaceItem = useCallback((proposal: BoardItem) => {
+    setBoard((prev) => {
+      if (!prev || proposal.questionId !== prev.questionId) return prev;
+      if (!prev.items.some((item) => item.id === proposal.id)) return prev;
+      return {
+        ...prev,
+        items: prev.items
+          .map((item) => (item.id === proposal.id ? proposal : item))
+          .sort(compareBoardItems),
+      };
+    });
+  }, []);
+
+  /**
    * Apply a proposal's new reaction state (F18).
    *
    * Only the reaction list is replaced, so a reaction arriving mid-drag cannot
@@ -247,7 +275,7 @@ export function usePinboard(sessionId: string) {
       upsertItem(proposal);
       highlight(proposal.id);
     };
-    const onUpdated = ({ proposal }: { proposal: BoardItem }) => upsertItem(proposal);
+    const onUpdated = ({ proposal }: { proposal: BoardItem }) => replaceItem(proposal);
     const onDeleted = ({ proposalId, questionId }: { proposalId: string; questionId: string }) =>
       removeItem(proposalId, questionId);
     // F25: the leader moved the agenda. Which question is active — and so
@@ -285,7 +313,16 @@ export function usePinboard(sessionId: string) {
       socket.off('sessionFocus', onFocus);
       socket.off('proposalReactionsUpdated', applyReactions);
     };
-  }, [sessionId, applyReactions, applySnapshot, highlight, reload, removeItem, upsertItem]);
+  }, [
+    sessionId,
+    applyReactions,
+    applySnapshot,
+    highlight,
+    reload,
+    removeItem,
+    replaceItem,
+    upsertItem,
+  ]);
 
   /** Propose a new item onto the board (F15). */
   const propose = useCallback(
@@ -306,6 +343,20 @@ export function usePinboard(sessionId: string) {
       writeIntent(
         (ack) => getSocket().emit('proposalUpdate', input, ack),
         'That change was rejected',
+      ),
+    [],
+  );
+
+  /**
+   * Bring a proposal to the front or send it to the back — the leader
+   * arranging the board. Nothing is restacked locally: the server picks the new
+   * value and the row arrives on `proposalUpdated` for the whole room.
+   */
+  const arrangeProposal = useCallback(
+    (proposalId: string, to: ProposalArrangeInput['to']) =>
+      writeIntent(
+        (ack) => getSocket().emit('proposalArrange', { id: proposalId, to }, ack),
+        'That proposal could not be restacked',
       ),
     [],
   );
@@ -347,6 +398,7 @@ export function usePinboard(sessionId: string) {
     reload,
     propose,
     editProposal,
+    arrangeProposal,
     deleteProposal,
     reactToProposal,
     isLive,

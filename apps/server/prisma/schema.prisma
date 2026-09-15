@@ -178,6 +178,9 @@ model Proposal {
   // same place, and a move by one person moves it for the room.
   x                 Float
   y                 Float
+  // Stacking order on the board, higher above lower, creation order breaking
+  // ties. Shared like x/y, and only the leader rearranges it.
+  z                 Int       @default(0)
   extendsProposalId String?
   extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
   extensions        Proposal[] @relation("ProposalExtends")

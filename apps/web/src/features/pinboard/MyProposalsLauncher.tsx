@@ -25,14 +25,15 @@ interface MyProposalsLauncherProps {
  * watches, so it earns a button and not a column of screen for the whole
  * session.
  *
- * Reuse goes through the same path as Extend (F23): both open a proposal in
- * its own editor prefilled, and both save as a new proposal that records what
- * it came from. Only the source differs, so there is one write path rather
- * than two that could disagree.
+ * Reuse shares its write path with Extend (F23): both open a proposal in its
+ * own editor prefilled, and both save as a new proposal that records what it
+ * came from. It opens through its own entry point, though, so the editor knows
+ * it is reusing rather than extending, and the board marks only extensions:
+ * a reuse names a proposal from an earlier question, never this one.
  */
 export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyProposalsLauncherProps) {
   const { data, error } = useMyProposals(sessionId, revision);
-  const { openEditorForExtend } = useCreativeTools();
+  const { openEditorForReuse } = useCreativeTools();
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
 
@@ -59,7 +60,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
 
   const reuse = (item: BoardItem) => {
     setOpen(false);
-    openEditorForExtend(item);
+    openEditorForReuse(item);
   };
 
   /**

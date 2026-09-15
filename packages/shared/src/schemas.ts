@@ -1069,6 +1069,23 @@ export const proposalUpdateSchema = z
 
 export type ProposalUpdateInput = z.infer<typeof proposalUpdateSchema>;
 
+/**
+ * Restack contract: bring a card to the front of the board, or send it to the
+ * back.
+ *
+ * The client names a direction, never a number. The server works out the new
+ * value from what is stored, so two leaders' tabs arranging at once cannot
+ * write stale positions over each other, and its own intent rather than a
+ * field on `proposalUpdate` because it carries a different permission: only
+ * the leader arranges the shared board.
+ */
+export const proposalArrangeSchema = z.object({
+  id: z.string().min(1),
+  to: z.enum(['front', 'back']),
+});
+
+export type ProposalArrangeInput = z.infer<typeof proposalArrangeSchema>;
+
 export const proposalDeleteSchema = z.object({ id: z.string().min(1) });
 
 export type ProposalDeleteInput = z.infer<typeof proposalDeleteSchema>;

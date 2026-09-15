@@ -26,8 +26,14 @@ export function CreativeToolsWorkbench() {
         x: input.x,
         y: input.y,
         createdAt: new Date().toISOString(),
+        z: 0,
         editedAt: null,
         extendsProposalId: input.extendsProposalId ?? null,
+        // Everything here is one question and one author, so any source is an
+        // extension of your own idea.
+        extendsFrom: input.extendsProposalId
+          ? { authorId: 'current-developer', authorName: 'You' }
+          : null,
         reactions: [],
       },
     ]);

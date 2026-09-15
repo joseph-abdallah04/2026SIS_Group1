@@ -21,12 +21,16 @@ export interface CreativeToolsContextValue {
   draftScope: { sessionId: string; questionId: string; viewerId: string | null };
   extensionSource: BoardItem | null;
   /**
-   * The source is this viewer's own work, so the editor says "reusing yours"
-   * rather than naming them as though they were someone else (F38). Copying
-   * your own earlier proposal onto the current question and building on a
-   * colleague's are the same write; only the wording differs.
+   * The source was opened from Reuse (F38) rather than Extend (F23). Both copy
+   * a proposal into its editor and save a new one that records where it came
+   * from, but they are different acts: reuse brings your earlier idea onto this
+   * question, extend builds on an idea on the board in front of you — your own
+   * included. Said by the button that opened it, never guessed from who wrote
+   * the source.
    */
-  isReusingOwn: boolean;
+  isReusing: boolean;
+  /** Extending a proposal this viewer wrote, so the editor says "your" instead of a name. */
+  isExtendingOwn: boolean;
   /**
    * The proposal being rewritten in place, as opposed to copied. Editing keeps
    * the original's id, author and position; extending creates a new proposal
@@ -42,7 +46,10 @@ export interface CreativeToolsContextValue {
   submissionStatus: ProposalSubmissionStatus;
   submissionError: string | null;
   openTool: (tool: ToolKind) => void;
+  /** Open a copy of a proposal on the board to build on it (F23). */
   openEditorForExtend: (proposal: BoardItem) => void;
+  /** Open a copy of one of your proposals from an earlier question (F38). */
+  openEditorForReuse: (proposal: BoardItem) => void;
   /** Reopen a proposal's own editor to change what it says (F16). */
   openEditorForEdit: (proposal: BoardItem) => void;
   /** False when the open tool's close guard kept it open. */

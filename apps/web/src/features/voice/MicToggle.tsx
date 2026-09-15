@@ -44,6 +44,11 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
   const onToggle = useCallback(() => void toggle(), [toggle]);
   useMicShortcut(onToggle, !disabled);
 
+  // Voice is not configured on this server, so there is no microphone to
+  // offer. Hiding beats a permanently greyed button that explains nothing.
+  // Guarded here rather than at each call site so no caller has to remember.
+  if (status === 'unavailable') return null;
+
   const label = name && name.length > 0 ? name : 'You';
   const action = micEnabled ? 'Mute your microphone' : 'Unmute your microphone';
 

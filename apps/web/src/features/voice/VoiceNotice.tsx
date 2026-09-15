@@ -39,6 +39,12 @@ function currentNotice(props: VoiceNoticeProps): Notice | null {
     unlockAudio,
   } = props;
 
+  // A server with no LiveKit credentials has nothing to say about the room.
+  // Checked before everything else because `micStatus` can still be a stale
+  // `blocked` from an earlier connected period, which would otherwise raise a
+  // microphone banner about a room that no longer exists.
+  if (status === 'unavailable') return null;
+
   // Nothing to hear beats nothing to say: if the browser is holding audio back,
   // the room is silent no matter what the microphone is doing.
   if (audioBlocked) {

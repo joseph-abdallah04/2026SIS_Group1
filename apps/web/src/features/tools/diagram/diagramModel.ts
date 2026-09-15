@@ -900,20 +900,28 @@ export function deleteEdge(
   return edges.filter((edge) => edge.from !== target.from || edge.to !== target.to);
 }
 
+/** The box every element on a canvas fits inside, in sheet units. */
+export interface DiagramContentBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 /**
- * How far the artwork has to move to sit inside the preview frame.
+ * The extent of everything on the canvas, or null when there is nothing.
  *
- * Ink is measured alongside the nodes because both are shifted by the same
- * amount: normalising the shapes on their own would slide them out from under
- * a sketch that was drawn around them.
+ * Every kind of element is measured together, because every kind moves
+ * together: shifting the shapes on their own would slide them out from under a
+ * sketch that was drawn around them.
  */
-function normalizationDelta(
+export function diagramContentBounds(
   nodes: readonly DiagramNode[],
   ink: readonly StudioInkStroke[],
   paths: readonly PathElement[] = [],
   tables: readonly TableElement[] = [],
   arrows: readonly ArrowElement[] = [],
-): DiagramPoint {
+): DiagramContentBounds | null {
   const xs: number[] = [];
   const ys: number[] = [];
   const rights: number[] = [];
@@ -961,18 +969,127 @@ function normalizationDelta(
     }
   }
 
-  if (xs.length === 0) return { x: 0, y: 0 };
+  if (xs.length === 0) return null;
 
   return {
-    x: Math.min(
-      DIAGRAM_PREVIEW_PADDING - Math.min(...xs),
-      DIAGRAM_CANVAS_WIDTH - Math.max(...rights),
-    ),
-    y: Math.min(
-      DIAGRAM_PREVIEW_PADDING - Math.min(...ys),
-      DIAGRAM_CANVAS_HEIGHT - Math.max(...bottoms),
-    ),
+    left: Math.min(...xs),
+    top: Math.min(...ys),
+    right: Math.max(...rights),
+    bottom: Math.max(...bottoms),
   };
+}
+
+/**
+ * How far the artwork has to move to sit inside the preview frame: tucked into
+ * the top-left corner, so the board's card frames the artwork and not the sheet.
+ */
+function normalizationDelta(
+  nodes: readonly DiagramNode[],
+  ink: readonly StudioInkStroke[],
+  paths: readonly PathElement[] = [],
+  tables: readonly TableElement[] = [],
+  arrows: readonly ArrowElement[] = [],
+): DiagramPoint {
+  const bounds = diagramContentBounds(nodes, ink, paths, tables, arrows);
+  if (!bounds) return { x: 0, y: 0 };
+
+  return {
+    x: Math.min(DIAGRAM_PREVIEW_PADDING - bounds.left, DIAGRAM_CANVAS_WIDTH - bounds.right),
+    y: Math.min(DIAGRAM_PREVIEW_PADDING - bounds.top, DIAGRAM_CANVAS_HEIGHT - bounds.bottom),
+  };
+}
+
+/** The element collections a canvas holds, as the editor and an artifact both carry them. */
+interface StudioContent {
+  nodes: DiagramNode[];
+  ink?: StudioInkStroke[];
+  paths?: PathElement[];
+  tables?: TableElement[];
+  arrows?: ArrowElement[];
+}
+
+/**
+ * Move everything on the canvas by the same amount.
+ *
+ * A bound arrow end is drawn from the element it names, so only its stored
+ * fallback point moves — but it has to move, or detaching the arrow later would
+ * send that end back to where the canvas used to be.
+ */
+function shiftStudioContent<T extends StudioContent>(content: T, dx: number, dy: number): T {
+  return {
+    ...content,
+    nodes: content.nodes.map((node) => ({
+      ...node,
+      x: Math.round(node.x + dx),
+      y: Math.round(node.y + dy),
+    })),
+    ...(content.ink
+      ? {
+          ink: content.ink.map((stroke) => ({
+            ...stroke,
+            points: stroke.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+          })),
+        }
+      : {}),
+    ...(content.paths
+      ? {
+          paths: content.paths.map((path) => ({
+            ...path,
+            anchors: path.anchors.map((point) => ({
+              ...point,
+              x: Math.round((point.x + dx) * 10) / 10,
+              y: Math.round((point.y + dy) * 10) / 10,
+            })),
+          })),
+        }
+      : {}),
+    ...(content.tables
+      ? {
+          tables: content.tables.map((table) => ({
+            ...table,
+            x: Math.round(table.x + dx),
+            y: Math.round(table.y + dy),
+          })),
+        }
+      : {}),
+    ...(content.arrows
+      ? { arrows: content.arrows.map((arrow) => offsetArrow(arrow, dx, dy)) }
+      : {}),
+  };
+}
+
+/**
+ * Put a proposal's artwork in the middle of the sheet, for opening it again.
+ *
+ * Proposing tucks the artwork into the sheet's top-left corner so the board's
+ * card is framed around it. Reopened as it is stored, a single shape would sit
+ * jammed in that corner of an otherwise empty canvas. Centring it again is only
+ * a change of where it sits on the sheet: proposing tucks it back into the
+ * same corner, so the card on the board looks exactly as it did.
+ *
+ * Content that is somehow wider or taller than the sheet is left where it is
+ * on that axis, since there is no position on it that fits.
+ */
+export function centreStudioContent<T extends StudioContent>(content: T): T {
+  const bounds = diagramContentBounds(
+    content.nodes,
+    content.ink ?? [],
+    content.paths ?? [],
+    content.tables ?? [],
+    content.arrows ?? [],
+  );
+  if (!bounds) return content;
+
+  const centreOnAxis = (low: number, high: number, sheet: number) => {
+    const size = high - low;
+    if (size > sheet) return 0;
+    // Rounded to whole units, so shapes land on the grid they were drawn on.
+    return Math.round((sheet - size) / 2 - low);
+  };
+  const dx = centreOnAxis(bounds.left, bounds.right, DIAGRAM_CANVAS_WIDTH);
+  const dy = centreOnAxis(bounds.top, bounds.bottom, DIAGRAM_CANVAS_HEIGHT);
+  if (dx === 0 && dy === 0) return content;
+  return shiftStudioContent(content, dx, dy);
 }
 
 export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): DiagramNode[] {
@@ -983,6 +1100,36 @@ export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): Diag
     x: Math.round(node.x + delta.x),
     y: Math.round(node.y + delta.y),
   }));
+}
+
+/**
+ * What proposing this canvas would store, as a string, or null when it could
+ * not be proposed at all.
+ *
+ * For telling an extension that changes its original from one that does not.
+ * Comparing canvas positions is not enough: proposing tucks the artwork into
+ * the sheet's corner, so selecting everything and nudging it lands the very
+ * same artifact. Comparing what would be stored is exactly the question.
+ */
+export function preparedDiagramKey(content: {
+  nodes: readonly DiagramNode[];
+  edges: readonly DiagramEdge[];
+  ink?: readonly StudioInkStroke[];
+  z?: readonly string[];
+  paths?: readonly PathElement[];
+  tables?: readonly TableElement[];
+  arrows?: readonly ArrowElement[];
+}): string | null {
+  const prepared = prepareDiagram(
+    content.nodes,
+    content.edges,
+    content.ink ?? [],
+    content.z ?? [],
+    content.paths ?? [],
+    content.tables ?? [],
+    content.arrows ?? [],
+  );
+  return prepared.ok ? JSON.stringify(prepared.artifact) : null;
 }
 
 export function prepareDiagram(
@@ -1041,19 +1188,23 @@ export function prepareDiagram(
   // Shapes and ink shift together, so a sketch drawn around a diagram stays
   // registered with it once the whole thing is framed for the board preview.
   const delta = normalizationDelta(normalizedNodes, ink, paths, tables, arrows);
-  const shiftedNodes = normalizedNodes.map((node) => ({
-    ...node,
-    x: Math.round(node.x + delta.x),
-    y: Math.round(node.y + delta.y),
-  }));
+  // One shift for every kind of element — the same one reopening a proposal
+  // uses to centre it — so the two can never disagree about what moves.
+  const shifted = shiftStudioContent(
+    {
+      nodes: normalizedNodes,
+      ink: [...ink],
+      paths: [...paths],
+      tables: [...tables],
+      arrows: [...arrows],
+    },
+    delta.x,
+    delta.y,
+  );
+  const shiftedNodes = shifted.nodes;
   // Simplified and packed once, at the boundary: the editor keeps every sampled
   // point for a faithful undo, and only what is proposed needs to be compact.
-  const shiftedInk = inkToData(
-    ink.map((stroke) => ({
-      ...stroke,
-      points: stroke.points.map((point) => ({ x: point.x + delta.x, y: point.y + delta.y })),
-    })),
-  );
+  const shiftedInk = inkToData(shifted.ink ?? []);
 
   const pathIds = new Set(paths.map((path) => path.id));
   if (
@@ -1065,14 +1216,7 @@ export function prepareDiagram(
 
   // Paths move with the shapes and the ink, so a line drawn against a diagram
   // stays where its author put it once the whole canvas is framed.
-  const shiftedPaths = paths.map((path) => ({
-    ...path,
-    anchors: path.anchors.map((point) => ({
-      ...point,
-      x: Math.round((point.x + delta.x) * 10) / 10,
-      y: Math.round((point.y + delta.y) * 10) / 10,
-    })),
-  }));
+  const shiftedPaths = shifted.paths ?? [];
 
   const tableIds = new Set(tables.map((table) => table.id));
   if (
@@ -1082,11 +1226,7 @@ export function prepareDiagram(
     return { ok: false, error: 'Every element on the canvas must have a unique id.' };
   }
 
-  const shiftedTables = tables.map((table) => ({
-    ...table,
-    x: Math.round(table.x + delta.x),
-    y: Math.round(table.y + delta.y),
-  }));
+  const shiftedTables = shifted.tables ?? [];
 
   const arrowIds = new Set(arrows.map((arrow) => arrow.id));
   if (
@@ -1117,9 +1257,11 @@ export function prepareDiagram(
     endpoint.elementId !== undefined && !bindable.has(endpoint.elementId)
       ? { x: endpoint.x, y: endpoint.y }
       : endpoint;
-  const shiftedArrows = arrows
-    .map((arrow) => offsetArrow(arrow, delta.x, delta.y))
-    .map((arrow) => ({ ...arrow, from: detach(arrow.from), to: detach(arrow.to) }));
+  const shiftedArrows = (shifted.arrows ?? []).map((arrow) => ({
+    ...arrow,
+    from: detach(arrow.from),
+    to: detach(arrow.to),
+  }));
 
   const known = new Set<string>([
     ...shiftedNodes.map((node) => node.id),

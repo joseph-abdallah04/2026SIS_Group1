@@ -15,7 +15,7 @@ interface CreativeToolsProviderProps {
   /** The question the board is on; a draft is kept per question. */
   questionId: string;
   isLive: boolean;
-  /** Who is looking, so the editors can tell reuse from extending (F38). */
+  /** Who is looking, so extending your own proposal can say "your". */
   viewerId: string | null;
   proposals: readonly BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
@@ -34,10 +34,14 @@ export function CreativeToolsProvider({
 }: CreativeToolsProviderProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [extensionSource, setExtensionSource] = useState<BoardItem | null>(null);
+  // Which button opened the copy. Meaningless without a source, and cleared
+  // with it everywhere below.
+  const [extensionKind, setExtensionKind] = useState<'extend' | 'reuse'>('extend');
   const [editSource, setEditSource] = useState<BoardItem | null>(null);
   const activeTool = parseToolKind(searchParams.get('tool'));
   const submission = useProposalSubmission({
     extensionSource,
+    isReusing: extensionKind === 'reuse',
     editSource,
     isLive,
     proposals,
@@ -68,21 +72,35 @@ export function CreativeToolsProvider({
 
   // The three entry points are mutually exclusive, so each clears the others:
   // a stale source would decide whether the next save creates or overwrites.
+  //
+  // None of them opens while a proposal is on its way. Opening resets the
+  // submission, and resetting it mid-send releases the lock that stops a second
+  // send and pins the first one's result on whatever opened next. The toolbar
+  // already refuses by going dim; a card's menu can be reached without it.
+  const sending = () => submission.status === 'submitting';
+
   function openTool(tool: ToolKind) {
+    if (sending()) return;
     submission.reset();
     setExtensionSource(null);
     setEditSource(null);
     setToolParam(tool, activeTool !== null);
   }
 
-  function openEditorForExtend(proposal: BoardItem) {
+  function openCopy(proposal: BoardItem, kind: 'extend' | 'reuse') {
+    if (sending()) return;
     submission.reset();
     setEditSource(null);
     setExtensionSource(proposal);
+    setExtensionKind(kind);
     setToolParam(proposal.type, activeTool !== null);
   }
 
+  const openEditorForExtend = (proposal: BoardItem) => openCopy(proposal, 'extend');
+  const openEditorForReuse = (proposal: BoardItem) => openCopy(proposal, 'reuse');
+
   function openEditorForEdit(proposal: BoardItem) {
+    if (sending()) return;
     submission.reset();
     setExtensionSource(null);
     setEditSource(proposal);
@@ -113,7 +131,12 @@ export function CreativeToolsProvider({
         activeTool,
         draftScope: { sessionId, questionId, viewerId },
         extensionSource,
-        isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
+        isReusing: extensionSource !== null && extensionKind === 'reuse',
+        isExtendingOwn:
+          extensionSource !== null &&
+          extensionKind === 'extend' &&
+          viewerId !== null &&
+          extensionSource.authorId === viewerId,
         editSource,
         isLive,
         stickyDraftKey:
@@ -122,6 +145,7 @@ export function CreativeToolsProvider({
         submissionError: submission.error,
         openTool,
         openEditorForExtend,
+        openEditorForReuse,
         openEditorForEdit,
         closeTool,
         setCloseGuard,

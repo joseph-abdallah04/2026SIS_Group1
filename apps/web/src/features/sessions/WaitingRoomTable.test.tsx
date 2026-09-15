@@ -53,9 +53,9 @@ describe('WaitingRoomTable', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Joey, Leader' }).closest('.rt-waiting-seat')).not.toHaveAttribute(
-      'data-just-joined',
-    );
+    expect(
+      screen.getByRole('button', { name: 'Joey, Leader' }).closest('.rt-waiting-seat'),
+    ).not.toHaveAttribute('data-just-joined');
 
     rerender(
       <WaitingRoomTable
@@ -71,8 +71,71 @@ describe('WaitingRoomTable', () => {
       'data-just-joined',
       'true',
     );
-    expect(screen.getByRole('button', { name: 'Joey, Leader' }).closest('.rt-waiting-seat')).not.toHaveAttribute(
-      'data-just-joined',
+    expect(
+      screen.getByRole('button', { name: 'Joey, Leader' }).closest('.rt-waiting-seat'),
+    ).not.toHaveAttribute('data-just-joined');
+  });
+
+  it('rings the seat of whoever is speaking, and only theirs', () => {
+    const { container } = render(
+      <WaitingRoomTable
+        participants={[
+          { id: 'u2', displayName: 'Alice Smith' },
+          { id: 'leader-1', displayName: 'Joey' },
+        ]}
+        leaderId="leader-1"
+        voiceParticipants={[
+          { identity: 'u2', name: 'Alice Smith', isLocal: false, isSpeaking: true, isMuted: false },
+          { identity: 'leader-1', name: 'Joey', isLocal: true, isSpeaking: false, isMuted: false },
+        ]}
+      />,
     );
+
+    const ringed = container.querySelectorAll('.rt-voice-seat[data-speaking="true"]');
+    expect(ringed).toHaveLength(1);
+    expect(ringed[0]).toContainElement(screen.getByRole('button', { name: 'Alice Smith' }));
+  });
+
+  it('ignores a voice participant who has no seat', () => {
+    render(
+      <WaitingRoomTable
+        participants={[{ id: 'leader-1', displayName: 'Joey' }]}
+        leaderId="leader-1"
+        voiceParticipants={[
+          // Socket presence is the roster; someone heard but not seated is not
+          // drawn a chair of their own.
+          { identity: 'ghost', name: 'Ghost', isLocal: false, isSpeaking: true, isMuted: false },
+          { identity: 'leader-1', name: 'Joey', isLocal: true, isSpeaking: false, isMuted: false },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Ghost' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('does not replay the arrival animation when only voice changes', () => {
+    const participants = [
+      { id: 'u2', displayName: 'Alice Smith' },
+      { id: 'leader-1', displayName: 'Joey' },
+    ];
+    const { container, rerender } = render(
+      <WaitingRoomTable participants={participants} leaderId="leader-1" voiceParticipants={[]} />,
+    );
+
+    // Speech edges re-render this table constantly. If that churn reached the
+    // join/leave bookkeeping, every seat would flash its arrival animation
+    // each time somebody drew breath.
+    rerender(
+      <WaitingRoomTable
+        participants={participants}
+        leaderId="leader-1"
+        voiceParticipants={[
+          { identity: 'u2', name: 'Alice Smith', isLocal: false, isSpeaking: true, isMuted: false },
+        ]}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-just-joined="true"]')).toHaveLength(0);
   });
 });

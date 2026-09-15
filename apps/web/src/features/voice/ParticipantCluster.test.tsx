@@ -323,4 +323,12 @@ describe('ParticipantCluster', () => {
       expect(screen.queryByRole('button', { name: /Show everyone/ })).toBeNull();
     });
   });
+
+  it('renders nothing when the server has no voice', () => {
+    // Unlike `failed`, there is no room to be listed in and no retry to offer,
+    // so an empty chip explaining its own emptiness is worse than no chip.
+    const { container } = render(<ParticipantCluster participants={[]} status="unavailable" />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
 });

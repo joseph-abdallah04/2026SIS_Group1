@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { SessionUserPayload } from '@roundtable/shared/events';
 
+import { useSustainedSpeaking, voiceStateByIdentity, type VoiceParticipant } from '../voice';
 import { WaitingRoomSeat } from './WaitingRoomSeat';
 import {
   colorsForParticipants,
@@ -14,6 +15,14 @@ import {
 interface WaitingRoomTableProps {
   participants: SessionUserPayload[] | null;
   leaderId: string | null;
+  /**
+   * Who is in the voice room, joined onto the seats by user id (LiveKit's
+   * identity is the user id). A different set from `participants`, which is
+   * socket presence: someone can be seated while still connecting, with a
+   * blocked microphone, or on a server with no voice at all. Defaults to
+   * empty, which draws exactly the plain seats this table drew before voice.
+   */
+  voiceParticipants?: readonly VoiceParticipant[];
   children?: ReactNode;
 }
 
@@ -41,11 +50,24 @@ function prefersReducedMotion(): boolean {
  * seats sit just outside the rim and keep `user.id` as their React key
  * so they slide when the ring reflows.
  */
-export function WaitingRoomTable({ participants, leaderId, children }: WaitingRoomTableProps) {
-  const ordered = useMemo(
-    () => orderSeats(participants ?? [], leaderId),
-    [participants, leaderId],
-  );
+const NO_VOICE: readonly VoiceParticipant[] = [];
+
+export function WaitingRoomTable({
+  participants,
+  leaderId,
+  voiceParticipants = NO_VOICE,
+  children,
+}: WaitingRoomTableProps) {
+  // Called here rather than by the page: this re-renders on every speech edge
+  // and again when each 600ms tail expires, and one level up that would
+  // repaint the invite card and the question list at the same rate. The
+  // layout effect below depends only on memos keyed off `participants` and
+  // `leaderId`, so a voice-only render does not re-run the join/leave
+  // bookkeeping.
+  const speaking = useSustainedSpeaking(voiceParticipants);
+  const voiceById = useMemo(() => voiceStateByIdentity(voiceParticipants), [voiceParticipants]);
+
+  const ordered = useMemo(() => orderSeats(participants ?? [], leaderId), [participants, leaderId]);
   const colors = useMemo(
     () => colorsForParticipants(ordered.map((person) => person.id)),
     [ordered],
@@ -53,9 +75,9 @@ export function WaitingRoomTable({ participants, leaderId, children }: WaitingRo
   const positions = useMemo(() => seatPositions(ordered.length), [ordered.length]);
 
   const seenRef = useRef<Set<string> | null>(null);
-  const infoRef = useRef<Map<string, { displayName: string; swatch: SeatSwatch; wasLeader: boolean }>>(
-    new Map(),
-  );
+  const infoRef = useRef<
+    Map<string, { displayName: string; swatch: SeatSwatch; wasLeader: boolean }>
+  >(new Map());
   const lastPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   const [justJoined, setJustJoined] = useState<Set<string>>(() => new Set());
@@ -141,7 +163,9 @@ export function WaitingRoomTable({ participants, leaderId, children }: WaitingRo
       <div className="rt-waiting-scene relative aspect-square">
         <div className="rt-waiting-table" aria-hidden="true" />
         {children ? (
-          <div className="absolute inset-[14%] z-10 flex items-center justify-center">{children}</div>
+          <div className="absolute inset-[14%] z-10 flex items-center justify-center">
+            {children}
+          </div>
         ) : null}
 
         {ordered.map((person, index) => {
@@ -156,6 +180,8 @@ export function WaitingRoomTable({ participants, leaderId, children }: WaitingRo
               isLeader={person.id === leaderId}
               justJoined={justJoined.has(person.id)}
               leaving={false}
+              isSpeaking={speaking.has(person.id)}
+              isMuted={voiceById.get(person.id)?.isMuted ?? false}
               x={spot.x}
               y={spot.y}
               onArriveEnd={() => clearJustJoined(person.id)}

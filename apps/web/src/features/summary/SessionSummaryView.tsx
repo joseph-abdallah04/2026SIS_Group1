@@ -89,6 +89,7 @@ function QuestionRecap({
                 >
                   <ProposalCard
                     item={item}
+                    viewerId={viewerId}
                     isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId != null && item.authorId === leaderId}
                   />

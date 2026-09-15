@@ -43,8 +43,12 @@ export const CARD_RADIUS_PX = 16;
  * against it: a probe that set the byline differently would size the card for
  * a footer it does not have.
  */
+// Baseline-aligned, not centred: the byline mixes the name and time with smaller
+// marks ("Edited", "Extended", the leader's L), and centring boxes of different
+// sizes leaves each word sitting at a slightly different height. On a shared
+// baseline they read as one straight line of text.
 export const CARD_FOOT_CLASS =
-  'flex items-center justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint';
+  'flex items-baseline justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint';
 export const CARD_RADIUS = `${CARD_RADIUS_PX}px`;
 export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21,0.04)';
 
@@ -93,6 +97,15 @@ export const REACTION_HOVER_FILL = '#F4F6F7';
 export const REMOVE_HOVER_FILL = '#FDECEC';
 export const REMOVE_HOVER_BORDER = '#EFBDBD';
 export const REMOVE_HOVER_INK = '#A93B34';
+
+/**
+ * The outline on a card whose action menu is open.
+ *
+ * Blue, deliberately outside the warm palette: it is the selection colour
+ * people know from design tools, and it must never be mistaken for the amber
+ * shortlist ring a card can carry at the same time.
+ */
+export const MENU_TARGET_OUTLINE = '#3B82F6';
 
 /** Plate behind a drawing's artwork. */
 export const THUMB_BACKGROUND = '#F7F7F8';
