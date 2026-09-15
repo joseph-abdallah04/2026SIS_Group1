@@ -34,8 +34,6 @@ interface StudioOverlayProps {
 export interface StudioStatus {
   /** Counts worth naming, already worded: "2 elements", "1 arrow". */
   parts: readonly string[];
-  /** Changed since it was opened, and not yet proposed. */
-  unsaved: boolean;
 }
 
 const ReportStudioStatus = createContext<(status: StudioStatus) => void>(() => undefined);
@@ -132,14 +130,14 @@ export function StudioActions({
  * Tells the studio what the editor's canvas holds, so its minimised face can
  * say so. A no-op outside the studio, as in an editor rendered on its own.
  */
-export function useReportStudioStatus(parts: readonly string[], unsaved: boolean) {
+export function useReportStudioStatus(parts: readonly string[]) {
   const report = useContext(ReportStudioStatus);
   // One value to compare between renders, so a new array of the same words
   // does not report again.
   const wording = JSON.stringify(parts);
   useEffect(() => {
-    report({ parts: JSON.parse(wording) as string[], unsaved });
-  }, [report, wording, unsaved]);
+    report({ parts: JSON.parse(wording) as string[] });
+  }, [report, wording]);
 }
 
 interface StudioProposeButtonProps {
@@ -669,9 +667,10 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
     if (current.moved) dropBack();
   };
 
-  const summary = status
-    ? [status.parts.join(', '), status.unsaved ? 'unsaved' : null].filter(Boolean).join(' · ')
-    : '';
+  // What the canvas holds, and nothing about saving: resting on the board loses
+  // nothing, and a diagram is kept as a draft anyway, so "unsaved" was neither
+  // true nor anything to act on from here.
+  const summary = status ? status.parts.join(', ') : '';
 
   const onBoard = ON_BOARD.has(phase);
   // Worded only while the studio is down or on its way, so the canvas's own

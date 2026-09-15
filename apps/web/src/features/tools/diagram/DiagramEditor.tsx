@@ -1007,18 +1007,15 @@ export function DiagramEditor() {
   // count, as they are to whoever drew them.
   const plural = (count: number, one: string, many: string) =>
     `${count} ${count === 1 ? one : many}`;
-  useReportStudioStatus(
-    [
-      plural(nodes.length, 'element', 'elements'),
-      plural(edges.length + arrows.length, 'arrow', 'arrows'),
-      ...(ink.length > 0 ? [plural(ink.length, 'stroke', 'strokes')] : []),
-      ...(paths.length > 0 ? [plural(paths.length, 'path', 'paths')] : []),
-      ...(history.snapshot.tables?.length
-        ? [plural(history.snapshot.tables.length, 'table', 'tables')]
-        : []),
-    ],
-    history.isDirty,
-  );
+  useReportStudioStatus([
+    plural(nodes.length, 'element', 'elements'),
+    plural(edges.length + arrows.length, 'arrow', 'arrows'),
+    ...(ink.length > 0 ? [plural(ink.length, 'stroke', 'strokes')] : []),
+    ...(paths.length > 0 ? [plural(paths.length, 'path', 'paths')] : []),
+    ...(history.snapshot.tables?.length
+      ? [plural(history.snapshot.tables.length, 'table', 'tables')]
+      : []),
+  ]);
   const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);

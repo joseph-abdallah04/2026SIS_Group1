@@ -8,7 +8,7 @@ import { StudioActions, StudioOverlay, useReportStudioStatus } from './StudioOve
 /** An editor with state of its own, to show peeking does not throw it away. */
 function Canvas() {
   const [count, setCount] = useState(0);
-  useReportStudioStatus([`${count} ${count === 1 ? 'element' : 'elements'}`, '1 arrow'], count > 0);
+  useReportStudioStatus([`${count} ${count === 1 ? 'element' : 'elements'}`, '1 arrow']);
   return (
     <button type="button" onClick={() => setCount((current) => current + 1)}>
       Add element ({count})
@@ -114,7 +114,7 @@ describe('studio overlay', () => {
     expect(minimised).not.toBeNull();
     expect(minimised!.textContent).toContain('Creative studio · Minimised');
     expect(minimised!.textContent).toContain('New studio');
-    expect(minimised!.textContent).toContain('2 elements, 1 arrow · unsaved');
+    expect(minimised!.textContent).toContain('New studio · 2 elements, 1 arrow');
     // The canvas below the bottom of the window is out of reach meanwhile.
     expect(
       screen.getByRole('button', { name: 'Add element (2)' }).closest('[inert]'),
@@ -134,14 +134,17 @@ describe('studio overlay', () => {
     expect(screen.getByRole('button', { name: 'Peek at board' })).toHaveFocus();
   });
 
-  it('does not call a canvas with nothing changed unsaved', async () => {
+  // Resting on the board loses nothing, and a diagram is kept as a draft, so
+  // there is nothing about saving for it to say.
+  it('says what the canvas holds, and nothing about saving', async () => {
     const user = userEvent.setup();
     renderStudio();
 
+    await user.click(screen.getByRole('button', { name: 'Add element (0)' }));
     await user.click(screen.getByRole('button', { name: 'Peek at board' }));
 
-    expect(bar()!.textContent).toContain('0 elements, 1 arrow');
-    expect(bar()!.textContent).not.toContain('unsaved');
+    expect(bar()!.textContent).toContain('1 element, 1 arrow');
+    expect(bar()!.textContent).not.toMatch(/unsaved/i);
   });
 
   it('comes back on Escape pressed anywhere on the board', async () => {
