@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -372,6 +372,36 @@ describe('lists in RichStickyField', () => {
     expect(current().levels).toEqual([0, 0]);
   });
 
+  // Tab stays in the note only when it nests something. An item that cannot go
+  // any deeper, or the first of a list, lets it move on like anywhere else.
+  it.each([
+    ['the first item of a list', toStickyNote({ text: 'Plan', lines: ['bullet'] }), 2],
+    [
+      'an item already as deep as it goes',
+      toStickyNote({
+        text: 'a\nb\nc',
+        lines: ['bullet', 'bullet', 'bullet'],
+        levels: [0, 1, 2],
+      }),
+      5,
+    ],
+  ])('leaves Tab to the page on %s', async (_, initial, caret) => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <Editor initial={initial} />
+        <button type="button">Next</button>
+      </>,
+    );
+
+    await user.click(noteBox());
+    select(caret);
+    await user.keyboard('{Tab}');
+
+    expect(current().levels).toEqual(initial.levels);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }));
+  });
+
   // Tab is the list's only while there is a list: anywhere else it moves on,
   // so the note never traps the keyboard.
   it('leaves Tab to the page on a line that is not in a list', async () => {
@@ -535,6 +565,55 @@ describe('links in RichStickyField', () => {
     expect(current().links).toEqual([{ from: 9, to: 13, href: 'https://example.com/spec' }]);
   });
 
+  /**
+   * A paste as a browser sends it: the paste event, and a `beforeinput` for it
+   * as well, in either order. Chrome skips the second once the first is
+   * cancelled; not every browser does.
+   */
+  function pasteBothWays(text: string, beforeInputFirst: boolean) {
+    const beforeInput = () =>
+      noteBox().dispatchEvent(
+        new InputEvent('beforeinput', {
+          inputType: 'insertFromPaste',
+          data: text,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    const paste = () => fireEvent.paste(noteBox(), { clipboardData: { getData: () => text } });
+    act(() => {
+      if (beforeInputFirst) beforeInput();
+      paste();
+      if (!beforeInputFirst) beforeInput();
+    });
+  }
+
+  it.each([
+    ['before', true],
+    ['after', false],
+  ])('pastes once when the beforeinput for it comes %s the paste', async (_, first) => {
+    const user = userEvent.setup();
+    render(<Editor initial={toStickyNote({ text: 'Read ' })} />);
+
+    await user.click(noteBox());
+    select(5);
+    pasteBothWays('the spec', first);
+
+    expect(current().text).toBe('Read the spec');
+  });
+
+  it('links the words an address is pasted over once, however the paste arrives', async () => {
+    const user = userEvent.setup();
+    render(<Editor initial={toStickyNote({ text: 'Read the spec' })} />);
+
+    await user.click(noteBox());
+    select(9, 13);
+    pasteBothWays('https://example.com/spec', true);
+
+    expect(current().text).toBe('Read the spec');
+    expect(current().links).toEqual([{ from: 9, to: 13, href: 'https://example.com/spec' }]);
+  });
+
   it('pastes anything that is not only a web address as words', async () => {
     const user = userEvent.setup();
     render(<Editor initial={toStickyNote({ text: 'Read the spec' })} />);
@@ -616,5 +695,51 @@ describe('links in RichStickyField', () => {
     await user.type(noteBox(), 'notes.txt and example.com{Enter}');
 
     expect(current().links).toEqual([]);
+  });
+});
+
+describe('composing in RichStickyField', () => {
+  /** What an input method does: writes into the field itself, then says it is done. */
+  function compose(write: () => void) {
+    act(() => {
+      write();
+      noteBox().dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    });
+  }
+
+  // Only what was composed is cut back, never the words after it.
+  it('holds composed words to the character limit, keeping the words after them', () => {
+    render(<Editor initial={toStickyNote({ text: 'Hello there' })} limit={12} />);
+
+    compose(() => {
+      (lineElements()[0]!.firstChild as Text).data = 'Hello big there';
+    });
+
+    expect(current().text).toBe('Hello bthere');
+    expect(noteBox().textContent).toBe('Hello bthere');
+  });
+
+  it('holds composed lines to the line limit', () => {
+    render(<Editor initial={toStickyNote({ text: 'One\nTwo' })} lineLimit={2} />);
+
+    compose(() => {
+      const line = document.createElement('div');
+      line.className = 'rt-sticky-line';
+      line.textContent = 'Three';
+      noteBox().append(line);
+    });
+
+    expect(current().text).toBe('One\nTwo');
+    expect(lineElements()).toHaveLength(2);
+  });
+
+  it('takes composed words that fit as they are', () => {
+    render(<Editor initial={toStickyNote({ text: 'Hello there' })} />);
+
+    compose(() => {
+      (lineElements()[0]!.firstChild as Text).data = 'Hello big there';
+    });
+
+    expect(current().text).toBe('Hello big there');
   });
 });

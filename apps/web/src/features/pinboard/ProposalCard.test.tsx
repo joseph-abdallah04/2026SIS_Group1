@@ -205,15 +205,25 @@ describe('sticky card', () => {
 
   // Longer than even the largest square holds: every word stays on the card,
   // which keeps the largest width and is left to grow taller.
-  it('shows all of a note too long for the largest square, nothing hidden', () => {
+  // jsdom lays nothing out, so the height itself is measured in a browser. What
+  // this holds is the contract that lets the card grow: the square is a floor,
+  // and nothing between the card and the note can be squeezed below the note,
+  // which in a column that fills its card is what cut a long one off.
+  it('lets a note too long for the largest square make the card taller', () => {
     const text = `Start${'\n'.repeat(20)}the end`;
     const { container } = render(<ProposalCard item={stickyItem(text)} />);
 
     const card = container.querySelector('article')!;
+    const note = container.querySelector<HTMLElement>('[data-sticky-note]')!;
     expect(card.style.width).toBe('339px');
     expect(card.style.minHeight).toBe('339px');
     expect(card.style.height).toBe('');
-    expect(container.querySelector('[data-sticky-note]')?.textContent).toContain('the end');
+    for (let box: HTMLElement | null = note; box && box !== card; box = box.parentElement) {
+      expect(box.className).not.toMatch(/\bmin-h-0\b|\boverflow-(hidden|auto|clip)\b/);
+      expect(box.style.height).toBe('');
+      expect(box.style.maxHeight).toBe('');
+    }
+    expect(note.textContent).toContain('the end');
     expect(screen.queryByRole('button', { name: 'Read more' })).toBeNull();
   });
 

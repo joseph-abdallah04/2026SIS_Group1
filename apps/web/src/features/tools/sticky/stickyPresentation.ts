@@ -21,9 +21,13 @@ export const STICKY_LINE_HEIGHT = 1.45;
  * of spaces and indents. It may well be deliberate, and a board that tidied it
  * would be rewriting somebody's note. It also takes the room it takes, so the
  * size a note is given counts it.
+ *
+ * Fills the paper above the byline, so a short note sits at the top of its
+ * square, but never shrinks below its own words: a note longer than the
+ * largest square makes the card taller rather than being cut off by it.
  */
 export const STICKY_NOTE_CLASS =
-  'min-h-0 flex-1 wrap-break-word whitespace-pre-wrap font-medium text-rt-ink';
+  'flex-1 wrap-break-word whitespace-pre-wrap font-medium text-rt-ink';
 export const STICKY_NOTE_PADDING = '14px 14px 6px';
 
 /**

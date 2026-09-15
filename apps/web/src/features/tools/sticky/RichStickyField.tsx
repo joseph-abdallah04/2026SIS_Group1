@@ -52,7 +52,6 @@ import {
   stylesThroughout,
   toggleList,
   toggleStyle,
-  touchesList,
   type StickyLines,
   type StickyNote,
   type StickySegment,
@@ -310,6 +309,51 @@ function readNote(root: HTMLElement): StickyNote {
 function withoutBrokenEnd(text: string): string {
   const last = text.charCodeAt(text.length - 1);
   return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+}
+
+/**
+ * As much of `data` as fits in the note in place of `range`: no more characters
+ * than the limit, and no more lines. Whatever does not fit is cut from the end
+ * of what is going in, never from what the note already says, so Enter at the
+ * line limit does nothing and a paste stops at the last line there is room for.
+ */
+function fitting(
+  note: StickyNote,
+  range: Selection,
+  data: string,
+  limit: number,
+  lineLimit: number | undefined,
+): string {
+  const room = limit - (note.text.length - (range.end - range.start));
+  const text = withoutBrokenEnd(data.slice(0, Math.max(0, room)));
+  if (lineLimit === undefined || !text.includes('\n')) return text;
+  const kept = lineCount(note.text) - (lineCount(note.text.slice(range.start, range.end)) - 1);
+  return text
+    .split('\n')
+    .slice(0, Math.max(0, lineLimit - kept) + 1)
+    .join('\n');
+}
+
+/**
+ * The stretch that changed between two versions of a note's text: where it
+ * starts, and where it ends in each. Everything before it and after it is the
+ * same in both.
+ */
+function changedStretch(
+  before: string,
+  after: string,
+): { start: number; endBefore: number; endAfter: number } {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) {
+    start += 1;
+  }
+  let endBefore = before.length;
+  let endAfter = after.length;
+  while (endBefore > start && endAfter > start && before[endBefore - 1] === after[endAfter - 1]) {
+    endBefore -= 1;
+    endAfter -= 1;
+  }
+  return { start, endBefore, endAfter };
 }
 
 function withStyle(styles: readonly StickyMarkStyle[], style: StickyMarkStyle, on: boolean) {
@@ -654,20 +698,7 @@ export const RichStickyField = forwardRef<RichStickyFieldHandle, RichStickyField
           }
         }
 
-        const room = props.current.limit - (note.text.length - (range.end - range.start));
-        let text = withoutBrokenEnd(data.slice(0, Math.max(0, room)));
-        // New lines only up to the line limit: Enter there does nothing, and a
-        // paste stops at the last line there is room for.
-        const lineLimit = props.current.lineLimit;
-        if (lineLimit !== undefined && text.includes('\n')) {
-          const kept =
-            lineCount(note.text) - (lineCount(note.text.slice(range.start, range.end)) - 1);
-          const breaks = Math.max(0, lineLimit - kept);
-          text = text
-            .split('\n')
-            .slice(0, breaks + 1)
-            .join('\n');
-        }
+        const text = fitting(note, range, data, props.current.limit, props.current.lineLimit);
         const caret = range.start + text.length;
         if (text.length > 0 || range.start !== range.end) {
           const styles =
@@ -1010,16 +1041,10 @@ export const RichStickyField = forwardRef<RichStickyFieldHandle, RichStickyField
             return;
           case 'insertFromPaste':
           case 'insertFromPasteAsQuotation':
-            // Normally taken from the paste event, below, which every browser
-            // gives the clipboard to; this is for one that goes straight here.
-            insert(
-              selection,
-              (event.dataTransfer?.getData('text/plain') || event.data || '').replace(
-                /\r\n?/g,
-                '\n',
-              ),
-              'paste',
-            );
+            // The paste event, below, is the one place a paste goes in. Some
+            // browsers send this as well, before or after it, and taking both
+            // pasted everything twice, and linked the wrong words for an
+            // address pasted over a selection. Its default is already stopped.
             return;
           case 'historyUndo':
             travel('undo');
@@ -1081,16 +1106,36 @@ export const RichStickyField = forwardRef<RichStickyFieldHandle, RichStickyField
         // Anything else — a drop, a browser's own link — is not something a sticky has.
       };
 
-      // Whatever the browser changed itself, which is only ever composition.
+      /**
+       * Whatever the browser changed itself, which is only ever composition.
+       *
+       * Held to the same limits as anything typed or pasted, characters and
+       * lines both. What the input method put in is found as the stretch that
+       * changed, and only that is cut back, so the words after it stay.
+       */
       const onInput = (event: Event) => {
         if ((event as InputEvent).isComposing) return;
         const read = readNote(root);
-        if (sameNote(read, shown.current)) return;
+        const previous = shown.current;
+        if (sameNote(read, previous)) return;
         const selection = readSelection(root) ?? { start: read.text.length, end: read.text.length };
-        const limit = props.current.limit;
+        const { start, endBefore, endAfter } = changedStretch(previous.text, read.text);
+        const composed = read.text.slice(start, endAfter);
+        const kept = fitting(
+          previous,
+          { start, end: endBefore },
+          composed,
+          props.current.limit,
+          props.current.lineLimit,
+        );
         const next =
-          read.text.length > limit ? replaceText(read, limit, read.text.length, '', []) : read;
-        const caret = Math.min(selection.end, next.text.length);
+          kept.length < composed.length
+            ? replaceText(read, start + kept.length, endAfter, '', [])
+            : read;
+        const caret =
+          kept.length < composed.length
+            ? start + kept.length
+            : Math.min(selection.end, next.text.length);
         commit(next, { start: caret, end: caret }, 'type');
       };
 
@@ -1100,19 +1145,18 @@ export const RichStickyField = forwardRef<RichStickyFieldHandle, RichStickyField
           action();
         };
 
-        // Tab belongs to a list while the caret is in one, and moves focus on
-        // anywhere else. Shift+Tab only stays when there is a level to come out
-        // of, so it is always a way out of the note.
+        // Tab and Shift+Tab stay in the note only when they nest an item or
+        // bring one out. Anywhere else, a line that is not in a list or an item
+        // already as deep or as shallow as it goes, they move focus on as they
+        // do on any page, so the note never holds on to the keyboard.
         if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
           const selection = readSelection(root) ?? lastSelection.current;
           if (!selection || props.current.readOnly) return;
           const note = shown.current;
           if (event.shiftKey) {
             if (canOutdent(note, selection.start, selection.end)) run(() => indent(-1));
-          } else if (touchesList(note, selection.start, selection.end)) {
-            run(() => {
-              if (canIndent(note, selection.start, selection.end)) indent(1);
-            });
+          } else if (canIndent(note, selection.start, selection.end)) {
+            run(() => indent(1));
           }
           return;
         }

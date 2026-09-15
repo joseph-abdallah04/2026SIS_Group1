@@ -530,8 +530,9 @@ export function ProposalCard({
       >
         {artifact.type === 'sticky' ? (
           // Fills whatever the square leaves above the byline, so a short note
-          // sits at the top of the paper rather than centred in it.
-          <div className="flex min-h-0 flex-1 flex-col">
+          // sits at the top of the paper rather than centred in it. Never
+          // shrinks below the note, so a long one makes the card taller.
+          <div className="flex flex-1 flex-col">
             <div
               data-sticky-note
               className={STICKY_NOTE_CLASS}

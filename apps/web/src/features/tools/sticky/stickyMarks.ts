@@ -315,16 +315,6 @@ function deepestFor(lines: StickyLines, levels: readonly number[], index: number
   return Math.min(STICKY_LIST_MAX_LEVEL, above);
 }
 
-/** Whether any line a selection touches is in a list, so Tab is the list's rather than the page's. */
-export function touchesList(note: StickyNote, from: number, to: number): boolean {
-  const { first, last } = linesTouched(note.text, from, to);
-  const lines = normalizeLines(note.text, note.lines);
-  for (let index = first; index <= last; index += 1) {
-    if (lines[index]) return true;
-  }
-  return false;
-}
-
 /** Whether Tab would nest any of the list lines a selection touches. */
 export function canIndent(note: StickyNote, from: number, to: number): boolean {
   const { first, last } = linesTouched(note.text, from, to);
