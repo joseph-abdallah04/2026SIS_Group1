@@ -100,6 +100,8 @@ interface PinboardCanvasProps {
   ballot?: ReactNode;
   /** Discussion clock. Hidden by the parent once the ballot overlay is up. */
   headerTimer?: ReactNode;
+  /** Last card the viewer interacted with, so the assistant can resolve "this one". */
+  onSelectProposal?: (id: string) => void;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -265,6 +267,7 @@ export function PinboardCanvas({
   boardOverlay,
   ballot,
   headerTimer,
+  onSelectProposal,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -800,6 +803,7 @@ export function PinboardCanvas({
                       isShortlisted={shortlist.includes(item.id)}
                       canToggleShortlist={canToggleShortlist}
                       onToggleShortlist={onToggleShortlist}
+                      onSelectProposal={onSelectProposal}
                     />
                   ))}
                 </div>

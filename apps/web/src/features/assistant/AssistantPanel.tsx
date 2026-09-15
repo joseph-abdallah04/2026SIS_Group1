@@ -34,6 +34,12 @@ export interface AssistantPanelProps {
   questionStatus?: QuestionStatus | null;
   /** After in-panel provider setup, so the rail can start chatting without a reload. */
   onProviderConfigured?: (model: string) => void;
+  /**
+   * True once the shell's clip has finished expanding. The composer waits to
+   * take focus until then — focusing mid-morph scrolls the clipped box and
+   * hitchs the animation.
+   */
+  revealed?: boolean;
 }
 
 export function AssistantPanel({
@@ -43,12 +49,15 @@ export function AssistantPanel({
   modelLabel,
   questionStatus,
   onProviderConfigured,
+  revealed = true,
 }: AssistantPanelProps) {
   const { entries, streaming, thinking, send, stop, clear, setProposeState } = chat;
   const [draft, setDraft] = useState('');
   const [setupOpen, setSetupOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const setupRef = useRef<HTMLDivElement>(null);
+  const composerReady = configured === true;
 
   // Read the context rather than `useCreativeTools()`: the hook throws outside the
   // provider, and the panel should still render (minus Propose) if it is ever mounted
@@ -67,8 +76,8 @@ export function AssistantPanel({
   }, [followKey]);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (revealed) inputRef.current?.focus();
+  }, [revealed]);
 
   // Escape closes this overlay first, not the whole rail — the bubble also listens.
   useEffect(() => {
@@ -82,6 +91,36 @@ export function AssistantPanel({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [setupOpen]);
 
+  useEffect(() => {
+    if (!setupOpen) return;
+    const root = setupRef.current;
+    if (!root) return;
+
+    const focusables = () =>
+      [...root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea')].filter(
+        (el) => !el.hasAttribute('disabled') && el.tabIndex !== -1,
+      );
+
+    focusables()[0]?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    root.addEventListener('keydown', onKeyDown);
+    return () => root.removeEventListener('keydown', onKeyDown);
+  }, [setupOpen]);
+
   // Grow with the draft up to the CSS max-height, then scroll inside the field.
   useEffect(() => {
     const el = inputRef.current;
@@ -91,7 +130,7 @@ export function AssistantPanel({
   }, [draft]);
 
   const submit = () => {
-    if (!draft.trim() || streaming) return;
+    if (!composerReady || !draft.trim() || streaming) return;
     const message = draft;
     setDraft('');
     void send(message);
@@ -115,148 +154,151 @@ export function AssistantPanel({
 
   return (
     <div className="rt-assistant-rail">
-      <header className="rt-assistant-header">
-        <div className="min-w-0 flex-1">
-          <h2 className="rt-assistant-kicker">Assistant</h2>
-          <p className="rt-assistant-meta">
-            {modelLabel ? `${modelLabel} · private to you` : 'Private to you'}
-          </p>
-        </div>
-        {entries.length > 0 && (
-          <button type="button" onClick={clear} className="rt-assistant-icon-btn">
-            Clear
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close assistant"
-          className="rt-assistant-icon-btn"
-        >
-          <svg
-            viewBox="0 0 20 20"
-            className="size-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
-          </svg>
-        </button>
-      </header>
-
-      <div ref={scrollRef} className="rt-assistant-feed">
-        {configured === false && <NotConfigured onOpenSetup={() => setSetupOpen(true)} />}
-
-        {configured !== false && entries.length === 0 && (
-          <EmptyState
-            onPick={(text) => {
-              setDraft(text);
-              inputRef.current?.focus();
-            }}
-          />
-        )}
-
-        {entries.map((entry, index) => {
-          switch (entry.kind) {
-            case 'user':
-              return (
-                <div key={entry.id} className="flex justify-end">
-                  <p className="rt-assistant-user">{entry.text}</p>
-                </div>
-              );
-
-            case 'assistant':
-              return (
-                <p key={entry.id} className="rt-assistant-reply">
-                  {entry.text}
-                  {entry.streaming && <span className="rt-caret ml-0.5">▍</span>}
-                  {entry.interrupted && <span className="rt-assistant-stopped">Stopped</span>}
-                </p>
-              );
-
-            case 'tool':
-              return shouldRenderToolEntry(entry, streaming) ? (
-                <ToolActivity
-                  key={entry.id}
-                  toolName={entry.toolName}
-                  status={entry.status}
-                  {...(entry.summary ? { summary: entry.summary } : {})}
-                  {...(entry.results ? { results: entry.results } : {})}
-                />
-              ) : null;
-
-            case 'artifact':
-              return (
-                <ArtifactCard
-                  key={entry.id}
-                  artifact={entry.artifact}
-                  propose={entry.propose}
-                  {...(entry.proposeError ? { proposeError: entry.proposeError } : {})}
-                  canPropose={canPropose}
-                  {...(questionStatus !== undefined ? { questionStatus } : {})}
-                  onPropose={() => void handlePropose(entry.id, index)}
-                />
-              );
-
-            case 'error':
-              return (
-                <p key={entry.id} className="rt-assistant-error">
-                  {entry.message}
-                </p>
-              );
-          }
-        })}
-        <AgentActivity entries={entries} streaming={streaming} thinking={thinking} />
-      </div>
-
-      <div className="rt-assistant-composer">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              // Enter sends, Shift+Enter breaks the line — chat convention.
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-            rows={1}
-            placeholder="Ask the assistant…"
-            disabled={configured === false}
-            className="rt-assistant-input"
-          />
-          {streaming ? (
-            <button
-              type="button"
-              onClick={stop}
-              title="Stop generating"
-              aria-label="Stop generating"
-              aria-busy="true"
-              className="rt-assistant-stop"
-            >
-              <span className="rt-assistant-stop-track" aria-hidden="true">
-                <span className="rt-assistant-stop-arc" />
-              </span>
-              <span className="rt-assistant-stop-square" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!draft.trim() || configured === false}
-              className="rt-assistant-send"
-            >
-              Send
+      <div className="rt-assistant-body" {...(setupOpen ? { inert: '' } : {})}>
+        <header className="rt-assistant-header">
+          <div className="min-w-0 flex-1">
+            <h2 className="rt-assistant-kicker">Assistant</h2>
+            <p className="rt-assistant-meta">
+              {modelLabel ? `${modelLabel} · private to you` : 'Private to you'}
+            </p>
+          </div>
+          {entries.length > 0 && (
+            <button type="button" onClick={clear} className="rt-assistant-icon-btn">
+              Clear
             </button>
           )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close assistant"
+            className="rt-assistant-icon-btn"
+          >
+            <svg
+              viewBox="0 0 20 20"
+              className="size-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
+            </svg>
+          </button>
+        </header>
+
+        <div ref={scrollRef} className="rt-assistant-feed">
+          {configured === false && <NotConfigured onOpenSetup={() => setSetupOpen(true)} />}
+
+          {configured === true && entries.length === 0 && (
+            <EmptyState
+              onPick={(text) => {
+                setDraft(text);
+                inputRef.current?.focus();
+              }}
+            />
+          )}
+
+          {entries.map((entry, index) => {
+            switch (entry.kind) {
+              case 'user':
+                return (
+                  <div key={entry.id} className="flex justify-end">
+                    <p className="rt-assistant-user">{entry.text}</p>
+                  </div>
+                );
+
+              case 'assistant':
+                return (
+                  <p key={entry.id} className="rt-assistant-reply">
+                    {entry.text}
+                    {entry.streaming && <span className="rt-caret ml-0.5">▍</span>}
+                    {entry.interrupted && <span className="rt-assistant-stopped">Stopped</span>}
+                  </p>
+                );
+
+              case 'tool':
+                return shouldRenderToolEntry(entry, streaming) ? (
+                  <ToolActivity
+                    key={entry.id}
+                    toolName={entry.toolName}
+                    status={entry.status}
+                    {...(entry.summary ? { summary: entry.summary } : {})}
+                    {...(entry.results ? { results: entry.results } : {})}
+                  />
+                ) : null;
+
+              case 'artifact':
+                return (
+                  <ArtifactCard
+                    key={entry.id}
+                    artifact={entry.artifact}
+                    propose={entry.propose}
+                    {...(entry.proposeError ? { proposeError: entry.proposeError } : {})}
+                    canPropose={canPropose}
+                    {...(questionStatus !== undefined ? { questionStatus } : {})}
+                    onPropose={() => void handlePropose(entry.id, index)}
+                  />
+                );
+
+              case 'error':
+                return (
+                  <p key={entry.id} className="rt-assistant-error">
+                    {entry.message}
+                  </p>
+                );
+            }
+          })}
+          <AgentActivity entries={entries} streaming={streaming} thinking={thinking} />
+        </div>
+
+        <div className="rt-assistant-composer">
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                // Enter sends, Shift+Enter breaks the line — chat convention.
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+              rows={1}
+              placeholder="Ask the assistant…"
+              disabled={!composerReady}
+              className="rt-assistant-input"
+            />
+            {streaming ? (
+              <button
+                type="button"
+                onClick={stop}
+                title="Stop generating"
+                aria-label="Stop generating"
+                aria-busy="true"
+                className="rt-assistant-stop"
+              >
+                <span className="rt-assistant-stop-track" aria-hidden="true">
+                  <span className="rt-assistant-stop-arc" />
+                </span>
+                <span className="rt-assistant-stop-square" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!draft.trim() || !composerReady}
+                className="rt-assistant-send"
+              >
+                Send
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {setupOpen && (
         <div
+          ref={setupRef}
           className="rt-assistant-setup-overlay"
           role="dialog"
           aria-modal="true"

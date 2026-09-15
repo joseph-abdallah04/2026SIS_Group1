@@ -14,6 +14,7 @@ import { scriptedModel, type ScriptedTurn } from './testing/scriptedModel.js';
 vi.stubEnv('NODE_ENV', 'development');
 vi.stubEnv('JWT_SECRET', 'test-jwt-secret-at-least-32-characters-long');
 vi.stubEnv('LLM_KEY_ENCRYPTION_SECRET', 'test-encryption-secret-value-32ch');
+vi.stubEnv('ASSISTANT_MAX_TURNS_PER_MINUTE', '0');
 
 // --- fake database ---------------------------------------------------------
 interface ConfigRow {
@@ -48,6 +49,19 @@ vi.mock('../../db.js', () => ({
       deleteMany: async ({ where }: { where: { userId: string } }) => {
         const had = configs.delete(where.userId);
         return { count: had ? 1 : 0 };
+      },
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { userId: string };
+        data: Partial<ConfigRow>;
+      }) => {
+        const existing = configs.get(where.userId);
+        if (!existing) throw new Error('not found');
+        const row = { ...existing, ...data };
+        configs.set(where.userId, row);
+        return row;
       },
     },
     assistantTurnUsage: {
@@ -103,6 +117,11 @@ vi.mock('./provider.js', async (importOriginal) => {
     probeCredentials: async () => ({ latencyMs: 12, model: 'test-model' }),
   };
 });
+
+vi.mock('./rateLimit.js', () => ({
+  assertTurnAllowed: () => undefined,
+  resetTurnLimiter: () => undefined,
+}));
 
 const { assistantRouter } = await import('./routes.js');
 const { errorHandler, ApiError } = await import('../../middleware/error.js');
@@ -512,10 +531,14 @@ describe('prompt context is server-authoritative (F35)', () => {
     await readStream(await chat({ message: 'Give me 5 sticky notes for this question' }));
 
     const instructions = instructionsSent();
-    expect(instructions).toContain('1. [answered] What slowed us down?');
-    expect(instructions).toContain('2. [discussion] Which database? ← the team is on this one now');
-    expect(instructions).toContain('3. [pending] Who owns the migration?');
-    expect(instructions).toContain('The question being discussed right now: Which database?');
+    expect(instructions).toContain('1. [answered] <untrusted>What slowed us down?</untrusted>');
+    expect(instructions).toContain(
+      '2. [discussion] <untrusted>Which database?</untrusted> ← the team is on this one now',
+    );
+    expect(instructions).toContain('3. [pending] <untrusted>Who owns the migration?</untrusted>');
+    expect(instructions).toContain(
+      'The question being discussed right now: <untrusted>Which database?</untrusted>',
+    );
   });
 
   // A skipped question is not a question still to come. Passing the board's own word for
@@ -532,7 +555,7 @@ describe('prompt context is server-authoritative (F35)', () => {
 
     await readStream(await chat({ message: 'Where are we up to?' }));
 
-    expect(instructionsSent()).toContain('1. [skipped] What slowed us down?');
+    expect(instructionsSent()).toContain('1. [skipped] <untrusted>What slowed us down?</untrusted>');
   });
 
   // The board's contents left the prompt when they grew too expensive to send every turn.
@@ -569,7 +592,9 @@ describe('prompt context is server-authoritative (F35)', () => {
 
     const frames = await readStream(await chat({ message: 'hello' }));
     expect(frames.at(-1)).toMatchObject({ type: 'done', reason: 'complete' });
-    expect(instructionsSent()).toContain('2. [discussion] Which database?');
+    expect(instructionsSent()).toContain(
+      '2. [discussion] <untrusted>Which database?</untrusted>',
+    );
   });
 
   it('falls back to admitting it knows nothing only when nothing at all can be read', async () => {

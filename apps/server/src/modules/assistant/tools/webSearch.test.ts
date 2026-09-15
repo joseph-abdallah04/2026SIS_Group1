@@ -86,6 +86,18 @@ describe('parseInstantAnswer', () => {
   it('survives malformed json', () => {
     expect(parseInstantAnswer('{not json')).toEqual([]);
   });
+
+  it('drops javascript and other non-http Instant Answer urls', () => {
+    expect(
+      parseInstantAnswer(
+        JSON.stringify({
+          AbstractText: 'pwn',
+          AbstractURL: 'javascript:alert(1)',
+          RelatedTopics: [{ Text: 'also bad', FirstURL: 'data:text/html,hi' }],
+        }),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe('text helpers', () => {

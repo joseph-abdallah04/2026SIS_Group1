@@ -199,6 +199,19 @@ describe('propose availability copy', () => {
   });
 });
 
+describe('composer availability', () => {
+  it('stays disabled until the provider check has returned', () => {
+    render(
+      <CreativeToolsContext.Provider value={tools(async () => ({ ok: true }))}>
+        <AssistantPanel chat={chat([])} onClose={() => undefined} configured={null} />
+      </CreativeToolsContext.Provider>,
+    );
+
+    expect(screen.getByPlaceholderText(/ask the assistant/i)).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
+  });
+});
+
 describe('provider setup', () => {
   it('does not send the user to /settings, and opens setup inside the rail', async () => {
     const user = userEvent.setup();

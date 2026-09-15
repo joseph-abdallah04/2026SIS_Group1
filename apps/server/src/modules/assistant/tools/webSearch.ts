@@ -6,6 +6,8 @@
 // the chat turn.
 import type { WebSearchResult } from '@roundtable/shared';
 
+import { guardedFetch } from '../network/guardedFetch.js';
+
 const HTML_ENDPOINT = 'https://html.duckduckgo.com/html/';
 const INSTANT_ANSWER_ENDPOINT = 'https://api.duckduckgo.com/';
 const SEARCH_TIMEOUT_MS = 12_000;
@@ -66,9 +68,11 @@ export async function searchWeb(query: string, signal?: AbortSignal): Promise<We
   };
 }
 
+const publicFetch = guardedFetch({ allowPrivateHosts: false });
+
 async function fetchText(url: string, signal?: AbortSignal): Promise<string> {
   const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
-  const response = await fetch(url, {
+  const response = await publicFetch(url, {
     headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/json' },
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
@@ -161,23 +165,39 @@ export function parseInstantAnswer(json: string): WebSearchResult[] {
 
   const results: WebSearchResult[] = [];
   if (payload.AbstractText && payload.AbstractURL) {
-    results.push({
-      title: payload.Heading || payload.AbstractURL,
-      url: payload.AbstractURL,
-      snippet: payload.AbstractText,
-    });
+    const url = publicHttpUrl(payload.AbstractURL);
+    if (url) {
+      results.push({
+        title: payload.Heading || url,
+        url,
+        snippet: payload.AbstractText,
+      });
+    }
   }
 
   const flat = (payload.RelatedTopics ?? []).flatMap((topic) => topic.Topics ?? [topic]);
   for (const topic of flat) {
     if (!topic.FirstURL || !topic.Text) continue;
+    const url = publicHttpUrl(topic.FirstURL);
+    if (!url) continue;
     results.push({
       title: topic.Text.split(' - ')[0] ?? topic.Text,
-      url: topic.FirstURL,
+      url,
       snippet: topic.Text,
     });
   }
   return results;
+}
+
+/** Instant Answer URLs are not DuckDuckGo-wrapped; still refuse anything that is not http(s). */
+export function publicHttpUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return raw;
+  } catch {
+    return null;
+  }
 }
 
 const ENTITIES: Record<string, string> = {

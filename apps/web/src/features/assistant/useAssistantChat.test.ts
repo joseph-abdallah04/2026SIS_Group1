@@ -257,4 +257,49 @@ describe('reconcileProposed', () => {
     expect(seen[0]).toMatchObject({ propose: 'proposed', seenOnBoard: true });
     expect(reconcileProposed(seen, [])[0]).toMatchObject({ propose: 'idle', seenOnBoard: false });
   });
+
+  // The board broadcast normally arrives before the create ack, so the card is still
+  // 'sending' the only time the item is first seen. Ignoring that left Propose stuck
+  // on "On the pinboard" for good once the item was deleted.
+  it('unlocks after a delete even though the item landed while Propose was still sending', () => {
+    const diagram = { type: 'diagram' as const, nodes: [], edges: [] };
+    const seen = reconcileProposed([card('sending')], [diagram]);
+    expect(seen[0]).toMatchObject({ propose: 'sending', seenOnBoard: true });
+
+    const acked = seen.map((entry) => ({ ...entry, propose: 'proposed' as const }));
+    expect(reconcileProposed(acked, [])[0]).toMatchObject({ propose: 'idle', seenOnBoard: false });
+  });
+
+  it('does not unlock a card that is still in flight', () => {
+    const entries = [card('sending')];
+    expect(reconcileProposed(entries, [])).toBe(entries);
+  });
+
+  it('keeps two identical stickies independent when only one is deleted', () => {
+    const note = { type: 'sticky' as const, text: 'Use Postgres', color: 'yellow' as const };
+    const card = (
+      id: string,
+      seenOnBoard?: boolean,
+    ): Extract<ChatEntry, { kind: 'artifact' }> => ({
+      kind: 'artifact',
+      id,
+      source: 'sticky_ideation',
+      artifact: note,
+      propose: 'proposed',
+      ...(seenOnBoard ? { seenOnBoard: true } : {}),
+    });
+
+    const bothSeen = reconcileProposed([card('a'), card('b')], [note, note]);
+    expect(bothSeen.every((entry) => entry.kind === 'artifact' && entry.seenOnBoard)).toBe(true);
+
+    const afterDelete = reconcileProposed(bothSeen, [note]);
+    const proposed = afterDelete.filter(
+      (entry) => entry.kind === 'artifact' && entry.propose === 'proposed',
+    );
+    const idle = afterDelete.filter(
+      (entry) => entry.kind === 'artifact' && entry.propose === 'idle',
+    );
+    expect(proposed).toHaveLength(1);
+    expect(idle).toHaveLength(1);
+  });
 });

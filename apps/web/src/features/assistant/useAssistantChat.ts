@@ -17,6 +17,8 @@ import type {
   WebSearchResult,
 } from '@roundtable/shared';
 
+import { getCurrentUserId } from '../../lib/currentUser';
+
 import { streamAssistantChat } from './api';
 import { clearChat, loadChat, saveChat } from './chatStorage';
 
@@ -68,8 +70,9 @@ export interface UseAssistantChatOptions {
 }
 
 export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOptions) {
+  const userId = getCurrentUserId();
   // Lazy initialiser: reads storage once on mount rather than on every render.
-  const [entries, setEntries] = useState<ChatEntry[]>(() => loadChat(sessionId));
+  const [entries, setEntries] = useState<ChatEntry[]>(() => loadChat(userId, sessionId));
   const [streaming, setStreaming] = useState(false);
   /** True only while the provider is streaming a reasoning channel this turn. */
   const [thinking, setThinking] = useState(false);
@@ -80,12 +83,25 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
   const latest = useRef(entries);
   latest.current = entries;
   useEffect(() => {
-    const timer = setTimeout(() => saveChat(sessionId, latest.current), SAVE_DEBOUNCE_MS);
+    const timer = setTimeout(() => saveChat(userId, sessionId, latest.current), SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [entries, sessionId]);
+  }, [entries, sessionId, userId]);
   useEffect(() => {
-    return () => saveChat(sessionId, latest.current);
-  }, [sessionId]);
+    return () => saveChat(userId, sessionId, latest.current);
+  }, [sessionId, userId]);
+
+  // A reused /sessions/:id route must not keep the previous transcript in memory, or save
+  // it under the new key. Reload whenever identity or session changes.
+  const scopeKey = `${userId ?? ''}:${sessionId}`;
+  const scopeRef = useRef(scopeKey);
+  useEffect(() => {
+    if (scopeRef.current === scopeKey) return;
+    abortRef.current?.abort();
+    scopeRef.current = scopeKey;
+    setEntries(loadChat(userId, sessionId));
+    setStreaming(false);
+    setThinking(false);
+  }, [scopeKey, userId, sessionId]);
 
   const send = useCallback(
     async (message: string) => {
@@ -143,8 +159,8 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
     abortRef.current?.abort();
     setThinking(false);
     setEntries([]);
-    clearChat(sessionId);
-  }, [sessionId]);
+    clearChat(userId, sessionId);
+  }, [sessionId, userId]);
 
   const setProposeState = useCallback((entryId: string, propose: ProposeState, error?: string) => {
     setEntries((prev) =>
@@ -407,17 +423,30 @@ export function reconcileProposed(
   entries: ChatEntry[],
   boardArtifacts: readonly ArtifactJson[],
 ): ChatEntry[] {
-  const onBoard = new Set(boardArtifacts.map(artifactFingerprint));
+  // Counts, not a set: two identical stickies on the board must keep two cards
+  // "on the pinboard". A Set would unlock both when only one was deleted.
+  const remaining = new Map<string, number>();
+  for (const artifact of boardArtifacts) {
+    const fingerprint = artifactFingerprint(artifact);
+    remaining.set(fingerprint, (remaining.get(fingerprint) ?? 0) + 1);
+  }
+
   let changed = false;
   const next = entries.map((entry) => {
-    if (entry.kind !== 'artifact' || entry.propose !== 'proposed') return entry;
-    const present = onBoard.has(artifactFingerprint(entry.artifact));
-    if (present) {
+    if (entry.kind !== 'artifact') return entry;
+    // 'sending' counts: the board broadcast usually beats the create ack, so waiting
+    // for 'proposed' meant the card was never marked as seen — and then a delete had
+    // nothing to unlock and Propose stayed stuck on "On the pinboard".
+    if (entry.propose !== 'proposed' && entry.propose !== 'sending') return entry;
+    const fingerprint = artifactFingerprint(entry.artifact);
+    const left = remaining.get(fingerprint) ?? 0;
+    if (left > 0) {
+      remaining.set(fingerprint, left - 1);
       if (entry.seenOnBoard) return entry;
       changed = true;
       return { ...entry, seenOnBoard: true };
     }
-    if (entry.seenOnBoard) {
+    if (entry.seenOnBoard && entry.propose === 'proposed') {
       changed = true;
       return { ...entry, propose: 'idle' as const, seenOnBoard: false };
     }

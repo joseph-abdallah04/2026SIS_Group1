@@ -70,6 +70,25 @@ export function decryptSecret(token: string, secret: string): string {
   }
 }
 
+/**
+ * Decrypts with the current secret, then with a previous one if rotation is in progress.
+ *
+ * `usedPrevious` tells the caller to re-encrypt under the current secret so the old one
+ * can be retired. Encrypt always uses the current secret; this is only the read path.
+ */
+export function decryptSecretWithFallback(
+  token: string,
+  secret: string,
+  previousSecret?: string,
+): { plaintext: string; usedPrevious: boolean } {
+  try {
+    return { plaintext: decryptSecret(token, secret), usedPrevious: false };
+  } catch (cause) {
+    if (!previousSecret || previousSecret === secret) throw cause;
+    return { plaintext: decryptSecret(token, previousSecret), usedPrevious: true };
+  }
+}
+
 /** Cheap shape check used before attempting an expensive decrypt. */
 export function looksEncrypted(value: string): boolean {
   return value.startsWith(`${VERSION}.`) && value.split('.').length === 4;

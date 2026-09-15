@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clearChat, loadChat, saveChat, MAX_STORED_BYTES } from './chatStorage';
+import {
+  chatStorageKey,
+  clearAllChats,
+  clearChat,
+  loadChat,
+  saveChat,
+  MAX_STORED_BYTES,
+} from './chatStorage';
 import type { ChatEntry } from './useAssistantChat';
 
 const SESSION = 's1';
+const USER = 'alice';
+const OTHER = 'bob';
 
-// The artifact member specifically, not the whole union: spreading a `ChatEntry` and
-// overriding `propose` would widen to "some entry with a propose field", which no member is.
 const sticky = (text: string): Extract<ChatEntry, { kind: 'artifact' }> => ({
   kind: 'artifact',
   id: `art-${text}`,
@@ -29,33 +36,53 @@ describe('chat persistence', () => {
       { kind: 'user', id: 'u1', text: 'What have we proposed?' },
       { kind: 'assistant', id: 'a1', text: 'Two so far.', streaming: false },
     ];
-    saveChat(SESSION, entries);
-    expect(loadChat(SESSION)).toEqual(entries);
+    saveChat(USER, SESSION, entries);
+    expect(loadChat(USER, SESSION)).toEqual(entries);
   });
 
   it('keeps each session separate', () => {
-    saveChat('a', [{ kind: 'user', id: 'u1', text: 'in A' }]);
-    saveChat('b', [{ kind: 'user', id: 'u1', text: 'in B' }]);
-    expect(loadChat('a')).toEqual([{ kind: 'user', id: 'u1', text: 'in A' }]);
-    expect(loadChat('b')).toEqual([{ kind: 'user', id: 'u1', text: 'in B' }]);
+    saveChat(USER, 'a', [{ kind: 'user', id: 'u1', text: 'in A' }]);
+    saveChat(USER, 'b', [{ kind: 'user', id: 'u1', text: 'in B' }]);
+    expect(loadChat(USER, 'a')).toEqual([{ kind: 'user', id: 'u1', text: 'in A' }]);
+    expect(loadChat(USER, 'b')).toEqual([{ kind: 'user', id: 'u1', text: 'in B' }]);
+  });
+
+  it('keeps two people in the same session separate', () => {
+    saveChat(USER, SESSION, [{ kind: 'user', id: 'u1', text: "Alice's note" }]);
+    saveChat(OTHER, SESSION, [{ kind: 'user', id: 'u1', text: "Bob's note" }]);
+    expect(loadChat(USER, SESSION)[0]).toMatchObject({ text: "Alice's note" });
+    expect(loadChat(OTHER, SESSION)[0]).toMatchObject({ text: "Bob's note" });
   });
 
   it('returns nothing for a session that has no stored chat', () => {
-    expect(loadChat('never-used')).toEqual([]);
+    expect(loadChat(USER, 'never-used')).toEqual([]);
   });
 
-  // The point of the whole module: a refresh kills the request behind every in-flight state,
-  // so restoring one as-is stores a spinner that never stops.
+  it('returns nothing and writes nothing when there is no user', () => {
+    saveChat(null, SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }]);
+    expect(loadChat(null, SESSION)).toEqual([]);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('drops an unscoped legacy key rather than showing it to whoever is logged in', () => {
+    sessionStorage.setItem(
+      `rt_assistant_chat:${SESSION}`,
+      JSON.stringify([{ kind: 'user', id: 'u1', text: 'leaked' }]),
+    );
+    expect(loadChat(USER, SESSION)).toEqual([]);
+    expect(sessionStorage.getItem(`rt_assistant_chat:${SESSION}`)).toBeNull();
+  });
+
   it('settles a reply that was still streaming', () => {
-    saveChat(SESSION, [{ kind: 'assistant', id: 'a1', text: 'Half a thou', streaming: true }]);
-    expect(loadChat(SESSION)).toEqual([
+    saveChat(USER, SESSION, [{ kind: 'assistant', id: 'a1', text: 'Half a thou', streaming: true }]);
+    expect(loadChat(USER, SESSION)).toEqual([
       { kind: 'assistant', id: 'a1', text: 'Half a thou', streaming: false },
     ]);
   });
 
   it('fails a tool that was still running, and says why', () => {
-    saveChat(SESSION, [{ kind: 'tool', id: 't1', toolName: 'web_search', status: 'running' }]);
-    expect(loadChat(SESSION)).toEqual([
+    saveChat(USER, SESSION, [{ kind: 'tool', id: 't1', toolName: 'web_search', status: 'running' }]);
+    expect(loadChat(USER, SESSION)).toEqual([
       {
         kind: 'tool',
         id: 't1',
@@ -67,11 +94,11 @@ describe('chat persistence', () => {
   });
 
   it('resets a Propose that was mid-flight, but keeps one that finished', () => {
-    saveChat(SESSION, [
+    saveChat(USER, SESSION, [
       { ...sticky('sending'), propose: 'sending' },
       { ...sticky('done'), propose: 'proposed' },
     ]);
-    const restored = loadChat(SESSION);
+    const restored = loadChat(USER, SESSION);
     expect(restored.map((e) => (e.kind === 'artifact' ? e.propose : e.kind))).toEqual([
       'idle',
       'proposed',
@@ -80,7 +107,7 @@ describe('chat persistence', () => {
 
   it('keeps completed tool results, including their search links', () => {
     const results = [{ title: 'Socket.IO', url: 'https://socket.io', snippet: 'v4' }];
-    saveChat(SESSION, [
+    saveChat(USER, SESSION, [
       {
         kind: 'tool',
         id: 't1',
@@ -90,12 +117,12 @@ describe('chat persistence', () => {
         results,
       },
     ]);
-    expect(loadChat(SESSION)[0]).toMatchObject({ status: 'done', results });
+    expect(loadChat(USER, SESSION)[0]).toMatchObject({ status: 'done', results });
   });
 
   it('drops entries this build cannot render rather than showing a broken card', () => {
     sessionStorage.setItem(
-      `rt_assistant_chat:${SESSION}`,
+      chatStorageKey(USER, SESSION),
       JSON.stringify([
         { kind: 'user', id: 'u1', text: 'kept' },
         { kind: 'hologram', id: 'x1' },
@@ -104,14 +131,14 @@ describe('chat persistence', () => {
         { kind: 'assistant', text: 'no id', streaming: false },
       ]),
     );
-    expect(loadChat(SESSION)).toEqual([{ kind: 'user', id: 'u1', text: 'kept' }]);
+    expect(loadChat(USER, SESSION)).toEqual([{ kind: 'user', id: 'u1', text: 'kept' }]);
   });
 
   it('survives corrupt storage', () => {
-    sessionStorage.setItem(`rt_assistant_chat:${SESSION}`, '{ not json');
-    expect(loadChat(SESSION)).toEqual([]);
-    sessionStorage.setItem(`rt_assistant_chat:${SESSION}`, '"a string"');
-    expect(loadChat(SESSION)).toEqual([]);
+    sessionStorage.setItem(chatStorageKey(USER, SESSION), '{ not json');
+    expect(loadChat(USER, SESSION)).toEqual([]);
+    sessionStorage.setItem(chatStorageKey(USER, SESSION), '"a string"');
+    expect(loadChat(USER, SESSION)).toEqual([]);
   });
 
   it('never throws when storage itself is unavailable', () => {
@@ -121,8 +148,8 @@ describe('chat persistence', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
-    expect(loadChat(SESSION)).toEqual([]);
-    expect(() => saveChat(SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }])).not.toThrow();
+    expect(loadChat(USER, SESSION)).toEqual([]);
+    expect(() => saveChat(USER, SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }])).not.toThrow();
   });
 
   it('drops the oldest turns rather than the whole transcript when it outgrows the budget', () => {
@@ -132,23 +159,32 @@ describe('chat persistence', () => {
       id: `u${i}`,
       text: `${i}:${long}`,
     }));
-    saveChat(SESSION, entries);
+    saveChat(USER, SESSION, entries);
 
-    const restored = loadChat(SESSION);
+    const restored = loadChat(USER, SESSION);
     expect(restored.length).toBeGreaterThan(0);
     expect(restored.length).toBeLessThan(entries.length);
     expect(JSON.stringify(restored).length).toBeLessThanOrEqual(MAX_STORED_BYTES);
-    // The tail is what you come back to, so that is what survives.
     expect(restored.at(-1)).toEqual(entries.at(-1));
   });
 
   it('clears on request, and saving an empty transcript clears too', () => {
-    saveChat(SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }]);
-    clearChat(SESSION);
-    expect(loadChat(SESSION)).toEqual([]);
+    saveChat(USER, SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }]);
+    clearChat(USER, SESSION);
+    expect(loadChat(USER, SESSION)).toEqual([]);
 
-    saveChat(SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }]);
-    saveChat(SESSION, []);
-    expect(sessionStorage.getItem(`rt_assistant_chat:${SESSION}`)).toBeNull();
+    saveChat(USER, SESSION, [{ kind: 'user', id: 'u1', text: 'hi' }]);
+    saveChat(USER, SESSION, []);
+    expect(sessionStorage.getItem(chatStorageKey(USER, SESSION))).toBeNull();
+  });
+
+  it('wipes every assistant key in the tab', () => {
+    saveChat(USER, SESSION, [{ kind: 'user', id: 'u1', text: 'alice' }]);
+    saveChat(OTHER, 's2', [{ kind: 'user', id: 'u1', text: 'bob' }]);
+    sessionStorage.setItem('unrelated', 'keep');
+    clearAllChats();
+    expect(loadChat(USER, SESSION)).toEqual([]);
+    expect(loadChat(OTHER, 's2')).toEqual([]);
+    expect(sessionStorage.getItem('unrelated')).toBe('keep');
   });
 });

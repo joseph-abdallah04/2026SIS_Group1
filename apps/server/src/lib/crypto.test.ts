@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   decryptSecret,
+  decryptSecretWithFallback,
   encryptSecret,
   looksEncrypted,
   maskSecret,
@@ -61,6 +62,19 @@ describe('encryptSecret / decryptSecret', () => {
 
   it('refuses to encrypt nothing', () => {
     expect(() => encryptSecret('', SECRET)).toThrow(SecretCryptoError);
+  });
+
+  it('decrypts with the previous secret during rotation', () => {
+    const previous = 'the-previous-encryption-secret!!';
+    const token = encryptSecret('sk-old', previous);
+    const result = decryptSecretWithFallback(token, SECRET, previous);
+    expect(result).toEqual({ plaintext: 'sk-old', usedPrevious: true });
+  });
+
+  it('prefers the current secret when both would work', () => {
+    const token = encryptSecret('sk-new', SECRET);
+    const result = decryptSecretWithFallback(token, SECRET, 'the-previous-encryption-secret!!');
+    expect(result).toEqual({ plaintext: 'sk-new', usedPrevious: false });
   });
 });
 

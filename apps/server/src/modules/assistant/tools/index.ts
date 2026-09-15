@@ -33,6 +33,7 @@ import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 
 import type { Agenda, SessionLookupData, SessionLookupReader } from '../sessionLookup.js';
+import { quoteUntrustedBlock } from '../untrusted.js';
 import { layoutDiagram } from './layout.js';
 import { searchWeb } from './webSearch.js';
 
@@ -88,9 +89,12 @@ export async function runWebSearch(
     };
   }
 
-  const modelText = outcome.results
-    .map((result, index) => `[${index + 1}] ${result.title}\n${result.url}\n${result.snippet}`)
-    .join('\n\n');
+  const modelText = quoteUntrustedBlock(
+    'web',
+    outcome.results
+      .map((result, index) => `[${index + 1}] ${result.title}\n${result.url}\n${result.snippet}`)
+      .join('\n\n'),
+  );
 
   return {
     ok: true,
@@ -279,14 +283,17 @@ export function runLookUpSession(
   input: z.infer<typeof lookUpSessionInput>,
   data: SessionLookupData,
 ): ToolOutcome {
-  switch (input.what) {
-    case 'agenda':
-      return describeAgenda(data.agenda);
-    case 'proposals':
-      return describeProposals(data);
-    case 'answers':
-      return describeAnswers(data);
-  }
+  const outcome = (() => {
+    switch (input.what) {
+      case 'agenda':
+        return describeAgenda(data.agenda);
+      case 'proposals':
+        return describeProposals(data);
+      case 'answers':
+        return describeAnswers(data);
+    }
+  })();
+  return { ...outcome, modelText: quoteUntrustedBlock('session', outcome.modelText) };
 }
 
 function describeAgenda(agenda: Agenda): ToolOutcome {

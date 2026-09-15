@@ -2,8 +2,11 @@
 //
 // `sessionStorage`, not `localStorage`, on purpose. The chat is private to one person in one
 // session and is not worth keeping forever: this scope survives a refresh and a navigation,
-// and goes away when the tab does. Keyed per session id, so two sessions open in two tabs
-// never show each other's conversation.
+// and goes away when the tab does.
+//
+// Keys include the user id as well as the session id. A second person on the same tab who
+// joins the same session must not inherit the previous transcript, and logout / a new login
+// wipe every assistant key in this tab.
 //
 // Storage is best-effort throughout. Private-mode browsers throw on access, quotas run out,
 // and a transcript from an older build may not match today's shapes. Every one of those ends
@@ -29,7 +32,12 @@ const TOOL_NAMES = new Set<string>([
 ]);
 const PROPOSE_STATES = new Set<string>(['idle', 'sending', 'proposed', 'failed']);
 
-function storageKey(sessionId: string): string {
+export function chatStorageKey(userId: string, sessionId: string): string {
+  return `${KEY_PREFIX}${userId}:${sessionId}`;
+}
+
+/** Unscoped keys from builds that keyed only by session id. Never read; always dropped. */
+function legacyStorageKey(sessionId: string): string {
   return `${KEY_PREFIX}${sessionId}`;
 }
 
@@ -42,16 +50,7 @@ function safeStorage(): Storage | null {
   }
 }
 
-export function loadChat(sessionId: string): ChatEntry[] {
-  const store = safeStorage();
-  if (!store) return [];
-
-  let raw: string | null;
-  try {
-    raw = store.getItem(storageKey(sessionId));
-  } catch {
-    return [];
-  }
+function parseEntries(raw: string | null): ChatEntry[] {
   if (!raw) return [];
 
   let parsed: unknown;
@@ -65,12 +64,28 @@ export function loadChat(sessionId: string): ChatEntry[] {
   return parsed.map(reviveEntry).filter((entry): entry is ChatEntry => entry !== null);
 }
 
-export function saveChat(sessionId: string, entries: ChatEntry[]): void {
+export function loadChat(userId: string | null, sessionId: string): ChatEntry[] {
+  if (!userId || !sessionId) return [];
+  const store = safeStorage();
+  if (!store) return [];
+
+  let raw: string | null;
+  try {
+    forgetLegacyKey(store, sessionId);
+    raw = store.getItem(chatStorageKey(userId, sessionId));
+  } catch {
+    return [];
+  }
+  return parseEntries(raw);
+}
+
+export function saveChat(userId: string | null, sessionId: string, entries: ChatEntry[]): void {
+  if (!userId || !sessionId) return;
   const store = safeStorage();
   if (!store) return;
 
   if (entries.length === 0) {
-    clearChat(sessionId);
+    clearChat(userId, sessionId);
     return;
   }
 
@@ -85,16 +100,45 @@ export function saveChat(sessionId: string, entries: ChatEntry[]): void {
   if (payload.length > MAX_STORED_BYTES) return;
 
   try {
-    store.setItem(storageKey(sessionId), payload);
+    store.setItem(chatStorageKey(userId, sessionId), payload);
   } catch {
     // Quota exceeded, or storage disabled mid-session. Nothing useful to do about it, and a
     // chat that fails to persist must not break the chat that is on screen.
   }
 }
 
-export function clearChat(sessionId: string): void {
+export function clearChat(userId: string | null, sessionId: string): void {
+  if (!userId || !sessionId) return;
   try {
-    safeStorage()?.removeItem(storageKey(sessionId));
+    safeStorage()?.removeItem(chatStorageKey(userId, sessionId));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Drops every assistant transcript in this tab. Called whenever identity changes
+ * (logout, login, account deletion) so a second person cannot read the last chat.
+ */
+export function clearAllChats(): void {
+  const store = safeStorage();
+  if (!store) return;
+
+  const doomed: string[] = [];
+  try {
+    for (let i = 0; i < store.length; i += 1) {
+      const key = store.key(i);
+      if (key?.startsWith(KEY_PREFIX)) doomed.push(key);
+    }
+    for (const key of doomed) store.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function forgetLegacyKey(store: Storage, sessionId: string): void {
+  try {
+    store.removeItem(legacyStorageKey(sessionId));
   } catch {
     // ignore
   }

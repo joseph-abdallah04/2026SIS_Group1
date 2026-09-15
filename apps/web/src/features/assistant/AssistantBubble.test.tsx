@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The bubble asks the server whether a provider is configured on mount. Nothing here is
 // testing that, so it answers "yes" and stays out of the way.
+vi.mock('../../lib/currentUser', () => ({
+  getCurrentUserId: () => 'user-1',
+  useCurrentUserId: () => 'user-1',
+}));
+
 vi.mock('./api', () => ({
   fetchLlmConfig: async () => ({ config: { baseUrl: 'x', model: 'test-model', hasKey: true } }),
   streamAssistantChat: async () => undefined,
@@ -65,7 +70,7 @@ describe('bubble and panel', () => {
   it('brings the conversation back after a remount, as a refresh would', async () => {
     const user = userEvent.setup();
     sessionStorage.setItem(
-      'rt_assistant_chat:s1',
+      'rt_assistant_chat:user-1:s1',
       JSON.stringify([{ kind: 'user', id: 'u1', text: 'What have we proposed?' }]),
     );
 

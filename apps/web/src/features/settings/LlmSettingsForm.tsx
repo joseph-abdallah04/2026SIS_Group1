@@ -173,6 +173,7 @@ export function LlmSettingsForm({ variant = 'page', onSaved, onCancel }: LlmSett
             placeholder="https://api.openai.com/v1"
             autoComplete="off"
             spellCheck={false}
+            autoFocus
           />
         </label>
         <label className="rt-assistant-setup-field">

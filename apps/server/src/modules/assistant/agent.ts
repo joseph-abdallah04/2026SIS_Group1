@@ -21,10 +21,18 @@ import type {
   AssistantHistoryMessage,
   AssistantStreamEvent,
   AssistantUsage,
+  ArtifactJson,
 } from '@roundtable/shared';
-import { streamText, stepCountIs, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import {
+  streamText,
+  stepCountIs,
+  ToolChoiceViolationError,
+  type LanguageModel,
+  type ModelMessage,
+  type ToolSet,
+} from 'ai';
 
-import { isAssistantToolName, type ToolOutcomeSink } from './tools/index.js';
+import { isAssistantToolName, runStickyIdeation, type ToolOutcomeSink } from './tools/index.js';
 
 /**
  * Ceiling on model round trips in a single turn. Four is enough for the realistic chains
@@ -102,10 +110,25 @@ export function toModelMessages(
   return messages;
 }
 
+/**
+ * When the user is clearly asking for sticky notes, force that tool on the first step.
+ * Tiny local models (Gemma 2B-class) otherwise answer in prose — or with nothing —
+ * and the panel never gets a Propose card.
+ *
+ * Only stickies. `create_diagram` takes a node/edge graph that a small model cannot
+ * reliably fill in on demand, and forcing it turned a working diagram into a dead turn.
+ */
+export function artifactToolForMessage(message: string): 'sticky_ideation' | undefined {
+  const text = message.toLowerCase();
+  if (/\bstick(?:y|ies)\b/.test(text) || /\bpost-?its?\b/.test(text)) return 'sticky_ideation';
+  return undefined;
+}
+
 export async function runAssistantTurn(options: RunAssistantTurnOptions): Promise<TurnOutcome> {
   const { model, instructions, history, message, emit, signal, tools } = options;
   const maxSteps = options.maxSteps ?? MAX_STEPS;
   const startedAt = Date.now();
+  const requiredTool = artifactToolForMessage(message);
 
   if (signal.aborted) {
     const usage = emptyUsage(startedAt);
@@ -126,9 +149,18 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
     timeout: TIMEOUTS,
     ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
     temperature: 0.7,
+    ...(requiredTool
+      ? {
+          prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+            stepNumber === 0
+              ? { toolChoice: { type: 'tool' as const, toolName: requiredTool } }
+              : { toolChoice: 'none' as const },
+        }
+      : {}),
   });
 
   let textLength = 0;
+  let artifactsEmitted = 0;
   let reasoningText = '';
   let thinkingAnnounced = false;
   let finishReason: string | undefined;
@@ -143,6 +175,19 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
     announcedTools.add(id);
     thinkingAnnounced = false;
     emit({ type: 'tool', toolName, status: 'running', args });
+  };
+
+  const emitArtifacts = (
+    toolName: 'sticky_ideation',
+    artifacts: readonly ArtifactJson[],
+    summary: string,
+    ok: boolean,
+  ) => {
+    for (const artifact of artifacts) {
+      artifactsEmitted += 1;
+      emit({ type: 'artifact', artifactId: randomUUID(), source: toolName, artifact });
+    }
+    emit({ type: 'tool-result', toolName, ok, summary });
   };
 
   // Per-step totals are summed as they arrive so a turn that dies mid-loop still knows
@@ -206,13 +251,14 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
           // Artifacts go out before the result chip so the panel can render them under
           // the tool that made them.
           for (const artifact of outcome?.artifacts ?? []) {
+            artifactsEmitted += 1;
             emit({ type: 'artifact', artifactId: randomUUID(), source: part.toolName, artifact });
           }
           emit({
             type: 'tool-result',
             toolName: part.toolName,
-            ok: outcome?.ok ?? true,
-            summary: outcome?.summary ?? 'Done',
+            ok: outcome?.ok ?? false,
+            summary: outcome?.summary ?? 'The tool finished without reporting a result',
             ...(outcome?.results ? { results: outcome.results } : {}),
           });
           break;
@@ -260,6 +306,15 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
           break;
       }
     }
+  } catch (error) {
+    if (aborted || signal.aborted) {
+      // The stream threw because the client disconnected; treat as a normal abort.
+    } else if (requiredTool && isToolChoiceViolation(error)) {
+      // Tiny models ignore a forced tool and finish empty. Fall through to the
+      // sticky JSON recovery rather than failing the SSE stream.
+    } else {
+      throw error;
+    }
   } finally {
     options.onUsage?.(currentUsage());
   }
@@ -277,39 +332,172 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
       type: 'message',
       role: 'assistant',
       content:
-        '\n\n_(I stopped after several tool calls without reaching an answer — try narrowing the question.)_',
+        '\n\nI stopped after several tool calls without reaching an answer — try narrowing the question.',
     });
     return { reason: 'max-steps', usage };
+  }
+
+  if (artifactsEmitted === 0 && requiredTool === 'sticky_ideation' && !signal.aborted) {
+    const recovered = await stickyNotesFromJsonReply(model, message, signal);
+    if (recovered?.artifacts?.length) {
+      emit({ type: 'tool', toolName: 'sticky_ideation', status: 'running', args: {} });
+      emitArtifacts('sticky_ideation', recovered.artifacts, recovered.summary, recovered.ok);
+    }
+  }
+
+  // Cards already on screen ARE the answer; the model just did not add a closing line.
+  if (textLength === 0 && artifactsEmitted > 0) {
+    emit({
+      type: 'message',
+      role: 'assistant',
+      content: 'Here they are — propose any you want onto the pinboard.',
+    });
+    return { reason: 'complete', usage };
+  }
+
+  // Nothing at all. Small local models go silent when the whole tool schema is attached,
+  // far more often than they genuinely have nothing to say, so ask once more with the
+  // tools removed before admitting defeat.
+  if (textLength === 0 && finishReason !== 'length' && !signal.aborted) {
+    const retried = await replyWithoutTools({
+      model,
+      instructions,
+      messages,
+      signal,
+      emit,
+      maxOutputTokens: options.maxOutputTokens,
+    });
+    if (retried) return { reason: 'complete', usage };
   }
 
   // A turn that writes nothing renders as a question with no answer under it and no
   // error — indistinguishable from a broken app. Every turn must say something.
   if (textLength === 0) {
-    emit({
-      type: 'message',
-      role: 'assistant',
-      content: recoverEmptyReply(reasoningText, finishReason),
-    });
+    emit({ type: 'message', role: 'assistant', content: recoverEmptyReply(finishReason) });
   }
 
   return { reason: 'complete', usage };
 }
 
 /**
+ * One more pass with no tools offered, streamed straight to the panel.
+ *
+ * Returns false when this produced nothing either, so the caller can fall back to
+ * telling the user plainly. Failures here are swallowed: this is already the
+ * recovery path, and its own error is less useful than the fallback line.
+ */
+async function replyWithoutTools(options: {
+  model: LanguageModel;
+  instructions: string;
+  messages: ModelMessage[];
+  signal: AbortSignal;
+  emit: (event: AssistantStreamEvent) => void;
+  maxOutputTokens?: number;
+}): Promise<boolean> {
+  const { model, instructions, messages, signal, emit } = options;
+  try {
+    const result = streamText({
+      model,
+      instructions,
+      messages,
+      abortSignal: signal,
+      maxRetries: 1,
+      timeout: TIMEOUTS,
+      ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
+      temperature: 0.7,
+    });
+
+    let wrote = false;
+    for await (const delta of result.textStream) {
+      if (delta.length === 0) continue;
+      wrote = true;
+      emit({ type: 'message', role: 'assistant', content: delta });
+    }
+    return wrote;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * What to show when the model finished without writing an answer.
  *
- * If it streamed its thinking on a reasoning channel, that thinking *is* the answer in this
- * failure mode, so it is better shown than swallowed. Otherwise explain the silence — an
- * empty panel reads as a broken app, and the most common cause (the token budget going
- * entirely on reasoning) is something the user can act on.
+ * Reasoning channels stay off the transcript: they are the model's private scratchpad
+ * and can contain chain-of-thought the UI otherwise hides. The panel gets a short
+ * explanation instead, including when the token budget was the cause. Plain prose —
+ * the chat does not render markdown, so wrapping this in `_italics_` used to print
+ * the underscores.
  */
-function recoverEmptyReply(reasoningText: string, finishReason: string | undefined): string {
-  const thinking = reasoningText.trim();
-  if (thinking) return thinking;
+function recoverEmptyReply(finishReason: string | undefined): string {
   if (finishReason === 'length') {
-    return '_(The model ran out of tokens before writing an answer — try a shorter question, or raise the output limit on your provider.)_';
+    return 'The model ran out of tokens before writing an answer — try a shorter question, or raise the output limit on your provider.';
   }
-  return '_(The model returned an empty reply. Try asking again — if it keeps happening, a different model on the same provider usually fixes it.)_';
+  return 'The model returned an empty reply. Try asking again — if it keeps happening, a different model on the same provider usually fixes it.';
+}
+
+function isToolChoiceViolation(error: unknown): boolean {
+  if (error instanceof ToolChoiceViolationError) return true;
+  return error instanceof Error && error.name === 'AI_ToolChoiceViolationError';
+}
+
+/**
+ * Tiny models often cannot emit an OpenAI tool call even when we require one.
+ * They can still write JSON. One extra un-tooled turn is cheaper than a dead chip.
+ */
+async function stickyNotesFromJsonReply(
+  model: LanguageModel,
+  message: string,
+  signal: AbortSignal,
+) {
+  if (signal.aborted) return null;
+  try {
+    const result = streamText({
+      model,
+      instructions:
+        'Reply with JSON only, no markdown: {"ideas":[{"text":"..."}]}. Five short brainstorm ideas for the user, each under 20 words.',
+      messages: [{ role: 'user', content: message }],
+      abortSignal: signal,
+      maxRetries: 0,
+      temperature: 0.7,
+    });
+    const text = (await result.text).trim();
+    const ideas = parseStickyIdeas(text);
+    if (ideas.length === 0) return null;
+    return runStickyIdeation({ ideas: ideas.map((text) => ({ text })) });
+  } catch {
+    return null;
+  }
+}
+
+function parseStickyIdeas(text: string): string[] {
+  const blob = text.match(/\{[\s\S]*\}/)?.[0];
+  if (blob) {
+    try {
+      const parsed: unknown = JSON.parse(blob);
+      if (parsed && typeof parsed === 'object' && 'ideas' in parsed) {
+        const ideas = (parsed as { ideas: unknown }).ideas;
+        if (Array.isArray(ideas)) {
+          return ideas
+            .map((idea) => {
+              if (typeof idea === 'string') return idea.trim();
+              if (idea && typeof idea === 'object' && 'text' in idea) {
+                return String((idea as { text: unknown }).text).trim();
+              }
+              return '';
+            })
+            .filter((idea) => idea.length > 0)
+            .slice(0, 5);
+        }
+      }
+    } catch {
+      // Fall through to line-splitting.
+    }
+  }
+  return text
+    .split('\n')
+    .map((line) => line.replace(/^[\s\d.*-]+/, '').replace(/^"+|"+$/g, '').trim())
+    .filter((line) => line.length > 2 && !line.startsWith('{'))
+    .slice(0, 5);
 }
 
 // ---------------------------------------------------------------------------

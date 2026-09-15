@@ -66,7 +66,7 @@ describe('buildSystemPrompt', () => {
 
     expect(text).toContain(STOPPED_TURN_NOTE);
     expect(text).toContain('draw a login flow');
-    expect(text.endsWith('It was the reply to: draw a login flow')).toBe(true);
+    expect(text).toContain('It was the reply to:');
     expect(text).not.toMatch(/say they cancelled|say you pressed/i);
   });
 
@@ -89,6 +89,13 @@ describe('buildSystemPrompt', () => {
 
     expect(text).toContain("That's okay");
     expect(text).toContain('Sounds good.');
+    expect(text).toContain('<untrusted');
     expect(text).toMatch(/never claim you cannot recall this conversation/i);
+  });
+
+  it('treats client-reported artifacts as a UI report, not a server record', () => {
+    const text = prompt([{ role: 'assistant', content: 'Here.', artifacts: ['diagram'] }]);
+    expect(text).toMatch(/chat UI reported/i);
+    expect(text).not.toMatch(/What you have actually done in this chat \(facts/i);
   });
 });

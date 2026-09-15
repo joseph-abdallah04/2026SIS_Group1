@@ -16,6 +16,7 @@ import { summarizeArtifact } from '@roundtable/shared';
 
 import { getBoardForSession } from '../pinboard/index.js';
 import { readAgenda, type Agenda } from './sessionLookup.js';
+import { quoteUntrusted } from './untrusted.js';
 
 /**
  * Extension point for the Session / Pinboard / Voting owners.
@@ -82,7 +83,7 @@ export async function buildSessionContext(
   if (agenda && agenda.questions.length > 0) lines.push(...describeAgenda(agenda));
 
   if (board?.questionText) {
-    lines.push(`The question being discussed right now: ${board.questionText}`);
+    lines.push(`The question being discussed right now: ${quoteUntrusted(board.questionText)}`);
     if (board.questionStatus) lines.push(`Its phase: ${board.questionStatus}`);
   }
 
@@ -100,7 +101,7 @@ export async function buildSessionContext(
     const selected = board.items.find((item) => item.id === clientHints.selectedProposalId);
     if (selected) {
       lines.push(
-        `The user has this one selected: [${selected.artifactJson.type}] ${summarizeArtifact(selected.artifactJson)} — ${selected.authorName}`,
+        `The user has this one selected: [${selected.artifactJson.type}] ${quoteUntrusted(summarizeArtifact(selected.artifactJson))} — ${quoteUntrusted(selected.authorName)}`,
       );
     }
   }
@@ -144,7 +145,7 @@ function describeAgenda(agenda: Agenda): string[] {
 
   for (const question of shown) {
     const here = question.isCurrent ? ' ← the team is on this one now' : '';
-    lines.push(`  ${question.number}. [${question.status}] ${question.text}${here}`);
+    lines.push(`  ${question.number}. [${question.status}] ${quoteUntrusted(question.text)}${here}`);
   }
 
   if (omitted > 0) lines.push(`  …and ${omitted} more. Use look_up_session to read them.`);

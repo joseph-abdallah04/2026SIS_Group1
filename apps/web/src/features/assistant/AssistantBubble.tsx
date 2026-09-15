@@ -13,10 +13,11 @@
 // corner out to a slim right-hand panel (see assistant.css for why that is a clip and not a
 // resize). The launch button is gone while the rail is up; the rail's own X, or Escape,
 // closes it.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, AssistantContext, QuestionStatus } from '@roundtable/shared';
 
 import './assistant.css';
+import { CreativeToolsContext } from '../tools/CreativeToolsContext';
 import { AssistantPanel } from './AssistantPanel';
 import { fetchLlmConfig } from './api';
 import { useAssistantChat } from './useAssistantChat';
@@ -29,6 +30,13 @@ import { useAssistantChat } from './useAssistantChat';
  * transition because the tab was hidden while it ran.
  */
 const EXPAND_MS = 520;
+
+function prefersReducedMotion() {
+  return (
+    typeof window.matchMedia !== 'function' ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
 
 export interface AssistantBubbleProps {
   sessionId: string;
@@ -45,6 +53,11 @@ export interface AssistantBubbleProps {
   boardItems?: readonly { artifactJson: ArtifactJson }[];
   /** The pinboard's current phase, so a locked Propose can say why it is locked. */
   questionStatus?: QuestionStatus | null;
+  /**
+   * Hide the rail entirely — used while a voting ballot covers the board, so a
+   * z-index fight cannot put the chat on top of the vote.
+   */
+  suppressed?: boolean;
 }
 
 export function AssistantBubble({
@@ -52,12 +65,16 @@ export function AssistantBubble({
   getContext,
   boardItems,
   questionStatus,
+  suppressed = false,
 }: AssistantBubbleProps) {
   const [open, setOpen] = useState(false);
   // Distinct from `open`: the panel is mounted as soon as it opens, but stays invisible until
   // the shell has finished growing. Contents appearing inside a panel that is still expanding
   // look half-built.
   const [revealed, setRevealed] = useState(false);
+  // Stays mounted through the collapse so the clip-path does not have to rebuild
+  // an emptied flex tree on the first closing frame.
+  const [railMounted, setRailMounted] = useState(false);
   const [unread, setUnread] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [modelLabel, setModelLabel] = useState<string | undefined>(undefined);
@@ -65,6 +82,26 @@ export function AssistantBubble({
   const resolveContext = useCallback((): AssistantContext => getContext?.() ?? {}, [getContext]);
   const chat = useAssistantChat({ sessionId, getContext: resolveContext });
   const { syncProposedWithBoard } = chat;
+  const creativeTools = useContext(CreativeToolsContext);
+
+  const closePanel = useCallback(() => {
+    setOpen(false);
+    setRevealed(false);
+  }, []);
+  const openPanel = useCallback(() => {
+    setRailMounted(true);
+    setOpen(true);
+  }, []);
+
+  // The studio is a page-modal at z-40; the rail is below it. Closing on open is
+  // the belt: a leftover open rail must not sit over the editor.
+  useEffect(() => {
+    if (creativeTools?.activeTool) closePanel();
+  }, [closePanel, creativeTools?.activeTool]);
+
+  useEffect(() => {
+    if (suppressed) closePanel();
+  }, [closePanel, suppressed]);
 
   useEffect(() => {
     syncProposedWithBoard(boardItems ?? []);
@@ -92,13 +129,11 @@ export function AssistantBubble({
       setRevealed(false);
       return;
     }
+    setRailMounted(true);
     // No media-query engine means nothing is animating to wait for, which is jsdom and
     // the reduced-motion case both: show the transcript now rather than on a transition
     // that will never end.
-    if (
-      typeof window.matchMedia !== 'function' ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
+    if (prefersReducedMotion()) {
       setRevealed(true);
       return;
     }
@@ -107,6 +142,24 @@ export function AssistantBubble({
     const timer = window.setTimeout(() => setRevealed(true), EXPAND_MS);
     const onEnd = (event: TransitionEvent) => {
       if (event.propertyName === 'clip-path') setRevealed(true);
+    };
+    shell?.addEventListener('transitionend', onEnd);
+    return () => {
+      window.clearTimeout(timer);
+      shell?.removeEventListener('transitionend', onEnd);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    if (prefersReducedMotion()) {
+      setRailMounted(false);
+      return;
+    }
+    const shell = shellRef.current;
+    const timer = window.setTimeout(() => setRailMounted(false), EXPAND_MS);
+    const onEnd = (event: TransitionEvent) => {
+      if (event.propertyName === 'clip-path') setRailMounted(false);
     };
     shell?.addEventListener('transitionend', onEnd);
     return () => {
@@ -138,11 +191,11 @@ export function AssistantBubble({
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') closePanel();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open]);
+  }, [closePanel, open]);
 
   // Closing destroys the launch target, so focus would fall to <body> and a keyboard user
   // would lose their place. Hand it back to the orb that has just reappeared.
@@ -155,6 +208,8 @@ export function AssistantBubble({
 
   const label = unread ? 'Open AI assistant — new answer' : 'Open AI assistant';
   const busy = chat.streaming && !open;
+
+  if (suppressed) return null;
 
   return (
     <div
@@ -179,10 +234,11 @@ export function AssistantBubble({
           <AssistantIcon />
         </div>
 
-        {open && (
+        {railMounted && (
           <AssistantPanel
             chat={chat}
-            onClose={() => setOpen(false)}
+            revealed={revealed}
+            onClose={closePanel}
             configured={configured}
             {...(modelLabel ? { modelLabel } : {})}
             {...(questionStatus !== undefined ? { questionStatus } : {})}
@@ -198,7 +254,7 @@ export function AssistantBubble({
         <button
           ref={bubbleRef}
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={openPanel}
           aria-label={label}
           aria-haspopup="dialog"
           className="rt-assistant-launch"

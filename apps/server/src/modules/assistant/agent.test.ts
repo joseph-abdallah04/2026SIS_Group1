@@ -1,7 +1,7 @@
 import type { AssistantStreamEvent, AssistantUsage } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
-import { runAssistantTurn, toModelMessages } from './agent.js';
+import { artifactToolForMessage, runAssistantTurn, toModelMessages } from './agent.js';
 import { scriptedModel, type ScriptedTurn } from './testing/scriptedModel.js';
 import { createAssistantTools, ToolOutcomeSink } from './tools/index.js';
 
@@ -13,7 +13,11 @@ interface RunHandle {
   model: ReturnType<typeof scriptedModel>;
 }
 
-function run(turns: ScriptedTurn[], signal = new AbortController().signal): RunHandle {
+function run(
+  turns: ScriptedTurn[],
+  signal = new AbortController().signal,
+  message = 'hello',
+): RunHandle {
   const events: AssistantStreamEvent[] = [];
   const sink = new ToolOutcomeSink();
   const model = scriptedModel(turns);
@@ -27,7 +31,7 @@ function run(turns: ScriptedTurn[], signal = new AbortController().signal): RunH
       model,
       instructions: 'system',
       history: [],
-      message: 'hello',
+      message,
       emit: (event) => events.push(event),
       signal,
       tools: { toolSet: createAssistantTools(sink), sink },
@@ -73,11 +77,23 @@ describe('runAssistantTurn', () => {
     expect(messages[0]?.content).toMatch(/empty reply/i);
   });
 
-  it('falls back to the reasoning channel when the model answers only there', async () => {
+  // Small local models go quiet when the whole tool schema is attached far more often
+  // than they genuinely have nothing to say, so silence earns one un-tooled retry.
+  it('retries without tools before telling the user the reply was empty', async () => {
+    const { events, promise } = run([{}, { text: 'Happy to help.' }]);
+
+    await promise;
+    expect(reply(events)).toBe('Happy to help.');
+    expect(reply(events)).not.toMatch(/empty reply/i);
+  });
+
+  it('explains itself when the model answers only on the reasoning channel', async () => {
     const { events, promise } = run([{ reasoning: '  Three proposals so far: A, B and C.  ' }]);
 
     await promise;
-    expect(reply(events)).toBe('Three proposals so far: A, B and C.');
+    expect(reply(events)).toMatch(/empty reply/i);
+    expect(reply(events)).not.toContain('Three proposals');
+    expect(reply(events)).not.toMatch(/_\(/);
   });
 
   it('names the token limit when that is what silenced the model', async () => {
@@ -177,6 +193,28 @@ describe('runAssistantTurn', () => {
     expect(new Set(ids).size).toBe(2);
   });
 
+  it('does not claim the model was silent when a tool already put cards on screen', async () => {
+    const { events, promise } = run([{ toolCalls: [STICKY_CALL] }, {}]);
+
+    await promise;
+    expect(events.some((event) => event.type === 'artifact')).toBe(true);
+    expect(reply(events)).toMatch(/here they are/i);
+    expect(reply(events)).not.toMatch(/empty reply/i);
+  });
+
+  it('forces sticky_ideation when the user asked for notes', async () => {
+    const { promise, model } = run(
+      [{ toolCalls: [STICKY_CALL] }, { text: 'Here they are.' }],
+      new AbortController().signal,
+      'Give me 5 sticky notes for this question',
+    );
+    await promise;
+    expect(model.doStreamCalls[0]?.toolChoice).toEqual({
+      type: 'tool',
+      toolName: 'sticky_ideation',
+    });
+  });
+
   it('tells the model when it invents a tool, instead of failing the turn', async () => {
     const { events, promise, model } = run([
       { toolCalls: [{ name: 'summon_intern', input: {} }] },
@@ -266,6 +304,25 @@ describe('token accounting', () => {
     await handle.promise;
 
     expect(handle.reported()).toEqual({ steps: 0, durationMs: expect.any(Number) });
+  });
+});
+
+describe('artifactToolForMessage', () => {
+  it('forces the sticky tool for an explicit request for notes', () => {
+    expect(artifactToolForMessage('Give me 5 sticky notes for this question')).toBe(
+      'sticky_ideation',
+    );
+  });
+
+  // Forcing a node/edge graph out of a small model produced a dead turn instead of the
+  // diagram it managed perfectly well on its own.
+  it('leaves diagrams to the model', () => {
+    expect(artifactToolForMessage('Diagram how these pieces fit together')).toBeUndefined();
+  });
+
+  it('does not steal ordinary questions', () => {
+    expect(artifactToolForMessage('Which of those would you pick, and why?')).toBeUndefined();
+    expect(artifactToolForMessage('hey')).toBeUndefined();
   });
 });
 

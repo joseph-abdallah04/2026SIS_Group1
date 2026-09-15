@@ -12,7 +12,7 @@ import type { LlmConfigPublic, LlmConfigTestResult, LlmConfigUpsert } from '@rou
 
 import { prisma } from '../../db.js';
 import { env } from '../../env.js';
-import { decryptSecret, encryptSecret, SecretCryptoError } from '../../lib/crypto.js';
+import { decryptSecretWithFallback, encryptSecret, SecretCryptoError } from '../../lib/crypto.js';
 import { ApiError } from '../../middleware/error.js';
 import {
   assertCredentialsAllowed,
@@ -122,10 +122,26 @@ export async function getLlmCredentials(userId: string): Promise<LlmCredentials>
   }
 
   try {
+    const { plaintext, usedPrevious } = decryptSecretWithFallback(
+      row.apiKeyEncrypted,
+      encryptionSecret(),
+      env.LLM_KEY_ENCRYPTION_PREVIOUS_SECRET,
+    );
+    if (usedPrevious) {
+      // Rotation: rewrite under the current secret so the previous one can be dropped.
+      try {
+        await prisma.userLLMConfig.update({
+          where: { userId },
+          data: { apiKeyEncrypted: encryptSecret(plaintext, encryptionSecret()) },
+        });
+      } catch (cause) {
+        console.error('assistant: failed to re-wrap LLM key after secret rotation', cause);
+      }
+    }
     return {
       baseUrl: row.baseUrl,
       model: row.model,
-      apiKey: decryptSecret(row.apiKeyEncrypted, encryptionSecret()),
+      apiKey: plaintext,
     };
   } catch (cause) {
     if (cause instanceof SecretCryptoError) {

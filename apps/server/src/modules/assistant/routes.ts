@@ -30,6 +30,7 @@ import {
   testLlmConfig,
 } from './llmConfig.service.js';
 import { buildSystemPrompt } from './prompt.js';
+import { assertTurnAllowed } from './rateLimit.js';
 import { sessionLookupReader } from './sessionLookup.js';
 import {
   assertCredentialsAllowed,
@@ -126,6 +127,7 @@ assistantRouter.post('/sessions/:id/assistant/chat', requireAuth, async (req, re
     // body validation so a non-member learns nothing about the session from the error, and
     // ahead of the stream so this can still be a plain 403 rather than an SSE error frame.
     await assertSessionMember(sessionId, userId);
+    assertTurnAllowed(userId, env.ASSISTANT_MAX_TURNS_PER_MINUTE);
     const parsed = assistantChatRequestSchema.safeParse(req.body);
     if (!parsed.success) throw validationError(parsed.error.issues);
     request = parsed.data;

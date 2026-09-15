@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
 
@@ -55,6 +56,14 @@ interface SessionPinboardProps {
 export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
+  const selectedProposalId = useRef<string | undefined>(undefined);
+  const onSelectProposal = useCallback((proposalId: string) => {
+    selectedProposalId.current = proposalId;
+  }, []);
+  const getAssistantContext = useCallback(
+    () => (selectedProposalId.current ? { selectedProposalId: selectedProposalId.current } : {}),
+    [],
+  );
   const {
     board,
     loading,
@@ -287,6 +296,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           }
           joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
           reactToProposal={reactToProposal}
+          onSelectProposal={onSelectProposal}
           headerTimer={
             board.discussionTimer &&
             (board.questionStatus === 'discussion' ||
@@ -306,9 +316,12 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
       {/* Propose reads these items so it can unlock after a delete. The model
           still reads the board server-side on every turn (F35). */}
       <AssistantBubble
+        key={sessionId}
         sessionId={sessionId}
+        getContext={getAssistantContext}
         boardItems={board.items}
         questionStatus={board.questionStatus}
+        suppressed={balloting}
       />
     </CreativeToolsProvider>
   );

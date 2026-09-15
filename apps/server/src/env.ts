@@ -41,6 +41,10 @@ const envSchema = z.object({
   // AES-256-GCM key for LLM API keys at rest (docs/05 §8). 16+ chars so the derived key
   // has real entropy; generate with `openssl rand -base64 32`.
   LLM_KEY_ENCRYPTION_SECRET: z.preprocess(emptyToUndefined, z.string().min(16).optional()),
+  // Previous AES secret, used only to decrypt rows written before a rotation. Encrypt
+  // always uses LLM_KEY_ENCRYPTION_SECRET; a successful read with this value is
+  // re-wrapped under the current one so the old secret can be dropped later.
+  LLM_KEY_ENCRYPTION_PREVIOUS_SECRET: z.preprocess(emptyToUndefined, z.string().min(16).optional()),
   // Whether a user's LLM base URL may resolve to a private or loopback address.
   //
   // Local providers are the whole point of "bring your own model" — Ollama sits on
@@ -52,6 +56,9 @@ const envSchema = z.object({
   // Ceiling on tokens the assistant may generate per model call. The user pays for these,
   // and an unbounded reply is the difference between a cent and a dollar on a bad prompt.
   ASSISTANT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(32_000).default(2_048),
+  // Sliding window of assistant turns per user per minute. Bounds DuckDuckGo
+  // egress and SSE slots; the user's own provider bill is separate. 0 disables.
+  ASSISTANT_MAX_TURNS_PER_MINUTE: z.coerce.number().int().min(0).max(120).default(20),
 });
 
 const parsed = envSchema.safeParse(process.env);
