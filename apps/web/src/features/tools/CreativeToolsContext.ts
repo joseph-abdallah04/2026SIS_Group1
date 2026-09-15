@@ -38,7 +38,8 @@ export interface CreativeToolsContextValue {
   openEditorForExtend: (proposal: BoardItem) => void;
   /** Reopen a proposal's own editor to change what it says (F16). */
   openEditorForEdit: (proposal: BoardItem) => void;
-  closeTool: () => void;
+  /** False when the open tool's close guard kept it open. */
+  closeTool: () => boolean;
   setCloseGuard: (guard: (() => boolean) | null) => void;
   resetSubmission: () => void;
   submitArtifact: (artifact: ArtifactJson) => Promise<boolean>;

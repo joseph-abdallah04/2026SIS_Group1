@@ -673,6 +673,9 @@ export function PinboardCanvas({
       */}
           <div
             ref={viewportRef}
+            // Marked so a minimised studio can sit at the bottom of the board
+            // itself, beside the agenda rather than across it.
+            data-board-frame
             className="relative h-full min-h-0 min-w-0 overflow-hidden bg-rt-surface-alt"
             style={{
               // Only promise a grab when one is actually on offer. Showing `grab`

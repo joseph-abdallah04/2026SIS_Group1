@@ -446,6 +446,187 @@ body {
 }
 
 /*
+ * The studio stepping aside for the board, and coming back.
+ *
+ * Peeking slides the studio down until only its header and the first of its
+ * canvas are left above the bottom of the window, so what waits at the bottom
+ * is the studio itself rather than a bar about it. The distance is the window
+ * less the studio's top inset and the part left showing, both set on the
+ * dialog for each screen size, so it lands the same way at every size.
+ *
+ * `--studio-lift` is how far up it is, from 0 resting at the bottom to 1 fully
+ * open. Dragging sets it under the pointer; the header's two faces cross-fade
+ * on it, the board's face at the bottom and the studio's own at the top.
+ */
+.rt-studio-peeked {
+  --studio-lift: 0;
+  transform: translateY(calc(100dvh - var(--studio-top) - var(--studio-showing)));
+}
+
+.rt-studio-dragging {
+  transform: translateY(
+    calc((100dvh - var(--studio-top) - var(--studio-showing)) * (1 - var(--studio-lift, 0)))
+  );
+}
+
+.rt-studio-face-board {
+  opacity: calc(1 - var(--studio-lift, 1));
+}
+
+.rt-studio-face-studio {
+  opacity: var(--studio-lift, 1);
+}
+
+/*
+ * Over a board, the studio opens wide and centred on the window, and rests in
+ * the board's own column, clear of the agenda; `--studio-rest-left` and
+ * `--studio-rest-width` are measured from the board. Both are lengths rather
+ * than auto margins so it can move between them: sliding down it narrows into
+ * the board's column, and dragged up it widens back out in step with the
+ * pointer.
+ */
+.rt-studio-columned {
+  --studio-open-width: min(100vw - 4rem, 92.5rem);
+  --studio-open-left: calc((100vw - var(--studio-open-width)) / 2);
+  right: auto;
+  left: var(--studio-open-left);
+  width: var(--studio-open-width);
+  max-width: none;
+  margin-inline: 0;
+}
+
+.rt-studio-columned.rt-studio-peeked {
+  left: var(--studio-rest-left);
+  width: var(--studio-rest-width);
+}
+
+.rt-studio-columned.rt-studio-dragging {
+  left: calc(
+    var(--studio-rest-left) + (var(--studio-open-left) - var(--studio-rest-left)) *
+      var(--studio-lift, 0)
+  );
+  width: calc(
+    var(--studio-rest-width) + (var(--studio-open-width) - var(--studio-rest-width)) *
+      var(--studio-lift, 0)
+  );
+}
+
+/*
+ * Sliding down, back up, or settling after a drag, as `SLIDE_MS`. Eased gently
+ * in and out, so it neither leaps from the start nor creeps into place: a
+ * quicker, front-loaded curve covered half the distance in a single frame.
+ */
+.rt-studio-slide,
+.rt-studio-slide .rt-studio-face-board,
+.rt-studio-slide .rt-studio-face-studio {
+  transition:
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    left 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    width 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 240ms ease;
+}
+
+/*
+ * Let go mid-drag, it is already moving, so it carries on and eases to a stop
+ * rather than slowing to start again from rest.
+ */
+.rt-studio-slide.rt-studio-released {
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-studio-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rt-studio-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rt-studio-minimise::backdrop {
+  animation: rt-studio-backdrop-out 300ms ease forwards;
+}
+
+/*
+ * Opening from a tool: the same fade the sticky popup makes, a small lift in,
+ * grown from its bottom edge. The rise is held to the studio's 180ms limit where
+ * the sticky's takes 220ms; the movement and easing are the same.
+ *
+ * Leaving, by the back arrow or once proposed, is a plain fade with a short
+ * settle down. It does not shrink as the sticky does: the studio is most of the
+ * window tall, and the same small scale dropped its top edge far enough in one
+ * go to read as a jolt.
+ */
+@keyframes rt-studio-appear {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-studio-appear {
+  transform-origin: bottom center;
+  animation: rt-studio-appear 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-studio-leave {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.rt-studio-leave {
+  animation: rt-studio-leave 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.rt-studio-leave::backdrop {
+  animation: rt-studio-backdrop-out 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.rt-studio-appear::backdrop {
+  animation: rt-studio-backdrop-in 180ms ease-out;
+}
+
+.rt-studio-restore::backdrop {
+  animation: rt-studio-backdrop-in 300ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-studio-minimise::backdrop,
+  .rt-studio-restore::backdrop,
+  .rt-studio-appear,
+  .rt-studio-appear::backdrop,
+  .rt-studio-leave,
+  .rt-studio-leave::backdrop {
+    animation: none;
+  }
+
+  .rt-studio-slide,
+  .rt-studio-slide .rt-studio-face-board,
+  .rt-studio-slide .rt-studio-face-studio {
+    transition: none;
+  }
+}
+
+/*
  * F13 participant rail. The bubble is the waiting room's head at rail size —
  * same initials, same hashed swatch — with two states added on top: a ring
  * while someone is talking, and F12's red-slash mic while they are muted.

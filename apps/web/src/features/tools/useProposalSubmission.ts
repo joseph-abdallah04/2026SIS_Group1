@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
@@ -75,4 +75,29 @@ export function useProposalSubmission({
   }
 
   return { status, error, reset, submitArtifact };
+}
+
+/** How long a proposal can be on its way before the studio shows it is waiting. */
+const SLOW_SUBMISSION_MS = 300;
+
+/**
+ * Whether a proposal has been on its way long enough to be worth showing.
+ *
+ * Most go through in well under a tenth of a second. Greying the studio's tools
+ * and swapping the Propose label for that moment flickered the whole studio just
+ * before it closed, so they wait to change until the send is actually slow.
+ * Input is still refused from the first moment, by the editors' own checks and
+ * by the send refusing a second one; only how it looks waits.
+ */
+export function useSlowSubmission(submitting: boolean): boolean {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!submitting) return;
+    const timer = window.setTimeout(() => setSlow(true), SLOW_SUBMISSION_MS);
+    return () => {
+      window.clearTimeout(timer);
+      setSlow(false);
+    };
+  }, [submitting]);
+  return submitting && slow;
 }
