@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { prepareStickyText, STICKY_TEXT_LIMIT } from './artifactLimits';
+import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from './artifactLimits';
 
 describe('prepareStickyText', () => {
   // Whitespace may be deliberate, so it is handed back untouched.
@@ -27,6 +27,15 @@ describe('prepareStickyText', () => {
     expect(prepareStickyText('a'.repeat(STICKY_TEXT_LIMIT + 1))).toEqual({
       ok: false,
       error: `Keep your sticky to ${STICKY_TEXT_LIMIT} characters or fewer.`,
+    });
+  });
+
+  it('accepts a sticky at the line limit, and rejects one over it', () => {
+    const lines = (count: number) => Array.from({ length: count }, () => 'a').join('\n');
+    expect(prepareStickyText(lines(STICKY_MAX_LINES)).ok).toBe(true);
+    expect(prepareStickyText(lines(STICKY_MAX_LINES + 1))).toEqual({
+      ok: false,
+      error: `Keep your sticky to ${STICKY_MAX_LINES} lines or fewer.`,
     });
   });
 });

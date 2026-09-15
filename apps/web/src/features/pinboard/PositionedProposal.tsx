@@ -1,17 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
-import type { BoardItem, StickyArtifact } from '@roundtable/shared';
+import type { BoardItem } from '@roundtable/shared';
 
-import { prepareStickyText, STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
-import {
-  STICKY_FONT_SIZE,
-  STICKY_LINE_HEIGHT,
-  STICKY_TOO_TALL,
-  stickyFits,
-  stickySize,
-} from '../tools/sticky/stickyPresentation';
 import { cardWidth } from './cardMetrics';
-import { useNoteAutoGrow } from '../tools/sticky/useNoteAutoGrow';
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
 import { ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
@@ -27,8 +18,6 @@ import {
   REMOVE_HOVER_INK,
   STICKY_RADIUS,
   STICKY_RADIUS_PX,
-  STICKY_SHADOW,
-  STICKY_THEMES,
 } from './pinboardTokens';
 
 interface DragHandlers {
@@ -68,7 +57,6 @@ interface PositionedProposalProps {
   canDelete: boolean;
   isDragging: boolean;
   dragHandlers: DragHandlers;
-  onEditText: (item: BoardItem, text: string) => Promise<void>;
   onDelete: (item: BoardItem) => Promise<void>;
   /**
    * Who the server says this client is, so the reaction row knows which chips
@@ -82,183 +70,6 @@ interface PositionedProposalProps {
   /** Leader may add/remove this card while the shortlist is still open. */
   canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
-}
-
-/**
- * Inline text editor for a sticky you authored.
- *
- * Stickies edit here, because a sticky is one field and a full-screen editor
- * for it would be heavier than the change. Drawings and diagrams reopen in the
- * Creative Tools studio (F19–F21) instead, which is the only place their
- * shapes can be manipulated.
- *
- * The length rule is the same one the tool enforces when a sticky is written,
- * and comes from the same place. Editing used to stop only at the schema's
- * outer bound, so a note capped at the tool's limit on the way in could be
- * grown to 2000 characters immediately afterwards, on a card the size of a
- * postcard.
- */
-function StickyTextEditor({
-  artifact,
-  onSave,
-  onCancel,
-}: {
-  artifact: StickyArtifact;
-  onSave: (text: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [text, setText] = useState(artifact.text);
-  const size = stickySize(text);
-  const [paperFull, setPaperFull] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const theme = STICKY_THEMES[artifact.color];
-
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
-
-  const noteFull = text.length >= STICKY_TEXT_LIMIT || paperFull;
-  // Whitespace counts as a change: adding a blank line is an edit like any other.
-  const unchanged = text === artifact.text;
-  const prepared = prepareStickyText(text);
-  // Checked as well as the count, for a note that arrived already too tall for
-  // any sticky: typing cannot make one, but it can open like that.
-  const tooTall = prepared.ok && !stickyFits(text);
-  const submittable = !saving && !unchanged && prepared.ok && !tooTall;
-  /**
-   * Shown as soon as it is true, not on a press.
-   *
-   * Save is disabled while the note is too long, so a message that waited for
-   * a click would wait for one that cannot land. Typing cannot get you here —
-   * the field stops at the limit — but a note written before the limit
-   * existed, or through another client, opens over it.
-   */
-  const tooLong =
-    !prepared.ok && text.length > STICKY_TEXT_LIMIT
-      ? prepared.error
-      : tooTall
-        ? STICKY_TOO_TALL
-        : null;
-
-  // The editor grows with the note for the same reason the card does, and
-  // raises its floor rather than setting its height: the paper around it is a
-  // flex column that already stretches this to fill a short note's square.
-  useNoteAutoGrow(ref, text, 'minHeight');
-
-  const submit = () => {
-    if (!submittable) return;
-    setSaving(true);
-    void onSave(text)
-      .then(() => {
-        // Parent closes the editor on success.
-      })
-      .catch(() => {
-        // Keep the editor open with the typed text so a rejected save is not lost.
-        setSaving(false);
-      });
-  };
-
-  return (
-    <div
-      className="flex flex-col overflow-hidden"
-      style={{
-        // Sized from the text as it is typed, by the same ladder the board
-        // card uses, so a note that will land bigger grows while you write it
-        // rather than jumping when you save.
-        width: size,
-        minHeight: size,
-        borderRadius: STICKY_RADIUS,
-        background: theme.bg,
-        boxShadow: STICKY_SHADOW,
-      }}
-    >
-      <textarea
-        ref={ref}
-        value={text}
-        maxLength={STICKY_TEXT_LIMIT}
-        onChange={(e) => {
-          const next = e.target.value;
-          // The same refusal the tool makes while a sticky is written: a note
-          // is not allowed to outgrow the largest square by being rewritten.
-          if (next.length > text.length && !stickyFits(next)) {
-            // Full once what was typed will not go in. A line break is the
-            // exception: the sticky can run out of lines while the last line
-            // still has room for words, and then the note is not full, the
-            // Enter just does not happen.
-            const onlyLineBreaks = next.replace(/\n/g, '') === text.replace(/\n/g, '');
-            setPaperFull(onlyLineBreaks ? !stickyFits(`${text}a`) : true);
-            return;
-          }
-          // Still full after trailing spaces go in: they take no room, so
-          // the note is no less full for them. Anything else changes what the
-          // paper holds, and the next refusal will say so if it is still full.
-          if (next.trim() !== text.trim()) setPaperFull(false);
-          setText(next);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel();
-          // Enter saves, Shift+Enter adds a line — the usual bargain for a
-          // one-field editor people use dozens of times in a session.
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        className="min-h-0 flex-1 resize-none overflow-hidden bg-transparent outline-none transition-[min-height] duration-150 ease-out motion-reduce:transition-none"
-        style={{
-          padding: '14px 14px 6px',
-          fontSize: STICKY_FONT_SIZE,
-          fontWeight: 500,
-          lineHeight: STICKY_LINE_HEIGHT,
-          color: CARD_INK,
-        }}
-        aria-label="Edit sticky note text"
-      />
-      {tooLong ? (
-        <p role="alert" className="px-3 pb-1 text-[10.5px] leading-snug text-rt-secondary-deep">
-          {tooLong}
-        </p>
-      ) : null}
-
-      {/* The same height as the card's byline, so a note has exactly the room
-          while it is edited that it will have on the board, and the editor
-          stays the square the card is. */}
-      <div className="flex items-center gap-2 px-3 pb-2">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!submittable}
-          className="rounded-full bg-rt-secondary px-3 py-[5px] text-[11px] font-semibold text-rt-ink disabled:opacity-45 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-full px-2.5 py-[5px] text-[11px] font-medium text-rt-ink-muted hover:bg-white/60 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-rt-secondary"
-        >
-          Cancel
-        </button>
-        {/* The same count the tool shows while a sticky is being written, so
-            the ceiling does not appear to move between writing and editing.
-            Every character counts, spaces at either end included: the box
-            itself stops at that many, so a count that skipped them could read
-            short of the limit while refusing the next keystroke. And like the
-            tool, it reads "Full" once nothing more will go in, whichever
-            limit stopped it. */}
-        <span
-          aria-live="polite"
-          className={`ml-auto text-[10px] tabular-nums ${
-            noteFull ? 'font-semibold text-rt-secondary-deep' : 'text-rt-ink-faint'
-          }`}
-        >
-          {noteFull ? 'Full' : `${text.length}/${STICKY_TEXT_LIMIT}`}
-        </span>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -365,7 +176,6 @@ export function PositionedProposal({
   canDelete,
   isDragging,
   dragHandlers,
-  onEditText,
   onDelete,
   viewerId,
   onReact,
@@ -373,7 +183,6 @@ export function PositionedProposal({
   canToggleShortlist,
   onToggleShortlist,
 }: PositionedProposalProps) {
-  const [editing, setEditing] = useState(false);
   // Removal is destructive and cannot be undone, so it always passes through a
   // confirmation (F17) — for the author and the moderating leader alike.
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -383,13 +192,12 @@ export function PositionedProposal({
   // The shortlist outline is a 2px ring, so its stroke runs 1px outside the
   // card and the marker that sits on it follows the card's own corner.
   const markerOffset = cornerPoint(isSticky ? STICKY_RADIUS_PX : CARD_RADIUS_PX, 1);
-  // A sticky is edited in place — it is one field, and a full-screen editor for
-  // it would be heavier than the change. Anything else reopens in the tool that
-  // made it, which is the only place its shape can be manipulated.
-  const editsInline = isOwn && isSticky;
+  // Every kind reopens in the tool that made it. A sticky opens its popup, which
+  // is where its formatting can be changed, so an edit keeps the note as it was
+  // written rather than flattening it in a plain box on the card.
   const boardFrozen = !canMove && !canDelete && onOpenEditor === undefined;
-  const canEdit = isOwn && !boardFrozen && (editsInline || onOpenEditor !== undefined);
-  const draggable = canMove && !editing;
+  const canEdit = isOwn && !boardFrozen && onOpenEditor !== undefined;
+  const draggable = canMove;
 
   const confirmRemove = () => {
     setRemoving(true);
@@ -421,8 +229,8 @@ export function PositionedProposal({
         // card's own corner: square on a sticky, rounded on every panel.
         borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
         top: position.y,
-        // A card being dragged, or edited, belongs above its neighbours.
-        zIndex: isDragging ? 30 : editing ? 20 : 1,
+        // A card being dragged belongs above its neighbours.
+        zIndex: isDragging ? 30 : 1,
         // An arrow at rest, even on a card you may move. A hand on hover would
         // promise that grabbing is the only thing a card does, when clicking it
         // also reaches its Edit and Remove controls — and it would put a hand
@@ -492,45 +300,34 @@ export function PositionedProposal({
         </button>
       ) : null}
 
-      {editing && item.artifactJson.type === 'sticky' ? (
-        <StickyTextEditor
-          artifact={item.artifactJson}
-          onCancel={() => setEditing(false)}
-          onSave={async (text) => {
-            await onEditText(item, text);
-            setEditing(false);
-          }}
+      <>
+        <ProposalCard
+          item={item}
+          isNew={isNew}
+          isOwnedByViewer={isOwn}
+          isAuthorLeader={isAuthorLeader}
+          isShortlisted={isShortlisted}
         />
-      ) : (
-        <>
-          <ProposalCard
-            item={item}
-            isNew={isNew}
-            isOwnedByViewer={isOwn}
-            isAuthorLeader={isAuthorLeader}
-            isShortlisted={isShortlisted}
+
+        {onReact ? (
+          <ReactionRow
+            reactions={item.reactions}
+            viewerId={viewerId}
+            onReact={(emoji) => onReact(item, emoji)}
+            width={cardWidth(item)}
           />
+        ) : null}
 
-          {onReact ? (
-            <ReactionRow
-              reactions={item.reactions}
-              viewerId={viewerId}
-              onReact={(emoji) => onReact(item, emoji)}
-              width={cardWidth(item)}
-            />
-          ) : null}
-
-          {canEdit || canDelete ? (
-            <OwnerControls
-              canEdit={canEdit}
-              canDelete={canDelete}
-              isOwn={isOwn}
-              onEdit={() => (editsInline ? setEditing(true) : onOpenEditor?.(item))}
-              onDelete={() => setConfirmingRemove(true)}
-            />
-          ) : null}
-        </>
-      )}
+        {canEdit || canDelete ? (
+          <OwnerControls
+            canEdit={canEdit}
+            canDelete={canDelete}
+            isOwn={isOwn}
+            onEdit={() => onOpenEditor?.(item)}
+            onDelete={() => setConfirmingRemove(true)}
+          />
+        ) : null}
+      </>
 
       {confirmingRemove ? (
         <ConfirmRemoveDialog

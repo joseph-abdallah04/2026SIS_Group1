@@ -148,11 +148,16 @@ interface StudioProposeButtonProps {
   submitting: boolean;
   /** On its way for long enough to say so; see `useSlowSubmission`. */
   sending: boolean;
+  /**
+   * Rewriting a proposal already on the board, so the button says it updates
+   * that proposal rather than offering to propose it again.
+   */
+  editing?: boolean;
   title: string;
 }
 
 /**
- * Propose, in the studio's header.
+ * Propose, or Update proposal for an edit, in the studio's header.
  *
  * The same size whatever it is doing: while a slow send is waiting, the label
  * is covered by a spinner rather than replaced by a longer one, so nothing else
@@ -168,6 +173,7 @@ export function StudioProposeButton({
   disabled,
   submitting,
   sending,
+  editing = false,
   title,
 }: StudioProposeButtonProps) {
   return (
@@ -184,12 +190,12 @@ export function StudioProposeButton({
       }}
     >
       <span aria-hidden={sending || undefined} className={sending ? 'invisible' : undefined}>
-        Propose
+        {editing ? 'Update proposal' : 'Propose'}
       </span>
       {sending ? (
         <span className="absolute inset-0 flex items-center justify-center">
           <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
-          <span className="sr-only">Proposing</span>
+          <span className="sr-only">{editing ? 'Updating' : 'Proposing'}</span>
         </span>
       ) : null}
     </Button>

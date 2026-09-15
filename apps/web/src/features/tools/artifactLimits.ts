@@ -1,15 +1,17 @@
 /**
- * Ten lines of ordinary prose on the largest sticky, with room to spare.
+ * A long paragraph: room for a real idea with its reasons, still a note.
  *
- * Measured in Chrome with Inter: nine lines at a sticky's width hold at most
- * 275 characters of real prose, and ten hold at least 307. A cap between the
- * two means a note at the cap needs all ten lines, so it ends at the bottom of
- * the largest square, and never needs an eleventh. Set in the middle of that
- * window, clear of both ends: well above the most nine lines hold, and far
- * enough under the least ten hold that prose whose words wrap badly still runs
- * out of count before it runs out of paper.
+ * Ordinary prose this long fits the largest sticky. A note that does not — many
+ * short lines, or a lot of it in bold — makes that sticky a little taller, so
+ * this limit is a count of characters. Lines have their own, below.
  */
-export const STICKY_TEXT_LIMIT = 290;
+export const STICKY_TEXT_LIMIT = 500;
+/**
+ * Lines a sticky may have, blank ones included. Enough for a heading over a
+ * good list with room to breathe, without letting Enter held down fill a note
+ * with nothing but empty lines.
+ */
+export const STICKY_MAX_LINES = 20;
 export const DRAWING_SVG_LIMIT = 100_000;
 export const DIAGRAM_NODE_LIMIT = 100;
 export const DIAGRAM_EDGE_LIMIT = 200;
@@ -36,6 +38,10 @@ export function prepareStickyText(value: string): PreparedStickyText {
       ok: false,
       error: `Keep your sticky to ${STICKY_TEXT_LIMIT} characters or fewer.`,
     };
+  }
+
+  if (text.split('\n').length > STICKY_MAX_LINES) {
+    return { ok: false, error: `Keep your sticky to ${STICKY_MAX_LINES} lines or fewer.` };
   }
 
   return { ok: true, text };
