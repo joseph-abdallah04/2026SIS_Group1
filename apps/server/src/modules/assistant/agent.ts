@@ -161,7 +161,6 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
 
   let textLength = 0;
   let artifactsEmitted = 0;
-  let reasoningText = '';
   let thinkingAnnounced = false;
   let finishReason: string | undefined;
   let steps = 0;
@@ -218,7 +217,6 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
         // actually stream a reasoning channel.
         case 'reasoning-start':
         case 'reasoning-delta': {
-          if (part.type === 'reasoning-delta') reasoningText += part.text;
           if (!thinkingAnnounced) {
             thinkingAnnounced = true;
             emit({ type: 'status', phase: 'thinking' });
