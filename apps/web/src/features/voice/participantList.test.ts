@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import {
+  localName,
   orderParticipants,
   presenceLabel,
   seatParticipants,
   splitForHeader,
+  voiceStateByIdentity,
 } from './participantList';
 import type { VoiceParticipant } from './useVoiceRoom';
 
@@ -238,5 +240,48 @@ describe('splitForHeader', () => {
 
     expect(visible).toHaveLength(0);
     expect(hidden).toHaveLength(2);
+  });
+});
+
+describe('voiceStateByIdentity', () => {
+  it('keys voice state by the identity a seat is drawn under', () => {
+    const byId = voiceStateByIdentity([
+      person({ identity: 'u1', isMuted: true }),
+      person({ identity: 'u2' }),
+    ]);
+
+    expect(byId.get('u1')).toEqual({ isMuted: true });
+    expect(byId.get('u2')).toEqual({ isMuted: false });
+  });
+
+  it('says nothing about someone who is not in the room', () => {
+    const byId = voiceStateByIdentity([person({ identity: 'u1' })]);
+
+    // Absence has to stay absence: a seated person who has not reached the
+    // voice room yet is unknown, not muted, and a caller that defaulted this
+    // to `true` would state something about a microphone nobody has heard
+    // from.
+    expect(byId.has('u2')).toBe(false);
+    expect(byId.get('u2')).toBeUndefined();
+  });
+
+  it('is empty when voice is off entirely', () => {
+    expect(voiceStateByIdentity([]).size).toBe(0);
+  });
+});
+
+describe('localName', () => {
+  it('finds your own name as the room minted it', () => {
+    expect(
+      localName([
+        person({ identity: 'u1', name: 'Ada' }),
+        person({ identity: 'u2', name: 'Mia', isLocal: true }),
+      ]),
+    ).toBe('Mia');
+  });
+
+  it('is null before you are in the room', () => {
+    expect(localName([])).toBeNull();
+    expect(localName([person({ identity: 'u1', name: 'Ada' })])).toBeNull();
   });
 });
