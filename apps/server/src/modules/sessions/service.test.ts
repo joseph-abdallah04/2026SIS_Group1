@@ -117,6 +117,7 @@ const {
   startSession,
   updateSessionDraft,
   getDiscussionTimer,
+  findLiveSessionForUser,
 } = await import('./service.js');
 
 beforeEach(() => {
@@ -1392,5 +1393,27 @@ describe('getDiscussionTimer', () => {
 
     votingRoundFindUnique.mockResolvedValueOnce({ status: 'closed' });
     await expect(getDiscussionTimer('s1')).resolves.toBeNull();
+  });
+});
+
+describe('findLiveSessionForUser', () => {
+  const liveQuery = {
+    where: {
+      status: { in: ['lobby', 'active'] },
+      members: { some: { userId: 'u1', leftAt: null } },
+    },
+    select: { id: true, title: true },
+  };
+
+  it('looks for a current membership in a lobby or active session', async () => {
+    sessionFindFirst.mockResolvedValueOnce({ id: 's1', title: 'Standup' });
+
+    await expect(findLiveSessionForUser('u1')).resolves.toEqual({ id: 's1', title: 'Standup' });
+    expect(sessionFindFirst).toHaveBeenCalledWith(liveQuery);
+  });
+
+  it('returns null when the user is not in a lobby or active session', async () => {
+    sessionFindFirst.mockResolvedValueOnce(null);
+    await expect(findLiveSessionForUser('u1')).resolves.toBeNull();
   });
 });

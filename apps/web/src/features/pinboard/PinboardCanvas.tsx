@@ -105,6 +105,8 @@ interface PinboardCanvasProps {
   ballot?: ReactNode;
   /** Discussion clock. Hidden by the parent once the ballot overlay is up. */
   headerTimer?: ReactNode;
+  /** Last card the viewer interacted with, so the assistant can resolve "this one". */
+  onSelectProposal?: (id: string) => void;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -134,8 +136,8 @@ function ZoomControl({
   onFit: () => void;
 }) {
   // Round buttons inside the pill rather than cells split by rules: it is the
-  // same shape as the creative toolbar floating beside it, so the two read as
-  // one set of controls rather than a toolbar and a stray widget.
+  // same shape as the creative toolbar, so the two read as one set of controls
+  // rather than a toolbar and a stray widget.
   const button =
     'flex h-9 min-w-9 items-center justify-center rounded-full px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-rt-ink-muted';
 
@@ -206,6 +208,7 @@ export function PinboardCanvas({
   boardOverlay,
   ballot,
   headerTimer,
+  onSelectProposal,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   // A message for the pill over the toolbar. The id makes the same words said
@@ -810,6 +813,7 @@ export function PinboardCanvas({
                     isShortlisted={shortlist.includes(item.id)}
                     canToggleShortlist={canToggleShortlist}
                     onToggleShortlist={onToggleShortlist}
+                    onSelectProposal={onSelectProposal}
                   />
                 ))}
               </div>
@@ -857,9 +861,9 @@ export function PinboardCanvas({
             nothing on the board should be caught by that. */}
           <div className="@container/board pointer-events-none absolute inset-0 z-20">
             {/* A refused write, stacked above the toolbar. It stays centred
-                  when the bar moves left, because at this height it is already
-                  clear of the nav bar. `bottom-19` is the bar's `bottom-6` plus
-                  its `h-11` plus an 8px gap. */}
+                  when the bar shifts, because at this height it is already
+                  clear of the zoom control and the assistant orb. `bottom-19`
+                  is the bar's `bottom-6` plus its `h-11` plus an 8px gap. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
               {notice ? (
                 <p
@@ -872,15 +876,18 @@ export function PinboardCanvas({
             </div>
 
             {/* The main toolbar. Centred on the board until it would run
-                  into the nav bar, then anchored left: the centred bar (~290px)
-                  meets the nav bar (~181px, 24px in from the edge, 16px gap)
-                  on a board narrower than ~732px, so 48rem leaves a margin.
-                  `bottom-6` clears the horizontal scrollbar. On a board too
-                  narrow even for icons (~320px) the two can still touch.
+                  into the zoom control on the left, then anchored right: the
+                  centred bar (~290px) meets the zoom control (~181px, 24px in
+                  from the edge, 16px gap) on a board narrower than ~732px, so
+                  48rem leaves a margin. Extra right padding clears the
+                  assistant orb in that corner. `bottom-6` clears the
+                  horizontal scrollbar. On a board too narrow even for icons
+                  (~320px) the two can still touch.
 
                   The leader's shortlist bar, which takes this slot while the
-                  board is closed, is wider (~490px) and meets the nav bar on a
-                  board narrower than ~930px, so it anchors left from 60rem.
+                  board is closed, is wider (~490px) and meets the zoom
+                  control on a board narrower than ~930px, so it anchors
+                  right from 60rem.
 
                   Marked so the sticky popup can centre itself over the board
                   this row spans, rather than over a window the side panels
@@ -889,8 +896,8 @@ export function PinboardCanvas({
               data-board-toolbar
               className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
                 !boardOpen && boardOverlay
-                  ? '@max-[60rem]/board:justify-start'
-                  : '@max-[48rem]/board:justify-start'
+                  ? '@max-[60rem]/board:justify-end @max-[60rem]/board:pr-[5.75rem]'
+                  : '@max-[48rem]/board:justify-end @max-[48rem]/board:pr-[5.75rem]'
               }`}
             >
               {/* `relative` so the first-proposal hint can rise off whichever
@@ -916,9 +923,9 @@ export function PinboardCanvas({
                   boardOverlay
                 ) : (
                   // A sentence cannot shrink to an icon, so it truncates
-                  // instead, capped at what the nav bar leaves free.
+                  // instead, capped at what the zoom control leaves free.
                   <p
-                    className={`${FLOATING_BAR} max-w-[calc(100cqw-15.5rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
+                    className={`${FLOATING_BAR} max-w-[calc(100cqw-18rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
                   >
                     <span className="truncate">{closedMessage}</span>
                   </p>
@@ -926,10 +933,10 @@ export function PinboardCanvas({
               </div>
             </div>
 
-            {/* Navigation, in the corner opposite nothing: clear of the
-                  vertical scrollbar by `right-6`, and on the same baseline as
-                  the main bar. */}
-            <div className="pointer-events-auto absolute right-6 bottom-6">
+            {/* Zoom, opposite the assistant: clear of the vertical
+                  scrollbar by `left-6`, and on the same baseline as the
+                  main bar. */}
+            <div className="pointer-events-auto absolute bottom-6 left-6">
               <ZoomControl
                 zoom={zoom}
                 canZoomIn={zoom !== ZOOM_LEVELS[0]}

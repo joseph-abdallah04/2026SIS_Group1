@@ -95,6 +95,56 @@ function EditButton({ proposal, label = 'Edit fixture' }: { proposal: BoardItem;
 }
 
 describe('creative sticky flow', () => {
+  // The assistant proposes straight from its chat panel, one card at a time, without ever
+  // opening or closing a studio tool — and closing is what releases the editor's write
+  // lock. Through `submitArtifact` that was one write per page load, every one after it a
+  // silent `false` the panel could only report to the user as a rejection.
+  it('proposes as many times as asked from outside an editor', async () => {
+    // Typed so the assertion below can read what the second call actually sent.
+    const propose = vi.fn<(input: ProposalCreateInput) => Promise<void>>(async () => undefined);
+
+    function TwiceButton() {
+      const { proposeArtifact } = useCreativeTools();
+      return (
+        <button
+          onClick={async () => {
+            const first = await proposeArtifact({ type: 'sticky', text: 'one', color: 'yellow' });
+            const second = await proposeArtifact({ type: 'sticky', text: 'two', color: 'blue' });
+            results.push(first.ok, second.ok);
+          }}
+        >
+          Propose twice
+        </button>
+      );
+    }
+    const results: boolean[] = [];
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/sessions/demo']}>
+        <CreativeToolsProvider
+          sessionId="session-1"
+          questionId="question-1"
+          viewerId={null}
+          isLive
+          proposals={[]}
+          propose={propose}
+          editProposal={async () => {}}
+        >
+          <TwiceButton />
+        </CreativeToolsProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Propose twice' }));
+
+    expect(results).toEqual([true, true]);
+    expect(propose).toHaveBeenCalledTimes(2);
+    expect(propose.mock.calls[1]?.[0]).toMatchObject({
+      artifactJson: { type: 'sticky', text: 'two' },
+    });
+  });
+
   it('proposes a coloured sticky exactly as typed through the existing write contract', async () => {
     const user = userEvent.setup();
     const propose = vi.fn(async () => undefined);

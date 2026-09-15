@@ -16,6 +16,13 @@ afterEach(() => {
 
 window.confirm = () => true;
 
+// No `matchMedia` is installed here on purpose. jsdom ships no media-query
+// engine, and the components that animate read that absence as "nothing is
+// moving, so do not wait for a transition" — which is what a suite wants. A
+// global stub would answer "no preference" instead and quietly put every one of
+// them on its animated path. The few tests that are about motion install their
+// own, and remove it afterwards.
+
 if (!globalThis.PointerEvent) {
   class TestPointerEvent extends MouseEvent {
     readonly pointerId: number;

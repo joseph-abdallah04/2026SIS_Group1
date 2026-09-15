@@ -5,6 +5,13 @@ import type { ToolKind } from './toolRegistry';
 
 export type ProposalSubmissionStatus = 'idle' | 'submitting' | 'success';
 
+/**
+ * What one write outside an editor came to. The reason it carries its own error
+ * rather than leaving it in `submissionError`: several of these can be in the
+ * air at once, and a caller must be told about its own.
+ */
+export type ProposeResult = { ok: true } | { ok: false; error: string };
+
 export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
   /**
@@ -49,7 +56,17 @@ export interface CreativeToolsContextValue {
   closeTool: () => boolean;
   setCloseGuard: (guard: (() => boolean) | null) => void;
   resetSubmission: () => void;
+  /**
+   * The editor's write: one per tool opened, since the lock it takes is released
+   * by opening or closing a tool, and `submissionStatus` is the editor's screen.
+   */
   submitArtifact: (artifact: ArtifactJson) => Promise<boolean>;
+  /**
+   * A write from somewhere that is not an editor — the assistant's chat cards,
+   * which never open a tool and each keep their own state. Same placement and
+   * same error copy; none of the editor's one-at-a-time state.
+   */
+  proposeArtifact: (artifact: ArtifactJson) => Promise<ProposeResult>;
 }
 
 export const CreativeToolsContext = createContext<CreativeToolsContextValue | null>(null);

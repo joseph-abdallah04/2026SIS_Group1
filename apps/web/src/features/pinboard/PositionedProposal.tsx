@@ -103,6 +103,8 @@ interface PositionedProposalProps {
   /** Leader may add/remove this card while the shortlist is still open. */
   canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
+  /** Last card the viewer interacted with, so the assistant can resolve "this one". */
+  onSelectProposal?: (id: string) => void;
 }
 
 /**
@@ -195,6 +197,7 @@ export function PositionedProposal({
   isShortlisted,
   canToggleShortlist,
   onToggleShortlist,
+  onSelectProposal,
 }: PositionedProposalProps) {
   // Removal is destructive and cannot be undone, so it always passes through a
   // confirmation (F17) — for the author and the moderating leader alike.
@@ -358,7 +361,16 @@ export function PositionedProposal({
         // toward it reads as lag. Other people's moves do animate.
         transition: isDragging ? undefined : 'left 120ms ease-out, top 120ms ease-out',
       }}
-      onPointerDown={draggable ? (e) => dragHandlers.onPointerDown(item, e) : undefined}
+      onPointerDown={
+        draggable
+          ? (e) => {
+              onSelectProposal?.(item.id);
+              dragHandlers.onPointerDown(item, e);
+            }
+          : onSelectProposal
+            ? () => onSelectProposal(item.id)
+            : undefined
+      }
       onPointerMove={draggable ? dragHandlers.onPointerMove : undefined}
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}

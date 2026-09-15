@@ -1,0 +1,233 @@
+// HTTP surface for the assistant module (docs/02 §5).
+//
+//   GET    /api/me/llm-config        → { baseUrl, model, hasKey } — never the key itself
+//   PUT    /api/me/llm-config        → save provider config
+//   DELETE /api/me/llm-config        → forget it
+//   POST   /api/me/llm-config/test   → "Test connection"
+//   GET    /api/me/assistant-usage   → token spend, per model
+//   POST   /api/sessions/:id/assistant/chat → SSE stream of the assistant's turn
+import { Router } from 'express';
+import type { Response } from 'express';
+import {
+  assistantChatRequestSchema,
+  llmConfigUpsertSchema,
+  type AssistantStreamEvent,
+  type AssistantUsage,
+} from '@roundtable/shared';
+
+import { env } from '../../env.js';
+import { SseWriter } from '../../lib/sse.js';
+import { getUserId, requireAuth } from '../../middleware/auth.js';
+import { ApiError } from '../../middleware/error.js';
+import { assertSessionMember } from '../sessions/index.js';
+import { runAssistantTurn } from './agent.js';
+import { buildSessionContext } from './context.js';
+import {
+  deleteLlmConfig,
+  getLlmConfigPublic,
+  getLlmCredentials,
+  saveLlmConfig,
+  testLlmConfig,
+} from './llmConfig.service.js';
+import { buildSystemPrompt } from './prompt.js';
+import { assertTurnAllowed } from './rateLimit.js';
+import { sessionLookupReader } from './sessionLookup.js';
+import {
+  assertCredentialsAllowed,
+  createAssistantModel,
+  describeProviderError,
+} from './provider.js';
+import { createAssistantTools, ToolOutcomeSink } from './tools/index.js';
+import { recordTurnUsage, summarizeUsage, type TurnOutcomeLabel } from './usage.service.js';
+
+export const assistantRouter: Router = Router();
+
+// ---------------------------------------------------------------------------
+// F33 — LLM provider configuration
+// ---------------------------------------------------------------------------
+
+assistantRouter.get('/me/llm-config', requireAuth, async (req, res, next) => {
+  try {
+    res.json({ config: await getLlmConfigPublic(getUserId(req)) });
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+assistantRouter.put('/me/llm-config', requireAuth, async (req, res, next) => {
+  try {
+    const parsed = llmConfigUpsertSchema.safeParse(req.body);
+    if (!parsed.success) throw validationError(parsed.error.issues);
+    res.json({ config: await saveLlmConfig(getUserId(req), parsed.data) });
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+assistantRouter.delete('/me/llm-config', requireAuth, async (req, res, next) => {
+  try {
+    await deleteLlmConfig(getUserId(req));
+    res.json({ ok: true });
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+assistantRouter.post('/me/llm-config/test', requireAuth, async (req, res, next) => {
+  try {
+    // An empty body tests what is already saved. A body tests what the user just typed, so
+    // they can verify before committing a key — and if it omits the key, the stored one is
+    // used, which is how "same key, different model" gets tested.
+    const hasBody = req.body && Object.keys(req.body as object).length > 0;
+    if (!hasBody) {
+      res.json(await testLlmConfig(getUserId(req)));
+      return;
+    }
+    const parsed = llmConfigUpsertSchema.safeParse(req.body);
+    if (!parsed.success) throw validationError(parsed.error.issues);
+    res.json(await testLlmConfig(getUserId(req), parsed.data));
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Token spend
+// ---------------------------------------------------------------------------
+
+assistantRouter.get('/me/assistant-usage', requireAuth, async (req, res, next) => {
+  try {
+    const days = Number(req.query.days);
+    const windowDays = Number.isInteger(days) && days > 0 && days <= 365 ? days : undefined;
+    res.json(await summarizeUsage(getUserId(req), windowDays));
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// F35–F36 — the chat stream
+// ---------------------------------------------------------------------------
+
+assistantRouter.post('/sessions/:id/assistant/chat', requireAuth, async (req, res, next) => {
+  // Express types route params as `string | string[]`; a single `:id` is always a string.
+  const rawId = req.params.id;
+  const sessionId = Array.isArray(rawId) ? rawId[0] : rawId;
+  if (!sessionId) {
+    next(new ApiError(400, 'Session id is required', 'SESSION_ID_REQUIRED'));
+    return;
+  }
+
+  let userId: string;
+  let request: ReturnType<typeof assistantChatRequestSchema.parse>;
+  try {
+    userId = getUserId(req);
+    // Before anything else: the assistant reads the live board into its prompt, so a caller
+    // who is not in this session must not get a turn at all. Membership is checked ahead of
+    // body validation so a non-member learns nothing about the session from the error, and
+    // ahead of the stream so this can still be a plain 403 rather than an SSE error frame.
+    await assertSessionMember(sessionId, userId);
+    assertTurnAllowed(userId, env.ASSISTANT_MAX_TURNS_PER_MINUTE);
+    const parsed = assistantChatRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw validationError(parsed.error.issues);
+    request = parsed.data;
+  } catch (cause) {
+    // Nothing has been streamed yet, so this can still be a normal JSON error response.
+    next(cause);
+    return;
+  }
+
+  await streamAssistantTurn(res, { sessionId, userId, request });
+});
+
+async function streamAssistantTurn(
+  res: Response,
+  input: {
+    sessionId: string;
+    userId: string;
+    request: ReturnType<typeof assistantChatRequestSchema.parse>;
+  },
+): Promise<void> {
+  const stream = new SseWriter<AssistantStreamEvent>(res);
+
+  // Abort the LLM call and any in-flight tool the moment the user closes the panel —
+  // they are paying for those tokens.
+  //
+  // Listen on the *response*, not the request: `req` emits 'close' as soon as its body has
+  // been read, which for a POST is immediately, and would abort every turn at step zero.
+  const abort = new AbortController();
+  res.on('close', () => abort.abort());
+
+  // Declared out here so the `finally` can bill a turn that ended by throwing.
+  let credentials: Awaited<ReturnType<typeof getLlmCredentials>> | undefined;
+  let outcome: TurnOutcomeLabel = 'error';
+  let usage: AssistantUsage | undefined;
+
+  try {
+    // Credentials are fetched first: "no provider configured" is the single most common
+    // failure and deserves a clean error frame rather than a half-started stream.
+    credentials = await getLlmCredentials(input.userId);
+    await assertCredentialsAllowed(credentials);
+
+    const context = await buildSessionContext(input.sessionId, input.userId, input.request.context);
+    const sink = new ToolOutcomeSink();
+
+    const result = await runAssistantTurn({
+      model: createAssistantModel(credentials),
+      instructions: buildSystemPrompt(context, input.request.history),
+      history: input.request.history,
+      message: input.request.message,
+      emit: (event) => stream.send(event),
+      signal: abort.signal,
+      maxOutputTokens: env.ASSISTANT_MAX_OUTPUT_TOKENS,
+      tools: { toolSet: createAssistantTools(sink, sessionLookupReader(input.sessionId)), sink },
+      // Set before any throw can escape, so the `finally` below bills a failed turn too.
+      onUsage: (reported) => {
+        usage = reported;
+      },
+    });
+
+    outcome = result.reason;
+    stream.send({ type: 'done', reason: result.reason, usage: result.usage });
+  } catch (cause) {
+    if (abort.signal.aborted) {
+      outcome = 'aborted';
+      stream.send({ type: 'done', reason: 'aborted' });
+    } else {
+      const apiError =
+        cause instanceof ApiError
+          ? cause
+          : describeProviderError(cause, credentials?.baseUrl ?? '');
+      stream.send({
+        type: 'error',
+        message: apiError.message,
+        ...(apiError.code ? { code: apiError.code } : {}),
+      });
+      // Every stream terminates with `done`, including on error (docs/06 acceptance criteria).
+      stream.send({ type: 'done', reason: 'error' });
+    }
+  } finally {
+    stream.close();
+
+    // Billed after the stream closes so bookkeeping never delays the last frame, and
+    // billed even on failure — a turn that burned tokens and then timed out still cost
+    // the user money.
+    if (credentials && usage) {
+      await recordTurnUsage({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        baseUrl: credentials.baseUrl,
+        model: credentials.model,
+        usage,
+        outcome,
+      });
+    }
+  }
+}
+
+function validationError(issues: Array<{ path: PropertyKey[]; message: string }>): ApiError {
+  const detail = issues
+    .map((issue) => `${issue.path.map(String).join('.') || 'body'}: ${issue.message}`)
+    .join('; ');
+  return new ApiError(400, `Invalid request: ${detail}`, 'VALIDATION_FAILED');
+}

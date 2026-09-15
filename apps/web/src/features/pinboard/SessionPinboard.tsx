@@ -1,9 +1,11 @@
+import { useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { PhaseTimer } from '../../components/PhaseTimer';
 import { AgendaPanel } from '../agenda/AgendaPanel';
+import { AssistantBubble } from '../assistant';
 import { JoinCodeCard } from '../sessions/JoinCodeCard';
 import { MyProposalsLauncher } from './MyProposalsLauncher';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
@@ -54,6 +56,14 @@ interface SessionPinboardProps {
 export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
+  const selectedProposalId = useRef<string | undefined>(undefined);
+  const onSelectProposal = useCallback((proposalId: string) => {
+    selectedProposalId.current = proposalId;
+  }, []);
+  const getAssistantContext = useCallback(
+    () => (selectedProposalId.current ? { selectedProposalId: selectedProposalId.current } : {}),
+    [],
+  );
   const {
     board,
     loading,
@@ -79,6 +89,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
   // Called before any early return so the room is not torn down and rebuilt
   // every time the board flips between loading, error and loaded.
   const voice = useVoiceRoom(sessionId);
+
   // The room's own name for us, minted into the token server-side — the only
   // name F12's toggle can show that is guaranteed to match what the rest of the
   // room sees beside our audio.
@@ -287,6 +298,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           }
           joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
           reactToProposal={reactToProposal}
+          onSelectProposal={onSelectProposal}
           headerTimer={
             board.discussionTimer &&
             (board.questionStatus === 'discussion' ||
@@ -303,6 +315,16 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
         <SessionJoinNotices />
       </main>
       <CreativeStudio />
+      {/* Propose reads these items so it can unlock after a delete. The model
+          still reads the board server-side on every turn (F35). */}
+      <AssistantBubble
+        key={sessionId}
+        sessionId={sessionId}
+        getContext={getAssistantContext}
+        boardItems={board.items}
+        questionStatus={board.questionStatus}
+        suppressed={balloting}
+      />
     </CreativeToolsProvider>
   );
 }

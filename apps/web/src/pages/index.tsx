@@ -8,7 +8,7 @@ import { Button } from '../components/ui/Button';
 import { logout } from '../features/auth/api';
 import { JoinByCodeForm } from '../features/sessions/JoinByCodeForm';
 import { SessionCardActions } from '../features/sessions/SessionCardActions';
-import { useSessions } from '../features/sessions/useSessions';
+import { liveMembershipOf, useSessions } from '../features/sessions/useSessions';
 import { clearToken } from '../lib/auth';
 import { disconnectSocket } from '../lib/socket';
 
@@ -179,9 +179,7 @@ export function DashboardPage() {
   // `isCurrentMember` matters: a session they left still appears here as
   // history, and without that check the redirect would haul them straight
   // back into the session they just walked out of.
-  const liveSession = sessions?.find(
-    (s) => (s.status === 'lobby' || s.status === 'active') && s.isCurrentMember,
-  );
+  const liveSession = liveMembershipOf(sessions);
 
   useEffect(() => {
     if (liveSession) navigate(`/sessions/${liveSession.id}`, { replace: true });

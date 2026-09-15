@@ -3,6 +3,16 @@ import type { SessionSummary } from '@roundtable/shared';
 
 import { api } from '../../lib/api';
 
+/** A lobby or active session this user has not left — the one they must not walk away from. */
+export function liveMembershipOf(
+  sessions: SessionSummary[] | null | undefined,
+): SessionSummary | undefined {
+  return sessions?.find(
+    (session) =>
+      (session.status === 'lobby' || session.status === 'active') && session.isCurrentMember,
+  );
+}
+
 /** The dashboard's list of sessions the current dev-identity leads or has joined. */
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);

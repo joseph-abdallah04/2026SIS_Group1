@@ -151,6 +151,7 @@ export function CreativeToolsProvider({
         setCloseGuard,
         resetSubmission: submission.reset,
         submitArtifact: submission.submitArtifact,
+        proposeArtifact: submission.proposeArtifact,
       }}
     >
       {children}

@@ -4,7 +4,7 @@ import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/share
 
 import { findOpenProposalPosition } from './proposalPlacement';
 import { proposalErrorMessage } from './proposeErrors';
-import type { ProposalSubmissionStatus } from './CreativeToolsContext';
+import type { ProposalSubmissionStatus, ProposeResult } from './CreativeToolsContext';
 
 interface UseProposalSubmissionOptions {
   extensionSource: BoardItem | null;
@@ -84,7 +84,41 @@ export function useProposalSubmission({
     }
   }
 
-  return { status, error, reset, submitArtifact };
+  /**
+   * A write that does not belong to an editor.
+   *
+   * `submitArtifact` above is one write per tool opened: the lock it takes is
+   * released by opening or closing a tool, and `status` drives the editor's own
+   * screen. That is right for a popup you open, propose from once, and close —
+   * it is what stops a stray keypress on a focused Propose button putting the
+   * same note on the board twice.
+   *
+   * It is wrong for the assistant, which proposes from chat cards that never
+   * open a tool and each track their own sending, proposed and failed. Sharing
+   * the editor's lock gave it exactly one write per page load; sharing the
+   * editor's `error` would tell one card about another's failure. So this
+   * shares the parts that are about the board — where the artifact lands, and
+   * what a rejection reads as — and keeps nothing that is about a popup.
+   *
+   * Always a create. Extending and editing are things you do from a tool.
+   */
+  async function proposeArtifact(artifactJson: ArtifactJson): Promise<ProposeResult> {
+    if (!isLive)
+      return { ok: false, error: 'Reconnect to the session before proposing your idea.' };
+
+    try {
+      await propose({
+        type: artifactJson.type,
+        artifactJson,
+        ...findOpenProposalPosition(proposals, artifactJson),
+      });
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, error: proposalErrorMessage(cause) };
+    }
+  }
+
+  return { status, error, reset, submitArtifact, proposeArtifact };
 }
 
 /** How long a proposal can be on its way before the studio shows it is waiting. */

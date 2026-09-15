@@ -198,5 +198,30 @@ describe('ProfilePage', () => {
       expect(clearTokenMock).not.toHaveBeenCalled();
       expect(navigateMock).not.toHaveBeenCalled();
     });
+
+    it('keeps the session when the server refuses because they are still in a live session', async () => {
+      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+      vi.mocked(authApi.deleteAccount).mockRejectedValue(
+        new ApiClientError(
+          409,
+          'End or leave "Sprint planning" before deleting your account',
+          'LIVE_SESSION_EXISTS',
+        ),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByText('alice@example.com');
+      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      const dialog = screen.getByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /delete account/i }));
+
+      expect(
+        await screen.findByText('End or leave "Sprint planning" before deleting your account'),
+      ).toBeInTheDocument();
+      expect(clearTokenMock).not.toHaveBeenCalled();
+      expect(navigateMock).not.toHaveBeenCalled();
+    });
   });
 });

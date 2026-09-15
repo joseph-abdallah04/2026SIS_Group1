@@ -1,5 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
+import { clearAllChats } from '../features/assistant/chatStorage';
+
 const TOKEN_KEY = 'rt_token';
 
 /**
@@ -22,11 +24,14 @@ export function getToken(): string | null {
 }
 
 export function setToken(token: string): void {
+  // A new identity on this tab must not inherit the previous person's private chat.
+  clearAllChats();
   localStorage.setItem(TOKEN_KEY, token);
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  clearAllChats();
 }
 
 /**

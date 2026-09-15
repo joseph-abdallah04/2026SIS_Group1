@@ -282,6 +282,10 @@ export interface LiveSessionRef {
  * `SessionMember` with `leftAt: null` (F07 — a leader cannot leave, only
  * end), so this single membership check catches leading and merely
  * belonging to a live session alike.
+ *
+ * Both `lobby` and `active` count. A waiting-room member is already in the
+ * session; deleting their account there would orphan the room the same way
+ * deleting during the board would.
  */
 export async function findLiveSessionForUser(userId: string): Promise<LiveSessionRef | null> {
   return prisma.session.findFirst({
