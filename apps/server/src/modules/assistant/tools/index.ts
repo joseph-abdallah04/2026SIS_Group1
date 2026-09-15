@@ -18,6 +18,7 @@
 // `execute` would race the agent's own reading of the stream, so execution records what
 // happened and the agent emits it when it sees the matching `tool-result`.
 import {
+  ASSISTANT_TOOL_NAMES,
   parseArtifact,
   STICKY_COLORS,
   summarizeArtifact,
@@ -31,6 +32,7 @@ import {
 import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 
+import type { Agenda, SessionLookupData, SessionLookupReader } from '../sessionLookup.js';
 import { layoutDiagram } from './layout.js';
 import { searchWeb } from './webSearch.js';
 
@@ -251,6 +253,123 @@ export function runStickyIdeation(input: z.infer<typeof stickyIdeationInput>): T
 // Registry
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// look_up_session
+// ---------------------------------------------------------------------------
+
+const lookUpSessionInput = z.object({
+  what: z
+    .enum(['agenda', 'proposals', 'answers'])
+    .describe(
+      'agenda: every question and its status. proposals: what is on the pinboard for a question. answers: what the settled questions were decided on.',
+    ),
+  question: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .describe(
+      'Which question to read, numbered from 1 as the agenda numbers them. Leave it out for the question being discussed now.',
+    ),
+});
+
+export function runLookUpSession(
+  input: z.infer<typeof lookUpSessionInput>,
+  data: SessionLookupData,
+): ToolOutcome {
+  switch (input.what) {
+    case 'agenda':
+      return describeAgenda(data.agenda);
+    case 'proposals':
+      return describeProposals(data);
+    case 'answers':
+      return describeAnswers(data);
+  }
+}
+
+function describeAgenda(agenda: Agenda): ToolOutcome {
+  if (agenda.questions.length === 0) {
+    return {
+      ok: true,
+      summary: 'No questions yet',
+      modelText: `"${agenda.title}" has no questions on its agenda yet.`,
+    };
+  }
+
+  // Formatted as the session-context block formats it, so the agenda does not appear to
+  // have changed shape between the prompt the model was given and the tool it just called.
+  const lines = agenda.questions.map(
+    (question) =>
+      `${question.number}. [${question.status}] ${question.text}${question.isCurrent ? ' ← the team is on this one now' : ''}`,
+  );
+
+  return {
+    ok: true,
+    summary: `${agenda.questions.length} question${agenda.questions.length === 1 ? '' : 's'}`,
+    modelText: `Agenda for "${agenda.title}":\n${lines.join('\n')}`,
+  };
+}
+
+function describeProposals(data: SessionLookupData): ToolOutcome {
+  const found = data.proposals;
+  if (!found) {
+    return {
+      ok: false,
+      summary: 'No such question',
+      modelText:
+        'There is no question with that number on the agenda. Look up the agenda first to see how many there are.',
+    };
+  }
+
+  const { question, items } = found;
+  const where = `question ${question.number}, "${question.text}"`;
+
+  if (items.length === 0) {
+    return {
+      ok: true,
+      summary: 'Nothing on it',
+      modelText: `Nothing has been proposed on ${where} — the board for it is empty.`,
+    };
+  }
+
+  const lines = items.map((item) => `  - [${item.type}] ${item.summary} — ${item.author}`);
+  return {
+    ok: true,
+    summary: `${items.length} proposal${items.length === 1 ? '' : 's'}`,
+    modelText: `On ${where}:\n${lines.join('\n')}`,
+  };
+}
+
+function describeAnswers(data: SessionLookupData): ToolOutcome {
+  const answers = data.answers ?? [];
+  if (answers.length === 0) {
+    return {
+      ok: true,
+      summary: 'Nothing settled yet',
+      modelText:
+        'No question has been settled yet — nothing has been answered or skipped so far in this session.',
+    };
+  }
+
+  const lines = answers.map(({ question, winner }) => {
+    if (question.status === 'skipped') {
+      return `${question.number}. "${question.text}" — skipped, never answered.`;
+    }
+    if (!winner) {
+      return `${question.number}. "${question.text}" — answered, but no single proposal won (a tie, or the winner has since been removed).`;
+    }
+    return `${question.number}. "${question.text}" — answered with [${winner.type}] ${winner.summary}, by ${winner.author}.`;
+  });
+
+  return {
+    ok: true,
+    summary: `${answers.length} settled`,
+    modelText: `What this session has settled so far:\n${lines.join('\n')}`,
+  };
+}
+
 /**
  * Builds the tool set for one turn, bound to the sink that collects what each call
  * produced.
@@ -258,13 +377,41 @@ export function runStickyIdeation(input: z.infer<typeof stickyIdeationInput>): T
  * Failures are caught and returned as text rather than thrown: a flaky search should let
  * the model explain itself and carry on, not kill the turn the user is waiting on.
  */
-export function createAssistantTools(sink: ToolOutcomeSink): ToolSet {
+export function createAssistantTools(sink: ToolOutcomeSink, lookup?: SessionLookupReader): ToolSet {
   const record = (toolCallId: string, outcome: ToolOutcome): string => {
     sink.record(toolCallId, outcome);
     return outcome.modelText;
   };
 
   return {
+    // Offered only where there is a session to read. Outside one — an eval, a unit test —
+    // there is nothing to look up, and a tool that can only fail is worse than no tool.
+    ...(lookup
+      ? {
+          look_up_session: tool({
+            description:
+              "Read this session's own state: the agenda and every question's status, what has been proposed on any question, or what the settled questions were decided on. Use it whenever an answer depends on where the team has got to — and never ask the user for something you could read here.",
+            inputSchema: lookUpSessionInput,
+            execute: async (input, { toolCallId }) =>
+              record(
+                toolCallId,
+                await guard('look_up_session', async () => {
+                  const data = await lookup.read(input.what, input.question);
+                  if (!data) {
+                    return {
+                      ok: false,
+                      summary: 'Session unavailable',
+                      modelText:
+                        'The session could not be read just now. Say so rather than guessing at its state.',
+                    };
+                  }
+                  return runLookUpSession(input, data);
+                }),
+              ),
+          }),
+        }
+      : {}),
+
     web_search: tool({
       description:
         'Search the public web for current facts, comparisons, prices, docs or prior art. Use it when the answer depends on information you do not reliably know, and cite the sources you use.',
@@ -332,5 +479,5 @@ function dropRedundantEdges<T extends { from: string; to: string }>(edges: T[]):
 
 /** Narrows a tool name off the stream to the union the stream events are typed with. */
 export function isAssistantToolName(name: string): name is AssistantToolName {
-  return name === 'web_search' || name === 'create_diagram' || name === 'sticky_ideation';
+  return (ASSISTANT_TOOL_NAMES as readonly string[]).includes(name);
 }

@@ -30,6 +30,7 @@ import {
   testLlmConfig,
 } from './llmConfig.service.js';
 import { buildSystemPrompt } from './prompt.js';
+import { sessionLookupReader } from './sessionLookup.js';
 import {
   assertCredentialsAllowed,
   createAssistantModel,
@@ -177,7 +178,7 @@ async function streamAssistantTurn(
       emit: (event) => stream.send(event),
       signal: abort.signal,
       maxOutputTokens: env.ASSISTANT_MAX_OUTPUT_TOKENS,
-      tools: { toolSet: createAssistantTools(sink), sink },
+      tools: { toolSet: createAssistantTools(sink, sessionLookupReader(input.sessionId)), sink },
       // Set before any throw can escape, so the `finally` below bills a failed turn too.
       onUsage: (reported) => {
         usage = reported;

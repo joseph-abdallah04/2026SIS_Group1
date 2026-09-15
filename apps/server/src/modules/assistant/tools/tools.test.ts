@@ -4,9 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
+import type { Agenda, QuestionFacts, SessionLookupData } from '../sessionLookup.js';
 import {
   createAssistantTools,
   runCreateDiagram,
+  runLookUpSession,
   runStickyIdeation,
   ToolOutcomeSink,
 } from './index.js';
@@ -19,8 +21,22 @@ function inputSchemaOf(name: keyof typeof tools): z.ZodType {
 }
 
 describe('tool registry', () => {
-  it('exposes exactly the three MVP tools (F36)', () => {
+  it('exposes the three MVP tools (F36) wherever there is no session to read', () => {
     expect(Object.keys(tools).sort()).toEqual(['create_diagram', 'sticky_ideation', 'web_search']);
+  });
+
+  // A tool whose every call would answer "the session could not be read" is worse than no
+  // tool: the model spends a step on it and then has to explain the failure to the user.
+  it('adds look_up_session once there is a session behind it', () => {
+    const withSession = createAssistantTools(new ToolOutcomeSink(), {
+      read: async () => null,
+    });
+    expect(Object.keys(withSession).sort()).toEqual([
+      'create_diagram',
+      'look_up_session',
+      'sticky_ideation',
+      'web_search',
+    ]);
   });
 
   it('describes every tool for the model', () => {
@@ -179,6 +195,140 @@ describe('sticky_ideation', () => {
 
   it('refuses an empty ideas array at the schema', () => {
     expect(inputSchemaOf('sticky_ideation').safeParse({ ideas: [] }).success).toBe(false);
+  });
+});
+
+describe('look_up_session', () => {
+  function question(overrides: Partial<QuestionFacts> = {}): QuestionFacts {
+    return {
+      number: 1,
+      id: 'q1',
+      text: 'What ships first?',
+      status: 'discussion',
+      isCurrent: true,
+      ...overrides,
+    };
+  }
+
+  const AGENDA: Agenda = {
+    sessionId: 's1',
+    title: 'Roadmap',
+    questions: [
+      question({
+        number: 1,
+        id: 'q1',
+        text: 'What slowed us down?',
+        status: 'answered',
+        isCurrent: false,
+      }),
+      question({
+        number: 2,
+        id: 'q2',
+        text: 'What did we skip?',
+        status: 'skipped',
+        isCurrent: false,
+      }),
+      question({
+        number: 3,
+        id: 'q3',
+        text: 'What ships first?',
+        status: 'discussion',
+        isCurrent: true,
+      }),
+    ],
+    current: question({ number: 3, id: 'q3' }),
+  };
+
+  function data(overrides: Partial<SessionLookupData> = {}): SessionLookupData {
+    return { agenda: AGENDA, ...overrides };
+  }
+
+  it('reads the agenda back with the live question marked', () => {
+    const outcome = runLookUpSession({ what: 'agenda' }, data());
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.modelText).toContain('1. [answered] What slowed us down?');
+    expect(outcome.modelText).toContain(
+      '3. [discussion] What ships first? ← the team is on this one now',
+    );
+    expect(outcome.summary).toBe('3 questions');
+  });
+
+  it('lists what is on a question', () => {
+    const outcome = runLookUpSession(
+      { what: 'proposals', question: 3 },
+      data({
+        proposals: {
+          question: question({ number: 3, id: 'q3' }),
+          items: [{ type: 'sticky', summary: 'Ship the importer', author: 'Bob' }],
+        },
+      }),
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.modelText).toContain('[sticky] Ship the importer — Bob');
+  });
+
+  // "Nothing on it" and "there is no such question" are different answers, and a model
+  // told the first when the second is true reports an empty board that does not exist.
+  it('says a question number names nothing, rather than reporting an empty board', () => {
+    const outcome = runLookUpSession({ what: 'proposals', question: 9 }, data());
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.modelText).toContain('no question with that number');
+    expect(outcome.modelText).not.toContain('empty');
+  });
+
+  it('distinguishes a question that was skipped from one that was answered', () => {
+    const outcome = runLookUpSession(
+      { what: 'answers' },
+      data({
+        answers: [
+          {
+            question: question({
+              number: 1,
+              id: 'q1',
+              text: 'What slowed us down?',
+              status: 'answered',
+              isCurrent: false,
+            }),
+            winner: { type: 'sticky', summary: 'Flaky CI', author: 'Ada' },
+          },
+          {
+            question: question({
+              number: 2,
+              id: 'q2',
+              text: 'What did we skip?',
+              status: 'skipped',
+              isCurrent: false,
+            }),
+            winner: null,
+          },
+        ],
+      }),
+    );
+
+    expect(outcome.modelText).toContain('answered with [sticky] Flaky CI, by Ada');
+    expect(outcome.modelText).toContain('skipped, never answered');
+  });
+
+  it('says plainly when nothing has been settled yet', () => {
+    const outcome = runLookUpSession({ what: 'answers' }, data({ answers: [] }));
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.modelText).toContain('No question has been settled yet');
+  });
+
+  // Models write `"question": null` for "not applicable" far more readily than they omit
+  // the key, and a schema that rejects it turns a sensible call into a failed one.
+  it('takes a null question number as "the one being discussed"', () => {
+    const withSession = createAssistantTools(new ToolOutcomeSink(), { read: async () => null });
+    const schema = withSession.look_up_session?.inputSchema as z.ZodType;
+
+    const result = schema.safeParse({ what: 'proposals', question: null });
+
+    expect(result.success).toBe(true);
+    expect(result.success && (result.data as { question?: number }).question).toBeUndefined();
   });
 });
 

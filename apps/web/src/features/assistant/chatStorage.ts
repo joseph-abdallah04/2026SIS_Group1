@@ -21,7 +21,12 @@ const KEY_PREFIX = 'rt_assistant_chat:';
  */
 export const MAX_STORED_BYTES = 256_000;
 
-const TOOL_NAMES = new Set<string>(['web_search', 'create_diagram', 'sticky_ideation']);
+const TOOL_NAMES = new Set<string>([
+  'web_search',
+  'create_diagram',
+  'sticky_ideation',
+  'look_up_session',
+]);
 const PROPOSE_STATES = new Set<string>(['idle', 'sending', 'proposed', 'failed']);
 
 function storageKey(sessionId: string): string {

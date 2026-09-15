@@ -11,10 +11,11 @@
 // to *read* the board — but not to rewrite it on its way into the model.
 //
 // The assistant's view is strictly read-only (docs/06): it never mutates session state.
-import type { AssistantContext, BoardItem } from '@roundtable/shared';
+import type { AssistantContext } from '@roundtable/shared';
 import { summarizeArtifact } from '@roundtable/shared';
 
 import { getBoardForSession } from '../pinboard/index.js';
+import { readAgenda, type Agenda } from './sessionLookup.js';
 
 /**
  * Extension point for the Session / Pinboard / Voting owners.
@@ -48,8 +49,13 @@ export function clearAssistantContextProviders(): void {
   providers.length = 0;
 }
 
-/** How many proposals to describe. Beyond this the prompt costs more than it informs. */
-const MAX_DESCRIBED_PROPOSALS = 12;
+/**
+ * How many agenda lines to show before summarising the rest.
+ *
+ * An agenda is a handful of questions, so this is a ceiling rather than a working limit —
+ * it stops a session with fifty questions on it from crowding out the conversation.
+ */
+const MAX_AGENDA_LINES = 20;
 
 export interface SessionContext {
   sessionId: string;
@@ -65,24 +71,36 @@ export async function buildSessionContext(
   userId: string,
   clientHints: AssistantContext,
 ): Promise<SessionContext> {
-  const board = await readBoard(sessionId);
+  const [board, agenda] = await Promise.all([readBoard(sessionId), readAgendaSafely(sessionId)]);
   const lines: string[] = [];
 
   if (board?.sessionTitle) lines.push(`Session focus: ${board.sessionTitle}`);
 
+  // The agenda and where the session has got to in it — the one piece of session state
+  // that belongs in every prompt, because it is what "this question", "the last one" and
+  // "what's left" all refer to, and none of those survive being looked up too late.
+  if (agenda && agenda.questions.length > 0) lines.push(...describeAgenda(agenda));
+
   if (board?.questionText) {
-    lines.push(`Current question being discussed: ${board.questionText}`);
-    if (board.questionStatus) lines.push(`Current phase: ${board.questionStatus}`);
+    lines.push(`The question being discussed right now: ${board.questionText}`);
+    if (board.questionStatus) lines.push(`Its phase: ${board.questionStatus}`);
   }
 
   if (board) {
-    if (board.items.length > 0) {
-      lines.push(...describeProposals(board.items, clientHints.selectedProposalId));
-    } else {
-      // Always say so. Omitting this line made the model treat earlier chat
-      // ("there are three stickies") as still true after the user cleared the board.
+    // A count, not the notes themselves. The detail is a `look_up_session` call away, and
+    // putting twelve summaries in every prompt spent the context window on something most
+    // turns never refer to. The count stays because its *absence* is what misleads: told
+    // nothing, the model treats "there are three stickies" from earlier chat as still true.
+    lines.push(
+      board.items.length === 0
+        ? 'The pinboard for this question is empty — 0 proposals on it. If earlier messages in this conversation mention proposals, they have been removed and must not be treated as still there.'
+        : `The pinboard for this question holds ${board.items.length} proposal${board.items.length === 1 ? '' : 's'}. Use look_up_session to read them; do not rely on what an earlier message in this conversation said was there.`,
+    );
+
+    const selected = board.items.find((item) => item.id === clientHints.selectedProposalId);
+    if (selected) {
       lines.push(
-        'The pinboard is empty — there are currently 0 proposals on it. If earlier messages in this conversation mention proposals, they have been removed and must not be treated as still there.',
+        `The user has this one selected: [${selected.artifactJson.type}] ${summarizeArtifact(selected.artifactJson)} — ${selected.authorName}`,
       );
     }
   }
@@ -110,28 +128,26 @@ export async function buildSessionContext(
 }
 
 /**
- * Describes the board, newest last.
+ * The agenda, numbered as the user sees it, with the live question marked.
  *
- * `selectedProposalId` is the one thing taken from the client — it is a statement about
- * the user's screen, not about the session. It is only ever used to annotate a proposal
- * the server already read, so a forged id annotates nothing.
+ * Statuses are given in the board's own words — pending, discussion, voting, answered,
+ * skipped — rather than translated, so that "skipped" cannot be softened into "not
+ * answered yet" by the time the model reads it.
  */
-function describeProposals(items: BoardItem[], selectedProposalId: string | undefined): string[] {
-  const recent = items.slice(-MAX_DESCRIBED_PROPOSALS);
-  const omitted = items.length - recent.length;
+function describeAgenda(agenda: Agenda): string[] {
+  const shown = agenda.questions.slice(0, MAX_AGENDA_LINES);
+  const omitted = agenda.questions.length - shown.length;
 
   const lines = [
-    omitted > 0
-      ? `Proposals on the pinboard (${items.length} total, showing the ${recent.length} most recent):`
-      : 'Proposals on the pinboard:',
+    `Agenda, ${agenda.questions.length} question${agenda.questions.length === 1 ? '' : 's'} in order:`,
   ];
 
-  for (const item of recent) {
-    const selected = item.id === selectedProposalId ? ' (the user has this one selected)' : '';
-    lines.push(
-      `  - [${item.type}] ${summarizeArtifact(item.artifactJson)} — ${item.authorName}${selected}`,
-    );
+  for (const question of shown) {
+    const here = question.isCurrent ? ' ← the team is on this one now' : '';
+    lines.push(`  ${question.number}. [${question.status}] ${question.text}${here}`);
   }
+
+  if (omitted > 0) lines.push(`  …and ${omitted} more. Use look_up_session to read them.`);
 
   return lines;
 }
@@ -149,6 +165,16 @@ async function readBoard(
     return await getBoardForSession(sessionId);
   } catch (cause) {
     console.warn('assistant: could not read the board for context', cause);
+    return null;
+  }
+}
+
+/** Tolerated for the same reason the board is: context is worth less than the turn. */
+async function readAgendaSafely(sessionId: string): Promise<Agenda | null> {
+  try {
+    return await readAgenda(sessionId);
+  } catch (cause) {
+    console.warn('assistant: could not read the agenda for context', cause);
     return null;
   }
 }

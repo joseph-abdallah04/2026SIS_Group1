@@ -9,6 +9,7 @@ export const TOOL_ACTIVITY_LABELS: Record<AssistantToolName, { running: string; 
   web_search: { running: 'Searching the web', done: 'Searched the web' },
   create_diagram: { running: 'Drawing a diagram', done: 'Drew a diagram' },
   sticky_ideation: { running: 'Writing sticky notes', done: 'Wrote sticky notes' },
+  look_up_session: { running: 'Checking the session', done: 'Checked the session' },
 };
 
 /**

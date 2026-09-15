@@ -198,7 +198,12 @@ export const LLM_PROVIDER_PRESETS = [
 // tried and failed to run.
 // ---------------------------------------------------------------------------
 
-export const ASSISTANT_TOOL_NAMES = ['web_search', 'create_diagram', 'sticky_ideation'] as const;
+export const ASSISTANT_TOOL_NAMES = [
+  'web_search',
+  'create_diagram',
+  'sticky_ideation',
+  'look_up_session',
+] as const;
 export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];
 
 export interface WebSearchResult {

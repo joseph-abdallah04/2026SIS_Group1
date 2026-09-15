@@ -62,14 +62,28 @@ vi.mock('../../db.js', () => ({
 
 // --- membership, as a controllable edge ------------------------------------
 const assertSessionMember = vi.fn();
+// The agenda goes into every prompt, so the two reads behind it are controllable here too.
+const getSessionWithQuestions = vi.fn();
+const getActiveQuestion = vi.fn();
 vi.mock('../sessions/index.js', () => ({
   assertSessionMember: (...args: unknown[]) => assertSessionMember(...args),
+  getSessionWithQuestions: (...args: unknown[]) => getSessionWithQuestions(...args),
+  getActiveQuestion: (...args: unknown[]) => getActiveQuestion(...args),
 }));
 
 // --- the board the assistant reads its context from ------------------------
 const getBoardForSession = vi.fn();
+const listProposals = vi.fn();
 vi.mock('../pinboard/index.js', () => ({
   getBoardForSession: (...args: unknown[]) => getBoardForSession(...args),
+  listProposals: (...args: unknown[]) => listProposals(...args),
+}));
+
+// Reached only by `look_up_session`, but mocked all the same: importing the real voting
+// module here would drag its sockets and deadline timers into a route test.
+const getSessionVoteOutcomes = vi.fn();
+vi.mock('../voting/index.js', () => ({
+  getSessionVoteOutcomes: (...args: unknown[]) => getSessionVoteOutcomes(...args),
 }));
 
 // --- the model -------------------------------------------------------------
@@ -128,11 +142,33 @@ beforeEach(() => {
   assertSessionMember.mockResolvedValue(undefined);
   getBoardForSession.mockReset();
   getBoardForSession.mockResolvedValue(emptyBoard());
+  getSessionWithQuestions.mockReset();
+  getSessionWithQuestions.mockResolvedValue(sessionWithQuestions());
+  getActiveQuestion.mockReset();
+  getActiveQuestion.mockResolvedValue({ id: 'q1' });
+  listProposals.mockReset();
+  listProposals.mockResolvedValue([]);
+  getSessionVoteOutcomes.mockReset();
+  getSessionVoteOutcomes.mockResolvedValue([]);
   configs.clear();
   usageRows.length = 0;
   script.length = 0;
   lastModel = undefined;
 });
+
+/** A three-question agenda with the board's question, `q1`, in the middle of it. */
+function sessionWithQuestions(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 's1',
+    title: 'Pick a database',
+    questions: [
+      { id: 'q0', text: 'What slowed us down?', position: 0, status: 'answered' },
+      { id: 'q1', text: 'Which database?', position: 1, status: 'discussion' },
+      { id: 'q2', text: 'Who owns the migration?', position: 2, status: 'pending' },
+    ],
+    ...overrides,
+  };
+}
 
 function emptyBoard(overrides: Record<string, unknown> = {}) {
   return {
@@ -460,10 +496,50 @@ describe('prompt context is server-authoritative (F35)', () => {
 
     const instructions = instructionsSent();
     expect(instructions).toContain('Which database?');
-    expect(instructions).toContain('Use Neon');
+    // The board's contents are counted here, not listed — the notes themselves are a
+    // `look_up_session` call away. The count still has to be the server's own.
+    expect(instructions).toContain('1 proposal');
     expect(instructions).not.toContain('Should we fire Bob?');
     expect(instructions).not.toContain('Bob agreed to resign');
     expect(instructions).not.toContain('Totally different session');
+  });
+
+  // The assistant asked the user "which question do you want ideas for?" while the
+  // question was sitting in its own prompt. The agenda is what makes "this question"
+  // answerable without asking, so it has to be in every turn's instructions — not
+  // something the model has to think to go and fetch.
+  it('puts the agenda and the live question in the instructions, unasked', async () => {
+    await readStream(await chat({ message: 'Give me 5 sticky notes for this question' }));
+
+    const instructions = instructionsSent();
+    expect(instructions).toContain('1. [answered] What slowed us down?');
+    expect(instructions).toContain('2. [discussion] Which database? ← the team is on this one now');
+    expect(instructions).toContain('3. [pending] Who owns the migration?');
+    expect(instructions).toContain('The question being discussed right now: Which database?');
+  });
+
+  // A skipped question is not a question still to come. Passing the board's own word for
+  // it through untranslated is what keeps the model from offering to "get back to" one.
+  it('keeps a skipped question distinguishable from a pending one', async () => {
+    getSessionWithQuestions.mockResolvedValue(
+      sessionWithQuestions({
+        questions: [
+          { id: 'q0', text: 'What slowed us down?', position: 0, status: 'skipped' },
+          { id: 'q1', text: 'Which database?', position: 1, status: 'discussion' },
+        ],
+      }),
+    );
+
+    await readStream(await chat({ message: 'Where are we up to?' }));
+
+    expect(instructionsSent()).toContain('1. [skipped] What slowed us down?');
+  });
+
+  // The board's contents left the prompt when they grew too expensive to send every turn.
+  // Nothing then tells the model they have changed, so the count has to.
+  it('counts the board rather than listing it, and says so when it is empty', async () => {
+    await readStream(await chat({ message: 'anything there?' }));
+    expect(instructionsSent()).toContain('The pinboard for this question is empty');
   });
 
   it('tells the model the pinboard is empty so a prior turn cannot contradict it', async () => {
@@ -484,8 +560,21 @@ describe('prompt context is server-authoritative (F35)', () => {
     expect(instructions).toMatch(/authoritative live board/i);
   });
 
-  it('still answers when the board cannot be read', async () => {
+  // The board and the agenda are read separately, so losing one is not losing both: a
+  // failed board read costs the proposal count and keeps the agenda, which is the half
+  // that tells the assistant what the user is talking about.
+  it('still answers, and still knows the agenda, when the board cannot be read', async () => {
     getBoardForSession.mockRejectedValue(new Error('database is down'));
+    script.push([{ text: 'I can still help.' }]);
+
+    const frames = await readStream(await chat({ message: 'hello' }));
+    expect(frames.at(-1)).toMatchObject({ type: 'done', reason: 'complete' });
+    expect(instructionsSent()).toContain('2. [discussion] Which database?');
+  });
+
+  it('falls back to admitting it knows nothing only when nothing at all can be read', async () => {
+    getBoardForSession.mockRejectedValue(new Error('database is down'));
+    getSessionWithQuestions.mockRejectedValue(new Error('database is down'));
     script.push([{ text: 'I can still help.' }]);
 
     const frames = await readStream(await chat({ message: 'hello' }));
