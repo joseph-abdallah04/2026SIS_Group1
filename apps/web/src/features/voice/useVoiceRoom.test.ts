@@ -16,6 +16,15 @@ let acquireError: Error | null = null;
  */
 let hangNextJoin = false;
 
+/**
+ * Whether the next microphone call should hang, as an open permission prompt
+ * does. Module-level for the same reason as `hangNextJoin`: the join acquires
+ * the device a few microtasks after mounting, and any `waitFor` used to reach
+ * in and arm an instance field costs a macrotask — by which point the call has
+ * already completed and the hang lands on some later one instead.
+ */
+let hangNextMic = false;
+
 /** A refused permission prompt, as the browser throws it. */
 function refusal(): Error {
   return Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
@@ -58,8 +67,9 @@ class FakeLocalParticipant {
 
   async setMicrophoneEnabled(enabled: boolean): Promise<void> {
     this.calls.push(enabled);
-    if (this.hangNext) {
+    if (this.hangNext || hangNextMic) {
       this.hangNext = false;
+      hangNextMic = false;
       await new Promise<void>((resolve) => {
         this.hanging = resolve;
       });
@@ -184,6 +194,7 @@ describe('useVoiceRoom mute (F12)', () => {
     FakeRoom.last = null;
     acquireError = null;
     hangNextJoin = false;
+    hangNextMic = false;
   });
 
   /** Let pending timers and promises run for `ms`. */
@@ -374,6 +385,7 @@ describe('useVoiceRoom when the server has no LiveKit credentials', () => {
     FakeRoom.last = null;
     acquireError = null;
     hangNextJoin = false;
+    hangNextMic = false;
     tokenFetch.mockClear();
   });
 
@@ -429,6 +441,7 @@ describe('useVoiceRoom across the lobby -> board handover', () => {
     FakeRoom.last = null;
     acquireError = null;
     hangNextJoin = false;
+    hangNextMic = false;
     tokenFetch.mockClear();
   });
 
@@ -479,6 +492,7 @@ describe('useVoiceRoom when the handover lands mid-join', () => {
     FakeRoom.last = null;
     acquireError = null;
     hangNextJoin = false;
+    hangNextMic = false;
     tokenFetch.mockClear();
   });
 
@@ -575,5 +589,40 @@ describe('useVoiceRoom when the handover lands mid-join', () => {
     });
 
     await waitFor(() => expect(participant.isMicrophoneEnabled).toBe(false));
+  });
+
+  it('opens the microphone when Start lands while the join is still acquiring it', async () => {
+    // The window the other mid-join tests miss: they hang `room.connect`, so
+    // LiveKit never reaches `Connected`. Here the handshake has *succeeded*
+    // and the join is inside `getUserMedia` — the room reports `Connected`
+    // while its join promise is still pending, because `connect()` does not
+    // settle until `settleMic` does.
+    hangNextMic = true;
+    const lobby = renderHook(() => useVoiceRoom('session-1'));
+    await waitFor(() => expect(FakeRoom.last?.state).toBe('connected'));
+    const room = FakeRoom.last!;
+    const participant = room.localParticipant;
+    await waitFor(() => expect(participant.calls).toEqual([true]));
+    // Hung before the device was ours, so there is no live mic to remember.
+    expect(participant.isMicrophoneEnabled).toBe(false);
+
+    // The leader presses Start with that prompt still open.
+    lobby.unmount();
+    const board = renderHook(() => useVoiceRoom('session-1'));
+    await act(async () => {
+      participant.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(board.result.current.status).toBe('connected'));
+    // Taking the merely-connected branch here skips `settleMic`, while the
+    // abandoned unmute lands on a room it no longer holds and mutes. The
+    // release recorded `micWasEnabled: false` — the device was not ours yet —
+    // so nothing restores it, and the board is connected and silent.
+    await waitFor(() => expect(participant.isMicrophoneEnabled).toBe(true));
+    expect(board.result.current.micEnabled).toBe(true);
+    // Adopting a join must not mean starting another one.
+    expect(room.connects).toBe(1);
+    board.unmount();
   });
 });

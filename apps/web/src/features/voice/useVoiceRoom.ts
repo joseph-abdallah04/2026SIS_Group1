@@ -221,9 +221,12 @@ export function useVoiceRoom(sessionId: string) {
             // `releaseVoiceRoom`'s mute ran before the device was ours, so
             // this is the one that has to stick.
             //
-            // A remount that re-acquired this same room does not come through
-            // here: `roomRef` points at it again, so the unmute stands, which
-            // is what someone who came straight back wants.
+            // This fires for a remount too — `roomRef` is per hook instance,
+            // and this one's was nulled by its own cleanup, so a view that
+            // picked the room straight back up does not rescue the unmute.
+            // That is why the branch below prefers an in-flight join over a
+            // merely-connected room: the adopter re-runs `settleMic` and
+            // opens the microphone again.
             if (enabled) {
               await room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
             }
@@ -495,18 +498,26 @@ export function useVoiceRoom(sessionId: string) {
       .on(RoomEvent.Disconnected, onDisconnected)
       .on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!room.canPlaybackAudio));
 
-    if (reused && isVoiceRoomConnected(room)) {
-      // Already in the room — picked back up rather than rejoined. Resyncing
-      // from the room is the whole saving: no token, no negotiation, no gap.
-      // Remote tracks are still attached to the container the registry kept,
-      // so sound never stopped.
+    if (reused && joinInFlight) {
+      // A join is still running on this room, so wait on it — even if LiveKit
+      // already says `Connected`. `connect()` does not settle until
+      // `settleMic` has finished, so "connected with a join still pending"
+      // means the microphone step is the part still in flight. Taking the
+      // picked-up branch there would skip it, while the abandoned view's
+      // in-flight unmute lands on a room it no longer holds and mutes — and
+      // the release recorded `micWasEnabled: false`, because the device was
+      // not ours yet, so nothing restores it. You arrive on the board
+      // connected and silent: exactly the gap this registry exists to close.
+      void adoptJoin(joinInFlight);
+    } else if (reused && isVoiceRoomConnected(room)) {
+      // Already in the room, with nothing outstanding — picked back up rather
+      // than rejoined. Resyncing from the room is the whole saving: no token,
+      // no negotiation, no gap. Remote tracks are still attached to the
+      // container the registry kept, so sound never stopped.
       attemptRef.current = 0;
       setStatus('connected');
       setError(null);
       syncParticipants();
-    } else if (reused && joinInFlight) {
-      // Mid-join: the previous view's handshake is still running on this room.
-      void adoptJoin(joinInFlight);
     } else {
       setVoiceRoomJoin(sessionId, connect());
     }
