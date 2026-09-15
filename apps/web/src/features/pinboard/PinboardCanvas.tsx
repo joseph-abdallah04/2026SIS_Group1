@@ -94,7 +94,7 @@ interface PinboardCanvasProps {
   onToggleShortlist: (id: string) => void;
   /** F27 header chrome (count / “leader is selecting”). */
   shortlistControl?: ReactNode;
-  /** Leader shortlist prompt, stacked just above the floating toolbar. */
+  /** Leader shortlist prompt. Takes the floating toolbar's place while the board is closed. */
   boardOverlay?: ReactNode;
   /** F28 ballot — covers the board + rails until the leader ends the vote. */
   ballot?: ReactNode;
@@ -847,13 +847,11 @@ export function PinboardCanvas({
             element the containing block for anything `fixed` inside, and
             nothing on the board should be caught by that. */}
           <div className="@container/board pointer-events-none absolute inset-0 z-20">
-            {/* What has to be said about the toolbar, stacked above it: the
-                  leader's shortlist prompt and a refused write. It stays
-                  centred when the bar moves left, because at this height it
-                  is already clear of the nav bar. `bottom-19` is the bar's
-                  `bottom-6` plus its `h-11` plus an 8px gap. */}
+            {/* A refused write, stacked above the toolbar. It stays centred
+                  when the bar moves left, because at this height it is already
+                  clear of the nav bar. `bottom-19` is the bar's `bottom-6` plus
+                  its `h-11` plus an 8px gap. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
-              {boardOverlay}
               {writeError ? (
                 <p
                   role="status"
@@ -871,12 +869,20 @@ export function PinboardCanvas({
                   `bottom-6` clears the horizontal scrollbar. On a board too
                   narrow even for icons (~320px) the two can still touch.
 
+                  The leader's shortlist bar, which takes this slot while the
+                  board is closed, is wider (~490px) and meets the nav bar on a
+                  board narrower than ~930px, so it anchors left from 60rem.
+
                   Marked so the sticky popup can centre itself over the board
                   this row spans, rather than over a window the side panels
                   make lopsided, and rest just above the toolbar. */}
             <div
               data-board-toolbar
-              className="absolute inset-x-0 bottom-6 flex justify-center px-6 @max-[48rem]/board:justify-start"
+              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
+                !boardOpen && boardOverlay
+                  ? '@max-[60rem]/board:justify-start'
+                  : '@max-[48rem]/board:justify-start'
+              }`}
             >
               <div className="pointer-events-auto min-w-0">
                 {boardOpen ? (
@@ -886,11 +892,14 @@ export function PinboardCanvas({
                   // the same reason they do: with the board closed there is
                   // nothing to reuse onto.
                   <CreativeToolbar>{myProposals}</CreativeToolbar>
+                ) : boardOverlay ? (
+                  // One bar for the leader: the shortlist controls stand in for
+                  // the locked message rather than stacking on top of it.
+                  boardOverlay
                 ) : (
                   // A sentence cannot shrink to an icon, so it truncates
                   // instead, capped at what the nav bar leaves free.
                   <p
-                    title={closedMessage}
                     className={`${FLOATING_BAR} max-w-[calc(100cqw-15.5rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
                   >
                     <span className="truncate">{closedMessage}</span>
