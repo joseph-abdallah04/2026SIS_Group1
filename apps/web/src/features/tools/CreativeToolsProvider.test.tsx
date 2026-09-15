@@ -614,6 +614,54 @@ describe('sticky drafts', () => {
       expect(note()?.textContent).toBe('Brand new');
     });
 
+    /**
+     * Every popup the page draws while `act` runs, however briefly. The router
+     * moves to a new address a render after an ordinary state change, so a
+     * popup that is drawn and taken away again inside one close would be gone
+     * again before any assertion could look for it.
+     */
+    function watchPopupLabels() {
+      const labels: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          record.addedNodes.forEach((node) => {
+            if (!(node instanceof HTMLElement)) return;
+            const label = node.querySelector('#sticky-composer-label') ?? null;
+            if (label?.textContent) labels.push(label.textContent);
+          });
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      return () => {
+        observer.takeRecords();
+        observer.disconnect();
+        return labels;
+      };
+    }
+
+    // Closing takes the sticky it was opened on away a render before the tool,
+    // and for that render the popup was a new sticky's: a flash of the wrong
+    // popup on every close and every update.
+    it.each([
+      ['closed', 'Close'],
+      ['updated', 'Update proposal'],
+    ])('draws no other popup in its place as an edit is %s', async (_, button) => {
+      const user = userEvent.setup();
+      render(
+        <Harness propose={vi.fn(async () => undefined)} proposals={[mine]} {...inSession}>
+          <EditButton proposal={mine} />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      await user.type(note()!, ' made better');
+      const stop = watchPopupLabels();
+      await user.click(screen.getByRole('button', { name: button }));
+      await waitFor(() => expect(note()).toBeNull());
+
+      expect(stop()).toEqual([]);
+    });
+
     it('keeps nothing for an edit opened and closed without a change', async () => {
       const user = userEvent.setup();
       render(
