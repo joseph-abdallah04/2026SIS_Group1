@@ -35,7 +35,8 @@ describe('SignupPage', () => {
     renderPage();
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/confirm password/i)).toBeInTheDocument();
   });
 
   it('shows a validation error without hitting the network for an invalid email', async () => {
@@ -44,10 +45,40 @@ describe('SignupPage', () => {
 
     await user.type(screen.getByLabelText(/display name/i), 'Alice');
     await user.type(screen.getByLabelText(/email/i), 'not-an-email');
-    await user.type(screen.getByLabelText(/password/i), 'longenough');
+    await user.type(screen.getByLabelText(/^password$/i), 'longenough');
+    await user.type(screen.getByLabelText(/confirm password/i), 'longenough');
     await user.click(screen.getByRole('button', { name: /sign up/i }));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(authApi.signup).not.toHaveBeenCalled();
+  });
+
+  it('shows a validation error without hitting the network for a password missing complexity', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByLabelText(/display name/i), 'Alice');
+    await user.type(screen.getByLabelText(/email/i), 'alice@example.com');
+    // Long enough, but no uppercase/number/special character.
+    await user.type(screen.getByLabelText(/^password$/i), 'longenough');
+    await user.type(screen.getByLabelText(/confirm password/i), 'longenough');
+    await user.click(screen.getByRole('button', { name: /sign up/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/uppercase/i);
+    expect(authApi.signup).not.toHaveBeenCalled();
+  });
+
+  it('shows a validation error without hitting the network when passwords do not match', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByLabelText(/display name/i), 'Alice');
+    await user.type(screen.getByLabelText(/email/i), 'alice@example.com');
+    await user.type(screen.getByLabelText(/^password$/i), 'longenough');
+    await user.type(screen.getByLabelText(/confirm password/i), 'somethingelse');
+    await user.click(screen.getByRole('button', { name: /sign up/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/do not match/i);
     expect(authApi.signup).not.toHaveBeenCalled();
   });
 
@@ -58,7 +89,8 @@ describe('SignupPage', () => {
 
     await user.type(screen.getByLabelText(/display name/i), 'Alice');
     await user.type(screen.getByLabelText(/email/i), 'alice@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'longenough');
+    await user.type(screen.getByLabelText(/^password$/i), 'Longenough1!');
+    await user.type(screen.getByLabelText(/confirm password/i), 'Longenough1!');
     await user.click(screen.getByRole('button', { name: /sign up/i }));
 
     await waitFor(() =>

@@ -8,6 +8,11 @@
 // Re-exported from `index.ts`, so every existing `@roundtable/shared` import
 // keeps working unchanged.
 
+// Type-only, so the runtime import graph stays one-directional:
+// `studioElements` imports this module's palettes, and nothing comes back.
+import type { ArrowElement } from './studioArrows.js';
+import type { InkElement, PathElement, TableElement } from './studioElements.js';
+
 export type DiagramNodeShape =
   'box' | 'container' | 'text' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'cylinder';
 
@@ -158,9 +163,17 @@ export function diagramLabelWidthRatio(shape?: DiagramNodeShape): number {
 // people's clients.
 
 export type DiagramFillKey = 'neutral' | 'surface' | 'blue' | 'green' | 'amber' | 'rose' | 'violet';
-export type DiagramStrokeKey = 'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet';
+export type DiagramStrokeKey =
+  'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink';
 export type DiagramStrokeWidthPreset = 'thin' | 'regular' | 'thick';
-export type DiagramFontSizePreset = 'small' | 'medium' | 'large';
+export type DiagramFontSizePreset = 'small' | 'medium' | 'large' | 'xlarge';
+
+/**
+ * Where a label sits across its element. The same three a table cell offers —
+ * text is text, and having a shape's label align differently to a cell's would
+ * be a distinction with no reason behind it.
+ */
+export type DiagramTextAlign = 'left' | 'center' | 'right';
 export type DiagramStrokeStyle = 'solid' | 'dashed' | 'dotted';
 
 export const DIAGRAM_FILL_KEYS = [
@@ -173,6 +186,9 @@ export const DIAGRAM_FILL_KEYS = [
   'violet',
 ] as const satisfies readonly DiagramFillKey[];
 
+// `ink` is appended rather than inserted: the order drives the inspector's
+// swatch row, and existing diagrams' swatches should not shuffle underneath
+// people because ink arrived. v4 ink defaults to it (see `studioElements.ts`).
 export const DIAGRAM_STROKE_KEYS = [
   'slate',
   'grey',
@@ -181,6 +197,7 @@ export const DIAGRAM_STROKE_KEYS = [
   'amber',
   'rose',
   'violet',
+  'ink',
 ] as const satisfies readonly DiagramStrokeKey[];
 
 export const DIAGRAM_STROKE_WIDTH_PRESETS = [
@@ -189,11 +206,20 @@ export const DIAGRAM_STROKE_WIDTH_PRESETS = [
   'thick',
 ] as const satisfies readonly DiagramStrokeWidthPreset[];
 
+// `xlarge` is appended rather than inserted: the order drives the size picker,
+// and existing diagrams' options should not shuffle underneath people.
 export const DIAGRAM_FONT_SIZE_PRESETS = [
   'small',
   'medium',
   'large',
+  'xlarge',
 ] as const satisfies readonly DiagramFontSizePreset[];
+
+export const DIAGRAM_TEXT_ALIGNS = [
+  'left',
+  'center',
+  'right',
+] as const satisfies readonly DiagramTextAlign[];
 
 export const DIAGRAM_STROKE_STYLES = [
   'solid',
@@ -226,6 +252,9 @@ export const DIAGRAM_STROKE_COLORS: Record<DiagramStrokeKey, string> = {
   amber: '#8A5B14',
   rose: '#A03040',
   violet: '#5B4494',
+  // The drawing tool's default pen, brought into the shared palette so ink and
+  // shapes on one canvas draw from one set of colours instead of two.
+  ink: '#080C15',
 };
 
 // `regular` reproduces the editor's original widths, so choosing it explicitly
@@ -243,13 +272,50 @@ export const DIAGRAM_EDGE_STROKE_WIDTHS: Record<DiagramStrokeWidthPreset, number
 };
 
 /** `medium` is the 11px both surfaces already used for node labels. */
+/**
+ * Four steps, each about half again the last.
+ *
+ * They used to run 8/11/15/20, which is barely a step at the bottom: `small`
+ * was too small to read comfortably and the gap to `medium` hardly showed. The
+ * smallest is now a comfortable reading size and each step is a clear change,
+ * so picking one is a decision with a visible result.
+ *
+ * This is deliberately *not* tied to the legacy size below. An element that
+ * never chose a preset still draws at the 11px both surfaces have always used,
+ * so no stored diagram moves under this; only an element that explicitly asked
+ * for a size gets the new scale, which is the point of changing it.
+ */
 export const DIAGRAM_FONT_SIZES: Record<DiagramFontSizePreset, number> = {
-  small: 9,
-  medium: 11,
-  large: 14,
+  small: 12,
+  medium: 16,
+  large: 22,
+  xlarge: 30,
 };
 
-export const DIAGRAM_LEGACY_FONT_SIZE = DIAGRAM_FONT_SIZES.medium;
+/** What an element with no preset has always been drawn at. */
+export const DIAGRAM_LEGACY_FONT_SIZE = 11;
+
+/**
+ * How a node's label is painted, so the editor and the board card cannot drift.
+ *
+ * `anchor` and `x` travel together: SVG aligns text by moving the anchor point,
+ * not by giving it a box, so the two are one decision and are made here once.
+ */
+export function diagramNodeLabelStyle(
+  node: Pick<DiagramNode, 'labelBold' | 'labelColor' | 'labelAlign' | 'shape'>,
+  width: number,
+  inset = 6,
+): { fill: string; fontWeight: number; anchor: 'start' | 'middle' | 'end'; x: number } {
+  const align = node.labelAlign ?? 'center';
+  return {
+    fill: node.labelColor ? DIAGRAM_STROKE_COLORS[node.labelColor] : DIAGRAM_LABEL_INK,
+    // A text element has always been drawn heavier than a label inside a shape;
+    // asking for bold raises either of them the same amount.
+    fontWeight: node.labelBold ? 700 : node.shape === 'text' ? 600 : 500,
+    anchor: align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle',
+    x: align === 'left' ? inset : align === 'right' ? width - inset : width / 2,
+  };
+}
 
 // Shape-derived fills predate v2 and are identical in the editor and the board
 // card, so the fallback lives here rather than in either surface.
@@ -604,6 +670,15 @@ export interface DiagramNode {
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
   fontSizePreset?: DiagramFontSizePreset;
+  /**
+   * Label styling. Named apart from the element's own `strokeColor` and friends:
+   * a shape's outline and the words inside it are two different things to paint,
+   * and one field that meant both would be ambiguous the first time someone
+   * wanted a dark label on a pale border.
+   */
+  labelBold?: boolean;
+  labelColor?: DiagramStrokeKey;
+  labelAlign?: DiagramTextAlign;
 }
 
 export type DiagramParentedNode = Pick<DiagramNode, 'id' | 'parentId'>;
@@ -703,4 +778,27 @@ export interface DiagramArtifact {
   type: 'diagram';
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  /**
+   * v4 free-form ink. Optional: a diagram authored before v4 has none and
+   * renders exactly as it always did. Geometry lives in `studioElements.ts`.
+   */
+  ink?: InkElement[];
+  /**
+   * v4 decorative paths — the pen and line tools. Unlike an `edge` a path is not
+   * semantic: it takes no part in routing, layout or grouping.
+   */
+  paths?: PathElement[];
+  /** v4 tables: a grid of cells with explicit column widths and row heights. */
+  tables?: TableElement[];
+  /**
+   * v4.2 standalone arrows. Unlike an `edge` an arrow may end in empty space or
+   * point at any kind of element, and it never takes part in auto-arrange.
+   */
+  arrows?: ArrowElement[];
+  /**
+   * v4 paint order, as element keys — node, ink, path, table and arrow ids,
+   * and `edgeKey` strings for edges. Absent means the derived pre-v4 order (edges, then nodes with
+   * containers behind their contents). See `studioPaintOrder`.
+   */
+  z?: string[];
 }

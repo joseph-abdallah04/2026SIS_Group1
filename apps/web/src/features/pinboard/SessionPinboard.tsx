@@ -172,6 +172,8 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
 
   return (
     <CreativeToolsProvider
+      sessionId={sessionId}
+      questionId={board.questionId ?? ''}
       isLive={acceptsProposals}
       viewerId={viewerId}
       proposals={board.items}
@@ -215,6 +217,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                 count={voting.proposalIds.length}
                 busy={voting.busy || phaseBusyId === board.questionId}
                 error={voting.error ?? phaseError}
+                limitHits={voting.limitHits}
                 onProceed={() => void voting.startVote()}
                 onClear={() => void voting.clear()}
                 onBack={() => {

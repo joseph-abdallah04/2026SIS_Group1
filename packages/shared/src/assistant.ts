@@ -5,7 +5,12 @@
 import { z } from 'zod';
 
 import type { ArtifactJson, StickyColor } from './index.js';
-import { artifactWriteJsonSchema } from './schemas.js';
+import {
+  artifactWriteJsonSchema,
+  diagramWriteArtifactSchema,
+  drawingWriteArtifactSchema,
+  stickyWriteArtifactSchema,
+} from './schemas.js';
 
 // ---------------------------------------------------------------------------
 // Artifact helpers the agent needs
@@ -45,50 +50,43 @@ export type ArtifactParseResult =
  */
 export function parseArtifact(input: unknown): ArtifactParseResult {
   const parsed = artifactWriteJsonSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: parsed.error.issues
-        .map((issue) => {
-          const path = issue.path.join('.');
-          return path ? `${path}: ${issue.message}` : issue.message;
-        })
-        .join('; '),
-    };
-  }
+  if (!parsed.success) return { ok: false, error: describeIssues(parsed.error.issues) };
 
   const size = new TextEncoder().encode(JSON.stringify(parsed.data)).length;
   if (size > MAX_ARTIFACT_BYTES) {
     return { ok: false, error: `Artifact is ${size} bytes; limit is ${MAX_ARTIFACT_BYTES}` };
   }
 
-  // Referential integrity. `artifactWriteJsonSchema` is a discriminated union, so it can
-  // only carry field-level rules — the cross-field ones live in `proposalCreateSchema`'s
-  // refinement and therefore do not run here. Checking them now means a bad diagram fails
-  // inside the chat, where the model can be told to fix it, instead of failing when the user
-  // presses Propose.
-  if (parsed.data.type === 'diagram') {
-    const problem = checkDiagramIntegrity(parsed.data.nodes, parsed.data.edges);
-    if (problem) return { ok: false, error: problem };
-  }
+  // The cross-field rules, run from the same schemas `proposalCreateSchema` uses rather
+  // than restated here. `artifactWriteJsonSchema` is a discriminated union and can only
+  // carry field-level rules, so on its own it accepts a diagram the board will reject.
+  //
+  // These once lived here as a hand-written id-and-edge check, which is exactly the kind
+  // of copy that goes quietly stale: the creative tools have since grown containers,
+  // paired node sizes, and a rule against self-edges and repeated arrows, none of which
+  // the copy knew about. Sharing the schema means a tool the team tightens tomorrow
+  // tightens what the agent may produce, in the chat, where the model can be told to fix
+  // it — instead of in the user's hand when they press Propose.
+  const writeSchema =
+    parsed.data.type === 'diagram'
+      ? diagramWriteArtifactSchema
+      : parsed.data.type === 'drawing'
+        ? drawingWriteArtifactSchema
+        : stickyWriteArtifactSchema;
+
+  const written = writeSchema.safeParse(parsed.data);
+  if (!written.success) return { ok: false, error: describeIssues(written.error.issues) };
 
   return { ok: true, artifact: parsed.data };
 }
 
-function checkDiagramIntegrity(
-  nodes: ReadonlyArray<{ id: string }>,
-  edges: ReadonlyArray<{ from: string; to: string }>,
-): string | null {
-  const ids = new Set<string>();
-  for (const node of nodes) {
-    if (ids.has(node.id)) return `Duplicate node id "${node.id}"`;
-    ids.add(node.id);
-  }
-  for (const edge of edges) {
-    if (!ids.has(edge.from)) return `Edge references unknown node "${edge.from}"`;
-    if (!ids.has(edge.to)) return `Edge references unknown node "${edge.to}"`;
-  }
-  return null;
+function describeIssues(issues: readonly z.ZodIssue[]): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path.join('.');
+      return path ? `${path}: ${issue.message}` : issue.message;
+    })
+    .join('; ');
 }
 
 /** One-line human summary — used in chat and in the agent's own context block. */
@@ -99,8 +97,36 @@ export function summarizeArtifact(artifact: ArtifactJson): string {
     case 'drawing':
       return 'Freehand drawing';
     case 'diagram':
-      return `${artifact.nodes.length} nodes, ${artifact.edges.length} edges`;
+      return summarizeDiagram(artifact);
   }
+}
+
+/**
+ * What is on a canvas, in the words the agent is told the board in.
+ *
+ * Counted across everything the studio can draw, not just boxes and arrows
+ * between them. The agent's own diagrams are nodes and edges and nothing else,
+ * but the people it is working with have a canvas that also holds tables,
+ * standalone arrows, freehand ink and drawn paths — and a canvas made entirely
+ * of those summarised as "0 nodes, 0 edges", which reads to the agent as an
+ * empty board and is the one thing it must not think.
+ */
+function summarizeDiagram(artifact: Extract<ArtifactJson, { type: 'diagram' }>): string {
+  const parts: string[] = [];
+  const count = (n: number, one: string, many: string) => {
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
+  };
+
+  count(artifact.nodes.length, 'node', 'nodes');
+  count(artifact.edges.length, 'edge', 'edges');
+  count(artifact.tables?.length ?? 0, 'table', 'tables');
+  // The edges above join two boxes; these are drawn on their own, so they are
+  // arrows rather than more edges.
+  count(artifact.arrows?.length ?? 0, 'arrow', 'arrows');
+  count(artifact.paths?.length ?? 0, 'shape', 'shapes');
+  count(artifact.ink?.length ?? 0, 'sketch', 'sketches');
+
+  return parts.length > 0 ? parts.join(', ') : 'Empty canvas';
 }
 
 // ---------------------------------------------------------------------------

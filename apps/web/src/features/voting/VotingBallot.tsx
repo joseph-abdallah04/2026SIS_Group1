@@ -1,7 +1,8 @@
 import { PhaseTimer } from '../../components/PhaseTimer';
 import type { BoardItem, VotingPhase, VotingTally, VotingVoterStatus } from '@roundtable/shared';
 
-import { CARD_RADIUS, CARD_WIDTH, STICKY_RADIUS } from '../pinboard/pinboardTokens';
+import { cardWidth } from '../pinboard/cardMetrics';
+import { CARD_RADIUS, STICKY_RADIUS } from '../pinboard/pinboardTokens';
 import { ProposalCard } from '../pinboard/ProposalCard';
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import { VoteResultBadge, voteResultRing } from './VoteResultBadge';
@@ -16,7 +17,7 @@ interface VotingBallotProps {
   phase: Extract<VotingPhase, 'open' | 'closed'>;
   isLeader: boolean;
   viewerId: string | null;
-  leaderId: string;
+  leaderId: string | null;
   voterStatuses: VotingVoterStatus[] | null;
   winnerProposalId: string | null;
   tiedProposalIds: string[];
@@ -28,10 +29,17 @@ interface VotingBallotProps {
   onContinue: () => void;
 }
 
-function cardFrameStyle(type: BoardItem['type']): { width: number; borderRadius: string } {
+/**
+ * The slot a proposal sits in, sized to the card it holds.
+ *
+ * Asked of the card rather than looked up by type: a sticky grows with its
+ * note, so a slot sized for the smallest one would leave a long note spilling
+ * out of it, and the result ring drawn on the slot falling short of the card.
+ */
+function cardFrameStyle(item: BoardItem): { width: number; borderRadius: string } {
   return {
-    width: CARD_WIDTH[type],
-    borderRadius: type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
+    width: cardWidth(item),
+    borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
   };
 }
 
@@ -42,7 +50,9 @@ function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally {
 }
 
 function VoterRow({ person }: { person: VotingVoterStatus }) {
-  const swatch = swatchForId(person.userId);
+  // A deleted voter's row still needs *a* stable color, just not one tied to
+  // an id that no longer exists.
+  const swatch = swatchForId(person.userId ?? 'deleted-user');
   return (
     <li className="flex items-center gap-2">
       <span
@@ -203,7 +213,10 @@ export function VotingBallot({
                     <ProposalCard
                       item={item}
                       isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
-                      isAuthorLeader={item.authorId === leaderId}
+                      isAuthorLeader={item.authorId != null && item.authorId === leaderId}
+                      // The card is the vote button, so nothing on it is a
+                      // press of its own.
+                      interactive={false}
                     />
                   );
 
@@ -211,13 +224,13 @@ export function VotingBallot({
                     <li
                       key={item.id}
                       className={`relative shrink-0 ${kind ? 'z-10' : ''}`}
-                      style={cardFrameStyle(item.type)}
+                      style={cardFrameStyle(item)}
                     >
                       {kind === 'winner' || kind === 'tied' ? (
                         <VoteResultBadge kind={kind} />
                       ) : null}
                       {revealed ? (
-                        <div className={voteResultRing(kind)} style={cardFrameStyle(item.type)}>
+                        <div className={voteResultRing(kind)} style={cardFrameStyle(item)}>
                           {card}
                         </div>
                       ) : (
@@ -226,7 +239,7 @@ export function VotingBallot({
                           onClick={() => onVote(item.id)}
                           disabled={busy}
                           aria-pressed={selected}
-                          style={cardFrameStyle(item.type)}
+                          style={cardFrameStyle(item)}
                           className={`block cursor-pointer border-0 bg-transparent p-0 text-left transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-70 ${voteResultRing(kind)} ${
                             selected ? '' : 'hover:ring-1 hover:ring-rt-secondary/40'
                           }`}

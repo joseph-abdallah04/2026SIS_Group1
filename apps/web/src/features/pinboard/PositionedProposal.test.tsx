@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import type { BoardItem } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
 import { PositionedProposal } from './PositionedProposal';
 
 function stickyItem(text: string): BoardItem {
@@ -23,18 +22,19 @@ function stickyItem(text: string): BoardItem {
   };
 }
 
-/** The viewer owns this card, so the pencil and the inline editor are offered. */
-function renderOwnSticky(text = 'Ship the beta') {
-  const onEditText = vi.fn(async () => {});
+/** The viewer owns this card, so the pencil is offered. */
+function renderOwnSticky({ boardOpen = true }: { boardOpen?: boolean } = {}) {
+  const onOpenEditor = vi.fn();
   render(
     <PositionedProposal
-      item={stickyItem(text)}
+      item={stickyItem('Ship the beta')}
       position={{ x: 0, y: 0 }}
       isNew={false}
       isOwn
       isAuthorLeader={false}
-      canMove
-      canDelete
+      onOpenEditor={boardOpen ? onOpenEditor : undefined}
+      canMove={boardOpen}
+      canDelete={boardOpen}
       isDragging={false}
       dragHandlers={{
         onPointerDown: vi.fn(),
@@ -42,7 +42,6 @@ function renderOwnSticky(text = 'Ship the beta') {
         onPointerUp: vi.fn(),
         onPointerCancel: vi.fn(),
       }}
-      onEditText={onEditText}
       onDelete={vi.fn(async () => {})}
       viewerId="viewer"
       onReact={vi.fn(async () => {})}
@@ -51,65 +50,25 @@ function renderOwnSticky(text = 'Ship the beta') {
       onToggleShortlist={vi.fn()}
     />,
   );
-  return { onEditText };
+  return { onOpenEditor };
 }
 
-const openEditor = async () => {
-  await userEvent.click(screen.getByRole('button', { name: 'Edit proposal' }));
-  return screen.getByRole('textbox', { name: 'Edit sticky note text' });
-};
+describe('editing a sticky', () => {
+  // A sticky reopens in its popup, where its formatting can be changed. A plain
+  // box on the card would have flattened a formatted note the moment it opened.
+  it('opens the sticky editor rather than a box on the card', async () => {
+    const { onOpenEditor } = renderOwnSticky();
 
-describe('editing a sticky in place', () => {
-  it('saves the edited text', async () => {
-    const { onEditText } = renderOwnSticky();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit proposal' }));
 
-    const box = await openEditor();
-    await userEvent.clear(box);
-    await userEvent.type(box, 'Ship the beta on Friday');
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(onEditText).toHaveBeenCalledWith(expect.anything(), 'Ship the beta on Friday');
+    expect(onOpenEditor).toHaveBeenCalledWith(expect.objectContaining({ id: 'sticky-1' }));
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  // The rule that applies when a sticky is written has to apply when it is
-  // rewritten, or the cap is a formality that one click undoes.
-  it('stops typing at the same limit the tool enforces', async () => {
-    renderOwnSticky();
+  it('offers no edit once the board is closed to changes', () => {
+    renderOwnSticky({ boardOpen: false });
 
-    const box = await openEditor();
-
-    expect(box.getAttribute('maxlength')).toBe(String(STICKY_TEXT_LIMIT));
-  });
-
-  it('counts down against that limit while you type', async () => {
-    renderOwnSticky('Hello');
-
-    await openEditor();
-
-    expect(screen.getByText(`5/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
-  });
-
-  // A note written before the cap existed, or through another client, opens
-  // longer than the limit. Save is closed, and the reason is on screen rather
-  // than waiting for a press that cannot land.
-  it('refuses a note that is already over the limit, and says why', async () => {
-    const { onEditText } = renderOwnSticky('x'.repeat(STICKY_TEXT_LIMIT + 20));
-
-    await openEditor();
-
-    expect(screen.getByRole('alert').textContent).toContain(String(STICKY_TEXT_LIMIT));
-    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
-    expect(onEditText).not.toHaveBeenCalled();
-  });
-
-  it('will not save an empty note', async () => {
-    const { onEditText } = renderOwnSticky();
-
-    const box = await openEditor();
-    await userEvent.clear(box);
-
-    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
-    expect(onEditText).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Edit proposal' })).toBeNull();
   });
 });
 
@@ -154,7 +113,6 @@ function renderCard({
         canDelete={false}
         isDragging={false}
         dragHandlers={dragHandlers}
-        onEditText={async () => undefined}
         onDelete={async () => undefined}
         viewerId="leader-1"
         isShortlisted={false}

@@ -17,7 +17,10 @@ export interface Session {
   // null while draft or ended — only lobby/active sessions hold a code.
   code: string | null;
   title: string;
-  leaderId: string;
+  // Null means the account that led this session has since been deleted
+  // — the session itself is untouched, it just no longer names a
+  // leader. Every session is created with one; this never means "unassigned".
+  leaderId: string | null;
   status: SessionStatus;
   createdAt: Date;
   // Set once, on lobby -> active (F09).
@@ -96,8 +99,24 @@ export type StickyColor = 'yellow' | 'pink' | 'blue' | 'green';
 
 export interface StickyArtifact {
   type: 'sticky';
+  /** The note's words, as plain text. */
   text: string;
   color: StickyColor;
+  /** Formatting over `text`; absent on a note with none. See `stickyContract`. */
+  marks?: StickyMark[];
+  /**
+   * The list style of each line of `text`, by line, with null for a plain line.
+   * Absent on a note with no lists, and may stop before the last line: any line
+   * it does not reach is plain.
+   */
+  lines?: (StickyLineStyle | null)[];
+  /**
+   * How deeply each line of a list is nested, by line, from 0. Absent when no
+   * item is nested, and may stop early the same way `lines` does.
+   */
+  levels?: number[];
+  /** Links over `text`; absent on a note with none. */
+  links?: StickyLink[];
 }
 
 export interface DrawingArtifact {
@@ -116,19 +135,35 @@ export interface DrawingArtifact {
 // lives in its own module; re-exported here so `@roundtable/shared` is still
 // the single import for domain types.
 export * from './diagramContract.js';
+// v4 studio elements (ink, paths and tables) live beside
+// the diagram contract for the same reason: one import for domain types.
+export * from './studioElements.js';
+// v4.2 standalone arrows: their own collection, because an arrow is drawn
+// artwork with free endpoints rather than a semantic node-to-node edge.
+export * from './studioArrows.js';
 export * from './drawingContract.js';
 export * from './reactionContract.js';
+export * from './stickyContract.js';
 import type { DiagramArtifact } from './diagramContract.js';
 import type { DrawingStrokeData } from './drawingContract.js';
 import type { ReactionGroup } from './reactionContract.js';
+import type { StickyLineStyle, StickyLink, StickyMark } from './stickyContract.js';
 
 export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
+
+// Shown as `authorName` wherever a proposal's author account has been
+// deleted (`authorId` is null). One constant so every place that might ever
+// render it — today just the pinboard, potentially recaps/summaries later —
+// shows the exact same string rather than each inventing its own wording.
+export const DELETED_USER_DISPLAY_NAME = 'Deleted user';
 
 /** API shape for a pinboard item returned by GET /api/sessions/:id/proposals */
 export interface BoardItem {
   id: string;
   questionId: string;
-  authorId: string;
+  // Null once the author's account has been deleted — the proposal
+  // survives, `authorName` becomes DELETED_USER_DISPLAY_NAME.
+  authorId: string | null;
   authorName: string;
   type: ProposalType;
   artifactJson: ArtifactJson;
@@ -213,9 +248,10 @@ export interface BoardResponse {
   /**
    * The session's leader. Clients compare it against their own id to decide
    * whether to offer the leader's board-tidying affordances; the server checks
-   * the same thing again on every write.
+   * the same thing again on every write. Null if that account has since been
+   * deleted — nobody's board-tidying affordances render then.
    */
-  leaderId: string;
+  leaderId: string | null;
   questionId: string | null;
   questionText: string | null;
   questionPosition: number | null;
@@ -345,7 +381,9 @@ export interface VotingViewerState extends VotingPublicState {
 
 /** One member's voted / not-yet status. Never carries which proposal they chose. */
 export interface VotingVoterStatus {
-  userId: string;
+  // Null if this member's account has since been deleted — their
+  // SessionMember row, and this status entry, survive regardless.
+  userId: string | null;
   displayName: string;
   hasVoted: boolean;
 }
@@ -384,7 +422,8 @@ export function toPublicVotingState(state: VotingViewerState): VotingPublicState
 
 /** One person who took part, for the F31 recap. */
 export interface SessionRecapParticipant {
-  userId: string;
+  // Null if this member's account has since been deleted.
+  userId: string | null;
   displayName: string;
   isLeader: boolean;
 }
@@ -415,7 +454,8 @@ export interface SessionRecap {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  leaderId: string;
+  // Null if the leader's account has since been deleted.
+  leaderId: string | null;
   participants: SessionRecapParticipant[];
   questions: SessionRecapQuestion[];
 }

@@ -4,25 +4,24 @@ import { afterEach } from 'vitest';
 
 afterEach(cleanup);
 
+/**
+ * One jsdom serves the whole file, so storage outlives a test the way it
+ * outlives a reload. That is right for the studio's draft and wrong for a suite:
+ * without this, a canvas left behind by one test is restored into the next.
+ */
+afterEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
+});
+
 window.confirm = () => true;
 
-// jsdom ships no media-query engine at all. Anything asking about
-// prefers-reduced-motion gets "no preference", which is what a default browser
-// would say — so a component that honours the preference still takes its
-// ordinary animated path under test.
-if (!window.matchMedia) {
-  window.matchMedia = (query: string): MediaQueryList =>
-    ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => false,
-    }) as MediaQueryList;
-}
+// No `matchMedia` is installed here on purpose. jsdom ships no media-query
+// engine, and the components that animate read that absence as "nothing is
+// moving, so do not wait for a transition" — which is what a suite wants. A
+// global stub would answer "no preference" instead and quietly put every one of
+// them on its animated path. The few tests that are about motion install their
+// own, and remove it afterwards.
 
 if (!globalThis.PointerEvent) {
   class TestPointerEvent extends MouseEvent {
@@ -43,8 +42,19 @@ if (!Element.prototype.setPointerCapture) {
   Element.prototype.hasPointerCapture = () => true;
 }
 
+// jsdom lays nothing out, and leaves a range with no box at all.
+if (!Range.prototype.getBoundingClientRect) {
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}
+
 if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function showModal() {
+    this.setAttribute('open', '');
+  };
+}
+
+if (!HTMLDialogElement.prototype.show) {
+  HTMLDialogElement.prototype.show = function show() {
     this.setAttribute('open', '');
   };
 }

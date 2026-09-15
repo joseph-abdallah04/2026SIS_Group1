@@ -63,7 +63,11 @@ describe('useVoting', () => {
       await result.current.castVote('p1');
     });
     // The ack only says the write was accepted, so nothing is ticked yet.
-    expect(socket.emit).toHaveBeenCalledWith('voteCast', { proposalId: 'p1' }, expect.any(Function));
+    expect(socket.emit).toHaveBeenCalledWith(
+      'voteCast',
+      { proposalId: 'p1' },
+      expect.any(Function),
+    );
     expect(result.current.myVote).toBeNull();
 
     act(() => {
@@ -118,5 +122,66 @@ describe('useVoting', () => {
       emitServer('votingUpdated', { ...OPEN_ROUND, phase: 'shortlisting' });
     });
     expect(result.current.locked).toBe(false);
+  });
+
+  it('counts a pick past the limit without sending it or raising an error', async () => {
+    const { result } = await mounted();
+    act(() => {
+      emitServer('votingUpdated', {
+        ...OPEN_ROUND,
+        phase: 'shortlisting',
+        proposalIds: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'],
+      });
+    });
+
+    await act(async () => {
+      await result.current.toggle('p7');
+    });
+    expect(socket.emit).not.toHaveBeenCalled();
+    expect(result.current.limitHits).toBe(1);
+    expect(result.current.error).toBeNull();
+
+    // Unticking one already on the list is not past the limit.
+    await act(async () => {
+      await result.current.toggle('p6');
+    });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'shortlistToggle',
+      { proposalId: 'p6' },
+      expect.any(Function),
+    );
+    expect(result.current.limitHits).toBe(1);
+  });
+
+  it('counts the server refusing a full shortlist rather than showing its message', async () => {
+    const { result } = await mounted();
+    act(() => {
+      emitServer('votingUpdated', { ...OPEN_ROUND, phase: 'shortlisting' });
+    });
+    socket.emit.mockImplementationOnce((_event, _payload, ack) => {
+      ack?.({ ok: false, code: 'SHORTLIST_FULL', error: 'Pick at most 6 proposals' });
+    });
+
+    await act(async () => {
+      await result.current.toggle('p3');
+    });
+    expect(result.current.limitHits).toBe(1);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('still reports any other refused pick as an error', async () => {
+    const { result } = await mounted();
+    act(() => {
+      emitServer('votingUpdated', { ...OPEN_ROUND, phase: 'shortlisting' });
+    });
+    socket.emit.mockImplementationOnce((_event, _payload, ack) => {
+      ack?.({ ok: false, error: 'Only the leader can shortlist' });
+    });
+
+    await act(async () => {
+      await result.current.toggle('p3');
+    });
+    expect(result.current.limitHits).toBe(0);
+    expect(result.current.error).toBe('Only the leader can shortlist');
   });
 });

@@ -20,6 +20,7 @@ import {
   draggedSelectionRoots,
   alignNodes,
   clientPointToDiagramPoint,
+  diagramRectToClientRect,
   copyDiagramFragment,
   createNodeId,
   deleteNode,
@@ -164,6 +165,27 @@ describe('diagram node model', () => {
     ).toEqual({ x: 480, y: 300 });
   });
 
+  it('accounts for the margin a full-bleed canvas leaves around the scene', () => {
+    // The canvas fills the window, so its shape rarely matches the scene's: SVG
+    // scales the view to fit and centres the remainder. Ignoring that margin
+    // puts every click a constant distance from where it was made.
+    const wide = { left: 0, top: 0, width: 1600, height: 600 };
+    // 1600x600 around a 960x600 scene: uniform scale of 1, 320px of margin each
+    // side, so the middle of the surface is still the middle of the sheet.
+    expect(clientPointToDiagramPoint({ x: 800, y: 300 }, wide)).toEqual({ x: 480, y: 300 });
+    expect(clientPointToDiagramPoint({ x: 320, y: 0 }, wide)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('puts a rectangle back where the canvas actually draws it', () => {
+    // The properties bar hangs off this, so it has to agree with the forward
+    // conversion or the bar lands beside the selection instead of over it.
+    const wide = { left: 0, top: 0, width: 1600, height: 600 };
+    const point = clientPointToDiagramPoint({ x: 900, y: 200 }, wide);
+    const back = diagramRectToClientRect({ ...point, width: 0, height: 0 }, wide);
+    expect(back.x).toBeCloseTo(900);
+    expect(back.y).toBeCloseTo(200);
+  });
+
   it('deletes only the targeted node', () => {
     expect(deleteNode(buildNodes(3), 'n2').map((node) => node.id)).toEqual(['n1', 'n3']);
   });
@@ -187,15 +209,19 @@ describe('prepareDiagram', () => {
   it('rejects an empty diagram before any write is attempted', () => {
     expect(prepareDiagram([], [])).toEqual({
       ok: false,
-      error: 'Add at least one element before proposing this diagram.',
+      // v4 widened the precondition: ink counts as content, so the canvas is
+      // only empty when it has neither a shape nor a stroke.
+      error: 'Add an element or draw something before proposing.',
     });
   });
 
-  it('rejects a node whose label was cleared', () => {
-    expect(prepareDiagram([{ id: 'n1', label: '   ', x: 0, y: 0 }], [])).toEqual({
-      ok: false,
-      error: 'Give every element a label before proposing.',
-    });
+  it('accepts an element with no label, since a shape is a drawing too', () => {
+    // Elements are placed empty now. Refusing to propose one would mean a blank
+    // frame or a plain box could never be sent, which the ink beside it can.
+    const prepared = prepareDiagram([{ id: 'n1', label: '   ', x: 0, y: 0 }], []);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) throw new Error(prepared.error);
+    expect(prepared.artifact.nodes[0]?.label).toBe('');
   });
 
   it('produces a valid artifact and preserves shapes', () => {

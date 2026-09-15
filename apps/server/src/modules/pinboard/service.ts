@@ -1,4 +1,5 @@
 import {
+  DELETED_USER_DISPLAY_NAME,
   isEmoji,
   type AuthoredProposalGroup,
   type AuthoredProposalsResponse,
@@ -87,7 +88,7 @@ export function toBoardItem(row: ProposalRow): BoardItem {
     id: row.id,
     questionId: row.questionId,
     authorId: row.authorId,
-    authorName: row.author.displayName,
+    authorName: row.author?.displayName ?? DELETED_USER_DISPLAY_NAME,
     type: row.type,
     artifactJson: parsed.data,
     x: row.x,

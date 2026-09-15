@@ -1,31 +1,62 @@
 import type { ReactNode } from 'react';
 import {
-  DIAGRAM_LABEL_INK,
+  arrowGeometry,
   diagramEdgeDash,
   diagramEdgeRoutes,
   diagramEdgeStroke,
   diagramEdgeStrokeWidth,
   diagramNodeFill,
   diagramNodeLabelLayout,
+  diagramNodeLabelStyle,
+  diagramEdgeKey,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
-  diagramNodesInDrawOrder,
   effectiveDiagramNodeSize,
+  inkPoints,
+  pathFill,
+  pathStrokeColor,
+  pathStrokeWidth,
+  pathSvgData,
+  strokePathData,
+  TABLE_CELL_PADDING,
+  tableCellAt,
+  tableCellBold,
+  tableCellColor,
+  tableCellFill,
+  tableCellFontSize,
+  tableCellLines,
+  tableColCount,
+  tableColumnOffsets,
+  tableRowOffsets,
+  tableSize,
+  tableStrokeColor,
+  tableStrokeWidth,
+  inkStrokeColor,
+  inkStrokeWidth,
+  studioPaintOrder,
   type BoardItem,
 } from '@roundtable/shared';
 
 import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
+import { arrowTargetLookup } from '../tools/studio/studioArrowTargets';
+import { StudioArrowView } from '../tools/studio/StudioArrowView';
 
-import { stickyTypography } from '../tools/sticky/stickyPresentation';
+import {
+  STICKY_FONT_SIZE,
+  STICKY_LINE_HEIGHT,
+  STICKY_NOTE_CLASS,
+  STICKY_NOTE_PADDING,
+} from '../tools/sticky/stickyPresentation';
+import { StickyText } from '../tools/sticky/StickyText';
+import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
+  CARD_FOOT_CLASS,
   CARD_RADIUS,
   CARD_SHADOW,
-  CARD_WIDTH,
   OWNED_INK,
   STICKY_RADIUS,
   STICKY_SHADOW,
-  STICKY_SIZE,
   STICKY_THEMES,
   THUMB_BACKGROUND,
 } from './pinboardTokens';
@@ -40,6 +71,12 @@ interface ProposalCardProps {
   isNew?: boolean;
   /** On the leader's voting shortlist (F27). */
   isShortlisted?: boolean;
+  /**
+   * Whether the card may hold presses of its own: a sticky's links. Off where
+   * the card is itself a button, as on a ballot, where links are drawn without
+   * being links.
+   */
+  interactive?: boolean;
 }
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
@@ -80,7 +117,7 @@ function CardFoot({
   isAuthorLeader: boolean;
 }) {
   return (
-    <footer className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint">
+    <footer className={CARD_FOOT_CLASS}>
       <span className="min-w-0 truncate font-medium text-rt-ink-muted">
         {isOwnedByViewer ? 'You' : item.authorName}
         {/* Never beside "You": the mark is there to say whose cards belong to the
@@ -139,11 +176,51 @@ function CardMedia({ children }: { children: ReactNode }) {
 function DiagramBody({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
   const { nodes, edges } = item.artifactJson;
+  const ink = item.artifactJson.ink ?? [];
+  const paths = item.artifactJson.paths ?? [];
+  const tables = item.artifactJson.tables ?? [];
+  const arrows = item.artifactJson.arrows ?? [];
+  // Unpacked once per render: the extent needs every point, and so does each
+  // stroke's path data.
+  const unpackedInk = ink.map((stroke) => ({ ...stroke, points: inkPoints(stroke) }));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const inkById = new Map(unpackedInk.map((stroke) => [stroke.id, stroke]));
+  const pathById = new Map(paths.map((path) => [path.id, path]));
+  const tableById = new Map(tables.map((table) => [table.id, table]));
+  // Resolved once: a bound arrow has to land on the same point of the same
+  // shape here as it did in the editor, so both go through one lookup.
+  const arrowTargets = arrowTargetLookup({ nodes, ink: unpackedInk, paths, tables });
+  const arrowRoutes = new Map(
+    arrows.map((arrow) => [arrow.id, arrowGeometry(arrow, arrowTargets)]),
+  );
+  const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
+  const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
+  // The card frames whatever the artifact contains, so ink counts towards the
+  // extent exactly as a node does — otherwise a sketch would be cropped.
+  const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
+  const allAnchors = paths.flatMap((path) => path.anchors);
+  const tableCorners = tables.map((table) => ({ table, size: tableSize(table) }));
+  // An arrow can reach past everything it points at, so its route counts
+  // towards the extent too — otherwise a free end would be cropped off.
+  const allArrowPoints = [...arrowRoutes.values()].flatMap((geometry) => geometry.points);
   const svgWidth =
-    Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + 28;
+    Math.max(
+      ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
+      ...allInkPoints.map((point) => point.x),
+      ...allAnchors.map((anchor) => anchor.x),
+      ...tableCorners.map(({ table, size }) => table.x + size.width),
+      ...allArrowPoints.map((point) => point.x),
+      72,
+    ) + 28;
   const svgHeight =
-    Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) + 24;
+    Math.max(
+      ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
+      ...allInkPoints.map((point) => point.y),
+      ...allAnchors.map((anchor) => anchor.y),
+      ...tableCorners.map(({ table, size }) => table.y + size.height),
+      ...allArrowPoints.map((point) => point.y),
+      32,
+    ) + 24;
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
   // colliding; one per resolved colour keeps each arrowhead matching its line.
   const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
@@ -151,9 +228,194 @@ function DiagramBody({ item }: { item: BoardItem }) {
   // Reciprocal pairs bow apart here exactly as they do in the editor.
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);
 
+  function renderEdge(edge: (typeof edges)[number], index: number) {
+    const from = nodeById.get(edge.from);
+    const to = nodeById.get(edge.to);
+    const route = edgeRoutes[index];
+    if (!from || !to || !route) return null;
+    const stroke = diagramEdgeStroke(edge);
+    // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
+    const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
+    return (
+      <g key={`${edge.from}-${edge.to}`}>
+        <path
+          d={route.path}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          markerEnd={`url(#${arrowId(stroke)})`}
+          {...diagramEdgeDash(edge, strokeWidth)}
+        />
+        {edge.label ? (
+          <text
+            x={route.labelX}
+            y={route.labelY}
+            textAnchor="middle"
+            fill="#5A5F68"
+            stroke="#F7F7F8"
+            strokeWidth={3}
+            paintOrder="stroke"
+            style={{ fontSize: '9px', fontFamily: 'Inter, system-ui, sans-serif' }}
+          >
+            {edge.label}
+          </text>
+        ) : null}
+      </g>
+    );
+  }
+
+  function renderPath(path: (typeof paths)[number]) {
+    const strokeWidth = pathStrokeWidth(path);
+    return (
+      <path
+        key={path.id}
+        d={pathSvgData(path)}
+        fill={pathFill(path)}
+        stroke={pathStrokeColor(path)}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        {...diagramEdgeDash(path, strokeWidth)}
+      />
+    );
+  }
+
+  function renderTable(table: (typeof tables)[number]) {
+    const cols = tableColCount(table);
+    const colOffsets = tableColumnOffsets(table);
+    const rowOffsets = tableRowOffsets(table);
+    const stroke = tableStrokeColor(table);
+    const strokeWidth = tableStrokeWidth(table);
+
+    return (
+      <g key={table.id} transform={`translate(${table.x}, ${table.y})`}>
+        {table.cells.map((_, index) => {
+          const row = Math.floor(index / cols);
+          const col = index % cols;
+          const cell = tableCellAt(table, row, col);
+          const x = colOffsets[col] ?? 0;
+          const y = rowOffsets[row] ?? 0;
+          const width = table.colWidths[col] ?? 0;
+          const height = table.rowHeights[row] ?? 0;
+          const lines = tableCellLines(table, cell, col, row);
+          const fontSize = tableCellFontSize(table, cell);
+          const lineHeight = fontSize * 1.25;
+          const align = cell?.align ?? 'left';
+          const textX =
+            align === 'center'
+              ? x + width / 2
+              : align === 'right'
+                ? x + width - TABLE_CELL_PADDING
+                : x + TABLE_CELL_PADDING;
+
+          return (
+            <g key={`${table.id}-${row}-${col}`}>
+              <rect
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill={tableCellFill(table, cell, row)}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+              />
+              <text
+                fill={tableCellColor(cell)}
+                textAnchor={align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start'}
+                style={{
+                  fontSize: `${fontSize}px`,
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  fontWeight: tableCellBold(table, cell, row) ? 600 : 400,
+                }}
+              >
+                {lines.map((line, lineIndex) => (
+                  <tspan
+                    key={line + String(lineIndex)}
+                    x={textX}
+                    y={
+                      y +
+                      height / 2 +
+                      fontSize / 3 -
+                      ((lines.length - 1) * lineHeight) / 2 +
+                      lineIndex * lineHeight
+                    }
+                  >
+                    {line}
+                  </tspan>
+                ))}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+
+  function renderInk(stroke: (typeof unpackedInk)[number]) {
+    return (
+      <path
+        key={stroke.id}
+        d={strokePathData(stroke.points)}
+        fill="none"
+        stroke={inkStrokeColor(stroke)}
+        strokeWidth={inkStrokeWidth(stroke)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    );
+  }
+
+  function renderNode(node: (typeof nodes)[number]) {
+    const shape = node.shape ?? 'box';
+    const size = effectiveDiagramNodeSize(node);
+    const label = diagramNodeLabelLayout(node);
+    const labelStyle = diagramNodeLabelStyle(node, size.width);
+
+    return (
+      <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+        <DiagramShapeOutline
+          shape={shape}
+          size={size}
+          fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
+          // '#8CA4AC', 1 and '4 3' are this preview's own pre-v2 border.
+          stroke={diagramNodeStroke(node, '#8CA4AC')}
+          strokeWidth={diagramNodeStrokeWidth(node, 1)}
+          containerDashArray="4 3"
+        />
+        <text
+          textAnchor={labelStyle.anchor}
+          fill={labelStyle.fill}
+          style={{
+            fontSize: `${label.fontSize}px`,
+            fontFamily: 'Inter, system-ui, sans-serif',
+            // The card has always drawn labels a shade lighter than the editor;
+            // bold is the one weight both surfaces agree on exactly.
+            fontWeight: node.labelBold ? labelStyle.fontWeight : shape === 'text' ? 600 : 400,
+          }}
+        >
+          {label.lines.map((line, lineIndex) => (
+            <tspan
+              key={line + String(lineIndex)}
+              x={labelStyle.x}
+              y={label.firstBaselineY + lineIndex * label.lineHeight}
+            >
+              {line}
+            </tspan>
+          ))}
+        </text>
+      </g>
+    );
+  }
+
   return (
     <CardMedia>
-      {nodes.length === 0 ? (
+      {/* A studio canvas is empty only when it holds nothing at all — a sketch,
+          a line, a table or an arrow is as much a diagram as a shape is. */}
+      {nodes.length === 0 &&
+      ink.length === 0 &&
+      paths.length === 0 &&
+      tables.length === 0 &&
+      arrows.length === 0 ? (
         <div className="absolute inset-3 rounded-md border border-dashed border-rt-tertiary" />
       ) : (
         // Inset from the plate's edges so a shape at the diagram's boundary is
@@ -178,80 +440,37 @@ function DiagramBody({ item }: { item: BoardItem }) {
               </marker>
             ))}
           </defs>
-          {edges.map((edge, index) => {
-            const from = nodeById.get(edge.from);
-            const to = nodeById.get(edge.to);
-            const route = edgeRoutes[index];
-            if (!from || !to || !route) return null;
-            const stroke = diagramEdgeStroke(edge);
-            // 1.5 is this preview's own pre-v2 width, kept for unstyled arrows.
-            const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
-            return (
-              <g key={`${edge.from}-${edge.to}`}>
-                <path
-                  d={route.path}
-                  fill="none"
-                  stroke={stroke}
-                  strokeWidth={strokeWidth}
-                  markerEnd={`url(#${arrowId(stroke)})`}
-                  {...diagramEdgeDash(edge, strokeWidth)}
-                />
-                {edge.label ? (
-                  <text
-                    x={route.labelX}
-                    y={route.labelY}
-                    textAnchor="middle"
-                    fill="#5A5F68"
-                    stroke="#F7F7F8"
-                    strokeWidth={3}
-                    paintOrder="stroke"
-                    style={{ fontSize: '9px', fontFamily: 'Inter, system-ui, sans-serif' }}
-                  >
-                    {edge.label}
-                  </text>
-                ) : null}
-              </g>
-            );
-          })}
-          {/* Containers are drawn before what they hold, so a group reads as a
-              backdrop rather than covering its own contents. */}
-          {diagramNodesInDrawOrder(nodes).map((node) => {
-            const shape = node.shape ?? 'box';
-            const size = effectiveDiagramNodeSize(node);
-            const label = diagramNodeLabelLayout(node);
-
-            return (
-              <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-                <DiagramShapeOutline
-                  shape={shape}
-                  size={size}
-                  fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
-                  // '#8CA4AC', 1 and '4 3' are this preview's own pre-v2 border.
-                  stroke={diagramNodeStroke(node, '#8CA4AC')}
-                  strokeWidth={diagramNodeStrokeWidth(node, 1)}
-                  containerDashArray="4 3"
-                />
-                <text
-                  textAnchor="middle"
-                  fill={DIAGRAM_LABEL_INK}
-                  style={{
-                    fontSize: `${label.fontSize}px`,
-                    fontFamily: 'Inter, system-ui, sans-serif',
-                    fontWeight: shape === 'text' ? 600 : 400,
-                  }}
-                >
-                  {label.lines.map((line, lineIndex) => (
-                    <tspan
-                      key={line + String(lineIndex)}
-                      x={size.width / 2}
-                      y={label.firstBaselineY + lineIndex * label.lineHeight}
-                    >
-                      {line}
-                    </tspan>
-                  ))}
-                </text>
-              </g>
-            );
+          {/* The card paints in the artifact's own order, so a sketch sits
+              above or below a shape here exactly as it did in the editor. */}
+          {studioPaintOrder(item.artifactJson).map((ref) => {
+            if (ref.kind === 'edge') {
+              const index = edgeIndexByKey.get(ref.key);
+              const edge = index === undefined ? undefined : edges[index];
+              return edge && index !== undefined ? renderEdge(edge, index) : null;
+            }
+            if (ref.kind === 'ink') {
+              const stroke = inkById.get(ref.key);
+              return stroke ? renderInk(stroke) : null;
+            }
+            if (ref.kind === 'path') {
+              const path = pathById.get(ref.key);
+              return path ? renderPath(path) : null;
+            }
+            if (ref.kind === 'table') {
+              const table = tableById.get(ref.key);
+              return table ? renderTable(table) : null;
+            }
+            if (ref.kind === 'arrow') {
+              const arrow = arrowById.get(ref.key);
+              const geometry = arrowRoutes.get(ref.key);
+              return arrow && geometry ? (
+                <g key={arrow.id}>
+                  <StudioArrowView arrow={arrow} geometry={geometry} />
+                </g>
+              ) : null;
+            }
+            const node = nodeById.get(ref.key);
+            return node ? renderNode(node) : null;
           })}
         </svg>
       )}
@@ -265,9 +484,11 @@ export function ProposalCard({
   isAuthorLeader = false,
   isNew = false,
   isShortlisted = false,
+  interactive = true,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
+  const size = cardWidth(item);
   // A sticky keeps the colour its author chose, in its own matching edge.
   const theme = isSticky ? STICKY_THEMES[artifact.color] : null;
 
@@ -286,15 +507,21 @@ export function ProposalCard({
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
       {/* A sticky is bare paper: no outline, square corners, and a square
-          footprint that does not grow with its contents. Everything else is a
-          panel, so it keeps its border and its rounded edge. */}
+          footprint that grows a step at a time with its note. Everything else
+          is a panel, so it keeps its border and its rounded edge. */}
       <article
-        className={`flex shrink-0 flex-col overflow-hidden ${isSticky ? '' : 'border'} ${
-          isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''
-        }`}
+        className={`flex shrink-0 flex-col overflow-hidden ${
+          isSticky
+            ? 'transition-[width,min-height] duration-150 ease-out motion-reduce:transition-none'
+            : 'border'
+        } ${isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''}`}
         style={{
-          width: CARD_WIDTH[item.type],
-          ...(isSticky ? { height: STICKY_SIZE } : {}),
+          width: size,
+          // Square, and a floor rather than a fixed height: the step the note's
+          // length picked is the size it starts at. A note longer than even the
+          // largest square holds stays that wide and grows a little taller, so
+          // every word of it is on the board.
+          ...(isSticky ? { minHeight: size } : {}),
           borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
           ...(isSticky ? {} : { borderColor: theme ? theme.border : CARD_BORDER }),
           background: theme ? theme.bg : '#FFFFFF',
@@ -303,18 +530,21 @@ export function ProposalCard({
       >
         {artifact.type === 'sticky' ? (
           // Fills whatever the square leaves above the byline, so a short note
-          // sits at the top of the paper rather than centred in it.
-          <p
-            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
-            style={{
-              padding: '14px 14px 6px',
-              // Shared with the editor's preview, so a note that had to shrink
-              // to fit while you were writing it looks the same on the board.
-              ...stickyTypography(artifact.text),
-            }}
-          >
-            {artifact.text}
-          </p>
+          // sits at the top of the paper rather than centred in it. Never
+          // shrinks below the note, so a long one makes the card taller.
+          <div className="flex flex-1 flex-col">
+            <div
+              data-sticky-note
+              className={STICKY_NOTE_CLASS}
+              style={{
+                padding: STICKY_NOTE_PADDING,
+                fontSize: STICKY_FONT_SIZE,
+                lineHeight: STICKY_LINE_HEIGHT,
+              }}
+            >
+              <StickyText note={artifact} links={interactive ? 'open' : 'inert'} />
+            </div>
+          </div>
         ) : null}
 
         {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}

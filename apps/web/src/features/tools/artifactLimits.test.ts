@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { prepareStickyText, STICKY_TEXT_LIMIT } from './artifactLimits';
+import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from './artifactLimits';
 
 describe('prepareStickyText', () => {
-  it('trims a valid sticky before submission', () => {
-    expect(prepareStickyText('  Keep the scope focused.  ')).toEqual({
-      ok: true,
-      text: 'Keep the scope focused.',
-    });
+  // Whitespace may be deliberate, so it is handed back untouched.
+  it('keeps a sticky exactly as typed, whitespace included', () => {
+    const typed = `  Keep the scope focused.  \n\n    and indented  `;
+    expect(prepareStickyText(typed)).toEqual({ ok: true, text: typed });
   });
 
   it('rejects a blank sticky', () => {
@@ -28,6 +27,15 @@ describe('prepareStickyText', () => {
     expect(prepareStickyText('a'.repeat(STICKY_TEXT_LIMIT + 1))).toEqual({
       ok: false,
       error: `Keep your sticky to ${STICKY_TEXT_LIMIT} characters or fewer.`,
+    });
+  });
+
+  it('accepts a sticky at the line limit, and rejects one over it', () => {
+    const lines = (count: number) => Array.from({ length: count }, () => 'a').join('\n');
+    expect(prepareStickyText(lines(STICKY_MAX_LINES)).ok).toBe(true);
+    expect(prepareStickyText(lines(STICKY_MAX_LINES + 1))).toEqual({
+      ok: false,
+      error: `Keep your sticky to ${STICKY_MAX_LINES} lines or fewer.`,
     });
   });
 });

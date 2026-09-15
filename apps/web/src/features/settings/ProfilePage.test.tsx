@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,25 @@ import { ApiClientError } from '../../lib/api';
 import * as authApi from '../auth/api';
 import { ProfilePage } from './ProfilePage';
 
-vi.mock('../auth/api', () => ({ getMe: vi.fn(), updateProfile: vi.fn() }));
+const navigateMock = vi.fn();
+const clearTokenMock = vi.fn();
+const disconnectSocketMock = vi.fn();
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => navigateMock };
+});
+
+vi.mock('../auth/api', () => ({
+  getMe: vi.fn(),
+  updateProfile: vi.fn(),
+  deleteAccount: vi.fn(),
+}));
+vi.mock('../../lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/auth')>('../../lib/auth');
+  return { ...actual, clearToken: () => clearTokenMock() };
+});
+vi.mock('../../lib/socket', () => ({ disconnectSocket: () => disconnectSocketMock() }));
 
 function renderPage() {
   return render(
@@ -28,6 +46,10 @@ describe('ProfilePage', () => {
   beforeEach(() => {
     vi.mocked(authApi.getMe).mockReset();
     vi.mocked(authApi.updateProfile).mockReset();
+    vi.mocked(authApi.deleteAccount).mockReset();
+    navigateMock.mockClear();
+    clearTokenMock.mockClear();
+    disconnectSocketMock.mockClear();
   });
 
   it('renders the fetched email and display name', async () => {
@@ -109,5 +131,72 @@ describe('ProfilePage', () => {
 
     await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
     expect(input).toHaveValue('Bob');
+  });
+
+  describe('delete account', () => {
+    it('keeps the delete button disabled until a password is entered', async () => {
+      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByText('alice@example.com');
+      const deleteButton = screen.getByRole('button', { name: /delete account/i });
+      expect(deleteButton).toBeDisabled();
+
+      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
+      expect(deleteButton).not.toBeDisabled();
+    });
+
+    it('requires a second, explicit confirmation before calling the API', async () => {
+      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByText('alice@example.com');
+      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+
+      expect(authApi.deleteAccount).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('deletes the account, clears the session, and redirects to /login on confirm', async () => {
+      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+      vi.mocked(authApi.deleteAccount).mockResolvedValue({ ok: true });
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByText('alice@example.com');
+      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      const dialog = screen.getByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /delete account/i }));
+
+      await waitFor(() =>
+        expect(authApi.deleteAccount).toHaveBeenCalledWith({ password: 'hunter2' }),
+      );
+      expect(clearTokenMock).toHaveBeenCalled();
+      expect(disconnectSocketMock).toHaveBeenCalled();
+      expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true });
+    });
+
+    it('shows the server error and does not clear the session on a wrong password', async () => {
+      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+      vi.mocked(authApi.deleteAccount).mockRejectedValue(
+        new ApiClientError(401, 'Incorrect password', 'INVALID_PASSWORD'),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByText('alice@example.com');
+      await user.type(screen.getByLabelText(/confirm your password/i), 'wrongpass');
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      const dialog = screen.getByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /delete account/i }));
+
+      expect(await screen.findByText('Incorrect password')).toBeInTheDocument();
+      expect(clearTokenMock).not.toHaveBeenCalled();
+      expect(navigateMock).not.toHaveBeenCalled();
+    });
   });
 });

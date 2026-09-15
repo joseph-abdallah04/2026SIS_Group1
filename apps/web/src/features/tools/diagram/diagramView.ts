@@ -107,6 +107,36 @@ export function fitDiagramView(nodes: readonly DiagramNode[]): DiagramView {
   });
 }
 
+/**
+ * The view as it is actually drawn, widened or heightened to the shape of the
+ * surface it is drawn on.
+ *
+ * The canvas fills the window and the sheet does not, so the two rarely share a
+ * shape. Rather than letterbox the difference into dead margins, the view takes
+ * it: what you see extends past the sheet, which reads as room around the
+ * drawing instead of a frame around the canvas.
+ *
+ * Only what is *visible* grows. The sheet is unchanged, and nothing can be made
+ * off it — the canvas clamps every press to it — so this buys the space without
+ * touching what an artifact is allowed to contain.
+ *
+ * Centred on the view it was given, so zooming and panning still mean what they
+ * meant: this is a presentation of the view, not a replacement for it.
+ */
+export function expandViewToAspect(view: DiagramView, aspect: number): DiagramView {
+  if (!Number.isFinite(aspect) || aspect <= 0 || view.width <= 0 || view.height <= 0) return view;
+
+  const current = view.width / view.height;
+  if (Math.abs(current - aspect) < 1e-6) return view;
+
+  if (current < aspect) {
+    const width = view.height * aspect;
+    return { x: view.x - (width - view.width) / 2, y: view.y, width, height: view.height };
+  }
+  const height = view.width / aspect;
+  return { x: view.x, y: view.y - (height - view.height) / 2, width: view.width, height };
+}
+
 export function diagramViewBoxAttribute(view: DiagramView): string {
   return `${view.x} ${view.y} ${view.width} ${view.height}`;
 }

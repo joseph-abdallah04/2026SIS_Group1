@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   emptyVotingState,
   isShortlistLocked,
+  SHORTLIST_MAX,
   type VotingPublicState,
   type VotingViewerState,
   type VotingVoterStatus,
@@ -56,6 +57,8 @@ export function useVoting(sessionId: string, questionId: string | null) {
   const [voting, setVoting] = useState<VotingViewerState>(emptyVotingState(questionId));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Picks refused for being past `SHORTLIST_MAX`. Only ever goes up. */
+  const [limitHits, setLimitHits] = useState(0);
 
   const applyViewer = useCallback(
     (next: VotingViewerState) => {
@@ -155,30 +158,40 @@ export function useVoting(sessionId: string, questionId: string | null) {
     }
   }, []);
 
-  // Ticking a card is a board write, not a bar action — do not flip `busy` or
-  // the proceed control flashes "Working…" on every select.
-  const runQuiet = useCallback(async (work: () => Promise<void>, fallback: string) => {
-    setError(null);
-    try {
-      await work();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : fallback);
-    }
-  }, []);
-
+  /**
+   * Picking past the limit is not an error to read, it is a pick that did not
+   * happen. It is counted rather than written into `error`, so the bar can
+   * flash its counter instead of swapping it for a sentence — and the count
+   * changes on every refused pick, so pressing again flashes again.
+   *
+   * Ticking a card is a board write, not a bar action — it does not flip
+   * `busy`, or the proceed control would flash "Working…" on every select.
+   */
   const toggle = useCallback(
-    (proposalId: string) => {
-      if (busy) return Promise.resolve();
-      return runQuiet(
-        () =>
-          writeIntent(
-            (ack) => getSocket().emit('shortlistToggle', { proposalId }, ack),
-            'Could not update the shortlist',
-          ),
-        'Could not update the shortlist',
-      );
+    async (proposalId: string) => {
+      if (busy) return;
+      const { proposalIds } = voting;
+      if (proposalIds.length >= SHORTLIST_MAX && !proposalIds.includes(proposalId)) {
+        setLimitHits((hits) => hits + 1);
+        return;
+      }
+      setError(null);
+      try {
+        await writeIntent(
+          (ack) => getSocket().emit('shortlistToggle', { proposalId }, ack),
+          'Could not update the shortlist',
+        );
+      } catch (err) {
+        // The check above runs on what this client last heard. The server has
+        // the final say, and may know of a pick made moments ago elsewhere.
+        if ((err as { code?: string }).code === 'SHORTLIST_FULL') {
+          setLimitHits((hits) => hits + 1);
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Could not update the shortlist');
+      }
     },
-    [busy, runQuiet],
+    [busy, voting],
   );
 
   const clear = useCallback(
@@ -239,10 +252,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
     () =>
       run(
         () =>
-          writeIntent(
-            (ack) => getSocket().emit('votingContinue', {}, ack),
-            'Could not continue',
-          ),
+          writeIntent((ack) => getSocket().emit('votingContinue', {}, ack), 'Could not continue'),
         'Could not continue',
       ),
     [run],
@@ -262,6 +272,7 @@ export function useVoting(sessionId: string, questionId: string | null) {
     votingEndsAt: voting.votingEndsAt,
     error,
     busy,
+    limitHits,
     toggle,
     clear,
     startVote,

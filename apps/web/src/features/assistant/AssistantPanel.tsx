@@ -73,13 +73,14 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
     if (!entry || entry.kind !== 'artifact' || !creativeTools) return;
 
     setProposeState(entryId, 'sending');
-    const ok = await creativeTools.submitArtifact(entry.artifact);
+    // `proposeArtifact`, not the editor's `submitArtifact`: every card here proposes on its
+    // own, and each needs to hear about its own write rather than read a status the whole
+    // board shares.
+    const result = await creativeTools.proposeArtifact(entry.artifact);
     setProposeState(
       entryId,
-      ok ? 'proposed' : 'failed',
-      // Only claim the board rejected it when the board actually said so. A `false` with no
-      // error means the write never left the client — another proposal was still in flight.
-      ok ? undefined : (creativeTools.submissionError ?? 'Could not send it — try again.'),
+      result.ok ? 'proposed' : 'failed',
+      result.ok ? undefined : result.error,
     );
   };
 

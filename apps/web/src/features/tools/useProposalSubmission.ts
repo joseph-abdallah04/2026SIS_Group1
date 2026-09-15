@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { findOpenProposalPosition } from './proposalPlacement';
 import { proposalErrorMessage } from './proposeErrors';
-import type { ProposalSubmissionStatus } from './CreativeToolsContext';
+import type { ProposalSubmissionStatus, ProposeResult } from './CreativeToolsContext';
 
 interface UseProposalSubmissionOptions {
   extensionSource: BoardItem | null;
@@ -60,29 +60,78 @@ export function useProposalSubmission({
         await propose({
           type: artifactJson.type,
           artifactJson,
-          ...findOpenProposalPosition(proposals, artifactJson.type),
+          ...findOpenProposalPosition(proposals, artifactJson),
           ...(extensionSource ? { extendsProposalId: extensionSource.id } : {}),
         });
       }
       setStatus('success');
       return true;
     } catch (cause) {
+      submitting.current = false;
       setStatus('idle');
       setError(proposalErrorMessage(cause));
       return false;
-    } finally {
-      // Released however the call ends, not just on failure. The ref guards against a
-      // second write while one is in flight; once the first has settled it has done its
-      // job, and `status` is what records that this editor already had its turn.
-      //
-      // It used to be released only in the catch, which was invisible to the studio —
-      // an editor shows a success screen and can only be left by closing it, and closing
-      // resets. A caller that submits repeatedly without ever opening or closing a tool,
-      // like the assistant's Propose button, got exactly one write per page load and
-      // silent `false` for every one after it.
-      submitting.current = false;
     }
   }
 
-  return { status, error, reset, submitArtifact };
+  /**
+   * A write that does not belong to an editor.
+   *
+   * `submitArtifact` above is one write per tool opened: the lock it takes is
+   * released by opening or closing a tool, and `status` drives the editor's own
+   * screen. That is right for a popup you open, propose from once, and close —
+   * it is what stops a stray keypress on a focused Propose button putting the
+   * same note on the board twice.
+   *
+   * It is wrong for the assistant, which proposes from chat cards that never
+   * open a tool and each track their own sending, proposed and failed. Sharing
+   * the editor's lock gave it exactly one write per page load; sharing the
+   * editor's `error` would tell one card about another's failure. So this
+   * shares the parts that are about the board — where the artifact lands, and
+   * what a rejection reads as — and keeps nothing that is about a popup.
+   *
+   * Always a create. Extending and editing are things you do from a tool.
+   */
+  async function proposeArtifact(artifactJson: ArtifactJson): Promise<ProposeResult> {
+    if (!isLive)
+      return { ok: false, error: 'Reconnect to the session before proposing your idea.' };
+
+    try {
+      await propose({
+        type: artifactJson.type,
+        artifactJson,
+        ...findOpenProposalPosition(proposals, artifactJson),
+      });
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, error: proposalErrorMessage(cause) };
+    }
+  }
+
+  return { status, error, reset, submitArtifact, proposeArtifact };
+}
+
+/** How long a proposal can be on its way before the studio shows it is waiting. */
+const SLOW_SUBMISSION_MS = 300;
+
+/**
+ * Whether a proposal has been on its way long enough to be worth showing.
+ *
+ * Most go through in well under a tenth of a second. Greying the studio's tools
+ * and swapping the Propose label for that moment flickered the whole studio just
+ * before it closed, so they wait to change until the send is actually slow.
+ * Input is still refused from the first moment, by the editors' own checks and
+ * by the send refusing a second one; only how it looks waits.
+ */
+export function useSlowSubmission(submitting: boolean): boolean {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!submitting) return;
+    const timer = window.setTimeout(() => setSlow(true), SLOW_SUBMISSION_MS);
+    return () => {
+      window.clearTimeout(timer);
+      setSlow(false);
+    };
+  }, [submitting]);
+  return submitting && slow;
 }

@@ -1,4 +1,4 @@
-import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
+import type { ArrowElement, DiagramEdge, DiagramNode } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -98,5 +98,47 @@ describe('diagramHistoryReducer', () => {
     expect(isDiagramDirty(initial)).toBe(false);
     expect(isDiagramDirty(changed)).toBe(true);
     expect(isDiagramDirty(diagramHistoryReducer(changed, { type: 'undo' }))).toBe(false);
+  });
+
+  // History clones a snapshot field by field, so every collection the canvas
+  // can hold has to be named there. One that is not is dropped the moment the
+  // editor opens — silently, because nothing else in the editor reads it.
+  describe('carrying every kind of element', () => {
+    const arrow: ArrowElement = {
+      id: 'arrow-1',
+      from: { x: 10, y: 10 },
+      to: { x: 90, y: 60, elementId: 'n1' },
+      route: 'elbow',
+      bend: 12,
+    };
+
+    it('keeps arrows through the clone a new history makes', () => {
+      const history = createDiagramHistory({ nodes: [firstNode], edges: [], arrows: [arrow] });
+      expect(history.present.arrows).toEqual([arrow]);
+    });
+
+    it('copies an arrow rather than sharing it', () => {
+      const history = createDiagramHistory({ nodes: [firstNode], edges: [], arrows: [arrow] });
+      expect(history.present.arrows?.[0]).not.toBe(arrow);
+      expect(history.present.arrows?.[0]?.to).not.toBe(arrow.to);
+    });
+
+    it('counts a change to the arrows alone as a change', () => {
+      // Snapshot identity decides both undo and the dirty flag. An omitted
+      // collection compares equal to itself changed, so moving an arrow would
+      // neither be undoable nor warn about being thrown away.
+      const initial = createDiagramHistory({ nodes: [firstNode], edges: [], arrows: [arrow] });
+      const moved = diagramHistoryReducer(initial, {
+        type: 'commit',
+        snapshot: {
+          nodes: [firstNode],
+          edges: [],
+          arrows: [{ ...arrow, to: { ...arrow.to, x: 300 } }],
+        },
+      });
+
+      expect(isDiagramDirty(moved)).toBe(true);
+      expect(moved.past).toHaveLength(1);
+    });
   });
 });

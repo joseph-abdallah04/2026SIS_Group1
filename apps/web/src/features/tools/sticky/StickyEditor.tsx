@@ -1,21 +1,126 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
-import { Check, CheckCircle2, LoaderCircle } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
+import { LoaderCircle, X } from 'lucide-react';
 import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
-import {
-  CARD_WIDTH,
-  STICKY_RADIUS,
-  STICKY_SHADOW,
-  STICKY_SIZE,
-  STICKY_THEMES,
-} from '../../pinboard/pinboardTokens';
-import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
+import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
+import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
-import { stickyTypography } from './stickyPresentation';
+import {
+  NO_STICKY_FORMAT,
+  RichStickyField,
+  StickyFormatBar,
+  type RichStickyFieldHandle,
+  type StickyFormat,
+} from './RichStickyField';
+import {
+  clearStickyDraft,
+  readStickyDraft,
+  sourceDraftKeyFor,
+  writeStickyDraft,
+} from './stickyDraft';
+import {
+  formatForArtifact,
+  lineCount,
+  sameNote,
+  toStickyNote,
+  type StickyNote,
+} from './stickyMarks';
 
 const STICKY_COLORS: StickyColor[] = ['yellow', 'pink', 'blue', 'green'];
 
+const POPUP_WIDTH = 'min(92vw, 520px)';
+const POPUP_MAX_WIDTH_PX = 520;
+/** Between the popup and the board's footer it rests on. */
+const FOOTER_GAP_PX = 12;
+/** Kept clear of the window's edge when the toolbar sits near it. */
+const EDGE_PX = 16;
+/** How long the popup takes to fade out; the same as `.rt-sticky-popup-fade`. */
+const EXIT_MS = 150;
+/** The toolbar button for the tool that is already open. */
+const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
+/**
+ * How tall the note grows before it scrolls: about a dozen lines at the popup's
+ * size, which a note at the limit in ordinary prose stays within, and short
+ * enough that the popup and its close button stay on a small laptop's screen.
+ */
+const NOTE_MAX_HEIGHT_PX = 360;
+
+/**
+ * Whether closing fades. Not for anyone who has asked for less motion, and not
+ * where there is no way to ask, which is only ever an environment with no
+ * rendering at all: there, a close that waited on an animation would wait on
+ * nothing.
+ */
+function closingFades(): boolean {
+  return (
+    typeof window.matchMedia === 'function' &&
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+/** With no toolbar to rest on, as in the tools workbench: the middle of the window. */
+const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
+
+/**
+ * Where the popup goes: resting just above the board's floating toolbar,
+ * centred on the board.
+ *
+ * Centred on the board's own toolbar row rather than on the window, because the
+ * panels either side of the board are not the same width, and the middle of
+ * the window is not the middle of the thing being written onto. Measured
+ * rather than offset by a fixed amount for the same reason.
+ *
+ * Anchored by the bottom, so a note that grows grows upward, away from the
+ * toolbar, instead of down over it. Null when there is no toolbar on screen, as
+ * in the tools workbench, and the popup sits in the middle of the window.
+ */
+function placeAboveFooter(): CSSProperties | null {
+  const toolbar = document.querySelector<HTMLElement>('[data-creative-toolbar]');
+  if (!toolbar) return null;
+
+  const board = (
+    toolbar.closest<HTMLElement>('[data-board-toolbar]') ?? toolbar
+  ).getBoundingClientRect();
+  const width = Math.min(window.innerWidth * 0.92, POPUP_MAX_WIDTH_PX);
+  const centred = board.left + board.width / 2 - width / 2;
+  return {
+    top: 'auto',
+    right: 'auto',
+    // The row spans the board but is only as tall as the toolbar, so its top
+    // edge is the toolbar's and the note rests just clear of it.
+    bottom: window.innerHeight - board.top + FOOTER_GAP_PX,
+    left: Math.max(EDGE_PX, Math.min(centred, window.innerWidth - width - EDGE_PX)),
+  };
+}
+
+/**
+ * Writing a sticky, as a note you write on rather than a room you enter.
+ *
+ * A sticky is a short note and a colour. A full-screen studio for
+ * that asks somebody to leave the board, lose sight of what everyone else has
+ * just proposed, and come back — for a sentence. So this is a popup over the
+ * board: the paper you are writing on, in the colour you picked, with the
+ * board still visible behind it. The drawing and diagram tools keep the studio,
+ * because a canvas genuinely needs the room.
+ *
+ * There is no preview, because the popup is the preview. It is the same paper
+ * the board uses — the same colours, the same square corners, the same shadow
+ * falling below it — so what you are writing on is what lands.
+ *
+ * It behaves like the other popovers on the board rather than like a dialog.
+ * Nothing behind it is locked or dimmed, a press anywhere else closes it, and
+ * whatever was written is kept, so closing it to look at something is free.
+ */
 export function StickyEditor() {
   const {
     closeTool,
@@ -24,31 +129,198 @@ export function StickyEditor() {
     editSource,
     isLive,
     resetSubmission,
+    stickyDraftKey,
     submissionError,
     submissionStatus,
     submitArtifact,
   } = useCreativeTools();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<RichStickyFieldHandle>(null);
+  // Read while rendering, before the note takes focus, so this is whatever
+  // opened the popup: the toolbar button, or a card's Extend.
+  const [opener] = useState(() => document.activeElement);
   // Editing rewrites this proposal; extending starts a new one from it.
   const sourceProposal = editSource ?? extensionSource;
   const sourceArtifact =
     sourceProposal?.artifactJson.type === 'sticky' ? sourceProposal.artifactJson : null;
-  const [text, setText] = useState(sourceArtifact?.text ?? '');
-  const [color, setColor] = useState<StickyColor>(sourceArtifact?.color ?? 'yellow');
+  /**
+   * Every sticky being written is a draft: a new one, and each proposal being
+   * edited or extended, apart from one another and keyed to that proposal. So
+   * closing the popup loses nothing, whatever it was opened for, and one note's
+   * words never open in another.
+   *
+   * Decided once, when the popup opens, along with whether it is an edit and
+   * what it was opened on. Closing clears the source a render before the popup
+   * itself goes, and a key worked out afresh in that render would take an edit
+   * for a new sticky and save its words over the new sticky's draft.
+   */
+  const [draftKey] = useState(() =>
+    stickyDraftKey && sourceProposal
+      ? sourceDraftKeyFor(stickyDraftKey, editSource ? 'edit' : 'extend', sourceProposal.id)
+      : stickyDraftKey,
+  );
+  const [editing] = useState(() => editSource !== null);
+  const [source] = useState(() => sourceArtifact);
+  const [saved] = useState(() => (draftKey ? readStickyDraft(draftKey) : null));
+  // A kept draft is what was last written, so it wins over the proposal it was
+  // started from: that proposal is already in it.
+  const [note, setNote] = useState<StickyNote>(() => toStickyNote(saved ?? source ?? { text: '' }));
+  const [color, setColor] = useState<StickyColor>(saved?.color ?? source?.color ?? 'yellow');
   const [validationError, setValidationError] = useState<string | null>(null);
-  const previewText = text.trim();
-  const typography = stickyTypography(previewText);
+  // What the selection is set in, for the toolbar.
+  const [format, setFormat] = useState<StickyFormat>(NO_STICKY_FORMAT);
+
   const theme = STICKY_THEMES[color];
+  const [placement, setPlacement] = useState(placeAboveFooter);
+
+  useEffect(() => {
+    const onResize = () => setPlacement(placeAboveFooter());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  /**
+   * Nothing to acknowledge. The sticky lands on the board directly behind this
+   * popup, so a receipt would cover the one thing that proves it worked. The
+   * full-screen studio needed a success screen because it had hidden the board.
+   */
+  const closeRef = useRef(closeTool);
+  useEffect(() => {
+    closeRef.current = closeTool;
+  });
+
+  /**
+   * Every close from here fades out first, then closes.
+   *
+   * The popup is removed the moment the tool closes, so there is nothing left
+   * to animate unless the close itself waits. While it fades it takes no more
+   * presses, so a second click on the board lands on the board.
+   *
+   * The wait is a timer rather than the end of the animation, so it closes on
+   * time even where the animation never runs, and it is cancelled if the popup
+   * goes first — opening another tool mid-fade removes it straight away, and a
+   * close arriving after that would shut the tool just opened.
+   */
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const exitTimer = useRef<number | null>(null);
+
+  const beginClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (!closingFades()) {
+      closeRef.current();
+      return;
+    }
+    setClosing(true);
+    exitTimer.current = window.setTimeout(() => closeRef.current(), EXIT_MS);
+  }, []);
+
+  // Changed its mind: the open tool's own button, pressed mid-fade.
+  const cancelClose = useCallback(() => {
+    if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
+    exitTimer.current = null;
+    closingRef.current = false;
+    setClosing(false);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (submissionStatus === 'success') beginClose();
+  }, [submissionStatus, beginClose]);
+
+  /**
+   * Saved as it is typed, colour and formatting included, so closing the popup by any route —
+   * a press outside it, Escape, the close button, a refresh — keeps the note.
+   *
+   * Not once it has been proposed, and not while it is on its way out. The
+   * draft is cleared the moment a proposal lands, and the popup fades for a
+   * moment after that with the note still focused; a keystroke then would
+   * write the proposed note straight back and open it again next time.
+   *
+   * Runs only when the note or its colour changes, and reads those two
+   * conditions from refs rather than depending on them. Depending on the
+   * submission status re-ran the save when closing reset that status to idle,
+   * a render before the popup went, and wrote the proposed note back anyway.
+   */
+  const proposedRef = useRef(false);
+  useEffect(() => {
+    if (!draftKey || closingRef.current || proposedRef.current) return;
+    // An edit or extension left exactly as the proposal it opened on is not a
+    // draft, so an untouched popup keeps nothing, and opens on the proposal as
+    // it is next time.
+    if (source && color === source.color && sameNote(note, source)) {
+      clearStickyDraft(draftKey);
+    } else {
+      writeStickyDraft(draftKey, { ...note, color });
+    }
+  }, [draftKey, note, color, source]);
+
+  /**
+   * A press anywhere outside the popup closes it, and still does whatever it
+   * was a press on: a card is still picked up, another tool still opens. The
+   * note is already saved, so nothing is lost by it.
+   *
+   * Listened for on the way down rather than on click, so the popup is gone
+   * before a drag that starts outside it gets going.
+   */
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target || panelRef.current?.contains(target)) return;
+      // The toolbar button for the tool already open. Pressing it again would
+      // close the popup and open it straight back, flashing the note away and
+      // losing the cursor, for no change at all — and pressed while the popup
+      // is fading, it is somebody asking for it back.
+      if (target.closest(OPEN_TOOL_BUTTON)) {
+        if (closingRef.current) cancelClose();
+        return;
+      }
+      beginClose();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [beginClose, cancelClose]);
+
+  /**
+   * Closing from inside the popup, by Escape or the close button, puts focus
+   * back on whatever opened it. Without a dialog to do that, somebody on the
+   * keyboard would be left with focus on nothing. A press outside does not:
+   * focus belongs to whatever was pressed.
+   */
+  function dismiss() {
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    beginClose();
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const prepared = prepareStickyText(text);
+    const prepared = prepareStickyText(note.text);
     if (!prepared.ok) {
       setValidationError(prepared.error);
       return;
     }
 
     setValidationError(null);
-    await submitArtifact({ type: 'sticky', text: prepared.text, color });
+    const proposed = await submitArtifact({
+      type: 'sticky',
+      text: prepared.text,
+      color,
+      ...formatForArtifact(note),
+    });
+    // Cleared once it has landed, here rather than when the popup closes: the
+    // popup can be closed while the proposal is still on its way, and a note
+    // already on the board should not come back as a draft next time.
+    if (proposed) {
+      proposedRef.current = true;
+      if (draftKey) clearStickyDraft(draftKey);
+    }
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -58,160 +330,174 @@ export function StickyEditor() {
     }
   }
 
-  if (submissionStatus === 'success') {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 bg-rt-surface-sunken px-6 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rt-primary-tint text-rt-primary-deep">
-          <CheckCircle2 aria-hidden="true" size={28} strokeWidth={1.7} />
-        </span>
-        <div>
-          <h2 className="text-[20px] font-semibold text-rt-ink">Sticky proposed</h2>
-          <p role="status" className="mt-1 text-[13px] text-rt-ink-muted">
-            It is now on the shared pinboard.
-          </p>
-        </div>
-        <Button onClick={closeTool}>Back to pinboard</Button>
-      </div>
-    );
-  }
-
   const error = validationError ?? submissionError;
+  const noteFull = note.text.length >= STICKY_TEXT_LIMIT;
+  const linesFull = lineCount(note.text) >= STICKY_MAX_LINES;
+  const label = editSource
+    ? 'Edit sticky'
+    : extensionSource
+      ? isReusingOwn
+        ? 'Reusing your sticky'
+        : `Extending ${extensionSource.authorName}'s sticky`
+      : 'New sticky';
 
-  return (
-    <div className="block min-h-0 flex-1 overflow-y-auto md:grid md:grid-cols-[minmax(300px,370px)_minmax(0,1fr)] md:grid-rows-1 md:overflow-hidden">
-      <aside className="border-b border-rt-tertiary bg-rt-surface md:min-h-0 md:overflow-y-auto md:border-r md:border-b-0">
-        <form
-          className="flex flex-col p-5 sm:p-6 md:min-h-full"
-          onKeyDown={onFormKeyDown}
-          onSubmit={(event) => void onSubmit(event)}
-        >
-          {extensionSource ? (
-            <div className="mb-5 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-              {isReusingOwn
-                ? 'Reusing your sticky'
-                : `Extending ${extensionSource.authorName}'s sticky`}
-            </div>
-          ) : null}
+  // Portalled to the body, like the board's other popovers, so the canvas's
+  // scale transform is not its containing block and it is placed against the
+  // window it was measured in.
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-labelledby="sticky-composer-label"
+      className={`fixed z-40 text-rt-ink ${closing ? 'pointer-events-none' : ''}`}
+      style={placement ?? CENTRED}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        dismiss();
+      }}
+    >
+      {/* The rise is on the paper, not on the panel around it: the panel is
+          what is positioned, and in the workbench that position is itself a
+          transform, which an animated one would overwrite. */}
+      <form
+        className={`${closing ? 'rt-sticky-popup-fade' : 'rt-sticky-popup-rise'} p-6`}
+        // Bare paper, exactly as it will sit on the board: no outline, square
+        // corners, and the shadow that falls below it.
+        style={{
+          width: POPUP_WIDTH,
+          background: theme.bg,
+          borderRadius: STICKY_RADIUS,
+          boxShadow: STICKY_SHADOW,
+        }}
+        onKeyDown={onFormKeyDown}
+        onSubmit={(event) => void onSubmit(event)}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <p
+            id="sticky-composer-label"
+            className="pt-1 text-[11px] leading-snug font-semibold tracking-[0.14em] text-rt-ink/70 uppercase"
+          >
+            {label}
+          </p>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={dismiss}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rt-ink/20 text-rt-ink/70 transition-colors hover:bg-rt-ink/8 hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
+          >
+            <X aria-hidden="true" size={15} strokeWidth={2.4} />
+          </button>
+        </div>
 
-          <div className="flex items-baseline justify-between gap-3">
-            <label htmlFor="sticky-text" className="text-[13px] font-semibold text-rt-ink">
-              Note
-            </label>
-            <span
-              className={`text-[11px] tabular-nums ${
-                text.length >= STICKY_TEXT_LIMIT ? 'text-rt-secondary-deep' : 'text-rt-ink-faint'
-              }`}
-              aria-live="polite"
-            >
-              {text.length}/{STICKY_TEXT_LIMIT}
-            </span>
-          </div>
-          <textarea
+        {/* The note's formatting, above the note it applies to. Pressing a
+            button keeps the selection in the note, so it styles what was
+            selected, or what is typed next. */}
+        <StickyFormatBar
+          field={fieldRef}
+          active={format}
+          disabled={closing}
+          className="mt-2 -ml-1.5"
+        />
+
+        <div className="mt-1">
+          <RichStickyField
+            ref={fieldRef}
             id="sticky-text"
+            label="Note"
+            value={note}
+            limit={STICKY_TEXT_LIMIT}
+            lineLimit={STICKY_MAX_LINES}
             autoFocus
-            maxLength={STICKY_TEXT_LIMIT}
-            rows={7}
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
+            readOnly={closing}
+            maxHeight={NOTE_MAX_HEIGHT_PX}
+            placeholder="Capture the idea in one clear note"
+            onFormatChange={setFormat}
+            onChange={(next) => {
+              // On its way out, so there is nowhere for more writing to go.
+              if (closingRef.current) return;
+              setNote(next);
               setValidationError(null);
               if (submissionError) resetSubmission();
             }}
-            placeholder="Capture the idea in one clear note"
-            className="mt-2 h-36 min-h-36 w-full resize-none rounded-2xl border border-rt-tertiary bg-rt-surface px-3.5 py-3 text-[14px] leading-relaxed text-rt-ink outline-none transition-colors placeholder:text-rt-ink-faint focus:border-rt-primary-deep focus:ring-2 focus:ring-rt-primary-tint sm:h-auto"
+            className="min-h-[124px] text-[19px] leading-relaxed font-medium text-rt-ink"
           />
+        </div>
 
-          <fieldset className="mt-5">
-            <legend className="text-[13px] font-semibold text-rt-ink">Colour</legend>
-            <div className="mt-2.5 flex gap-2.5">
-              {STICKY_COLORS.map((option) => {
-                const optionTheme = STICKY_THEMES[option];
-                const selected = color === option;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    aria-label={`${option} sticky`}
-                    aria-pressed={selected}
-                    title={option[0]?.toUpperCase() + option.slice(1)}
-                    onClick={() => setColor(option)}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
-                    style={{
-                      background: optionTheme.bg,
-                      borderColor: selected ? '#4D6A74' : optionTheme.border,
-                    }}
-                  >
-                    {selected ? <Check aria-hidden="true" size={16} strokeWidth={2.2} /> : null}
-                  </button>
-                );
-              })}
-            </div>
+        {error ? (
+          <p role="alert" className="mb-1 text-[12px] leading-relaxed text-rt-secondary-deep">
+            {error}
+          </p>
+        ) : null}
+
+        {/* Torn along the same line the paper would tear: the note above it,
+            what the note is made of below. */}
+        <div className="mt-2 flex items-center gap-3 border-t border-dashed border-rt-ink/25 pt-3">
+          <fieldset className="flex items-center gap-2">
+            <legend className="sr-only">Colour</legend>
+            {STICKY_COLORS.map((option) => {
+              const optionTheme = STICKY_THEMES[option];
+              const selected = color === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  aria-label={`${option} sticky`}
+                  aria-pressed={selected}
+                  title={option[0]?.toUpperCase() + option.slice(1)}
+                  onClick={() => setColor(option)}
+                  className="h-7 w-7 rounded-full border-2 transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:ring-offset-2 focus-visible:outline-none"
+                  style={{
+                    background: optionTheme.bg,
+                    // The chosen one is ringed in the ink the note is written
+                    // in, since the paper itself carries no outline to echo.
+                    borderColor: selected ? '#080C15' : optionTheme.border,
+                  }}
+                />
+              );
+            })}
           </fieldset>
 
-          <div className="mt-6 md:mt-auto md:pt-6">
-            {error ? (
-              <p role="alert" className="mb-3 text-[12px] leading-relaxed text-rt-secondary-deep">
-                {error}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2.5">
-              <Button variant="secondary" onClick={closeTool}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={!isLive || submissionStatus === 'submitting'}
-                title={isLive ? 'Propose sticky (Ctrl+Enter)' : 'Reconnect before proposing'}
-              >
-                {submissionStatus === 'submitting' ? (
-                  <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
-                ) : null}
-                {submissionStatus === 'submitting' ? 'Proposing' : 'Propose'}
-              </Button>
-            </div>
-          </div>
-        </form>
-      </aside>
-
-      <section
-        aria-label="Sticky preview"
-        className="relative flex min-h-90 items-center justify-center overflow-hidden bg-rt-surface-sunken p-8 md:min-h-0 md:overflow-auto"
-        style={{
-          backgroundImage: 'radial-gradient(rgba(140,164,172,0.30) 1.3px, transparent 1.3px)',
-          backgroundSize: '22px 22px',
-        }}
-      >
-        <div className="absolute top-4 left-5 text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-          Board preview
-        </div>
-        <article
-          className="flex shrink-0 flex-col overflow-hidden"
-          style={{
-            width: CARD_WIDTH.sticky,
-            height: STICKY_SIZE,
-            borderRadius: STICKY_RADIUS,
-            background: theme.bg,
-            boxShadow: STICKY_SHADOW,
-          }}
-        >
-          <p
-            className="line-clamp-6 min-h-0 flex-1 wrap-break-word font-medium text-rt-ink"
-            style={{
-              padding: '14px 14px 6px',
-              fontSize: typography.fontSize,
-              lineHeight: typography.lineHeight,
-            }}
+          {/* "Full" once the note is at its limit and nothing more will go in,
+              and the line limit once Enter will not start another line. */}
+          <span
+            className={`ml-auto text-[12px] tabular-nums ${
+              noteFull || linesFull ? 'font-semibold text-rt-secondary-deep' : 'text-rt-ink/55'
+            }`}
+            aria-live="polite"
           >
-            {previewText || '\u00a0'}
-          </p>
-          {/* Bottom-left with the board card's own spacing, so what you compose
-              is the size and shape of what lands. */}
-          <footer className="flex items-center justify-between gap-2 px-3 pt-0.5 pb-3 text-[11px] text-rt-ink-faint">
-            <span className="font-medium text-rt-ink-muted">You</span>
-            <span>now</span>
-          </footer>
-        </article>
-      </section>
-    </div>
+            {noteFull
+              ? 'Full'
+              : linesFull
+                ? `${STICKY_MAX_LINES} lines max`
+                : `${note.text.length} / ${STICKY_TEXT_LIMIT}`}
+          </span>
+
+          {/* An edit rewrites a proposal already on the board, so it says so
+              rather than offering to propose it again. */}
+          <Button
+            type="submit"
+            disabled={!isLive || submissionStatus === 'submitting'}
+            title={
+              isLive
+                ? `${editing ? 'Update proposal' : 'Propose sticky'} (Ctrl+Enter)`
+                : `Reconnect before ${editing ? 'updating' : 'proposing'}`
+            }
+          >
+            {submissionStatus === 'submitting' ? (
+              <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
+            ) : null}
+            {submissionStatus === 'submitting'
+              ? editing
+                ? 'Updating'
+                : 'Proposing'
+              : editing
+                ? 'Update proposal'
+                : 'Propose'}
+          </Button>
+        </div>
+      </form>
+    </div>,
+    document.body,
   );
 }

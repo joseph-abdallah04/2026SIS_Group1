@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
-import type { BoardItem, DiagramNode } from '@roundtable/shared';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import type { BoardItem, DiagramNode, StickyMark } from '@roundtable/shared';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
 
@@ -112,6 +112,381 @@ describe('diagram proposal card', () => {
       [...container.querySelectorAll('text')].some((text) => text.textContent === 'Node 5'),
     ).toBe(true);
     expect(container.querySelectorAll('path[marker-end]')).toHaveLength(1);
+  });
+});
+
+describe('sticky card', () => {
+  // A note written in lines lands in those lines, rather than run together.
+  it('shows the note exactly as written, line breaks and runs of spaces included', () => {
+    const text = 'Ship the API\n\n    then   the UI';
+    render(
+      <ProposalCard
+        item={{
+          ...diagramItem([]),
+          type: 'sticky',
+          artifactJson: { type: 'sticky', text, color: 'yellow' },
+        }}
+      />,
+    );
+
+    const lines = [...document.querySelectorAll('.rt-sticky-line')];
+    // A line for every line written, the blank one included, spaces kept.
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Ship the API',
+      '',
+      '    then   the UI',
+    ]);
+    // Preserves spaces as well as breaks; pre-line would collapse the spaces.
+    expect(document.querySelector('[data-sticky-note]')).toHaveClass('whitespace-pre-wrap');
+  });
+
+  function stickyItem(text: string, marks?: StickyMark[]): BoardItem {
+    return {
+      ...diagramItem([]),
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text, color: 'yellow', ...(marks ? { marks } : {}) },
+    };
+  }
+
+  it('shows each word in the styles it was written in', () => {
+    const { container } = render(
+      <ProposalCard
+        item={stickyItem('Ship the beta, not the bug', [
+          { from: 0, to: 4, style: 'bold' },
+          { from: 9, to: 13, style: 'italic' },
+          { from: 15, to: 18, style: 'underline' },
+          { from: 15, to: 18, style: 'strike' },
+        ])}
+      />,
+    );
+
+    const styled = [...container.querySelectorAll('[data-sticky-note] span')];
+    expect(styled.map((span) => span.textContent)).toEqual(['Ship', 'beta', 'not']);
+    expect(styled[0]).toHaveStyle({ fontWeight: '700' });
+    expect(styled[1]).toHaveStyle({ fontStyle: 'italic' });
+    expect((styled[2] as HTMLElement).style.textDecorationLine).toBe('underline line-through');
+    expect(container.querySelector('[data-sticky-note]')?.textContent).toBe(
+      'Ship the beta, not the bug',
+    );
+  });
+
+  // Ranges a stored note no longer has words for are clamped, never an error.
+  it('shows lists as they were written, numbered from 1', () => {
+    render(
+      <ProposalCard
+        item={{
+          ...stickyItem('Plan\nDraft\nReview\nNote'),
+          artifactJson: {
+            type: 'sticky',
+            text: 'Plan\nDraft\nReview\nNote',
+            color: 'yellow',
+            lines: [null, 'number', 'number', 'bullet'],
+          },
+        }}
+      />,
+    );
+
+    const lines = [...document.querySelectorAll('.rt-sticky-line')];
+    expect(
+      lines.map((line) => [line.getAttribute('data-list'), line.getAttribute('data-number')]),
+    ).toEqual([
+      [null, null],
+      ['number', '1'],
+      ['number', '2'],
+      ['bullet', null],
+    ]);
+  });
+
+  it('shows a note whose formatting runs past its words', () => {
+    render(<ProposalCard item={stickyItem('Hi', [{ from: 0, to: 40, style: 'bold' }])} />);
+
+    expect(screen.getByText('Hi')).toHaveStyle({ fontWeight: '700' });
+  });
+
+  // Longer than even the largest square holds: every word stays on the card,
+  // which keeps the largest width and is left to grow taller.
+  // jsdom lays nothing out, so the height itself is measured in a browser. What
+  // this holds is the contract that lets the card grow: the square is a floor,
+  // and nothing between the card and the note can be squeezed below the note,
+  // which in a column that fills its card is what cut a long one off.
+  it('lets a note too long for the largest square make the card taller', () => {
+    const text = `Start${'\n'.repeat(20)}the end`;
+    const { container } = render(<ProposalCard item={stickyItem(text)} />);
+
+    const card = container.querySelector('article')!;
+    const note = container.querySelector<HTMLElement>('[data-sticky-note]')!;
+    expect(card.style.width).toBe('339px');
+    expect(card.style.minHeight).toBe('339px');
+    expect(card.style.height).toBe('');
+    for (let box: HTMLElement | null = note; box && box !== card; box = box.parentElement) {
+      expect(box.className).not.toMatch(/\bmin-h-0\b|\boverflow-(hidden|auto|clip)\b/);
+      expect(box.style.height).toBe('');
+      expect(box.style.maxHeight).toBe('');
+    }
+    expect(note.textContent).toContain('the end');
+    expect(screen.queryByRole('button', { name: 'Read more' })).toBeNull();
+  });
+
+  it('nests list items, each level numbered its own way', () => {
+    render(
+      <ProposalCard
+        item={{
+          ...stickyItem(''),
+          artifactJson: {
+            type: 'sticky',
+            text: 'Plan\nScope\nBudget\nShip',
+            color: 'yellow',
+            lines: ['number', 'number', 'bullet', 'number'],
+            levels: [0, 1, 2, 0],
+          },
+        }}
+      />,
+    );
+
+    const lines = [...document.querySelectorAll('.rt-sticky-line')];
+    expect(
+      lines.map((line) => [line.getAttribute('data-level'), line.getAttribute('data-number')]),
+    ).toEqual([
+      [null, '1'],
+      ['1', 'a'],
+      ['2', null],
+      [null, '2'],
+    ]);
+  });
+
+  function linkedItem(href: string): BoardItem {
+    return {
+      ...stickyItem(''),
+      artifactJson: {
+        type: 'sticky',
+        text: 'Read the spec first',
+        color: 'yellow',
+        links: [{ from: 9, to: 13, href }],
+      },
+    };
+  }
+
+  // Opened in a new tab, with nothing of the board handed to the site.
+  it('opens a link in a new tab, telling the site nothing about the board', () => {
+    render(<ProposalCard item={linkedItem('https://example.com/spec')} />);
+
+    const link = screen.getByRole('link', { name: 'spec' });
+    expect(link).toHaveAttribute('href', 'https://example.com/spec');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  // A stored note is only as trustworthy as whoever wrote it.
+  it('never draws a link that would run something, only its words', () => {
+    const { container } = render(
+      <ProposalCard item={linkedItem('javascript:alert(document.cookie)')} />,
+    );
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(container.querySelector('[data-sticky-note]')?.textContent).toBe('Read the spec first');
+  });
+
+  // Pressing a link is not picking the card up, or pressing the card.
+  it('keeps a press on a link to the link', () => {
+    const onPointerDown = vi.fn();
+    const onClick = vi.fn();
+    render(
+      <div onPointerDown={onPointerDown} onClick={onClick}>
+        <ProposalCard item={linkedItem('https://example.com/spec')} />
+      </div>,
+    );
+
+    const link = screen.getByRole('link', { name: 'spec' });
+    link.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.pointerDown(link);
+    fireEvent.click(link);
+
+    expect(onPointerDown).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  // On a ballot the card is the vote button, and a link inside a button is
+  // neither one thing nor the other.
+  it('draws links as words only where the card is itself a press', () => {
+    render(<ProposalCard item={linkedItem('https://example.com/spec')} interactive={false} />);
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('spec')).toHaveClass('rt-sticky-link');
+  });
+});
+
+describe('studio proposal card (v4)', () => {
+  // Packed `[x0, y0, x1, y1]`, the form a stroke is stored and broadcast in.
+  const stroke = {
+    id: 'ink-1',
+    points: [10, 10, 90, 60],
+    strokeColor: 'ink' as const,
+    strokeWidthPreset: 'regular' as const,
+  };
+
+  function studioItem(artifact: Partial<Extract<BoardItem['artifactJson'], { type: 'diagram' }>>) {
+    return {
+      ...diagramItem([]),
+      artifactJson: { type: 'diagram' as const, nodes: [], edges: [], ...artifact },
+    };
+  }
+
+  it('draws the ink a studio canvas was proposed with', () => {
+    const { container } = render(<ProposalCard item={studioItem({ ink: [stroke] })} />);
+    const paths = [...container.querySelectorAll('path')];
+    expect(paths.some((path) => path.getAttribute('stroke') === '#080C15')).toBe(true);
+  });
+
+  it('frames a sketch that has no shapes instead of showing the empty placeholder', () => {
+    const { container } = render(<ProposalCard item={studioItem({ ink: [stroke] })} />);
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.border-dashed')).toBeNull();
+  });
+
+  it('paints ink under a shape when the artifact says so', () => {
+    // The card has to honour the same order the editor did, or what the author
+    // arranged is not what the room sees.
+    const { container } = render(
+      <ProposalCard
+        item={studioItem({
+          nodes: [{ id: 'n1', label: 'API', x: 0, y: 0, shape: 'box' }],
+          ink: [stroke],
+          z: ['ink-1', 'n1'],
+        })}
+      />,
+    );
+
+    const svg = container.querySelector('svg')!;
+    const painted = [...svg.querySelectorAll('path, g')];
+    const inkIndex = painted.findIndex((el) => el.getAttribute('stroke') === '#080C15');
+    const nodeIndex = painted.findIndex((el) => el.getAttribute('transform') === 'translate(0, 0)');
+    expect(inkIndex).toBeGreaterThanOrEqual(0);
+    expect(nodeIndex).toBeGreaterThanOrEqual(0);
+    expect(inkIndex).toBeLessThan(nodeIndex);
+  });
+
+  it('still shows the empty placeholder for a diagram with nothing in it', () => {
+    const { container } = render(<ProposalCard item={studioItem({})} />);
+    expect(container.querySelector('.border-dashed')).not.toBeNull();
+  });
+});
+
+describe('studio path proposal card (v4)', () => {
+  const line = {
+    id: 'path-1',
+    anchors: [
+      { x: 10, y: 10 },
+      { x: 90, y: 60 },
+    ],
+    strokeColor: 'ink' as const,
+  };
+
+  function pathItem(artifact: Partial<Extract<BoardItem['artifactJson'], { type: 'diagram' }>>) {
+    return {
+      ...diagramItem([]),
+      artifactJson: { type: 'diagram' as const, nodes: [], edges: [], ...artifact },
+    };
+  }
+
+  it('draws a path the studio proposed', () => {
+    const { container } = render(<ProposalCard item={pathItem({ paths: [line] })} />);
+    const drawn = [...container.querySelectorAll('path')].filter(
+      (path) => path.getAttribute('stroke') === '#080C15',
+    );
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]?.getAttribute('d')).toBe('M 10 10 L 90 60');
+  });
+
+  it('frames a canvas that holds only paths', () => {
+    const { container } = render(<ProposalCard item={pathItem({ paths: [line] })} />);
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.border-dashed')).toBeNull();
+  });
+
+  it('fills a closed path and leaves an open one unfilled', () => {
+    const closed = {
+      ...line,
+      id: 'path-2',
+      anchors: [
+        { x: 0, y: 0 },
+        { x: 40, y: 0 },
+        { x: 40, y: 40 },
+      ],
+      closed: true,
+      fillColor: 'blue' as const,
+    };
+    const { container } = render(<ProposalCard item={pathItem({ paths: [closed, line] })} />);
+    const fills = [...container.querySelectorAll('path')].map((path) => path.getAttribute('fill'));
+    expect(fills).toContain('#DCE9F7');
+    expect(fills).toContain('none');
+  });
+
+  it('paints a path under a shape when the artifact says so', () => {
+    const { container } = render(
+      <ProposalCard
+        item={pathItem({
+          nodes: [{ id: 'n1', label: 'API', x: 0, y: 0, shape: 'box' }],
+          paths: [line],
+          z: ['path-1', 'n1'],
+        })}
+      />,
+    );
+    const painted = [...container.querySelectorAll('svg path, svg g')];
+    const pathIndex = painted.findIndex((el) => el.getAttribute('d') === 'M 10 10 L 90 60');
+    const nodeIndex = painted.findIndex((el) => el.getAttribute('transform') === 'translate(0, 0)');
+    expect(pathIndex).toBeGreaterThanOrEqual(0);
+    expect(pathIndex).toBeLessThan(nodeIndex);
+  });
+});
+
+describe('studio table proposal card (v4)', () => {
+  const table = {
+    id: 'table-1',
+    x: 0,
+    y: 0,
+    colWidths: [96, 96],
+    rowHeights: [32, 32],
+    cells: [{ text: 'Idea' }, { text: 'Owner' }, { text: 'Search' }, { text: 'Ana' }],
+    headerRow: true,
+  };
+
+  function tableItem(artifact: Partial<Extract<BoardItem['artifactJson'], { type: 'diagram' }>>) {
+    return {
+      ...diagramItem([]),
+      artifactJson: { type: 'diagram' as const, nodes: [], edges: [], ...artifact },
+    };
+  }
+
+  it('draws every cell of a proposed table', () => {
+    const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
+    const texts = [...container.querySelectorAll('text')].map((node) => node.textContent);
+    expect(texts).toContain('Idea');
+    expect(texts).toContain('Ana');
+    // One rect per cell.
+    expect(container.querySelectorAll('rect')).toHaveLength(4);
+  });
+
+  it('frames a canvas that holds only a table', () => {
+    const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
+    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.border-dashed')).toBeNull();
+  });
+
+  it('tints the header row so it reads as a heading', () => {
+    const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
+    const fills = [...container.querySelectorAll('rect')].map((rect) => rect.getAttribute('fill'));
+    // The first row is tinted and the body is not.
+    expect(fills[0]).not.toBe(fills[2]);
+  });
+
+  it('honours a cell fill over the header tint', () => {
+    const filled = {
+      ...table,
+      cells: [{ text: 'Idea', fill: 'rose' as const }, {}, {}, {}],
+    };
+    const { container } = render(<ProposalCard item={tableItem({ tables: [filled] })} />);
+    const fills = [...container.querySelectorAll('rect')].map((rect) => rect.getAttribute('fill'));
+    expect(fills).toContain('#FAE0E0');
   });
 });
 

@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { cardWidth } from '../pinboard/cardMetrics';
 import { CARD_WIDTH } from '../pinboard/pinboardTokens';
 import { VotingBallot } from './VotingBallot';
 
@@ -327,11 +328,84 @@ describe('VotingBallot', () => {
     const selected = screen.getByRole('button', { pressed: true });
     expect(selected).toHaveStyle({ width: `${CARD_WIDTH.drawing}px` });
     expect(screen.getByRole('button', { name: /Ship the API/i })).toHaveStyle({
-      width: `${CARD_WIDTH.sticky}px`,
+      width: `${cardWidth(sticky('p1', 'Ship the API'))}px`,
     });
     expect(screen.getByText('API').closest('button')).toHaveStyle({
       width: `${CARD_WIDTH.diagram}px`,
     });
+  });
+
+  // A sticky grows with its note. A slot sized for the smallest sticky left a
+  // long note spilling out of it, past the ring that marks the winner.
+  // The card is the vote button, so a long sticky is all there on it to read,
+  // with nothing to press inside the button.
+  it('shows the whole of a long sticky on the ballot, with nothing to press inside it', () => {
+    const onVote = vi.fn();
+    const long = sticky('p2', `Why${'\n'.repeat(20)}because`);
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[sticky('p1', 'Ship the API'), long]}
+        tallies={[]}
+        myVote={null}
+        votedCount={0}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
+        busy={false}
+        error={null}
+        onVote={onVote}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    const voteButtons = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('aria-pressed'));
+    const longCard = voteButtons.find((button) => button.textContent?.includes('Why'));
+    expect(longCard).toHaveTextContent('because');
+    expect(longCard?.querySelector('button, a')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Read more' })).toBeNull();
+    expect(onVote).not.toHaveBeenCalled();
+  });
+
+  it('gives a long sticky a slot as wide as its card, and wider than a short one', () => {
+    const long = sticky('p2', 'a'.repeat(280));
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[sticky('p1', 'Ship the API'), long]}
+        tallies={[
+          { proposalId: 'p2', votes: 2, percent: 100 },
+          { proposalId: 'p1', votes: 0, percent: 0 },
+        ]}
+        myVote="p2"
+        votedCount={2}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId="p2"
+        tiedProposalIds={[]}
+        phase="closed"
+        busy={false}
+        error={null}
+        onVote={() => undefined}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    const winner = screen.getByText('Winner').closest('li');
+    expect(winner).toHaveStyle({ width: `${cardWidth(long)}px` });
+    expect(cardWidth(long)).toBeGreaterThan(cardWidth(sticky('p1', 'Ship the API')));
   });
 
   it('keeps the winner ring on the winning card’s own width', () => {

@@ -73,6 +73,8 @@ POST   /api/auth/signup               → { token: string }
 POST   /api/auth/login                → { token: string }
 GET    /api/auth/me                   → { user: User }
 PATCH  /api/users/me                  → { displayName } → User
+DELETE /api/users/me                  → { password } → { ok } (permanently deletes the caller's own account;
+                                          409 LIVE_SESSION_EXISTS while they lead/belong to a live session)
 PUT    /api/me/llm-config             → { baseUrl, apiKey, model } → { ok }
 GET    /api/me/llm-config             → { baseUrl, model } (no key)
 POST   /api/me/llm-config/test        → { ok: boolean, error? }
@@ -87,6 +89,7 @@ POST   /api/me/llm-config/test        → { ok: boolean, error? }
 
 - Coordinate **LLM config schema** with assistant owner before starting
 - Password hash via bcrypt; no plaintext storage
+- Account deletion (`DELETE /api/users/me`) is not on the F01-F03/F33 list above — it's extra Auth-owned work with no feature number of its own. It touches other modules' nullability (`Session.leaderId`, `Proposal.authorId`, `SessionMember.userId`, `Vote.voterId` — see docs/02 §3), so treat schema changes there as cross-module and worth a heads-up in review, not something to land silently in an Auth-only PR.
 
 ### Also owns (deferred from setup)
 
@@ -121,10 +124,12 @@ Frontend: apps/web/src/features/sessions/
 ### Database tables
 
 ```
-Session (id, code, title, leaderId, status, createdAt, endedAt)
+Session (id, code, title, leaderId?, status, createdAt, endedAt)
 Question (id, sessionId, text, position, phase)
-SessionMember (sessionId, userId, joinedAt) — who's in this session
+SessionMember (sessionId, userId?, joinedAt) — who's in this session
 ```
+
+`leaderId`/`userId` are nullable — SET NULL when the account is deleted (Auth's `DELETE /api/users/me`), not cascaded. A session or membership is never the deleted user's alone to take with them.
 
 ### API surface
 
@@ -207,9 +212,11 @@ Frontend: apps/web/src/features/pinboard/
 ### Database tables
 
 ```
-Proposal (id, questionId, authorId, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
+Proposal (id, questionId, authorId?, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
 ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
+
+`authorId` is nullable — SET NULL when the account is deleted (Auth's `DELETE /api/users/me`), not cascaded, so a proposal others reacted to, voted on, or extended never disappears out from under them. `authorName` in the wire shape (`BoardItem`, `packages/shared`) falls back to `DELETED_USER_DISPLAY_NAME` ("Deleted user") when this is null.
 
 ### Socket events
 
@@ -384,9 +391,11 @@ Frontend: apps/web/src/features/voting/
 
 ```
 VotingRound (id, sessionId, questionId, status, createdAt, closedAt)
-Vote (id, roundId, voterId, proposalId) — unique(roundId, voterId)
+Vote (id, roundId, voterId?, proposalId) — unique(roundId, voterId)
 Answer (id, questionId, winningProposalId, decidedAt) — unique(questionId)
 ```
+
+`voterId` is nullable — SET NULL when the account is deleted (Auth's `DELETE /api/users/me`), not cascaded. The ballot itself survives, so a closed round's tally and declared winner never change after the fact; only the identity of who cast it is lost.
 
 ### Socket events
 

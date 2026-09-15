@@ -7,7 +7,7 @@
 import type { ArtifactJson, StickyColor } from '@roundtable/shared';
 
 import { CARD_INK, STICKY_THEMES } from '../pinboard/pinboardTokens';
-import { stickyTypography } from '../tools/sticky/stickyPresentation';
+import { STICKY_FONT_SIZE, STICKY_LINE_HEIGHT } from '../tools/sticky/stickyPresentation';
 import { DiagramPreview } from './DiagramPreview';
 import type { ProposeState } from './useAssistantChat';
 
@@ -97,7 +97,14 @@ function StickyPreview({ text, color }: { text: string; color: StickyColor }) {
     >
       {/* Same anatomy as a board sticky: the note sits at the top of the paper,
           and a byline holds the bottom edge so it reads as a pad, not a swatch. */}
-      <p className="rt-assistant-sticky-text" style={stickyTypography(text)}>
+      {/* The one size every note is set in, board and editors alike, rather than a size
+          chosen for this note's length: a preview set smaller than the sticky it becomes
+          is a preview of something else. A long note makes the card taller, as it does
+          on the board. */}
+      <p
+        className="rt-assistant-sticky-text"
+        style={{ fontSize: STICKY_FONT_SIZE, lineHeight: STICKY_LINE_HEIGHT }}
+      >
         {text}
       </p>
       {/* Propose authors the note as you, the same way a hand-written sticky

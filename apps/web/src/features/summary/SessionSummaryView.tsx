@@ -5,7 +5,8 @@ import {
   type VotingTally,
 } from '@roundtable/shared';
 
-import { CARD_RADIUS, CARD_WIDTH, STICKY_RADIUS } from '../pinboard/pinboardTokens';
+import { cardWidth } from '../pinboard/cardMetrics';
+import { CARD_RADIUS, STICKY_RADIUS } from '../pinboard/pinboardTokens';
 import { ProposalCard } from '../pinboard/ProposalCard';
 import { VoteResultBadge, voteResultRing } from '../voting/VoteResultBadge';
 
@@ -33,7 +34,7 @@ function QuestionRecap({
   question: SessionRecapQuestion;
   index: number;
   viewerId: string | null;
-  leaderId: string;
+  leaderId: string | null;
 }) {
   const winnerId = question.winnerProposalId;
   const tied = new Set(question.tiedProposalIds);
@@ -63,15 +64,18 @@ function QuestionRecap({
       ) : (
         <ul className="mt-3 flex flex-wrap gap-4">
           {question.proposals.map((item) => {
-            const kind =
-              winnerId === item.id ? 'winner' : tied.has(item.id) ? 'tied' : null;
+            const kind = winnerId === item.id ? 'winner' : tied.has(item.id) ? 'tied' : null;
             const tally = tallyFor(question.tallies, item.id);
+            // Sized to the card, not to its type: a sticky grows with its
+            // note, and a slot sized for the smallest would let a long one
+            // spill out past its winner ring.
+            const width = cardWidth(item);
             return (
               <li
                 key={item.id}
                 className={`relative shrink-0 ${kind ? 'z-10' : ''}`}
                 style={{
-                  width: CARD_WIDTH[item.type],
+                  width,
                   borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
                 }}
               >
@@ -79,14 +83,14 @@ function QuestionRecap({
                 <div
                   className={voteResultRing(kind)}
                   style={{
-                    width: CARD_WIDTH[item.type],
+                    width,
                     borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
                   }}
                 >
                   <ProposalCard
                     item={item}
                     isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
-                    isAuthorLeader={item.authorId === leaderId}
+                    isAuthorLeader={item.authorId != null && item.authorId === leaderId}
                   />
                 </div>
                 {tally ? (

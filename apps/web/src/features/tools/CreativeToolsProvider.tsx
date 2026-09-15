@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { startTransition, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
 import { CreativeToolsContext } from './CreativeToolsContext';
+import { draftKeyFor } from './sticky/stickyDraft';
 import { parseToolKind, type ToolKind } from './toolRegistry';
 import { useProposalSubmission } from './useProposalSubmission';
 
 interface CreativeToolsProviderProps {
   children: ReactNode;
+  /** Which session the tools are writing into, so a draft stays with it. */
+  sessionId: string;
+  /** The question the board is on; a draft is kept per question. */
+  questionId: string;
   isLive: boolean;
   /** Who is looking, so the editors can tell reuse from extending (F38). */
   viewerId: string | null;
@@ -19,6 +24,8 @@ interface CreativeToolsProviderProps {
 
 export function CreativeToolsProvider({
   children,
+  sessionId,
+  questionId,
   isLive,
   viewerId,
   proposals,
@@ -82,24 +89,35 @@ export function CreativeToolsProvider({
     setToolParam(proposal.type, activeTool !== null);
   }
 
-  function closeTool() {
-    if (closeGuardRef.current && !closeGuardRef.current()) return;
+  function closeTool(): boolean {
+    if (closeGuardRef.current && !closeGuardRef.current()) return false;
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('tool');
-    setSearchParams(nextParams, { replace: true });
-    setExtensionSource(null);
-    setEditSource(null);
+    // What the tool was opened on goes in the same render as the tool. The
+    // router moves to the new address as a transition, so a source cleared
+    // straight away went a render before the tool did, and for that render the
+    // tool still open was one opened on nothing: an edit's popup swapped for a
+    // new sticky's, flashing up as it closed.
+    startTransition(() => {
+      setSearchParams(nextParams, { replace: true });
+      setExtensionSource(null);
+      setEditSource(null);
+    });
     if (submission.status !== 'submitting') submission.reset();
+    return true;
   }
 
   return (
     <CreativeToolsContext.Provider
       value={{
         activeTool,
+        draftScope: { sessionId, questionId, viewerId },
         extensionSource,
         isReusingOwn: extensionSource !== null && extensionSource.authorId === viewerId,
         editSource,
         isLive,
+        stickyDraftKey:
+          sessionId && questionId && viewerId ? draftKeyFor(sessionId, questionId, viewerId) : null,
         submissionStatus: submission.status,
         submissionError: submission.error,
         openTool,
@@ -109,6 +127,7 @@ export function CreativeToolsProvider({
         setCloseGuard,
         resetSubmission: submission.reset,
         submitArtifact: submission.submitArtifact,
+        proposeArtifact: submission.proposeArtifact,
       }}
     >
       {children}

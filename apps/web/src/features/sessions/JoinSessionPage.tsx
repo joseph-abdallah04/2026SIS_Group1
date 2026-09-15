@@ -10,7 +10,7 @@ interface SessionPreview {
   id: string;
   title: string;
   status: 'draft' | 'lobby' | 'active' | 'ended';
-  leaderId: string;
+  leaderId: string | null;
   questionCount: number;
 }
 

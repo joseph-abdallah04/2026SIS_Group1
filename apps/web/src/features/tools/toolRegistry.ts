@@ -5,7 +5,7 @@ export type ToolKind = (typeof TOOL_KINDS)[number];
 export const TOOL_LABELS: Record<ToolKind, string> = {
   sticky: 'Sticky note',
   drawing: 'Drawing',
-  diagram: 'Diagram',
+  diagram: 'Studio',
 };
 
 export function parseToolKind(value: string | null): ToolKind | null {

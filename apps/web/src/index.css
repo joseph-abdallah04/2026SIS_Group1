@@ -50,13 +50,156 @@ body {
   }
 }
 
+/*
+ * A line of a sticky. In a list, its bullet or number hangs in the margin
+ * rather than sitting in the text, so a long item wraps under its own words and
+ * the marker is never part of what is selected or copied. Each level of nesting
+ * moves the item, marker and all, one step in, and changes the bullet, so a
+ * nested list reads as nested even on a small card.
+ */
+.rt-sticky-line[data-list] {
+  --rt-list-indent: 0em;
+  position: relative;
+  padding-left: calc(1.5em + var(--rt-list-indent));
+}
+
+.rt-sticky-line[data-level='1'] {
+  --rt-list-indent: 1.25em;
+}
+
+.rt-sticky-line[data-level='2'] {
+  --rt-list-indent: 2.5em;
+}
+
+.rt-sticky-line[data-list]::before {
+  position: absolute;
+  left: var(--rt-list-indent);
+  width: 1.15em;
+  text-align: right;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.rt-sticky-line[data-list='bullet']::before {
+  content: '\2022';
+}
+
+.rt-sticky-line[data-list='bullet'][data-level='1']::before {
+  content: '\25E6';
+}
+
+.rt-sticky-line[data-list='bullet'][data-level='2']::before {
+  content: '\25AA';
+}
+
+.rt-sticky-line[data-list='number']::before {
+  content: attr(data-number) '.';
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A link in a sticky: coloured as well as underlined, so it is told apart from
+ * words that are only underlined.
+ */
+.rt-sticky-link {
+  color: var(--color-rt-cool-deep);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+}
+
+a.rt-sticky-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+a.rt-sticky-link:focus-visible {
+  outline: 2px solid var(--color-rt-ink);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 .rt-proposal-arrive {
   animation: rt-proposal-arrive 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/*
+ * The sticky popup rising off the toolbar it was opened from. Grown from its
+ * bottom edge, so it comes up out of the footer rather than swelling from its
+ * middle, and on the same easing as a card arriving on the board.
+ */
+@keyframes rt-sticky-popup-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-sticky-popup-rise {
+  transform-origin: bottom center;
+  animation: rt-sticky-popup-rise 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * And fading back out when it closes, settling a few pixels toward the toolbar
+ * it came from. Quicker than the rise: an opening is something to notice, a
+ * closing should get out of the way. Held at the end so the popup cannot flash
+ * back before it is removed. The duration is mirrored in StickyEditor.
+ */
+@keyframes rt-sticky-popup-fade {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.rt-sticky-popup-fade {
+  transform-origin: bottom center;
+  animation: rt-sticky-popup-fade 150ms ease-in forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rt-proposal-arrive {
+  .rt-proposal-arrive,
+  .rt-sticky-popup-rise,
+  .rt-sticky-popup-fade {
     animation: none;
+  }
+}
+
+/*
+ * The shortlist counter refusing a pick past the limit: a red wash behind the
+ * count, twice. A wash rather than only red text because the count is small,
+ * and it changes nothing about the layout. Red 100 and 600 from Tailwind's
+ * palette, written out because only the colours a utility uses are emitted as
+ * variables.
+ */
+@keyframes rt-shortlist-flash {
+  0%,
+  100% {
+    background-color: transparent;
+    color: inherit;
+  }
+  35% {
+    background-color: oklch(93.6% 0.032 17.717);
+    color: oklch(57.7% 0.245 27.325);
+  }
+}
+
+.rt-shortlist-flash {
+  animation: rt-shortlist-flash 450ms ease-out 2;
+}
+
+/* Still two blinks with less motion asked for, but snapped rather than eased. */
+@media (prefers-reduced-motion: reduce) {
+  .rt-shortlist-flash {
+    animation-timing-function: steps(1);
   }
 }
 
@@ -279,6 +422,235 @@ body {
 
   .rt-waiting-start:hover:not(:disabled) {
     transform: none;
+  }
+}
+
+/*
+ * T1 studio motion.
+ *
+ * The rail, the properties bar and their panels appear and disappear constantly,
+ * so their entry is short and small: long enough to say something arrived, never
+ * long enough to be waited for. Nothing animates out — a panel that lingers
+ * after it has been dismissed reads as lag.
+ */
+@keyframes rt-studio-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-studio-rise {
+  animation: rt-studio-rise 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * Opacity only, deliberately. A popover is positioned by transform for its
+ * centred placements, and an animation ending in `transform: none` would throw
+ * that centring away on the last frame.
+ */
+@keyframes rt-studio-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rt-studio-fade {
+  animation: rt-studio-fade 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-studio-rise,
+  .rt-studio-fade {
+    animation: none;
+  }
+}
+
+/*
+ * The studio stepping aside for the board, and coming back.
+ *
+ * Peeking slides the studio down until only its header and the first of its
+ * canvas are left above the bottom of the window, so what waits at the bottom
+ * is the studio itself rather than a bar about it. The distance is the window
+ * less the studio's top inset and the part left showing, both set on the
+ * dialog for each screen size, so it lands the same way at every size.
+ *
+ * `--studio-lift` is how far up it is, from 0 resting at the bottom to 1 fully
+ * open. Dragging sets it under the pointer; the header's two faces cross-fade
+ * on it, the board's face at the bottom and the studio's own at the top.
+ */
+.rt-studio-peeked {
+  --studio-lift: 0;
+  transform: translateY(calc(100dvh - var(--studio-top) - var(--studio-showing)));
+}
+
+.rt-studio-dragging {
+  transform: translateY(
+    calc((100dvh - var(--studio-top) - var(--studio-showing)) * (1 - var(--studio-lift, 0)))
+  );
+}
+
+.rt-studio-face-board {
+  opacity: calc(1 - var(--studio-lift, 1));
+}
+
+.rt-studio-face-studio {
+  opacity: var(--studio-lift, 1);
+}
+
+/*
+ * Over a board, the studio opens wide and centred on the window, and rests in
+ * the board's own column, clear of the agenda; `--studio-rest-left` and
+ * `--studio-rest-width` are measured from the board. Both are lengths rather
+ * than auto margins so it can move between them: sliding down it narrows into
+ * the board's column, and dragged up it widens back out in step with the
+ * pointer.
+ */
+.rt-studio-columned {
+  --studio-open-width: min(100vw - 4rem, 92.5rem);
+  --studio-open-left: calc((100vw - var(--studio-open-width)) / 2);
+  right: auto;
+  left: var(--studio-open-left);
+  width: var(--studio-open-width);
+  max-width: none;
+  margin-inline: 0;
+}
+
+.rt-studio-columned.rt-studio-peeked {
+  left: var(--studio-rest-left);
+  width: var(--studio-rest-width);
+}
+
+.rt-studio-columned.rt-studio-dragging {
+  left: calc(
+    var(--studio-rest-left) + (var(--studio-open-left) - var(--studio-rest-left)) *
+      var(--studio-lift, 0)
+  );
+  width: calc(
+    var(--studio-rest-width) + (var(--studio-open-width) - var(--studio-rest-width)) *
+      var(--studio-lift, 0)
+  );
+}
+
+/*
+ * Sliding down, back up, or settling after a drag, as `SLIDE_MS`. Eased gently
+ * in and out, so it neither leaps from the start nor creeps into place: a
+ * quicker, front-loaded curve covered half the distance in a single frame.
+ */
+.rt-studio-slide,
+.rt-studio-slide .rt-studio-face-board,
+.rt-studio-slide .rt-studio-face-studio {
+  transition:
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    left 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    width 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 240ms ease;
+}
+
+/*
+ * Let go mid-drag, it is already moving, so it carries on and eases to a stop
+ * rather than slowing to start again from rest.
+ */
+.rt-studio-slide.rt-studio-released {
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-studio-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rt-studio-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rt-studio-minimise::backdrop {
+  animation: rt-studio-backdrop-out 300ms ease forwards;
+}
+
+/*
+ * Opening from a tool: the same fade the sticky popup makes, a small lift in,
+ * grown from its bottom edge. The rise is held to the studio's 180ms limit where
+ * the sticky's takes 220ms; the movement and easing are the same.
+ *
+ * Leaving, by the back arrow or once proposed, is a plain fade with a short
+ * settle down. It does not shrink as the sticky does: the studio is most of the
+ * window tall, and the same small scale dropped its top edge far enough in one
+ * go to read as a jolt.
+ */
+@keyframes rt-studio-appear {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-studio-appear {
+  transform-origin: bottom center;
+  animation: rt-studio-appear 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-studio-leave {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.rt-studio-leave {
+  animation: rt-studio-leave 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.rt-studio-leave::backdrop {
+  animation: rt-studio-backdrop-out 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.rt-studio-appear::backdrop {
+  animation: rt-studio-backdrop-in 180ms ease-out;
+}
+
+.rt-studio-restore::backdrop {
+  animation: rt-studio-backdrop-in 300ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-studio-minimise::backdrop,
+  .rt-studio-restore::backdrop,
+  .rt-studio-appear,
+  .rt-studio-appear::backdrop,
+  .rt-studio-leave,
+  .rt-studio-leave::backdrop {
+    animation: none;
+  }
+
+  .rt-studio-slide,
+  .rt-studio-slide .rt-studio-face-board,
+  .rt-studio-slide .rt-studio-face-studio {
+    transition: none;
   }
 }
 

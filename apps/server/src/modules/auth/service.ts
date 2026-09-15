@@ -6,6 +6,7 @@ import type { LoginInput, SignupInput, UpdateProfileInput } from '@roundtable/sh
 import { Prisma, type User as UserRow } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
+import { deleteDraftSessionsForUser, findLiveSessionForUser } from '../sessions/index.js';
 import { signToken } from './jwt.js';
 
 const BCRYPT_ROUNDS = 10;
@@ -128,6 +129,64 @@ export async function getUserById(userId: string): Promise<User | null> {
 export function getCurrentUser(req: Request): Promise<User | null> {
   if (!req.userId) return Promise.resolve(null);
   return getUserById(req.userId);
+}
+
+/**
+ * Permanently deletes the requesting user's own row. `userId` comes from
+ * `requireAuth`'s verified token, same as every other function in this file
+ * — there is no code path that lets a request name a different user.
+ *
+ * Requires the current password as a fresh proof of intent, distinct from
+ * the session token itself: a token alone just means "some tab is logged
+ * in," and this is irreversible. Deliberately its own message/code rather
+ * than reusing `login`'s INVALID_CREDENTIALS — there's no enumeration
+ * concern here (identity is already established by the token), so nothing
+ * is gained by being vague about which check failed.
+ *
+ * Refuses while this user leads or belongs to a live (lobby/active) session:
+ * deleting them out from under one would leave it leaderless — every
+ * `session.leaderId === actor.id` check elsewhere stops matching anyone, so
+ * remaining members could never start/end it, advance the agenda, shortlist,
+ * or close a vote, and the row itself would have no GC path (draft-delete and
+ * ended-hide both need a leader or a membership to act through). They need to
+ * end (as leader) or leave (as a member) first — same "one live session at a
+ * time" fact `assertNotInAnotherLiveSession` already enforces elsewhere.
+ *
+ * What happens to everything else this user's content touches is a
+ * schema-level decision, not something this function orchestrates:
+ * `Session.leaderId`, `Proposal.authorId`, `SessionMember.userId`, and
+ * `Vote.voterId` are all nullable with `onDelete: SetNull` — a session this
+ * user led, a proposal they authored, their past membership in someone
+ * else's session, or a ballot they cast all survive with that reference
+ * cleared, rather than taking other people's history, tallies, or recap
+ * outcomes down with them. Only what is entirely theirs (a draft they alone
+ * are the sole member of, their own reactions, their own LLM config) is
+ * actually removed.
+ */
+export async function deleteAccount(userId: string, password: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordMatches) {
+    throw new ApiError(401, 'Incorrect password', 'INVALID_PASSWORD');
+  }
+
+  const liveSession = await findLiveSessionForUser(userId);
+  if (liveSession) {
+    throw new ApiError(
+      409,
+      `End or leave "${liveSession.title}" before deleting your account`,
+      'LIVE_SESSION_EXISTS',
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await deleteDraftSessionsForUser(userId, tx);
+    await tx.user.delete({ where: { id: userId } });
+  });
 }
 
 export async function updateDisplayName(

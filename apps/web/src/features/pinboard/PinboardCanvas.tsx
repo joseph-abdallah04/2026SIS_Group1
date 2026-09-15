@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
 import type { ProposalUpdateInput } from '@roundtable/shared/schemas';
+import { Scan } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { EndSessionControl } from '../sessions/EndSessionControl';
 import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
-import { CreativeToolbar } from '../toolbar/CreativeToolbar';
+import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
+import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
@@ -15,7 +17,6 @@ import { useProposalDrag } from './useProposalDrag';
 import {
   DESK_MARGIN,
   BOARD_SIZE,
-  CARD_WIDTH,
   DOT_COLOR,
   DOT_RADIUS,
   DOT_SPACING,
@@ -47,14 +48,14 @@ interface PinboardCanvasProps {
    * F24's agenda rail, rendered beside the board. A node rather than the
    * question list itself: the agenda belongs to the sessions side of the app,
    * and passing it in keeps this component about the board while still owning
-   * the header/board/footer split the rail has to sit inside.
+   * the header/board split the rail has to sit inside.
    */
   agenda?: ReactNode;
   /**
    * F38's way to put one of your earlier proposals on the board, rendered in
-   * the footer beside the creative tools. A node for the same reason `agenda`
-   * is: what goes in it is fetched and wired by the page, and this component
-   * stays the thing that lays a board out.
+   * the floating toolbar beside the creative tools. A node for the same reason
+   * `agenda` is: what goes in it is fetched and wired by the page, and this
+   * component stays the thing that lays a board out.
    */
   myProposals?: ReactNode;
   /**
@@ -72,9 +73,10 @@ interface PinboardCanvasProps {
    */
   participants?: ReactNode;
   /**
-   * The live join code, in the footer beside the zoom control. It followed the
-   * roster out of the retired right rail, and sits outside the `boardOpen`
-   * branch because inviting someone is worth doing in any phase.
+   * The live join code, in the header under the item count and live dot. It
+   * followed the roster out of the retired right rail, then came up from the
+   * retired footer, and is shown in every phase because inviting someone is
+   * worth doing in any of them.
    */
   joinCode?: ReactNode;
   /**
@@ -92,7 +94,7 @@ interface PinboardCanvasProps {
   onToggleShortlist: (id: string) => void;
   /** F27 header chrome (count / “leader is selecting”). */
   shortlistControl?: ReactNode;
-  /** Leader shortlist prompt, pinned to the bottom of the board window. */
+  /** Leader shortlist prompt. Takes the floating toolbar's place while the board is closed. */
   boardOverlay?: ReactNode;
   /** F28 ballot — covers the board + rails until the leader ends the vote. */
   ballot?: ReactNode;
@@ -160,7 +162,7 @@ function EmptyBoardPlate() {
 
       <div className="flex items-center gap-3 border-t border-rt-tertiary px-5 py-3">
         <p className="flex-1 text-[11px] text-rt-ink-faint">
-          Toolbar lives at the foot of the board (F22)
+          Toolbar floats at the foot of the board (F22)
         </p>
         <button
           type="button"
@@ -191,18 +193,26 @@ function ZoomControl({
   onZoomOut: () => void;
   onFit: () => void;
 }) {
+  // Round buttons inside the pill rather than cells split by rules: it is the
+  // same shape as the creative toolbar floating beside it, so the two read as
+  // one set of controls rather than a toolbar and a stray widget.
+  const button =
+    'flex h-9 min-w-9 items-center justify-center rounded-full px-2.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-rt-ink-muted';
+
   return (
-    <div className="flex overflow-hidden rounded-full border border-rt-tertiary bg-white">
+    <nav aria-label="Board navigation" className={FLOATING_BAR}>
       <button
         type="button"
         onClick={onZoomOut}
         disabled={!canZoomOut}
         title={canZoomOut ? 'Zoom out' : 'The whole board is already in view'}
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className={button}
       >
         −
       </button>
-      <span className="border-r border-rt-tertiary px-3.5 py-[7px] text-[11px] font-semibold text-rt-ink">
+      {/* `sr-only` rather than `hidden` on a narrow board: the number goes from
+          the screen, not from the accessibility tree. */}
+      <span className="min-w-13 text-center text-[11px] font-semibold text-rt-ink tabular-nums @max-[36rem]/board:sr-only">
         {zoom}%
       </span>
       <button
@@ -210,18 +220,27 @@ function ZoomControl({
         onClick={onZoomIn}
         disabled={!canZoomIn}
         title="Zoom in"
-        className="border-r border-rt-tertiary px-3 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+        className={button}
       >
         +
       </button>
+      <span aria-hidden="true" className="mx-1 h-5 w-px bg-rt-tertiary" />
       <button
         type="button"
         onClick={onFit}
-        className="px-3.5 py-[7px] text-[11px] font-medium text-rt-ink-muted hover:bg-rt-primary-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary"
+        aria-label="Fit"
+        title="Fit the board to the proposals"
+        className={button}
       >
-        Fit
+        <span className={TOOL_LABEL}>Fit</span>
+        <Scan
+          aria-hidden="true"
+          size={16}
+          strokeWidth={1.8}
+          className="hidden @max-[36rem]/board:block"
+        />
       </button>
-    </div>
+    </nav>
   );
 }
 
@@ -250,6 +269,24 @@ export function PinboardCanvas({
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   const [writeError, setWriteError] = useState<string | null>(null);
   const scale = ZOOM_SCALE[zoom];
+
+  /**
+   * One more render once the page's fonts have arrived. A sticky's size is
+   * measured by laying its note out, and a board that rendered while Inter was
+   * still loading measured every note in the fallback face, which wraps
+   * differently. Those measurements are not kept, so this render redoes them in
+   * the real one.
+   */
+  const [fontsSettled, setFontsSettled] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) setFontsSettled(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const isEmpty = board.items.length === 0;
   // `isLeader` arrives as a prop rather than being derived from
   // `viewerId === board.leaderId` here: the header needs it to choose between
@@ -265,13 +302,15 @@ export function PinboardCanvas({
    * Whether a proposal can be reopened in the tool that made it.
    *
    * It depends on whether the artifact still holds what the editor works on. A
-   * diagram always does: its nodes and edges are the artifact. A drawing does
+   * sticky and a diagram always do: a note's words and formatting, and a
+   * diagram's nodes and edges, are the artifact. A drawing does
    * only if its strokes were stored — ones proposed before that kept just the
    * rendered SVG, and reopening those would mean starting from a blank canvas
    * and replacing the artwork instead of changing it.
    */
   const canReopen = useCallback(
     (item: BoardItem) =>
+      item.artifactJson.type === 'sticky' ||
       item.artifactJson.type === 'diagram' ||
       (item.artifactJson.type === 'drawing' && (item.artifactJson.strokes?.length ?? 0) > 0),
     [],
@@ -318,7 +357,15 @@ export function PinboardCanvas({
     overflowX,
     overflowY,
     panHandlers,
-  } = useCanvasPan({ contentWidth, contentHeight, onZoom });
+  } = useCanvasPan({
+    contentWidth,
+    contentHeight,
+    onZoom,
+    // The ballot takes the board's place while people vote. With no board on
+    // screen there is nothing for a zoom to zoom, so the gesture is the
+    // browser's again.
+    zoomEnabled: !ballot,
+  });
 
   /**
    * The furthest out the board may be zoomed: the point where it still covers
@@ -424,19 +471,6 @@ export function PinboardCanvas({
   // write failed, but only the card knows it is holding an editor open or a
   // confirmation waiting on that promise, and swallowing the rejection here
   // would leave either of them stuck mid-action with nothing to release them.
-  const onEditText = useCallback(
-    async (item: BoardItem, text: string) => {
-      if (item.artifactJson.type !== 'sticky') return;
-      try {
-        await editProposal({ id: item.id, artifactJson: { ...item.artifactJson, text } });
-      } catch (err) {
-        setWriteError(err instanceof Error ? err.message : 'Could not save that edit');
-        throw err;
-      }
-    },
-    [editProposal],
-  );
-
   const onDelete = useCallback(
     async (item: BoardItem) => {
       try {
@@ -483,11 +517,14 @@ export function PinboardCanvas({
       const at = positionOf(item);
       minX = Math.min(minX, at.x);
       minY = Math.min(minY, at.y);
-      maxX = Math.max(maxX, at.x + CARD_WIDTH[item.type]);
+      maxX = Math.max(maxX, at.x + cardWidth(item));
       maxY = Math.max(maxY, at.y + CARD_FOOTPRINT_H);
     }
     return { minX, minY, width: maxX - minX, height: maxY - minY };
-  }, [board.items, positionOf]);
+    // `fontsSettled` is not read here, but a sticky's width is measured in the
+    // page's font: bounds worked out before Inter arrived used the fallback
+    // face, and Fit would frame those widths until something else moved.
+  }, [board.items, positionOf, fontsSettled]);
 
   /**
    * Frame the proposals, not the sheet.
@@ -586,6 +623,11 @@ export function PinboardCanvas({
         // skipped, so the agenda is done and the leader's move is to end it.
         'Agenda complete';
 
+  const closedMessage =
+    board.questionStatus === 'voting'
+      ? 'Proposals are locked while this question is in voting'
+      : 'This question is closed to new proposals';
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
       <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-3 text-rt-ink">
@@ -626,23 +668,33 @@ export function PinboardCanvas({
         <div className="flex shrink-0 items-center gap-2.5">
           {shortlistControl}
           {micControl}
-          <span className="rounded-full border border-rt-secondary/25 bg-white px-3 py-1 text-[10.5px] font-semibold text-rt-secondary-deep shadow-sm">
-            {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
-          </span>
-          <div
-            className="flex items-center gap-[7px] rounded-full border border-rt-secondary/25 bg-white px-2.5 py-1 shadow-sm"
-            title={
-              isLive
-                ? 'Connected: new proposals appear here as they are made'
-                : 'Not receiving live updates; reconnecting'
-            }
-          >
-            <div
-              className={`h-[7px] w-[7px] rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
-            />
-            <span className="text-[10.5px] font-medium text-rt-secondary-deep">
-              {isLive ? 'live' : 'offline'}
-            </span>
+          {/* Two short rows in the height one pill used to take: the count
+              and the live dot above, the join code below. The join code came
+              up from the retired footer, and stacking it here rather than
+              adding it to the row keeps the header neither taller nor wider.
+              `items-end` lines both rows up against the exit button. */}
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1.5">
+              <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2.5 text-[10px] font-semibold text-rt-secondary-deep shadow-sm">
+                {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
+              </span>
+              <div
+                className="flex h-4.5 items-center gap-1.5 rounded-full border border-rt-secondary/25 bg-white px-2 shadow-sm"
+                title={
+                  isLive
+                    ? 'Connected: new proposals appear here as they are made'
+                    : 'Not receiving live updates; reconnecting'
+                }
+              >
+                <div
+                  className={`size-1.5 rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
+                />
+                <span className="text-[10px] font-medium text-rt-secondary-deep">
+                  {isLive ? 'live' : 'offline'}
+                </span>
+              </div>
+            </div>
+            {joinCode}
           </div>
           {isLeader ? (
             <EndSessionControl sessionId={board.sessionId} />
@@ -652,174 +704,228 @@ export function PinboardCanvas({
         </div>
       </header>
 
-      {/* The agenda sits beside the board and above the footer, so the toolbar
-          and zoom control keep the full width they had. F13's roster used to
-          dock opposite it; it lives in the header now, and the board has that
-          256px back. */}
+      {/* Everything under the header. There is no footer: the agenda runs to
+          the bottom of the screen, and the toolbars float over the board
+          instead of taking a strip of it. F13's roster used to dock opposite
+          the agenda; it lives in the header now, and the board has that 256px
+          back. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
 
-        {/*
+        {/* The board and what floats over it. A box of its own so the main
+            toolbar centres on the board rather than the page, moving with the
+            agenda as it collapses, and so the floating bars are the viewport's
+            siblings: inside it, a press or a wheel on a toolbar would reach the
+            pan handlers too. */}
+        <div className="relative min-h-0 min-w-0 flex-1">
+          {/*
         A window onto the board, not a scroller: it clips, and the board is
         moved underneath it by a transform. That is what removes the browser's
         scrollbars rather than trying to style them, and it lets the dots be
         tiled across the whole window and simply offset by the pan, so they run
         on in every direction instead of stopping where the cards do.
       */}
-        <div
-          ref={viewportRef}
-          className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-rt-surface-alt"
-          style={{
-            // Only promise a grab when one is actually on offer. Showing `grab`
-            // everywhere implied the whole board could be dragged, including over
-            // cards, where a left drag moves the card instead.
-            cursor: isPanning ? 'grabbing' : isSpaceHeld ? 'grab' : 'default',
-            touchAction: 'none',
-          }}
-          {...panHandlers}
-        >
-          {isEmpty ? (
-            // Nothing to pan over, so the plate sits in the window rather than on
-            // the board.
-            <div className="absolute inset-0 flex items-center justify-center">
-              <EmptyBoardPlate />
-            </div>
-          ) : (
-            <div
-              className="absolute top-0 left-0"
-              style={{
-                // The single place zoom is applied. Everything inside is laid out
-                // at its natural size and magnified as one scene, so a card never
-                // reflows or changes shape as you zoom — it just gets bigger.
-                // Pan is in screen pixels, so it is applied before the scale, and
-                // rounded because a fractional offset renders text softly.
-                // The margin is added outside the scale, so the desk stays the
-                // same width on screen however far the board is magnified.
-                transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
-                transformOrigin: '0 0',
-              }}
-            >
-              {/*
+          <div
+            ref={viewportRef}
+            // Marked so a minimised studio can sit at the bottom of the board
+            // itself, beside the agenda rather than across it.
+            data-board-frame
+            className="relative h-full min-h-0 min-w-0 overflow-hidden bg-rt-surface-alt"
+            style={{
+              // Only promise a grab when one is actually on offer. Showing `grab`
+              // everywhere implied the whole board could be dragged, including over
+              // cards, where a left drag moves the card instead.
+              cursor: isPanning ? 'grabbing' : isSpaceHeld ? 'grab' : 'default',
+              touchAction: 'none',
+            }}
+            {...panHandlers}
+          >
+            {isEmpty ? (
+              // Nothing to pan over, so the plate sits in the window rather than on
+              // the board.
+              <div className="absolute inset-0 flex items-center justify-center">
+                <EmptyBoardPlate />
+              </div>
+            ) : (
+              <div
+                className="absolute top-0 left-0"
+                style={{
+                  // The single place zoom is applied. Everything inside is laid out
+                  // at its natural size and magnified as one scene, so a card never
+                  // reflows or changes shape as you zoom — it just gets bigger.
+                  // Pan is in screen pixels, so it is applied before the scale, and
+                  // rounded because a fractional offset renders text softly.
+                  // The margin is added outside the scale, so the desk stays the
+                  // same width on screen however far the board is magnified.
+                  transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
+                  transformOrigin: '0 0',
+                }}
+              >
+                {/*
               The sheet. One fixed size in board units, so it is the same board
               at every zoom — cards are clamped inside it and nothing can be
               dragged off its edge. x/y are where a card actually sits, in a
               coordinate space every participant shares.
             */}
-              <div
-                className="relative rounded-2xl bg-rt-surface"
-                style={{
-                  width: BOARD_SIZE.width,
-                  height: BOARD_SIZE.height,
-                  backgroundImage: dotBackground,
-                  backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
-                  boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
-                }}
-              >
-                {board.items.map((item) => (
-                  <PositionedProposal
-                    key={item.id}
-                    item={item}
-                    position={positionOf(item)}
-                    isNew={newItemIds.has(item.id)}
-                    isOwn={viewerId !== null && item.authorId === viewerId}
-                    isAuthorLeader={item.authorId === board.leaderId}
-                    onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
-                    canMove={
-                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
-                    }
-                    canDelete={
-                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
-                    }
-                    isDragging={draggingId === item.id}
-                    dragHandlers={dragHandlers}
-                    onEditText={onEditText}
-                    onDelete={onDelete}
-                    viewerId={viewerId}
-                    onReact={boardOpen ? onReact : undefined}
-                    isShortlisted={shortlist.includes(item.id)}
-                    canToggleShortlist={canToggleShortlist}
-                    onToggleShortlist={onToggleShortlist}
-                  />
-                ))}
+                <div
+                  className="relative rounded-2xl bg-rt-surface"
+                  style={{
+                    width: BOARD_SIZE.width,
+                    height: BOARD_SIZE.height,
+                    backgroundImage: dotBackground,
+                    backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
+                    boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
+                  }}
+                >
+                  {board.items.map((item) => (
+                    <PositionedProposal
+                      key={item.id}
+                      item={item}
+                      position={positionOf(item)}
+                      isNew={newItemIds.has(item.id)}
+                      isOwn={viewerId !== null && item.authorId === viewerId}
+                      isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
+                      onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
+                      canMove={
+                        boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                      }
+                      canDelete={
+                        boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                      }
+                      isDragging={draggingId === item.id}
+                      dragHandlers={dragHandlers}
+                      onDelete={onDelete}
+                      viewerId={viewerId}
+                      onReact={boardOpen ? onReact : undefined}
+                      isShortlisted={shortlist.includes(item.id)}
+                      canToggleShortlist={canToggleShortlist}
+                      onToggleShortlist={onToggleShortlist}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/*
+            {/*
           Only past 100%: below that the whole board is on screen or a pan away,
           and bars are furniture. Magnified, the board really does continue past
           the window and needs saying so. Both axes are shown together, since a
           board that runs off one edge almost always runs off the other.
         */}
-          <BoardScrollbar
-            orientation="horizontal"
-            enabled={zoom > 100}
-            viewportLength={viewport.width}
-            contentLength={contentWidth}
-            pan={pan.x}
-            maxPan={maxPanX}
-            overflow={overflowX}
-            isPanning={isPanning}
-            onPan={(x) => panTo({ x, y: pan.y })}
-          />
-          <BoardScrollbar
-            orientation="vertical"
-            enabled={zoom > 100}
-            viewportLength={viewport.height}
-            contentLength={contentHeight}
-            pan={pan.y}
-            maxPan={maxPanY}
-            overflow={overflowY}
-            isPanning={isPanning}
-            onPan={(y) => panTo({ x: pan.x, y })}
-          />
+            <BoardScrollbar
+              orientation="horizontal"
+              enabled={zoom > 100}
+              viewportLength={viewport.width}
+              contentLength={contentWidth}
+              pan={pan.x}
+              maxPan={maxPanX}
+              overflow={overflowX}
+              isPanning={isPanning}
+              onPan={(x) => panTo({ x, y: pan.y })}
+            />
+            <BoardScrollbar
+              orientation="vertical"
+              enabled={zoom > 100}
+              viewportLength={viewport.height}
+              contentLength={contentHeight}
+              pan={pan.y}
+              maxPan={maxPanY}
+              overflow={overflowY}
+              isPanning={isPanning}
+              onPan={(y) => panTo({ x: pan.x, y })}
+            />
+          </div>
 
-          {boardOverlay ? (
-            <div className="pointer-events-none absolute inset-x-0 bottom-[22px] z-20 flex justify-center">
-              {boardOverlay}
+          {/* Everything that floats over the board. `z-20` keeps the ballot's
+            scrim (z-30) on top, and the layer lets presses through to the
+            board; only what is drawn in it takes them.
+
+            It is also the `board` container the bars size themselves against,
+            so their stages follow the board's width rather than the window's
+            (the agenda rail alone moves it by 212px). The container is this
+            layer and not the box above because `container-type` makes its
+            element the containing block for anything `fixed` inside, and
+            nothing on the board should be caught by that. */}
+          <div className="@container/board pointer-events-none absolute inset-0 z-20">
+            {/* A refused write, stacked above the toolbar. It stays centred
+                  when the bar moves left, because at this height it is already
+                  clear of the nav bar. `bottom-19` is the bar's `bottom-6` plus
+                  its `h-11` plus an 8px gap. */}
+            <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
+              {writeError ? (
+                <p
+                  role="status"
+                  className="pointer-events-auto rounded-full border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-[11.5px] font-medium text-rt-secondary-deep shadow-sm"
+                >
+                  {writeError}
+                </p>
+              ) : null}
             </div>
-          ) : null}
+
+            {/* The main toolbar. Centred on the board until it would run
+                  into the nav bar, then anchored left: the centred bar (~290px)
+                  meets the nav bar (~181px, 24px in from the edge, 16px gap)
+                  on a board narrower than ~732px, so 48rem leaves a margin.
+                  `bottom-6` clears the horizontal scrollbar. On a board too
+                  narrow even for icons (~320px) the two can still touch.
+
+                  The leader's shortlist bar, which takes this slot while the
+                  board is closed, is wider (~490px) and meets the nav bar on a
+                  board narrower than ~930px, so it anchors left from 60rem.
+
+                  Marked so the sticky popup can centre itself over the board
+                  this row spans, rather than over a window the side panels
+                  make lopsided, and rest just above the toolbar. */}
+            <div
+              data-board-toolbar
+              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
+                !boardOpen && boardOverlay
+                  ? '@max-[60rem]/board:justify-start'
+                  : '@max-[48rem]/board:justify-start'
+              }`}
+            >
+              <div className="pointer-events-auto min-w-0">
+                {boardOpen ? (
+                  // Reuse sits in the same pill as the tools that start from
+                  // blank, because reusing an earlier proposal produces the
+                  // same thing they do. It belongs inside this branch for
+                  // the same reason they do: with the board closed there is
+                  // nothing to reuse onto.
+                  <CreativeToolbar>{myProposals}</CreativeToolbar>
+                ) : boardOverlay ? (
+                  // One bar for the leader: the shortlist controls stand in for
+                  // the locked message rather than stacking on top of it.
+                  boardOverlay
+                ) : (
+                  // A sentence cannot shrink to an icon, so it truncates
+                  // instead, capped at what the nav bar leaves free.
+                  <p
+                    className={`${FLOATING_BAR} max-w-[calc(100cqw-15.5rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
+                  >
+                    <span className="truncate">{closedMessage}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Navigation, in the corner opposite nothing: clear of the
+                  vertical scrollbar by `right-6`, and on the same baseline as
+                  the main bar. */}
+            <div className="pointer-events-auto absolute right-6 bottom-6">
+              <ZoomControl
+                zoom={zoom}
+                canZoomIn={zoom !== ZOOM_LEVELS[0]}
+                canZoomOut={zoom !== minZoom}
+                onZoomIn={onZoomIn}
+                onZoomOut={onZoomOut}
+                onFit={onFit}
+              />
+            </div>
+          </div>
         </div>
 
         {ballot}
       </div>
-
-      <footer className="flex shrink-0 items-center gap-3 border-t border-rt-tertiary px-6 py-[11px]">
-        {boardOpen ? (
-          <>
-            <CreativeToolbar />
-            {/* Beside the tools that start from blank, because reusing an
-                earlier proposal produces the same thing they do. It belongs
-                inside this branch for the same reason they do: with the board
-                closed there is nothing to reuse onto. */}
-            {myProposals}
-          </>
-        ) : board.questionStatus === 'voting' ? (
-          <p className="text-[12px] font-medium text-rt-ink-muted">
-            Proposals are locked while this question is in voting
-          </p>
-        ) : (
-          <p className="text-[12px] font-medium text-rt-ink-muted">
-            This question is closed to new proposals
-          </p>
-        )}
-        {writeError ? (
-          <p role="status" className="text-[11px] font-medium text-rt-secondary-deep">
-            {writeError}
-          </p>
-        ) : null}
-        <div className="ml-auto flex items-center gap-3">
-          {joinCode}
-          <ZoomControl
-            zoom={zoom}
-            canZoomIn={zoom !== ZOOM_LEVELS[0]}
-            canZoomOut={zoom !== minZoom}
-            onZoomIn={onZoomIn}
-            onZoomOut={onZoomOut}
-            onFit={onFit}
-          />
-        </div>
-      </footer>
     </div>
   );
 }

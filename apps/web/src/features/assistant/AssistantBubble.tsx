@@ -84,7 +84,13 @@ export function AssistantBubble({ sessionId, getContext, boardItems }: Assistant
       setRevealed(false);
       return;
     }
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    // No media-query engine means nothing is animating to wait for, which is jsdom and
+    // the reduced-motion case both: show the transcript now rather than on a transition
+    // that will never end.
+    if (
+      typeof window.matchMedia !== 'function' ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       setRevealed(true);
       return;
     }

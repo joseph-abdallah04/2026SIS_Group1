@@ -5,8 +5,20 @@ import type { ToolKind } from './toolRegistry';
 
 export type ProposalSubmissionStatus = 'idle' | 'submitting' | 'success';
 
+/**
+ * What one write outside an editor came to. The reason it carries its own error
+ * rather than leaving it in `submissionError`: several of these can be in the
+ * air at once, and a caller must be told about its own.
+ */
+export type ProposeResult = { ok: true } | { ok: false; error: string };
+
 export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
+  /**
+   * Which board this editor belongs to, so an unfinished canvas can be kept
+   * against it. A draft made for one question must never open on another.
+   */
+  draftScope: { sessionId: string; questionId: string; viewerId: string | null };
   extensionSource: BoardItem | null;
   /**
    * The source is this viewer's own work, so the editor says "reusing yours"
@@ -22,16 +34,32 @@ export interface CreativeToolsContextValue {
    */
   editSource: BoardItem | null;
   isLive: boolean;
+  /**
+   * Where this viewer's unproposed sticky for the current question is kept, or
+   * null where there is no session, question or signed-in viewer to keep it for.
+   */
+  stickyDraftKey: string | null;
   submissionStatus: ProposalSubmissionStatus;
   submissionError: string | null;
   openTool: (tool: ToolKind) => void;
   openEditorForExtend: (proposal: BoardItem) => void;
   /** Reopen a proposal's own editor to change what it says (F16). */
   openEditorForEdit: (proposal: BoardItem) => void;
-  closeTool: () => void;
+  /** False when the open tool's close guard kept it open. */
+  closeTool: () => boolean;
   setCloseGuard: (guard: (() => boolean) | null) => void;
   resetSubmission: () => void;
+  /**
+   * The editor's write: one per tool opened, since the lock it takes is released
+   * by opening or closing a tool, and `submissionStatus` is the editor's screen.
+   */
   submitArtifact: (artifact: ArtifactJson) => Promise<boolean>;
+  /**
+   * A write from somewhere that is not an editor — the assistant's chat cards,
+   * which never open a tool and each keep their own state. Same placement and
+   * same error copy; none of the editor's one-at-a-time state.
+   */
+  proposeArtifact: (artifact: ArtifactJson) => Promise<ProposeResult>;
 }
 
 export const CreativeToolsContext = createContext<CreativeToolsContextValue | null>(null);
