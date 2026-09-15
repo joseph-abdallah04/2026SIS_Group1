@@ -106,6 +106,36 @@ body {
 }
 
 /*
+ * The shortlist counter refusing a pick past the limit: a red wash behind the
+ * count, twice. A wash rather than only red text because the count is small,
+ * and it changes nothing about the layout. Red 100 and 600 from Tailwind's
+ * palette, written out because only the colours a utility uses are emitted as
+ * variables.
+ */
+@keyframes rt-shortlist-flash {
+  0%,
+  100% {
+    background-color: transparent;
+    color: inherit;
+  }
+  35% {
+    background-color: oklch(93.6% 0.032 17.717);
+    color: oklch(57.7% 0.245 27.325);
+  }
+}
+
+.rt-shortlist-flash {
+  animation: rt-shortlist-flash 450ms ease-out 2;
+}
+
+/* Still two blinks with less motion asked for, but snapped rather than eased. */
+@media (prefers-reduced-motion: reduce) {
+  .rt-shortlist-flash {
+    animation-timing-function: steps(1);
+  }
+}
+
+/*
  * F08 waiting-room seats. Position slides via left/top; pop/leave scale the
  * same wrapper (transform always includes the centering translate).
  */
