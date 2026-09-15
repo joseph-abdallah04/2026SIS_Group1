@@ -97,10 +97,50 @@ body {
   animation: rt-sticky-popup-fade 150ms ease-in forwards;
 }
 
+/*
+ * The first-proposal hint rising out of the creative toolbar, and retracting
+ * back into it. Scaled about the pointer's tip (set on the element), so it
+ * reads as coming from the toolbar rather than appearing near it. The rise is
+ * a touch slower than the sticky popup's: nobody asked for this one, so it is
+ * given a moment to be noticed. The retract is quick and held at the end so it
+ * cannot flash back before it is removed.
+ */
+@keyframes rt-hint-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rt-hint-rise {
+  animation: rt-hint-rise 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-hint-retract {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+}
+
+.rt-hint-retract {
+  animation: rt-hint-retract 170ms ease-in forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rt-proposal-arrive,
   .rt-sticky-popup-rise,
-  .rt-sticky-popup-fade {
+  .rt-sticky-popup-fade,
+  .rt-hint-rise,
+  .rt-hint-retract {
     animation: none;
   }
 }

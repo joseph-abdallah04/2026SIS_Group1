@@ -11,6 +11,7 @@ import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeTo
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
+import { FirstProposalHint } from './FirstProposalHint';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
 import { useProposalDrag } from './useProposalDrag';
@@ -111,71 +112,6 @@ const PHASE_LABELS: Record<QuestionStatus, string> = {
   answered: 'Answered',
   skipped: 'Skipped',
 };
-
-function EmptyBoardPlate() {
-  return (
-    <div className="relative w-[400px] overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-sm">
-      <div className="border-b border-rt-tertiary bg-rt-surface-alt px-3.5 py-2 text-[9px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
-        Empty board
-      </div>
-
-      <div className="p-5">
-        <h2 className="text-[19px] leading-[1.3] font-semibold tracking-[-0.01em] text-rt-ink">
-          Nothing proposed yet
-        </h2>
-        <p className="mt-2 text-[13px] leading-relaxed text-rt-ink-muted">
-          Anything anyone proposes appears here for the whole room — same board, same positions.
-        </p>
-
-        <div className="mt-[18px] border-t border-rt-tertiary">
-          <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
-            <div
-              className="h-[26px] w-[26px] rounded-xl border border-[#F1C881]"
-              style={{ background: '#FDF4E5' }}
-            />
-            <p className="text-[12.5px] font-medium text-rt-ink">
-              Sticky note
-              <span className="font-normal text-rt-ink-faint"> — a short line of text</span>
-            </p>
-          </div>
-          <div className="flex items-center gap-3 border-b border-rt-tertiary py-2.5">
-            <div
-              className="h-[26px] w-[26px] rounded-xl border border-rt-tertiary bg-white"
-              style={{
-                background: 'repeating-linear-gradient(-45deg, #EEF2F4 0 5px, #FFFFFF 5px 10px)',
-              }}
-            />
-            <p className="text-[12.5px] font-medium text-rt-ink">
-              Drawing
-              <span className="font-normal text-rt-ink-faint"> — soft border, image thumbnail</span>
-            </p>
-          </div>
-          <div className="flex items-center gap-3 py-2.5">
-            <div className="h-[26px] w-[26px] rounded-xl border border-rt-tertiary bg-rt-cool-tint" />
-            <p className="text-[12.5px] font-medium text-rt-ink">
-              Diagram
-              <span className="font-normal text-rt-ink-faint"> — soft border, box preview</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 border-t border-rt-tertiary px-5 py-3">
-        <p className="flex-1 text-[11px] text-rt-ink-faint">
-          Toolbar floats at the foot of the board (F22)
-        </p>
-        <button
-          type="button"
-          disabled
-          className="rounded-full bg-rt-secondary px-[18px] py-[9px] text-[12px] font-semibold text-rt-ink opacity-90"
-          title="Coming in F22"
-        >
-          Propose the first idea
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function ZoomControl({
   zoom,
@@ -287,7 +223,6 @@ export function PinboardCanvas({
       live = false;
     };
   }, []);
-  const isEmpty = board.items.length === 0;
   // `isLeader` arrives as a prop rather than being derived from
   // `viewerId === board.leaderId` here: the header needs it to choose between
   // "Leave session" and "End session" from the first render, and `viewerId` is
@@ -295,7 +230,7 @@ export function PinboardCanvas({
   // the wrong exit. Either way it only decides what the UI offers — every
   // write is re-checked server-side.
 
-  const { openEditorForEdit } = useCreativeTools();
+  const { activeTool, openEditorForEdit } = useCreativeTools();
   const boardOpen = board.questionStatus === 'discussion';
 
   /**
@@ -748,72 +683,66 @@ export function PinboardCanvas({
             }}
             {...panHandlers}
           >
-            {isEmpty ? (
-              // Nothing to pan over, so the plate sits in the window rather than on
-              // the board.
-              <div className="absolute inset-0 flex items-center justify-center">
-                <EmptyBoardPlate />
-              </div>
-            ) : (
-              <div
-                className="absolute top-0 left-0"
-                style={{
-                  // The single place zoom is applied. Everything inside is laid out
-                  // at its natural size and magnified as one scene, so a card never
-                  // reflows or changes shape as you zoom — it just gets bigger.
-                  // Pan is in screen pixels, so it is applied before the scale, and
-                  // rounded because a fractional offset renders text softly.
-                  // The margin is added outside the scale, so the desk stays the
-                  // same width on screen however far the board is magnified.
-                  transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
-                  transformOrigin: '0 0',
-                }}
-              >
-                {/*
+            {/* Drawn empty or not: an empty board is still the board, and Fit
+                has already put its middle in the window. */}
+            <div
+              className="absolute top-0 left-0"
+              style={{
+                // The single place zoom is applied. Everything inside is laid out
+                // at its natural size and magnified as one scene, so a card never
+                // reflows or changes shape as you zoom — it just gets bigger.
+                // Pan is in screen pixels, so it is applied before the scale, and
+                // rounded because a fractional offset renders text softly.
+                // The margin is added outside the scale, so the desk stays the
+                // same width on screen however far the board is magnified.
+                transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
+                transformOrigin: '0 0',
+              }}
+            >
+              {/*
               The sheet. One fixed size in board units, so it is the same board
               at every zoom — cards are clamped inside it and nothing can be
               dragged off its edge. x/y are where a card actually sits, in a
               coordinate space every participant shares.
             */}
-                <div
-                  className="relative rounded-2xl bg-rt-surface"
-                  style={{
-                    width: BOARD_SIZE.width,
-                    height: BOARD_SIZE.height,
-                    backgroundImage: dotBackground,
-                    backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
-                    boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
-                  }}
-                >
-                  {board.items.map((item) => (
-                    <PositionedProposal
-                      key={item.id}
-                      item={item}
-                      position={positionOf(item)}
-                      isNew={newItemIds.has(item.id)}
-                      isOwn={viewerId !== null && item.authorId === viewerId}
-                      isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
-                      onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
-                      canMove={
-                        boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
-                      }
-                      canDelete={
-                        boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
-                      }
-                      isDragging={draggingId === item.id}
-                      dragHandlers={dragHandlers}
-                      onEditText={onEditText}
-                      onDelete={onDelete}
-                      viewerId={viewerId}
-                      onReact={boardOpen ? onReact : undefined}
-                      isShortlisted={shortlist.includes(item.id)}
-                      canToggleShortlist={canToggleShortlist}
-                      onToggleShortlist={onToggleShortlist}
-                    />
-                  ))}
-                </div>
+              <div
+                className="relative rounded-2xl bg-rt-surface"
+                style={{
+                  width: BOARD_SIZE.width,
+                  height: BOARD_SIZE.height,
+                  backgroundImage: dotBackground,
+                  backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
+                  boxShadow: '0 0 0 1px rgba(140,164,172,0.35)',
+                }}
+              >
+                {board.items.map((item) => (
+                  <PositionedProposal
+                    key={item.id}
+                    item={item}
+                    position={positionOf(item)}
+                    isNew={newItemIds.has(item.id)}
+                    isOwn={viewerId !== null && item.authorId === viewerId}
+                    isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
+                    onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
+                    canMove={
+                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                    }
+                    canDelete={
+                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
+                    }
+                    isDragging={draggingId === item.id}
+                    dragHandlers={dragHandlers}
+                    onEditText={onEditText}
+                    onDelete={onDelete}
+                    viewerId={viewerId}
+                    onReact={boardOpen ? onReact : undefined}
+                    isShortlisted={shortlist.includes(item.id)}
+                    canToggleShortlist={canToggleShortlist}
+                    onToggleShortlist={onToggleShortlist}
+                  />
+                ))}
               </div>
-            )}
+            </div>
 
             {/*
           Only past 100%: below that the whole board is on screen or a pan away,
@@ -893,7 +822,16 @@ export function PinboardCanvas({
                   : '@max-[48rem]/board:justify-start'
               }`}
             >
-              <div className="pointer-events-auto min-w-0">
+              {/* `relative` so the first-proposal hint can rise off whichever
+                  bar is here, and follow it when it anchors left. */}
+              <div className="pointer-events-auto relative min-w-0">
+                <FirstProposalHint
+                  sessionId={board.sessionId}
+                  viewerId={viewerId}
+                  boardOpen={boardOpen}
+                  isLive={isLive}
+                  toolOpen={activeTool !== null}
+                />
                 {boardOpen ? (
                   // Reuse sits in the same pill as the tools that start from
                   // blank, because reusing an earlier proposal produces the

@@ -12,6 +12,7 @@ import { LoaderCircle, X } from 'lucide-react';
 import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
+import { closingFades } from '../../../lib/motion';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
@@ -31,19 +32,6 @@ const EDGE_PX = 16;
 const EXIT_MS = 150;
 /** The toolbar button for the tool that is already open. */
 const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
-
-/**
- * Whether closing fades. Not for anyone who has asked for less motion, and not
- * where there is no way to ask, which is only ever an environment with no
- * rendering at all: there, a close that waited on an animation would wait on
- * nothing.
- */
-function closingFades(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 /** With no toolbar to rest on, as in the tools workbench: the middle of the window. */
 const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
