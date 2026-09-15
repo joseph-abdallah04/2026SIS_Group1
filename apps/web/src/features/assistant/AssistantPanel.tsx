@@ -7,14 +7,15 @@
 // Layout lives on the shared `.rt-assistant` shell. This file is the inside of that shell
 // once it has grown into the rail.
 import { useContext, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import type { QuestionStatus } from '@roundtable/shared';
 
 import { CreativeToolsContext } from '../tools/CreativeToolsContext';
+import { LlmSettingsForm } from '../settings/LlmSettingsForm';
 import { AgentActivity } from './AgentActivity';
 import { ArtifactCard } from './ArtifactCard';
 import { shouldRenderToolEntry } from './assistantActivity';
 import { ToolActivity } from './ToolActivity';
-import type { AssistantChat } from './useAssistantChat';
+import type { AssistantChat, ChatEntry } from './useAssistantChat';
 
 const SUGGESTIONS = [
   'Give me 5 sticky notes for this question',
@@ -29,11 +30,23 @@ export interface AssistantPanelProps {
   /** null while the config is still loading; false when the user has no provider set up. */
   configured: boolean | null;
   modelLabel?: string;
+  /** The pinboard's current phase, so a locked Propose can say why. */
+  questionStatus?: QuestionStatus | null;
+  /** After in-panel provider setup, so the rail can start chatting without a reload. */
+  onProviderConfigured?: (model: string) => void;
 }
 
-export function AssistantPanel({ chat, onClose, configured, modelLabel }: AssistantPanelProps) {
+export function AssistantPanel({
+  chat,
+  onClose,
+  configured,
+  modelLabel,
+  questionStatus,
+  onProviderConfigured,
+}: AssistantPanelProps) {
   const { entries, streaming, thinking, send, stop, clear, setProposeState } = chat;
   const [draft, setDraft] = useState('');
+  const [setupOpen, setSetupOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -43,15 +56,31 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
   const creativeTools = useContext(CreativeToolsContext);
   const canPropose = Boolean(creativeTools?.isLive);
 
-  // Follow the tail as tokens arrive — and on reopen, land at the newest message.
+  // Follow the tail as the conversation grows — tokens, a new card, thinking — and on
+  // reopen, land at the newest message. Propose is a flag on a card already on screen,
+  // and depending on `entries` itself treated pressing it as a new message: the feed
+  // jumped to the bottom and took the user with it.
+  const followKey = transcriptFollowKey(entries, streaming, thinking);
   useEffect(() => {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [entries, streaming, thinking]);
+  }, [followKey]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Escape closes this overlay first, not the whole rail — the bubble also listens.
+  useEffect(() => {
+    if (!setupOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopImmediatePropagation();
+      setSetupOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [setupOpen]);
 
   // Grow with the draft up to the CSS max-height, then scroll inside the field.
   useEffect(() => {
@@ -117,7 +146,7 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
       </header>
 
       <div ref={scrollRef} className="rt-assistant-feed">
-        {configured === false && <NotConfigured />}
+        {configured === false && <NotConfigured onOpenSetup={() => setSetupOpen(true)} />}
 
         {configured !== false && entries.length === 0 && (
           <EmptyState
@@ -165,6 +194,7 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
                   propose={entry.propose}
                   {...(entry.proposeError ? { proposeError: entry.proposeError } : {})}
                   canPropose={canPropose}
+                  {...(questionStatus !== undefined ? { questionStatus } : {})}
                   onPropose={() => void handlePropose(entry.id, index)}
                 />
               );
@@ -224,21 +254,39 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
           )}
         </div>
       </div>
+
+      {setupOpen && (
+        <div
+          className="rt-assistant-setup-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="assistant-provider-setup-title"
+        >
+          <LlmSettingsForm
+            variant="panel"
+            onCancel={() => setSetupOpen(false)}
+            onSaved={({ model }) => {
+              setSetupOpen(false);
+              onProviderConfigured?.(model);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function NotConfigured() {
+function NotConfigured({ onOpenSetup }: { onOpenSetup: () => void }) {
   return (
     <div className="rt-assistant-setup text-sm">
       <p className="font-semibold">No AI provider set up yet</p>
       <p className="mt-1 text-xs leading-relaxed">
         The assistant runs on your own LLM provider — RoundTable never pays for or sees your
-        inference. Add a base URL, API key and model in settings to switch it on.
+        inference. Add a base URL, API key and model here to switch it on.
       </p>
-      <Link to="/settings" className="mt-2 inline-block underline underline-offset-2">
-        Open settings →
-      </Link>
+      <button type="button" onClick={onOpenSetup} className="rt-assistant-setup-cta">
+        Set up provider
+      </button>
     </div>
   );
 }
@@ -264,4 +312,33 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
       </div>
     </div>
   );
+}
+
+/**
+ * What of the transcript the feed should follow.
+ *
+ * Propose, its error, and whether the board has the item are local flags on a card
+ * that is already on screen. Including them here is what yanked the feed to the
+ * bottom when the user pressed Propose on a sticky they were looking at.
+ */
+export function transcriptFollowKey(
+  entries: ChatEntry[],
+  streaming: boolean,
+  thinking: boolean,
+): string {
+  const parts = entries.map((entry) => {
+    switch (entry.kind) {
+      case 'artifact':
+        return `artifact:${entry.id}`;
+      case 'assistant':
+        return `assistant:${entry.id}:${entry.text.length}:${entry.streaming ? 1 : 0}:${entry.interrupted ? 1 : 0}`;
+      case 'user':
+        return `user:${entry.id}:${entry.text.length}`;
+      case 'tool':
+        return `tool:${entry.id}:${entry.status}:${entry.summary ?? ''}`;
+      case 'error':
+        return `error:${entry.id}:${entry.message.length}`;
+    }
+  });
+  return `${streaming ? 1 : 0}:${thinking ? 1 : 0}:${parts.join('|')}`;
 }

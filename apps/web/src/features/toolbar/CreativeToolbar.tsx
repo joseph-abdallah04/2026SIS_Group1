@@ -18,9 +18,9 @@ export const FLOATING_BAR =
  * container (the dev workbench, the editor tests) it never matches, so the
  * labels show.
  *
- * 36rem because the left-anchored main bar (~290px) and the nav bar (~181px),
- * with their 24px insets and a 16px gap between, need about 535px. Re-derive it
- * if the labels change.
+ * 36rem because the right-anchored main bar (~290px) and the zoom control
+ * (~181px), with their 24px insets and a 16px gap between, need about 535px.
+ * Re-derive it if the labels change.
  */
 export const TOOL_LABEL = '@max-[36rem]/board:hidden';
 

@@ -1,7 +1,7 @@
 import type { AssistantStreamEvent, AssistantUsage } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
-import { runAssistantTurn } from './agent.js';
+import { runAssistantTurn, toModelMessages } from './agent.js';
 import { scriptedModel, type ScriptedTurn } from './testing/scriptedModel.js';
 import { createAssistantTools, ToolOutcomeSink } from './tools/index.js';
 
@@ -266,5 +266,31 @@ describe('token accounting', () => {
     await handle.promise;
 
     expect(handle.reported()).toEqual({ steps: 0, durationMs: expect.any(Number) });
+  });
+});
+
+describe('toModelMessages', () => {
+  it('never puts a system message in the thread — this provider rejects them', () => {
+    const messages = toModelMessages(
+      [
+        { role: 'user', content: 'Where are we in the session' },
+        { role: 'assistant', content: '', interrupted: true },
+      ],
+      'Why did you stop?',
+    );
+    expect(messages.every((entry) => entry.role !== 'system')).toBe(true);
+    expect(messages).toEqual([
+      { role: 'user', content: 'Where are we in the session' },
+      { role: 'user', content: 'Why did you stop?' },
+    ]);
+  });
+
+  it('keeps the words from a reply that was stopped mid-sentence', () => {
+    expect(
+      toModelMessages([{ role: 'assistant', content: 'Looking at the', interrupted: true }], 'why?'),
+    ).toEqual([
+      { role: 'assistant', content: 'Looking at the' },
+      { role: 'user', content: 'why?' },
+    ]);
   });
 });

@@ -4,7 +4,7 @@
 // above it is the user's alone, and what the button sends goes through the Creative Tools
 // submit path — the same one the sticky and drawing editors use — so an AI-suggested
 // proposal is authored, validated and broadcast exactly like a hand-made one.
-import type { ArtifactJson, StickyColor } from '@roundtable/shared';
+import type { ArtifactJson, QuestionStatus, StickyColor } from '@roundtable/shared';
 
 import { CARD_INK, STICKY_THEMES } from '../pinboard/pinboardTokens';
 import { STICKY_FONT_SIZE, STICKY_LINE_HEIGHT } from '../tools/sticky/stickyPresentation';
@@ -15,8 +15,14 @@ export interface ArtifactCardProps {
   artifact: ArtifactJson;
   propose: ProposeState;
   proposeError?: string;
-  /** False when the board can't take a write yet — no live socket, or no active question. */
+  /**
+   * False when the board will not take a write. That is two different situations
+   * sharing one flag on the tools provider: the socket is down, or the question
+   * has left discussion. `questionStatus` is what tells them apart.
+   */
   canPropose: boolean;
+  /** The phase the pinboard is in, so a locked Propose can say why. */
+  questionStatus?: QuestionStatus | null;
   onPropose: () => void;
 }
 
@@ -31,6 +37,7 @@ export function ArtifactCard({
   propose,
   proposeError,
   canPropose,
+  questionStatus,
   onPropose,
 }: ArtifactCardProps) {
   return (
@@ -72,12 +79,12 @@ export function ArtifactCard({
                 : 'Propose'}
         </button>
         {!canPropose && propose !== 'proposed' && (
-          <span className="text-xs" style={{ color: 'var(--rt-assistant-muted)' }}>
-            Available once the board is connected
+          <span className="rt-assistant-artifact-hint">
+            {proposeUnavailableHint(questionStatus)}
           </span>
         )}
         {propose === 'failed' && proposeError && (
-          <span className="text-xs text-[#ffc9c3]">{proposeError}</span>
+          <span className="rt-assistant-artifact-hint text-[#ffc9c3]">{proposeError}</span>
         )}
       </div>
     </div>
@@ -114,4 +121,21 @@ function StickyPreview({ text, color }: { text: string; color: StickyColor }) {
       </footer>
     </article>
   );
+}
+
+/**
+ * Why Propose is locked.
+ *
+ * The tools provider's `isLive` is not "the socket is up". SessionPinboard
+ * passes `isLive && questionStatus === 'discussion'`, so voting, answered and
+ * skipped all look like a disconnect. The card used to print the disconnect
+ * line for all of them. The pinboard itself already names those phases — this
+ * is the same wording, so a locked Propose and a locked toolbar agree.
+ */
+export function proposeUnavailableHint(status: QuestionStatus | null | undefined): string {
+  if (status === 'voting') return 'Proposals are locked while this question is in voting';
+  if (status === 'answered' || status === 'skipped' || status === 'pending') {
+    return 'This question is closed to new proposals';
+  }
+  return 'Available once the board is connected';
 }

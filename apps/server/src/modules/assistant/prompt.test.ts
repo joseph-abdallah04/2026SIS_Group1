@@ -1,7 +1,7 @@
 import type { AssistantHistoryMessage } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
-import { buildSystemPrompt } from './prompt.js';
+import { buildSystemPrompt, STOPPED_TURN_NOTE } from './prompt.js';
 
 const context = { sessionId: 's1', block: 'Session: Pick a database' };
 
@@ -16,6 +16,7 @@ describe('buildSystemPrompt', () => {
 
   it('says nothing about past work when there is none', () => {
     expect(prompt()).not.toMatch(/What you have actually done/i);
+    expect(prompt()).not.toMatch(/This chat so far/i);
   });
 
   it('counts the artifacts earlier turns really produced', () => {
@@ -55,5 +56,39 @@ describe('buildSystemPrompt', () => {
     const text = prompt();
     expect(text).toMatch(/only when a tool call in THIS turn returned one/i);
     expect(text).toMatch(/no parenthetical notes|no bracketed asides/i);
+  });
+
+  it('states that the user stopped the last reply', () => {
+    const text = prompt([
+      { role: 'user', content: 'draw a login flow' },
+      { role: 'assistant', content: 'Half of an answ', interrupted: true },
+    ]);
+
+    expect(text).toContain(STOPPED_TURN_NOTE);
+    expect(text).toContain('draw a login flow');
+    expect(text.endsWith('It was the reply to: draw a login flow')).toBe(true);
+    expect(text).not.toMatch(/say they cancelled|say you pressed/i);
+  });
+
+  it('drops a stale stop once a later reply finished', () => {
+    const text = prompt([
+      { role: 'assistant', content: 'Half of an answ', interrupted: true },
+      { role: 'user', content: 'why did you stop?' },
+      { role: 'assistant', content: 'You cancelled it.' },
+    ]);
+
+    expect(text).not.toContain(STOPPED_TURN_NOTE);
+  });
+
+  it('puts this chat in the instructions so the model cannot deny seeing it', () => {
+    const text = prompt([
+      { role: 'user', content: "That's okay" },
+      { role: 'assistant', content: 'Sounds good.' },
+      { role: 'user', content: 'What was my last prompt to you?' },
+    ]);
+
+    expect(text).toContain("That's okay");
+    expect(text).toContain('Sounds good.');
+    expect(text).toMatch(/never claim you cannot recall this conversation/i);
   });
 });

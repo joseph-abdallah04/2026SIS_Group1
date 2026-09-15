@@ -305,7 +305,11 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
       <CreativeStudio />
       {/* Propose reads these items so it can unlock after a delete. The model
           still reads the board server-side on every turn (F35). */}
-      <AssistantBubble sessionId={sessionId} boardItems={board.items} />
+      <AssistantBubble
+        sessionId={sessionId}
+        boardItems={board.items}
+        questionStatus={board.questionStatus}
+      />
     </CreativeToolsProvider>
   );
 }

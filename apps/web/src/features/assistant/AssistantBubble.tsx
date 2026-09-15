@@ -1,8 +1,9 @@
 // F34 — the floating assistant orb and the rail it morphs into.
 //
 // Mounted by `SessionPinboard` inside `CreativeToolsProvider`, so Propose (F37) can use the
-// same submit path as the sticky and drawing editors. It sits bottom-right, above the
-// creative toolbar (F22), and never covers the board's own controls.
+// same submit path as the sticky and drawing editors. It sits on the right edge, from under
+// the session header to the bottom inset, with the launch orb in that corner. Zoom lives on
+// the other side so the rail can use the full height without covering those controls.
 //
 // It also owns the conversation. The rail unmounts when collapsed, so state kept there
 // would take the thread with it — and F34 requires history to persist across open/close,
@@ -13,7 +14,7 @@
 // resize). The launch button is gone while the rail is up; the rail's own X, or Escape,
 // closes it.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ArtifactJson, AssistantContext } from '@roundtable/shared';
+import type { ArtifactJson, AssistantContext, QuestionStatus } from '@roundtable/shared';
 
 import './assistant.css';
 import { AssistantPanel } from './AssistantPanel';
@@ -42,9 +43,16 @@ export interface AssistantBubbleProps {
    * Propose button's view of reality.
    */
   boardItems?: readonly { artifactJson: ArtifactJson }[];
+  /** The pinboard's current phase, so a locked Propose can say why it is locked. */
+  questionStatus?: QuestionStatus | null;
 }
 
-export function AssistantBubble({ sessionId, getContext, boardItems }: AssistantBubbleProps) {
+export function AssistantBubble({
+  sessionId,
+  getContext,
+  boardItems,
+  questionStatus,
+}: AssistantBubbleProps) {
   const [open, setOpen] = useState(false);
   // Distinct from `open`: the panel is mounted as soon as it opens, but stays invisible until
   // the shell has finished growing. Contents appearing inside a panel that is still expanding
@@ -177,6 +185,11 @@ export function AssistantBubble({ sessionId, getContext, boardItems }: Assistant
             onClose={() => setOpen(false)}
             configured={configured}
             {...(modelLabel ? { modelLabel } : {})}
+            {...(questionStatus !== undefined ? { questionStatus } : {})}
+            onProviderConfigured={(model) => {
+              setConfigured(true);
+              setModelLabel(model);
+            }}
           />
         )}
       </div>

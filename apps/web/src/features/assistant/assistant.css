@@ -91,11 +91,13 @@
   --rt-assistant-fill-strong: rgba(255, 255, 255, 0.22);
 
   /* The rail's footprint, and the orb is its bottom-right corner. Fixed at all
-     times: the open/close animation never touches these. */
+     times: the open/close animation never touches these. Top clears the
+     session header; bottom matches the right inset so the rail can run the
+     full height of the board. */
   position: fixed;
   top: 4.75rem;
   right: 1.5rem;
-  bottom: 5.75rem;
+  bottom: 1.5rem;
   width: min(24rem, calc(100vw - 3rem));
   z-index: 50;
   /* The shell and the launch button opt back in. Everything else here is a
@@ -555,7 +557,13 @@
   opacity: 0.55;
 }
 
-/* Primary action: white pill, black label. */
+/* Primary action: the lighter gold used in chrome, a step up from the mustard CTAs. */
+.rt-assistant-send,
+.rt-assistant-stop {
+  background: var(--color-rt-primary);
+  color: var(--color-rt-ink);
+}
+
 .rt-assistant-send {
   display: inline-flex;
   min-height: 2.4rem;
@@ -564,24 +572,24 @@
   padding: 0 1rem;
   border: 0;
   border-radius: 9999px;
-  background: #ffffff;
-  color: #07070a;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   text-shadow: none;
   transition:
     background 160ms ease,
+    color 160ms ease,
     opacity 160ms ease;
 }
 
-.rt-assistant-send:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.86);
+.rt-assistant-send:hover:not(:disabled),
+.rt-assistant-stop:hover {
+  background: var(--color-rt-secondary);
 }
 
 .rt-assistant-send:disabled {
   cursor: not-allowed;
-  opacity: 0.35;
+  opacity: 0.45;
 }
 
 .rt-assistant-send:focus-visible,
@@ -603,17 +611,13 @@
   padding: 0;
   border: 0;
   border-radius: 9999px;
-  background: #ffffff;
-  color: #07070a;
   cursor: pointer;
   overflow: visible;
+  text-shadow: none;
   transition:
     background 160ms ease,
+    color 160ms ease,
     opacity 160ms ease;
-}
-
-.rt-assistant-stop:hover {
-  background: rgba(255, 255, 255, 0.86);
 }
 
 .rt-assistant-stop-track {
@@ -627,7 +631,11 @@
   width: 100%;
   height: 100%;
   border-radius: 9999px;
-  background: conic-gradient(#ffffff 0deg, #ffffff 88deg, transparent 110deg 360deg);
+  background: conic-gradient(
+    var(--color-rt-primary) 0deg,
+    var(--color-rt-primary) 88deg,
+    transparent 110deg 360deg
+  );
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   animation: rt-assistant-stop-spin 0.85s linear infinite;
@@ -644,7 +652,7 @@
   width: 10px;
   height: 10px;
   border-radius: 2px;
-  background: #07070a;
+  background: currentColor;
 }
 
 .rt-assistant-empty {
@@ -696,6 +704,130 @@
   font-weight: 600;
 }
 
+.rt-assistant-setup-cta {
+  display: inline-flex;
+  margin-top: 0.7rem;
+  min-height: 2.1rem;
+  align-items: center;
+  padding: 0 0.9rem;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-rt-primary);
+  color: var(--color-rt-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-shadow: none;
+}
+
+.rt-assistant-setup-cta:hover {
+  background: var(--color-rt-secondary);
+}
+
+.rt-assistant-setup-overlay {
+  position: absolute;
+  inset: 3.4rem 0 0;
+  z-index: 4;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+  padding: 0.75rem 0.85rem 0.9rem;
+  background: rgba(8, 8, 10, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.rt-assistant-setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  text-shadow: none;
+}
+
+.rt-assistant-setup-form-title {
+  margin: 0;
+  color: var(--rt-assistant-ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.rt-assistant-setup-form-copy {
+  margin: 0.3rem 0 0;
+  color: var(--rt-assistant-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.rt-assistant-setup-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.rt-assistant-setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--rt-assistant-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.rt-assistant-setup-form .rt-assistant-input {
+  flex: none;
+  width: 100%;
+  max-height: none;
+  min-height: 2.4rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rt-assistant-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.rt-assistant-setup-secondary {
+  min-height: 2.4rem;
+  padding: 0 0.9rem;
+  border: 0;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--rt-assistant-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  text-shadow: none;
+}
+
+.rt-assistant-setup-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.rt-assistant-setup-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.rt-assistant-setup-status {
+  margin: 0;
+  color: var(--rt-assistant-muted);
+  font-size: 0.75rem;
+}
+
+.rt-assistant-setup-error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.75rem;
+}
+
 /* Artifact sitting in a frosted frame (the white hairline). The paper fills
    that frame — a 210px island in a 320px well is what read as unfinished. */
 .rt-assistant-artifact {
@@ -707,9 +839,19 @@
 
 .rt-assistant-artifact-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Stay on the Propose row. Without `min-width: 0` the hint's full sentence is
+   the item's minimum size, so flex-wrap sent the whole line under the button. */
+.rt-assistant-artifact-hint {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--rt-assistant-muted);
 }
 
 .rt-assistant-sticky {
@@ -940,7 +1082,7 @@
   .rt-assistant {
     top: 4.5rem;
     right: 1rem;
-    bottom: 5.5rem;
+    bottom: 1rem;
     width: calc(100vw - 2rem);
   }
 }

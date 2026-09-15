@@ -83,6 +83,25 @@ export interface RunAssistantTurnOptions {
   onUsage?: (usage: AssistantUsage) => void;
 }
 
+/**
+ * Turns the client's history into the conversation the model actually reads.
+ *
+ * Empty turns are omitted — they are not dialogue. A cancelled turn still has to be
+ * explained, but this provider rejects `system` messages beside `instructions`, so that
+ * fact lives in the prompt (see `STOPPED_TURN_NOTE`) rather than in this list. Partial
+ * text from a stopped reply is kept, so a cut-off sentence is visible as a cut-off sentence.
+ */
+export function toModelMessages(
+  history: AssistantHistoryMessage[],
+  message: string,
+): ModelMessage[] {
+  const messages: ModelMessage[] = history
+    .filter((entry) => entry.content.trim().length > 0)
+    .map((entry): ModelMessage => ({ role: entry.role, content: entry.content }));
+  messages.push({ role: 'user', content: message });
+  return messages;
+}
+
 export async function runAssistantTurn(options: RunAssistantTurnOptions): Promise<TurnOutcome> {
   const { model, instructions, history, message, emit, signal, tools } = options;
   const maxSteps = options.maxSteps ?? MAX_STEPS;
@@ -94,15 +113,7 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
     return { reason: 'aborted', usage };
   }
 
-  // A turn that produced artifacts and said nothing still carries facts, which the prompt
-  // has already read off `history`. As a message it would be an empty assistant turn, so
-  // only turns that actually said something reach the model as conversation.
-  const messages: ModelMessage[] = [
-    ...history
-      .filter((entry) => entry.content.trim().length > 0)
-      .map((entry): ModelMessage => ({ role: entry.role, content: entry.content })),
-    { role: 'user', content: message },
-  ];
+  const messages = toModelMessages(history, message);
 
   const result = streamText({
     model,

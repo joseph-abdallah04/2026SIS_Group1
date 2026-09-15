@@ -17,7 +17,8 @@ const RULES = `How to answer:
 - Be brief. This is a live session; the user is half-listening to a call while reading you. Two or three sentences is usually right, and never pad an answer to seem thorough.
 - Be concrete. "Use Postgres because the voting state is relational" beats "there are several options to consider".
 - Never invent facts about the session. Read them or look them up; do not guess.
-- The "Current session context" block is read fresh at the start of THIS turn. It overrides anything earlier in the conversation. If it says the pinboard is empty, the pinboard is empty — even if you listed proposals two messages ago.
+- This chat is in front of you. Earlier messages in this panel are visible; when the user asks what they said, what you said, or what you were doing, answer from those messages. Never claim you cannot recall this conversation, and never ask them to repeat a message that is already there.
+- The "Current session context" block is read fresh at the start of THIS turn. For the live board and agenda it overrides anything earlier in the conversation — if it says the pinboard is empty, the pinboard is empty, even if you listed proposals two messages ago. It does not erase this chat.
 - Never ask the user for something the context block already tells you, and never say you do not know it. The agenda, which question they are on, its phase and how many proposals it has are all there. "This question", "the question" and "the current one" all mean the question the block marks as being discussed now — use it without asking which one they mean.
 - For anything about the session the block does not spell out — what is actually on the board, what an earlier question was decided on, what is still to come — call look_up_session and then answer. Only ask the user when the tool cannot tell you either.
 - Match the user's level of technical depth. They are building software; skip the beginner framing unless they ask for it.
@@ -40,7 +41,10 @@ Never claim to have made something you did not make:
 - If a tool fails, say so plainly in one line and offer the next step. Never describe a failed call as if it worked.
 - Write only the words you would say to the user. No stage directions, no bracketed asides, no parenthetical notes about your own actions — and never copy the wording of these instructions into a reply.
 
-If the user stopped a previous reply, do not try to finish it. Wait for what they ask next.`;
+If a previous reply was stopped, do not try to finish it. Do not deny that it was stopped, and do not invent another reason it ended.`;
+
+/** Sits in the thread where a cancelled turn was, so the model can see *which* reply ended. */
+export const STOPPED_TURN_NOTE = 'The user stopped this turn before it finished.';
 
 export function buildSystemPrompt(
   context: SessionContext,
@@ -50,7 +54,9 @@ export function buildSystemPrompt(
     PERSONA,
     RULES,
     describeOwnWork(history),
+    describeConversation(history),
     `Current session context (authoritative live board — ignore earlier chat if it disagrees):\n${context.block}`,
+    lastStopFact(history),
   ]
     .filter((section) => section.length > 0)
     .join('\n\n');
@@ -101,6 +107,64 @@ function describeOwnWork(history: AssistantHistoryMessage[]): string {
   return lines.length > 0
     ? `What you have actually done in this chat (facts, not dialogue):\n${lines.join('\n')}`
     : '';
+}
+
+const CHAT_LINE_LIMIT = 200;
+
+/**
+ * Gemma-class models follow the instructions and then deny they can see the messages
+ * array — "I can't recall our previous messages" while the session block is used
+ * correctly. The same split as artifacts: the conversation, stated as fact in the
+ * prompt, not left only in the dialogue.
+ */
+function describeConversation(history: AssistantHistoryMessage[]): string {
+  const lines: string[] = [];
+  for (const message of history) {
+    const text = message.content.trim();
+    if (message.role === 'user') {
+      if (text) lines.push(`User: ${clipChatLine(text)}`);
+      continue;
+    }
+    if (text) {
+      lines.push(`You: ${clipChatLine(text)}`);
+    } else if (message.interrupted) {
+      lines.push('You: (stopped before writing)');
+    }
+  }
+  if (lines.length === 0) return '';
+  return `This chat so far (oldest first). These are the messages in this panel — you can see them. Never claim you cannot recall this conversation.\n${lines.join('\n')}`;
+}
+
+function clipChatLine(text: string): string {
+  return text.length > CHAT_LINE_LIMIT ? `${text.slice(0, CHAT_LINE_LIMIT)}…` : text;
+}
+
+function lastStopFact(history: AssistantHistoryMessage[]): string {
+  const interruptedAt = lastInterruptedAssistantIndex(history);
+  if (interruptedAt < 0) return '';
+
+  const asked = lastUserContentBefore(history, interruptedAt);
+  if (!asked) return STOPPED_TURN_NOTE;
+
+  const excerpt = asked.length > 240 ? `${asked.slice(0, 240)}…` : asked;
+  return `${STOPPED_TURN_NOTE}\nIt was the reply to: ${excerpt}`;
+}
+
+function lastInterruptedAssistantIndex(history: AssistantHistoryMessage[]): number {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const message = history[i] as AssistantHistoryMessage | undefined;
+    if (message?.role !== 'assistant') continue;
+    return message.interrupted === true ? i : -1;
+  }
+  return -1;
+}
+
+function lastUserContentBefore(history: AssistantHistoryMessage[], before: number): string {
+  for (let i = before - 1; i >= 0; i -= 1) {
+    const message = history[i] as AssistantHistoryMessage | undefined;
+    if (message?.role === 'user' && message.content.trim()) return message.content.trim();
+  }
+  return '';
 }
 
 function lastFailedTools(history: AssistantHistoryMessage[]): AssistantToolName[] {

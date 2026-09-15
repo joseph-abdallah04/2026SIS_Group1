@@ -84,7 +84,7 @@ describe('deleteAccount', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('refuses while the user leads or belongs to a live session, and deletes nothing', async () => {
+  it('refuses while the user leads or belongs to a lobby or active session, and deletes nothing', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(await userRow());
     findLiveSessionForUser.mockResolvedValue({ id: 'session-1', title: 'Sprint planning' });
 

@@ -240,8 +240,9 @@ export type AssistantContext = z.infer<typeof assistantContextSchema>;
  * One past turn.
  *
  * `content` is only ever what was actually said. What a turn *did* — the artifacts it
- * produced, the tools that failed — rides alongside as structured fields, and the server
- * renders it into the instructions rather than into the conversation.
+ * produced, the tools that failed, whether the user cancelled it — rides alongside as
+ * structured fields, and the server renders it into the instructions rather than into
+ * the conversation.
  *
  * That split is not tidiness. These facts used to be prepended to the assistant's own
  * words as "(Created 1 diagram for the user; they are already on screen.) …", and small
@@ -260,6 +261,8 @@ export const assistantHistoryMessageSchema = z.object({
     .optional(),
   /** Tools this turn called that failed, producing nothing. */
   failedTools: z.array(z.enum(ASSISTANT_TOOL_NAMES)).max(8).optional(),
+  /** True when the user pressed stop before this reply finished. */
+  interrupted: z.boolean().optional(),
 });
 export type AssistantHistoryMessage = z.infer<typeof assistantHistoryMessageSchema>;
 

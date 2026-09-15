@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
+import { liveMembershipOf, useSessions } from '../sessions/useSessions';
 import { LlmSettingsForm } from './LlmSettingsForm';
 import { ProfilePage } from './ProfilePage';
 
@@ -21,6 +22,25 @@ type TabId = (typeof TABS)[number]['id'];
 
 export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('profile');
+  const { sessions, loading } = useSessions();
+  const navigate = useNavigate();
+  const liveSession = liveMembershipOf(sessions);
+
+  useEffect(() => {
+    if (liveSession) navigate(`/sessions/${liveSession.id}`, { replace: true });
+  }, [liveSession, navigate]);
+
+  // Do not paint Profile (and its delete-account control) until we know this
+  // person is not in a lobby or live session.
+  if (loading || liveSession) {
+    return (
+      <main className="min-h-screen bg-rt-secondary-wash px-6 py-10 md:px-16">
+        <p className="text-sm text-rt-ink-muted">
+          {liveSession ? 'Taking you back to your live session…' : 'Loading…'}
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-rt-secondary-wash px-6 py-10 md:px-16">

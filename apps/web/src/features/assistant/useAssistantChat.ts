@@ -49,7 +49,7 @@ export type ChatEntry =
   | { kind: 'error'; id: string; message: string };
 
 /** Turns sent back to the model as context. Tool chatter and artifacts stay client-side. */
-const HISTORY_LIMIT = 10;
+const HISTORY_LIMIT = 20;
 
 /**
  * How long to wait after the transcript settles before writing it.
@@ -280,12 +280,14 @@ export function applyEvent(
  * Flattens the transcript into the turns the model sees next time.
  *
  * `content` carries only words that were actually said. What a turn *did* — the artifacts
- * it produced, the tools that failed — travels as structured fields the server renders
- * into the instructions, because the model needs both facts and must not mistake either
- * for prose. Without the artifact record its own view of the conversation is "the user
- * asked for five sticky notes and I replied with one vague sentence", which reads as a
- * request it never satisfied and gets retried on the next message. Without the failure
- * record, a call that produced nothing is indistinguishable from one that worked.
+ * it produced, the tools that failed, whether the user cancelled it — travels as
+ * structured fields the server renders into the instructions, because the model needs
+ * those facts and must not mistake them for prose. Without the artifact record its own
+ * view of the conversation is "the user asked for five sticky notes and I replied with
+ * one vague sentence", which reads as a request it never satisfied and gets retried on
+ * the next message. Without the failure record, a call that produced nothing is
+ * indistinguishable from one that worked. Without the stop flag, "why did you stop?"
+ * is answered as if the model chose to pause.
  *
  * Both travel *beside* the text rather than inside it. Written into the content they came
  * back out as chat: the model copied its own last turn verbatim, note and all, and kept
@@ -298,14 +300,17 @@ function toHistory(entries: ChatEntry[]): AssistantHistoryMessage[] {
   const messages: AssistantHistoryMessage[] = [];
   let artifacts: ArtifactJson['type'][] = [];
   let failedTools: AssistantToolName[] = [];
+  let interrupted = false;
 
   const takeFacts = () => {
     const facts = {
       ...(artifacts.length > 0 ? { artifacts: [...artifacts] } : {}),
       ...(failedTools.length > 0 ? { failedTools: [...failedTools] } : {}),
+      ...(interrupted ? { interrupted: true } : {}),
     };
     artifacts = [];
     failedTools = [];
+    interrupted = false;
     return facts;
   };
 
@@ -318,9 +323,12 @@ function toHistory(entries: ChatEntry[]): AssistantHistoryMessage[] {
         if (entry.status === 'failed') failedTools.push(entry.toolName);
         break;
       case 'assistant': {
+        if (entry.interrupted) interrupted = true;
         const content = assistantHistoryText(entry);
-        // A turn that only made artifacts still has to appear, or its facts are lost.
-        if (content.length > 0 || artifacts.length > 0 || failedTools.length > 0) {
+        // A turn that only made artifacts, failed a tool, or was stopped still has to
+        // appear, or those facts are lost. Empty content is fine — the server drops it
+        // from the dialogue and keeps the flags for the instructions.
+        if (content.length > 0 || artifacts.length > 0 || failedTools.length > 0 || interrupted) {
           messages.push({ role: 'assistant', content, ...takeFacts() });
         }
         break;
@@ -349,9 +357,7 @@ function toHistory(entries: ChatEntry[]): AssistantHistoryMessage[] {
 const LEGACY_ARTIFACT_NOTE = /^\(Created [^)]*already on screen\.\)\s*/;
 
 function assistantHistoryText(entry: Extract<ChatEntry, { kind: 'assistant' }>): string {
-  const said = entry.text.trim().replace(LEGACY_ARTIFACT_NOTE, '');
-  const stop = entry.interrupted ? '[The user stopped this reply. Do not continue it.]' : '';
-  return [said, stop].filter(Boolean).join('\n\n');
+  return entry.text.trim().replace(LEGACY_ARTIFACT_NOTE, '');
 }
 
 /**

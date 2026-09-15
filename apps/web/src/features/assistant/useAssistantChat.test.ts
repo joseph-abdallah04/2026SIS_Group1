@@ -144,7 +144,11 @@ describe('applyEvent', () => {
     expect(entries).toEqual([
       { kind: 'assistant', id: 'e1', text: 'Half of an answ', streaming: false, interrupted: true },
     ]);
-    expect(transcriptToHistory(entries)[0]?.content).toMatch(/stopped this reply/i);
+    expect(transcriptToHistory(entries)[0]).toEqual({
+      role: 'assistant',
+      content: 'Half of an answ',
+      interrupted: true,
+    });
   });
 
   it('fails a running tool when the user stops the turn', () => {
@@ -156,9 +160,16 @@ describe('applyEvent', () => {
       status: 'failed',
       summary: 'Stopped',
     });
-    expect(transcriptToHistory(entries).some((m) => /stopped this reply/i.test(m.content))).toBe(
-      true,
-    );
+    expect(transcriptToHistory(entries).some((m) => m.interrupted === true)).toBe(true);
+  });
+
+  it('keeps a stop that produced no text so the next turn still sees it', () => {
+    const entries = reduceUnderStrictMode([{ type: 'done', reason: 'aborted' }]);
+    expect(transcriptToHistory(entries).at(-1)).toEqual({
+      role: 'assistant',
+      content: '',
+      interrupted: true,
+    });
   });
 });
 
