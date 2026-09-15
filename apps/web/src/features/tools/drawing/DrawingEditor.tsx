@@ -328,7 +328,7 @@ export function DrawingEditor() {
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3 sm:p-6">
         <div
-          className="relative w-full shrink-0 overflow-hidden rounded-2xl border border-rt-tertiary shadow-[0_8px_30px_rgba(8,12,21,0.10)]"
+          className="relative w-full shrink-0 overflow-hidden rounded-2xl border border-rt-tertiary shadow-[0_8px_30px_rgba(8,12,21,0.10)] has-[svg:focus-visible]:ring-2 has-[svg:focus-visible]:ring-rt-secondary"
           style={{
             maxWidth: `min(1080px, calc((100dvh - ${DRAWING_VERTICAL_CHROME_REM}rem) * ${DRAWING_VIEWBOX_WIDTH / DRAWING_VIEWBOX_HEIGHT}))`,
             aspectRatio: `${DRAWING_VIEWBOX_WIDTH} / ${DRAWING_VIEWBOX_HEIGHT}`,
@@ -393,6 +393,7 @@ export function DrawingEditor() {
         <StudioProposeButton
           form={formId}
           disabled={!isLive}
+          submitting={isSubmitting}
           sending={showSubmitting}
           title={isLive ? 'Propose drawing (Ctrl+Enter)' : 'Reconnect before proposing'}
         />

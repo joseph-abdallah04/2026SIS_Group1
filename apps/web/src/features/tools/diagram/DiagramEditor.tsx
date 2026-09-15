@@ -1013,6 +1013,9 @@ export function DiagramEditor() {
       plural(edges.length + arrows.length, 'arrow', 'arrows'),
       ...(ink.length > 0 ? [plural(ink.length, 'stroke', 'strokes')] : []),
       ...(paths.length > 0 ? [plural(paths.length, 'path', 'paths')] : []),
+      ...(history.snapshot.tables?.length
+        ? [plural(history.snapshot.tables.length, 'table', 'tables')]
+        : []),
     ],
     history.isDirty,
   );
@@ -6570,12 +6573,16 @@ export function DiagramEditor() {
             {edges.length + arrows.length} {edges.length + arrows.length === 1 ? 'arrow' : 'arrows'}
             {ink.length > 0 ? ` · ${ink.length} ${ink.length === 1 ? 'stroke' : 'strokes'}` : ''}
             {paths.length > 0 ? ` · ${paths.length} ${paths.length === 1 ? 'path' : 'paths'}` : ''}
+            {tables.length > 0
+              ? ` · ${tables.length} ${tables.length === 1 ? 'table' : 'tables'}`
+              : ''}
           </>
         }
       >
         <StudioProposeButton
           form={formId}
           disabled={!isLive}
+          submitting={isSubmitting}
           sending={showSubmitting}
           title={isLive ? 'Propose diagram (Ctrl+Enter)' : 'Reconnect before proposing'}
         />

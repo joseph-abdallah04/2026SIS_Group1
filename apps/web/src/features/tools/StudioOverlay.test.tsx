@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StudioActions, StudioOverlay, useReportStudioStatus } from './StudioOverlay';
@@ -49,6 +49,21 @@ function renderStudio({
 const bar = () => screen.queryByRole('region', { name: 'Minimised studio' });
 
 const phaseOf = (studio: HTMLElement) => studio.getAttribute('data-phase');
+
+type PointerKind = 'pointerDown' | 'pointerMove' | 'pointerUp';
+
+/**
+ * A pointer event at a stated time. A flick is judged on how fast the pointer
+ * moved, and events fired without a time share whatever millisecond they land
+ * in, which differs from machine to machine; stating it keeps the outcome the
+ * same on every one.
+ */
+function pointer(kind: PointerKind, target: Element, clientY: number, at: number) {
+  const event = createEvent[kind](target, { pointerId: 1, isPrimary: true, button: 0, clientY });
+  // Offset from zero: React reads a timeStamp of 0 as missing and uses the clock.
+  Object.defineProperty(event, 'timeStamp', { value: 1000 + at });
+  fireEvent(target, event);
+}
 
 /**
  * Where a studio resting at the bottom has been drawn: its open position, and
@@ -260,6 +275,29 @@ describe("the editor's actions", () => {
     expect(within(header).queryByText('2 elements · 1 arrow')).toBeNull();
   });
 
+  // The header's slot is filled by a ref, so the first render inside a studio
+  // always sees it empty. That render used to put the actions in a footer under
+  // the canvas, which showed for a frame before they moved into the header.
+  it('never show a footer inside the studio, even before its header is ready', () => {
+    const footersSeen: number[] = [];
+    function Watch() {
+      useLayoutEffect(() => {
+        footersSeen.push(document.querySelectorAll('footer').length);
+      });
+      return null;
+    }
+
+    render(
+      <StudioOverlay onClose={vi.fn()} title="New studio">
+        <Actions />
+        <Watch />
+      </StudioOverlay>,
+    );
+
+    expect(footersSeen.length).toBeGreaterThan(0);
+    expect(footersSeen.every((count) => count === 0)).toBe(true);
+  });
+
   it('stay in a footer outside the studio, where there is no header', () => {
     render(<Actions />);
 
@@ -283,15 +321,16 @@ describe('dragging the studio up', () => {
     const { studio } = await peeked();
     const face = bar()!;
 
-    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
-    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 600 });
-    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 480 });
+    pointer('pointerDown', face, 720, 0);
+    pointer('pointerMove', face, 600, 200);
+    pointer('pointerMove', face, 480, 400);
 
     expect(phaseOf(studio)).toBe('dragging');
     // 240px of the 668px between resting and up.
     expect(Number(studio.style.getPropertyValue('--studio-lift'))).toBeCloseTo(240 / 668);
 
-    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 480 });
+    // Held still for a moment first, so this is the distance and not a flick.
+    pointer('pointerUp', face, 480, 700);
 
     expect(phaseOf(studio)).toBe('open');
     expect(studio.style.getPropertyValue('--studio-lift')).toBe('');
@@ -302,14 +341,53 @@ describe('dragging the studio up', () => {
     const { studio } = await peeked();
     const face = bar()!;
 
-    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
-    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 660 });
-    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 690 });
-    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 690 });
+    pointer('pointerDown', face, 720, 0);
+    pointer('pointerMove', face, 660, 50);
+    pointer('pointerMove', face, 690, 100);
+    pointer('pointerUp', face, 690, 130);
 
     expect(phaseOf(studio)).toBe('peeking');
     expect(studio.style.getPropertyValue('--studio-lift')).toBe('');
     expect(bar()).not.toBeNull();
+  });
+
+  // What failed on CI: a quick first hop up, then a move back down reported in
+  // the same millisecond. The first hop's speed used to stand, and the drag was
+  // let go as a flick however low it ended.
+  it('does not take a fast first hop, lowered again at once, for a flick', async () => {
+    const { studio } = await peeked();
+    const face = bar()!;
+
+    pointer('pointerDown', face, 720, 0);
+    pointer('pointerMove', face, 660, 1);
+    pointer('pointerMove', face, 690, 1);
+    pointer('pointerUp', face, 690, 1);
+
+    expect(phaseOf(studio)).toBe('peeking');
+  });
+
+  it('comes up when flicked, however little it rose', async () => {
+    const { studio } = await peeked();
+    const face = bar()!;
+
+    pointer('pointerDown', face, 720, 0);
+    pointer('pointerMove', face, 700, 10);
+    pointer('pointerMove', face, 640, 20);
+    // 80px in 24ms, well under a third of the way.
+    pointer('pointerUp', face, 640, 24);
+
+    expect(phaseOf(studio)).toBe('open');
+  });
+
+  it('does not count a rise the pointer then rested after as a flick', async () => {
+    const { studio } = await peeked();
+    const face = bar()!;
+
+    pointer('pointerDown', face, 720, 0);
+    pointer('pointerMove', face, 640, 20);
+    pointer('pointerUp', face, 640, 400);
+
+    expect(phaseOf(studio)).toBe('peeking');
   });
 
   it('is not a drag when the press never moves', async () => {
@@ -405,10 +483,10 @@ describe('studio overlay motion', () => {
     restAt(studio, { openTop: 32, restingTop: 700 });
 
     const face = bar()!;
-    fireEvent.pointerDown(face, { pointerId: 1, isPrimary: true, button: 0, clientY: 720 });
-    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 700 });
-    fireEvent.pointerMove(face, { pointerId: 1, isPrimary: true, clientY: 710 });
-    fireEvent.pointerUp(face, { pointerId: 1, isPrimary: true, clientY: 710 });
+    pointer('pointerDown', face, 720, 0);
+    pointer('pointerMove', face, 700, 50);
+    pointer('pointerMove', face, 710, 100);
+    pointer('pointerUp', face, 710, 130);
 
     expect(phaseOf(studio)).toBe('dropping');
     // Already moving when let go, so it eases out from there.

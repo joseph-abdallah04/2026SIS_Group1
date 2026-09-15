@@ -40,8 +40,15 @@ export interface StudioStatus {
 
 const ReportStudioStatus = createContext<(status: StudioStatus) => void>(() => undefined);
 
-/** Where in the studio's header an editor's own actions go. */
-const StudioActionsSlot = createContext<HTMLElement | null>(null);
+/**
+ * Where in the studio's header an editor's own actions go.
+ *
+ * Three states, not two. `undefined` is outside any studio, where the actions
+ * belong in a footer. `null` is inside a studio whose header has not mounted
+ * yet: the slot is filled by a ref, so the first render always sees it empty,
+ * and treating that as "outside" put a footer under the canvas for a frame.
+ */
+const StudioActionsSlot = createContext<HTMLElement | null | undefined>(undefined);
 
 const FALLBACK_FOOTER_CLASS =
   'flex shrink-0 flex-wrap items-center gap-3 border-t border-rt-tertiary bg-rt-surface px-4 py-3 sm:px-6';
@@ -72,7 +79,11 @@ export function StudioActions({
 }: StudioActionsProps) {
   const slot = useContext(StudioActionsSlot);
 
-  if (!slot) {
+  // Inside a studio, but its header is not there yet: nothing, for the one
+  // render before it is.
+  if (slot === null) return null;
+
+  if (slot === undefined) {
     return (
       <footer className={footerClassName}>
         <div className="min-w-0 flex-1">
@@ -135,6 +146,8 @@ interface StudioProposeButtonProps {
   /** The editor's form, which the button submits from the header. */
   form: string;
   disabled: boolean;
+  /** A proposal is on its way, however briefly. */
+  submitting: boolean;
   /** On its way for long enough to say so; see `useSlowSubmission`. */
   sending: boolean;
   title: string;
@@ -146,16 +159,31 @@ interface StudioProposeButtonProps {
  * The same size whatever it is doing: while a slow send is waiting, the label
  * is covered by a spinner rather than replaced by a longer one, so nothing else
  * in the header moves.
+ *
+ * From the moment a proposal is sent it refuses another press and says it is
+ * unavailable, but it does not dim: most sends are over before a dimmed button
+ * could be seen as anything but a flicker. It dims with the spinner once a send
+ * is slow.
  */
-export function StudioProposeButton({ form, disabled, sending, title }: StudioProposeButtonProps) {
+export function StudioProposeButton({
+  form,
+  disabled,
+  submitting,
+  sending,
+  title,
+}: StudioProposeButtonProps) {
   return (
     <Button
       type="submit"
       form={form}
-      className="relative shrink-0"
+      className="relative shrink-0 aria-disabled:cursor-wait"
       disabled={disabled}
+      aria-disabled={submitting || undefined}
       aria-busy={sending || undefined}
       title={title}
+      onClick={(event) => {
+        if (submitting) event.preventDefault();
+      }}
     >
       <span aria-hidden={sending || undefined} className={sending ? 'invisible' : undefined}>
         Propose
@@ -199,6 +227,10 @@ const DRAG_SLOP_PX = 4;
 const LIFT_COMMIT = 0.3;
 /** Or flicked upward at least this fast, in px per ms, however little it rose. */
 const FLICK_PX_PER_MS = 0.5;
+/** A flick is judged on the pointer's last moments before it was let go. */
+const FLICK_WINDOW_MS = 80;
+/** And needs at least a frame's worth of them to be judged at all. */
+const FLICK_MIN_SPAN_MS = 16;
 
 /** Kept clear either side of the studio where it sits over the board. */
 const BOARD_GUTTER_PX = 12;
@@ -297,17 +329,35 @@ function useStudioColumn() {
   return [column, remeasure] as const;
 }
 
+interface PointerSample {
+  y: number;
+  at: number;
+}
+
 /** A press on the minimised face, followed until it is let go. */
 interface Drag {
   pointerId: number;
   startY: number;
-  lastY: number;
-  lastTime: number;
-  /** Upward speed at the last move, in px per ms. */
-  speed: number;
+  /** Where the pointer has been lately, oldest first. */
+  samples: PointerSample[];
   /** From resting at the bottom to fully up, in px. */
   travel: number;
   moved: boolean;
+}
+
+/**
+ * How fast the pointer was rising as it was let go, in px per ms.
+ *
+ * From the oldest position in the last `FLICK_WINDOW_MS` to where it was let
+ * go, and only over at least `FLICK_MIN_SPAN_MS`. It used to be the speed of the
+ * last move with any time between it and the one before. Moves reported in the
+ * same millisecond have none, so a fast early rise stood through a later move
+ * back down, and a drag lifted and then lowered was let go as a flick.
+ */
+function releaseSpeed(samples: readonly PointerSample[], y: number, at: number): number {
+  const from = samples.find((sample) => sample.at >= at - FLICK_WINDOW_MS);
+  if (!from || at - from.at < FLICK_MIN_SPAN_MS) return 0;
+  return (from.y - y) / (at - from.at);
 }
 
 /**
@@ -574,9 +624,7 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
     drag.current = {
       pointerId: event.pointerId,
       startY: event.clientY,
-      lastY: event.clientY,
-      lastTime: event.timeStamp,
-      speed: 0,
+      samples: [{ y: event.clientY, at: event.timeStamp }],
       travel,
       moved: false,
     };
@@ -591,10 +639,14 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
       current.moved = true;
       setPhase('dragging');
     }
-    const elapsed = event.timeStamp - current.lastTime;
-    if (elapsed > 0) current.speed = (current.lastY - event.clientY) / elapsed;
-    current.lastY = event.clientY;
-    current.lastTime = event.timeStamp;
+    current.samples.push({ y: event.clientY, at: event.timeStamp });
+    // Only the last moments are ever read, so older ones are let go.
+    while (
+      current.samples.length > 1 &&
+      current.samples[0]!.at < event.timeStamp - FLICK_WINDOW_MS
+    ) {
+      current.samples.shift();
+    }
     const lift = Math.min(1, Math.max(0, risen / current.travel));
     dialogRef.current?.style.setProperty('--studio-lift', String(lift));
   };
@@ -605,7 +657,8 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
     drag.current = null;
     if (!current.moved) return;
     const lift = (current.startY - event.clientY) / current.travel;
-    if (lift >= LIFT_COMMIT || current.speed >= FLICK_PX_PER_MS) returnToStudio(true);
+    const speed = releaseSpeed(current.samples, event.clientY, event.timeStamp);
+    if (lift >= LIFT_COMMIT || speed >= FLICK_PX_PER_MS) returnToStudio(true);
     else dropBack();
   };
 
@@ -628,7 +681,9 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
   return (
     <dialog
       ref={dialogRef}
-      aria-labelledby="creative-studio-title"
+      // Named directly rather than by the heading, which is hidden while the
+      // studio rests on the board.
+      aria-label={title}
       data-phase={phase}
       className={`fixed inset-0 z-40 m-0 h-dvh max-h-none w-screen max-w-none overflow-hidden border-0 bg-rt-surface p-0 text-rt-ink [--studio-showing:5.5rem] [--studio-top:0px] backdrop:bg-rt-ink/35 md:m-auto md:h-[calc(100dvh-4rem)] md:w-[calc(100vw-4rem)] md:max-w-370 md:rounded-[28px] md:border md:border-rt-ink/15 md:shadow-[0_24px_64px_rgba(8,12,21,0.28)] md:[--studio-showing:6.5rem] md:[--studio-top:2rem] ${
         AWAY.has(phase) ? 'max-md:rounded-t-[28px]' : ''
@@ -673,9 +728,7 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
                 <p className="text-[9px] font-semibold tracking-[0.14em] text-rt-ink/60 uppercase">
                   Creative studio
                 </p>
-                <h1 id="creative-studio-title" className="truncate text-[17px] font-semibold">
-                  {title}
-                </h1>
+                <h1 className="truncate text-[17px] font-semibold">{title}</h1>
               </div>
               <div className="ml-auto flex min-w-0 items-center gap-2">
                 <button
