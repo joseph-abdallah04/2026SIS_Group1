@@ -391,7 +391,12 @@ export function DrawingEditor() {
           disabled={!isLive}
           submitting={isSubmitting}
           sending={showSubmitting}
-          title={isLive ? 'Propose drawing (Ctrl+Enter)' : 'Reconnect before proposing'}
+          editing={editSource !== null}
+          title={
+            isLive
+              ? `${editSource ? 'Update proposal' : 'Propose drawing'} (Ctrl+Enter)`
+              : `Reconnect before ${editSource ? 'updating' : 'proposing'}`
+          }
         />
       </StudioActions>
     </form>

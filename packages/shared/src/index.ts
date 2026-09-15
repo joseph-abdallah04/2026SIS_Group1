@@ -99,8 +99,24 @@ export type StickyColor = 'yellow' | 'pink' | 'blue' | 'green';
 
 export interface StickyArtifact {
   type: 'sticky';
+  /** The note's words, as plain text. */
   text: string;
   color: StickyColor;
+  /** Formatting over `text`; absent on a note with none. See `stickyContract`. */
+  marks?: StickyMark[];
+  /**
+   * The list style of each line of `text`, by line, with null for a plain line.
+   * Absent on a note with no lists, and may stop before the last line: any line
+   * it does not reach is plain.
+   */
+  lines?: (StickyLineStyle | null)[];
+  /**
+   * How deeply each line of a list is nested, by line, from 0. Absent when no
+   * item is nested, and may stop early the same way `lines` does.
+   */
+  levels?: number[];
+  /** Links over `text`; absent on a note with none. */
+  links?: StickyLink[];
 }
 
 export interface DrawingArtifact {
@@ -127,9 +143,11 @@ export * from './studioElements.js';
 export * from './studioArrows.js';
 export * from './drawingContract.js';
 export * from './reactionContract.js';
+export * from './stickyContract.js';
 import type { DiagramArtifact } from './diagramContract.js';
 import type { DrawingStrokeData } from './drawingContract.js';
 import type { ReactionGroup } from './reactionContract.js';
+import type { StickyLineStyle, StickyLink, StickyMark } from './stickyContract.js';
 
 export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
 

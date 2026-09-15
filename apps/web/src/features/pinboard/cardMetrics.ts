@@ -13,6 +13,6 @@ import { CARD_WIDTH } from './pinboardTokens';
  */
 export function cardWidth(item: Pick<BoardItem, 'type' | 'artifactJson'>): number {
   return item.artifactJson.type === 'sticky'
-    ? stickySize(item.artifactJson.text)
+    ? stickySize(item.artifactJson)
     : CARD_WIDTH[item.type];
 }

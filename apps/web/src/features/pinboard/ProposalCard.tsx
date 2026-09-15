@@ -47,6 +47,7 @@ import {
   STICKY_NOTE_CLASS,
   STICKY_NOTE_PADDING,
 } from '../tools/sticky/stickyPresentation';
+import { StickyText } from '../tools/sticky/StickyText';
 import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
@@ -70,6 +71,12 @@ interface ProposalCardProps {
   isNew?: boolean;
   /** On the leader's voting shortlist (F27). */
   isShortlisted?: boolean;
+  /**
+   * Whether the card may hold presses of its own: a sticky's links. Off where
+   * the card is itself a button, as on a ballot, where links are drawn without
+   * being links.
+   */
+  interactive?: boolean;
 }
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
@@ -477,9 +484,11 @@ export function ProposalCard({
   isAuthorLeader = false,
   isNew = false,
   isShortlisted = false,
+  interactive = true,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
+  const size = cardWidth(item);
   // A sticky keeps the colour its author chose, in its own matching edge.
   const theme = isSticky ? STICKY_THEMES[artifact.color] : null;
 
@@ -498,18 +507,21 @@ export function ProposalCard({
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
       {/* A sticky is bare paper: no outline, square corners, and a square
-          footprint that does not grow with its contents. Everything else is a
-          panel, so it keeps its border and its rounded edge. */}
+          footprint that grows a step at a time with its note. Everything else
+          is a panel, so it keeps its border and its rounded edge. */}
       <article
-        className={`flex shrink-0 flex-col overflow-hidden ${isSticky ? '' : 'border'} ${
-          isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''
-        }`}
+        className={`flex shrink-0 flex-col overflow-hidden ${
+          isSticky
+            ? 'transition-[width,min-height] duration-150 ease-out motion-reduce:transition-none'
+            : 'border'
+        } ${isShortlisted ? 'ring-1 ring-rt-secondary/40' : ''}`}
         style={{
-          width: cardWidth(item),
+          width: size,
           // Square, and a floor rather than a fixed height: the step the note's
-          // length picked is the size it starts at, and an awkward wrap can
-          // still push it taller rather than shrinking the text to fit.
-          ...(isSticky ? { minHeight: cardWidth(item) } : {}),
+          // length picked is the size it starts at. A note longer than even the
+          // largest square holds stays that wide and grows a little taller, so
+          // every word of it is on the board.
+          ...(isSticky ? { minHeight: size } : {}),
           borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
           ...(isSticky ? {} : { borderColor: theme ? theme.border : CARD_BORDER }),
           background: theme ? theme.bg : '#FFFFFF',
@@ -519,18 +531,19 @@ export function ProposalCard({
         {artifact.type === 'sticky' ? (
           // Fills whatever the square leaves above the byline, so a short note
           // sits at the top of the paper rather than centred in it.
-          <p
-            className={STICKY_NOTE_CLASS}
-            style={{
-              padding: STICKY_NOTE_PADDING,
-              // No clamp: the tool caps how long a note can be, so everything
-              // the board accepts has room to be read in full.
-              fontSize: STICKY_FONT_SIZE,
-              lineHeight: STICKY_LINE_HEIGHT,
-            }}
-          >
-            {artifact.text}
-          </p>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              data-sticky-note
+              className={STICKY_NOTE_CLASS}
+              style={{
+                padding: STICKY_NOTE_PADDING,
+                fontSize: STICKY_FONT_SIZE,
+                lineHeight: STICKY_LINE_HEIGHT,
+              }}
+            >
+              <StickyText note={artifact} links={interactive ? 'open' : 'inert'} />
+            </div>
+          </div>
         ) : null}
 
         {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}

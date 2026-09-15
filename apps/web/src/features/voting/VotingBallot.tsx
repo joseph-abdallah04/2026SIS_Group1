@@ -214,6 +214,9 @@ export function VotingBallot({
                       item={item}
                       isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
                       isAuthorLeader={item.authorId != null && item.authorId === leaderId}
+                      // The card is the vote button, so nothing on it is a
+                      // press of its own.
+                      interactive={false}
                     />
                   );
 

@@ -1,4 +1,6 @@
 import { CARD_FOOT_CLASS } from '../../pinboard/pinboardTokens';
+import { fillWithNote } from './stickyDom';
+import type { StickyContent } from './stickyMarks';
 
 /**
  * How sticky text is set, everywhere it is shown.
@@ -9,8 +11,8 @@ import { CARD_FOOT_CLASS } from '../../pinboard/pinboardTokens';
  * read at a glance, and glancing is what a board is for. The note grows
  * instead, in both directions.
  *
- * Shared by the board card, the inline editor and the probe that sizes them, so
- * all three set a note the same way.
+ * Shared by the board card, the editors and the probe that sizes them, so all
+ * of them set a note the same way.
  */
 export const STICKY_FONT_SIZE = 14;
 export const STICKY_LINE_HEIGHT = 1.45;
@@ -18,8 +20,7 @@ export const STICKY_LINE_HEIGHT = 1.45;
  * Whitespace is shown exactly as it was typed: line breaks, blank lines, runs
  * of spaces and indents. It may well be deliberate, and a board that tidied it
  * would be rewriting somebody's note. It also takes the room it takes, so the
- * size a note is given and the check that stops it outgrowing the paper both
- * count it, which is what stops Enter from growing the popup without end.
+ * size a note is given counts it.
  */
 export const STICKY_NOTE_CLASS =
   'min-h-0 flex-1 wrap-break-word whitespace-pre-wrap font-medium text-rt-ink';
@@ -44,19 +45,21 @@ const LINE_PX = STICKY_FONT_SIZE * STICKY_LINE_HEIGHT;
 export const stickySquare = (lines: number) => Math.ceil(CHROME_PX + lines * LINE_PX);
 
 /**
- * The three sizes a sticky can be: eight, nine and ten lines of note.
+ * The sizes a sticky can be: one for every line of note from eight to fourteen.
  *
- * A note sits on the smallest one it fits, and moves up only when its text
- * reaches the bottom of the paper. Each is exactly one line taller than the
- * last, so a note that has grown ends on the last line of its card.
+ * A note sits on the smallest one it fits, and moves up a line at a time as it
+ * grows, each size exactly one line taller and wider than the last. That is
+ * what makes a long note grow steadily as it is written rather than jumping
+ * between a few sizes far apart.
  *
- * Three and no more. The character cap is set so ordinary prose always fits in
- * ten lines, and the editors refuse text that would not fit the largest square
- * however it is written, so nothing needs a fourth.
+ * Fourteen lines hold a note at the editor's length in ordinary prose. One that
+ * still does not fit — many short lines, or a lot of bold — stays as wide as the
+ * largest size and grows a little taller than it, rather than hiding any of
+ * somebody's words.
  */
-const STICKY_LINES = [8, 9, 10];
-export const STICKY_MIN_SIZE = stickySquare(8);
-export const STICKY_MAX_SIZE = stickySquare(10);
+const STICKY_LINES = [8, 9, 10, 11, 12, 13, 14];
+export const STICKY_MIN_SIZE = stickySquare(STICKY_LINES[0]!);
+export const STICKY_MAX_SIZE = stickySquare(STICKY_LINES.at(-1)!);
 
 /**
  * How much a line holds, for when the page cannot be asked.
@@ -68,10 +71,18 @@ export const STICKY_MAX_SIZE = stickySquare(10);
  */
 const EFFECTIVE_ADVANCE_PX = 7.2;
 
+/** About how many lines a note wraps to at a square of this size. */
+function estimatedLines(text: string, size: number): number {
+  const perLine = Math.max(1, Math.floor((size - 28) / EFFECTIVE_ADVANCE_PX));
+  return text
+    .split('\n')
+    .reduce((lines, line) => lines + Math.max(1, Math.ceil(line.length / perLine)), 0);
+}
+
 function estimatedSize(text: string): number {
   for (const lines of STICKY_LINES) {
     const size = stickySquare(lines);
-    if (text.length <= lines * ((size - 28) / EFFECTIVE_ADVANCE_PX)) return size;
+    if (estimatedLines(text, size) <= lines) return size;
   }
   return STICKY_MAX_SIZE;
 }
@@ -81,10 +92,10 @@ function estimatedSize(text: string): number {
  *
  * Counting characters cannot say where a note will wrap, and a guess that is a
  * line out is the difference between a note that fits and one that spills over
- * the byline. So the note is laid out for real, at each candidate width, in the
- * font the page is actually using.
+ * the byline. So the note is laid out for real, formatting and all, at each
+ * candidate width, in the font the page is actually using.
  */
-let probe: { card: HTMLDivElement; note: HTMLParagraphElement } | null = null;
+let probe: { card: HTMLDivElement; note: HTMLDivElement } | null = null;
 
 function getProbe() {
   if (probe?.card.isConnected) return probe;
@@ -94,7 +105,8 @@ function getProbe() {
   card.style.cssText =
     'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;display:flex;flex-direction:column';
 
-  const note = document.createElement('p');
+  const note = document.createElement('div');
+  note.setAttribute('data-sticky-note', '');
   note.className = STICKY_NOTE_CLASS;
   note.style.padding = STICKY_NOTE_PADDING;
   note.style.fontSize = `${STICKY_FONT_SIZE}px`;
@@ -111,13 +123,27 @@ function getProbe() {
   return probe;
 }
 
-/** The smallest whole-line square the note is laid out within, or null with no layout. */
-function measuredSize(text: string): number | null {
-  if (typeof document === 'undefined') return null;
-
+/**
+ * Lays the note out in the probe, runs `measure` against it, and empties it.
+ *
+ * Emptied every time. Left holding the last note, the probe is a hidden second
+ * copy of somebody's words in the page: one more match for anything that
+ * searches the document for them.
+ */
+function withNoteLaidOut<T>(content: StickyContent, measure: (card: HTMLDivElement) => T): T {
   const { card, note } = getProbe();
-  note.textContent = text;
+  fillWithNote(note, content);
   try {
+    return measure(card);
+  } finally {
+    note.replaceChildren();
+  }
+}
+
+/** The smallest whole-line square the note is laid out within, or null with no layout. */
+function measuredSize(content: StickyContent): number | null {
+  if (typeof document === 'undefined') return null;
+  return withNoteLaidOut(content, (card) => {
     for (const lines of STICKY_LINES) {
       const size = stickySquare(lines);
       card.style.width = `${size}px`;
@@ -128,112 +154,43 @@ function measuredSize(text: string): number | null {
       if (height <= size) return size;
     }
     return STICKY_MAX_SIZE;
-  } finally {
-    // Emptied every time. Left holding the last note, the probe is a hidden
-    // second copy of somebody's words in the page: one more match for anything
-    // that searches the document for them.
-    note.textContent = '';
-  }
+  });
 }
 
 const measured = new Map<string, number>();
 /** Enough for every note on a busy board and the edits in progress on it. */
 const MEASURED_LIMIT = 1000;
 
-/**
- * The square a sticky with this note is shown on.
- *
- * Measured, then remembered. Only a measurement taken in the page's real font
- * is remembered: one taken while Inter is still loading was set in the fallback
- * face, which wraps differently, and remembering it would keep a card the wrong
- * size after the font arrived.
- */
-export function stickySize(text: string): number {
-  // Measured as written, since that is how the card shows it.
-  const note = text;
-  const known = measured.get(note);
-  if (known !== undefined) return known;
+function measure(content: StickyContent) {
+  const { text, marks = [], lines = [], levels = [] } = content;
+  // The formatting is part of the key: bold is wider, and a list item is
+  // indented, the more so nested, so any of them can need a line more. Links
+  // are not: a link is set in the same type as the words around it.
+  const key =
+    marks.length || lines.some(Boolean)
+      ? `${text}\u0000${JSON.stringify(marks)}\u0000${JSON.stringify(lines)}\u0000${JSON.stringify(levels)}`
+      : text;
+  const known = measured.get(key);
+  if (known) return known;
 
-  const size = measuredSize(note);
-  if (size === null) return estimatedSize(note);
+  const result = measuredSize(content);
+  if (result === null) return estimatedSize(text);
 
+  // Only a measurement taken in the page's real font is remembered: one taken
+  // while Inter is still loading was set in the fallback face, which wraps
+  // differently, and remembering it would keep a card the wrong size after the
+  // font arrived.
   if (typeof document !== 'undefined' && document.fonts?.status === 'loaded') {
     if (measured.size >= MEASURED_LIMIT) measured.clear();
-    measured.set(note, size);
+    measured.set(key, result);
   }
-  return size;
-}
-
-/** Said when a note will not fit on any sticky, whatever its character count. */
-export const STICKY_TOO_TALL =
-  'This note is too long to fit on a sticky. Shorten it to propose it.';
-
-/**
- * Whether a note fits on the largest sticky.
- *
- * The character cap keeps ordinary prose inside ten lines, but it counts
- * characters, not width: a note in capitals, or one key held down, runs out of
- * paper well before it runs out of characters. The editors ask this before
- * taking more text, and again before proposing or saving, so no note they
- * accept is taller than the largest square. A note that reaches the board some
- * other way and does not fit still grows taller rather than being clipped:
- * hiding somebody's words is the worse failure.
- *
- * With no layout engine at all there is nothing to measure against, and this
- * answers yes. That is jsdom in tests; in a browser a note always has height.
- */
-export function stickyFits(text: string): boolean {
-  if (typeof document === 'undefined') return true;
-
-  const { card, note } = getProbe();
-  // Exactly as written. Line breaks at either end are kept when the note is
-  // saved, and they are on the paper while it is being written; a check that
-  // ignored them would let Enter grow the popup forever.
-  //
-  // A line break at the very end draws no line of its own in a paragraph, yet
-  // in the box being typed into it has moved the cursor onto a new one. Left
-  // uncounted, the Enter on the last line was taken and put the cursor on a
-  // line the sticky does not have, where nothing more could be written. A
-  // zero-width space gives that empty line a height, so it is the Enter that
-  // is refused and the cursor stays where there is still room.
-  note.textContent = text.endsWith('\n') ? `${text}\u200b` : text;
-  try {
-    card.style.width = `${STICKY_MAX_SIZE}px`;
-    const height = card.getBoundingClientRect().height;
-    // No layout engine, nothing to measure: the character cap is all there is.
-    return height === 0 || height <= STICKY_MAX_SIZE;
-  } finally {
-    note.textContent = '';
-  }
+  return result;
 }
 
 /**
- * A note cut down to what the largest sticky can hold, keeping the words.
- *
- * For text that did not come through the editor's own refusal: a draft saved
- * before line breaks were counted could hold hundreds of empty lines, and the
- * popup, which grows to fit what it holds, opened thousands of pixels tall
- * with its top and its close button far off the window.
- *
- * A note that fits is returned exactly as it is, whitespace and all: this never
- * tidies a note that can be shown. Only one that cannot fit on any sticky is
- * changed, first by closing its runs of blank lines up to a single blank line,
- * which is nearly always what made it too tall and costs no words, and only if
- * that is still too much by cutting it to the longest start that fits. Adding
- * to a note never makes it shorter, so that length can be found by halving.
+ * How wide a sticky with this note is, and how tall at the least: the smallest
+ * square it fits, or the largest for a note that fits none.
  */
-export function fitToSticky(text: string): string {
-  if (stickyFits(text)) return text;
-
-  const closedUp = text.replace(/\n{3,}/g, '\n\n');
-  if (stickyFits(closedUp)) return closedUp;
-
-  let fits = 0;
-  let overflows = closedUp.length;
-  while (overflows - fits > 1) {
-    const middle = Math.floor((fits + overflows) / 2);
-    if (stickyFits(closedUp.slice(0, middle))) fits = middle;
-    else overflows = middle;
-  }
-  return closedUp.slice(0, fits);
+export function stickySize(content: StickyContent): number {
+  return measure(content);
 }
