@@ -5216,4 +5216,69 @@ describe('studio extend and reopen', () => {
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled();
   });
+
+  function twoBoxes(): BoardItem {
+    const item = oneBox();
+    return {
+      ...item,
+      id: 'two-boxes',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [
+          { id: 'n1', label: 'Idea', x: 24, y: 24, shape: 'box' },
+          { id: 'n2', label: 'Plan', x: 240, y: 24, shape: 'box' },
+        ],
+        edges: [],
+      },
+    };
+  }
+
+  // Proposing tucks the artwork back into the sheet's corner, so moving
+  // everything together stores exactly the original. That is not a change.
+  it('does not count moving everything together as a change', async () => {
+    const user = userEvent.setup();
+    const send = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(
+      <Harness propose={send}>
+        <ExtendButton proposal={twoBoxes()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
+    mockSurface(canvas, { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT });
+    const idea = screen.getByRole('button', { name: 'Rounded rectangle: Idea' });
+    const before = idea.getAttribute('transform');
+
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+    fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+
+    // It really moved on the canvas…
+    expect(idea.getAttribute('transform')).not.toBe(before);
+    // …but what would be stored has not, so the extension is still a clone.
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled();
+    fireEvent.submit(canvas.closest('form')!);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('counts moving one element relative to another as a change', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness propose={vi.fn(async () => undefined)}>
+        <ExtendButton proposal={twoBoxes()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
+    mockSurface(canvas, { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT });
+
+    pressNode(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }), canvas, {
+      pointerId: 901,
+      time: 1000,
+    });
+    fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
+  });
 });

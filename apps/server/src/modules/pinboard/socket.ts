@@ -174,7 +174,8 @@ export function registerPinboardSocketHandlers(io: RealtimeServer, socket: Realt
 
   onWriteIntent(socket, 'proposalArrange', proposalArrangeSchema, async (input, actor) => {
     const proposal = await arrangeProposal({ proposalId: input.id, actor, to: input.to });
-    emitProposalUpdated(io, actor.sessionId, proposal);
+    // Nothing moved, so there is nothing to tell the room.
+    if (proposal) emitProposalUpdated(io, actor.sessionId, proposal);
   });
 
   onWriteIntent(socket, 'proposalDelete', proposalDeleteSchema, async (input, actor) => {

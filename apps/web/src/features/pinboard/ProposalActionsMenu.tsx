@@ -115,9 +115,11 @@ export function ProposalActionsMenu({
     const panel = panelRef.current;
     if (!panel) return;
     setPosition(placeMenu(anchor, panel.offsetWidth, panel.offsetHeight));
-    // Measured once, on open, like the other popovers on the board: a menu
-    // that re-placed itself as the board moved would walk away from the card.
-  }, []);
+    // Placed when the menu opens and again whenever the card opens it from
+    // somewhere new — a second right-click, or the Menu key — which it does by
+    // handing over a new anchor. Never as the board pans: the anchor does not
+    // change then, and a menu that followed the board would walk off its card.
+  }, [anchor]);
 
   const enabledItems = () =>
     Array.from(
@@ -149,6 +151,13 @@ export function ProposalActionsMenu({
     const onPointerDown = (event: PointerEvent) => {
       if (outside(event.target)) onClose();
     };
+    // The Menu key and Shift+F10 open another card's menu without any press to
+    // close this one first, which would leave two open at once. Heard before
+    // the card's own handler, so on the card this menu belongs to it closes
+    // and that handler opens it again at the new spot in the same update.
+    const onContextMenu = (event: MouseEvent) => {
+      if (outside(event.target)) onClose();
+    };
     const onWheel = (event: WheelEvent) => {
       if (outside(event.target)) onClose();
     };
@@ -156,12 +165,14 @@ export function ProposalActionsMenu({
 
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('contextmenu', onContextMenu, true);
     window.addEventListener('wheel', onWheel, { passive: true });
     window.addEventListener('resize', onResize);
 
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('contextmenu', onContextMenu, true);
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', onResize);
       if (previous instanceof HTMLElement) previous.focus();

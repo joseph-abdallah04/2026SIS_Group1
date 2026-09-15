@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BringToFront,
   Copy,
@@ -294,6 +294,13 @@ export function PositionedProposal({
       : [],
   ];
   const hasActions = sections.some((section) => section.length > 0);
+
+  // What a viewer may do can change under an open menu — the leader moves the
+  // question to voting, a proposal starts sending — and a menu left with
+  // nothing in it would be an empty box floating over the board.
+  useEffect(() => {
+    if (menu && !hasActions) setMenu(null);
+  }, [menu, hasActions]);
 
   const confirmRemove = () => {
     setRemoving(true);

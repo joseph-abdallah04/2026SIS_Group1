@@ -1102,6 +1102,36 @@ export function normalizeDiagramCoordinates(nodes: readonly DiagramNode[]): Diag
   }));
 }
 
+/**
+ * What proposing this canvas would store, as a string, or null when it could
+ * not be proposed at all.
+ *
+ * For telling an extension that changes its original from one that does not.
+ * Comparing canvas positions is not enough: proposing tucks the artwork into
+ * the sheet's corner, so selecting everything and nudging it lands the very
+ * same artifact. Comparing what would be stored is exactly the question.
+ */
+export function preparedDiagramKey(content: {
+  nodes: readonly DiagramNode[];
+  edges: readonly DiagramEdge[];
+  ink?: readonly StudioInkStroke[];
+  z?: readonly string[];
+  paths?: readonly PathElement[];
+  tables?: readonly TableElement[];
+  arrows?: readonly ArrowElement[];
+}): string | null {
+  const prepared = prepareDiagram(
+    content.nodes,
+    content.edges,
+    content.ink ?? [],
+    content.z ?? [],
+    content.paths ?? [],
+    content.tables ?? [],
+    content.arrows ?? [],
+  );
+  return prepared.ok ? JSON.stringify(prepared.artifact) : null;
+}
+
 export function prepareDiagram(
   nodes: readonly DiagramNode[],
   edges: readonly DiagramEdge[],

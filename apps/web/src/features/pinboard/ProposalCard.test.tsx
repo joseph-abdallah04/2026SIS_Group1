@@ -679,6 +679,38 @@ describe('card layout', () => {
     });
   });
 
+  describe('where the explanation appears', () => {
+    const edited = { ...diagramItem([]), editedAt: '2026-09-03T04:30:00.000Z' };
+
+    function hoverMarkAt(top: number) {
+      render(<ProposalCard item={edited} />);
+      const mark = markLabelled('Edited')!.closest<HTMLElement>('[data-foot-mark]')!;
+      vi.spyOn(mark, 'getBoundingClientRect').mockReturnValue({
+        top,
+        bottom: top + 14,
+        left: 100,
+        right: 130,
+        width: 30,
+        height: 14,
+      } as DOMRect);
+      return mark;
+    }
+
+    it('sits above its mark where there is room', async () => {
+      await userEvent.hover(hoverMarkAt(400));
+      const tip = await screen.findByRole('presentation', { hidden: true });
+      expect(tip.getAttribute('data-placement')).toBe('above');
+    });
+
+    // A card near the top of the window would push it off the screen.
+    it('drops below its mark near the top of the window', async () => {
+      await userEvent.hover(hoverMarkAt(10));
+      const tip = await screen.findByRole('presentation', { hidden: true });
+      expect(tip.getAttribute('data-placement')).toBe('below');
+      expect(tip.style.top).toBe('30px');
+    });
+  });
+
   // The byline mixes text sizes; centring them leaves each word at a slightly
   // different height, so every level of it lines up on the text baseline.
   it('sets the whole byline on one baseline', () => {

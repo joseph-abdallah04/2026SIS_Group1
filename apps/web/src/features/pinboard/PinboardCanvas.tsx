@@ -4,9 +4,11 @@ import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shar
 import { Scan } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { copyText } from '../../lib/copyText';
 import { EndSessionControl } from '../sessions/EndSessionControl';
 import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
+import { stickyPlainText } from '../tools/sticky/stickyMarks';
 import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
@@ -206,7 +208,14 @@ export function PinboardCanvas({
   headerTimer,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
-  const [notice, setNotice] = useState<string | null>(null);
+  // A message for the pill over the toolbar. The id makes the same words said
+  // twice two notices, so a second copy restarts the timer rather than
+  // vanishing on the first one's schedule.
+  const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
+  const showNotice = useCallback(
+    (text: string) => setNotice((current) => ({ text, id: (current?.id ?? 0) + 1 })),
+    [],
+  );
   const scale = ZOOM_SCALE[zoom];
 
   /**
@@ -233,7 +242,11 @@ export function PinboardCanvas({
   // the wrong exit. Either way it only decides what the UI offers — every
   // write is re-checked server-side.
 
-  const { activeTool, openEditorForEdit, openEditorForExtend } = useCreativeTools();
+  const { activeTool, openEditorForEdit, openEditorForExtend, submissionStatus } =
+    useCreativeTools();
+  // Opening a tool waits while a proposal is on its way, so the menu offers
+  // nothing that would open one — the same way the toolbar goes dim.
+  const toolsFree = submissionStatus !== 'submitting';
   const boardOpen = board.questionStatus === 'discussion';
 
   /**
@@ -267,7 +280,7 @@ export function PinboardCanvas({
     items: board.items,
     scale,
     onCommit: (proposalId, at) => editProposal({ id: proposalId, x: at.x, y: at.y }),
-    onError: setNotice,
+    onError: showNotice,
   });
 
   // The sheet on screen. Fixed in board units, so zooming only ever changes how
@@ -415,7 +428,7 @@ export function PinboardCanvas({
       try {
         await deleteProposal(item.id);
       } catch (err) {
-        setNotice(err instanceof Error ? err.message : 'Could not remove that proposal');
+        showNotice(err instanceof Error ? err.message : 'Could not remove that proposal');
         throw err;
       }
     },
@@ -434,7 +447,7 @@ export function PinboardCanvas({
       try {
         await reactToProposal(item.id, emoji);
       } catch (err) {
-        setNotice(err instanceof Error ? err.message : 'Could not save that reaction');
+        showNotice(err instanceof Error ? err.message : 'Could not save that reaction');
       }
     },
     [reactToProposal],
@@ -447,7 +460,7 @@ export function PinboardCanvas({
   const onArrange = useCallback(
     (item: BoardItem, to: ProposalArrangeInput['to']) => {
       void arrangeProposal(item.id, to).catch((err: unknown) => {
-        setNotice(err instanceof Error ? err.message : 'Could not restack that proposal');
+        showNotice(err instanceof Error ? err.message : 'Could not restack that proposal');
       });
     },
     [arrangeProposal],
@@ -458,15 +471,18 @@ export function PinboardCanvas({
    * visible result of its own, so without the note it looks like nothing
    * happened.
    */
-  const onCopyText = useCallback((item: BoardItem) => {
-    if (item.artifactJson.type !== 'sticky') return;
-    const text = item.artifactJson.text;
-    const write = navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('unavailable'));
-    void write.then(
-      () => setNotice('Copied to clipboard'),
-      () => setNotice('Could not copy that text'),
-    );
-  }, []);
+  const onCopyText = useCallback(
+    (item: BoardItem) => {
+      if (item.artifactJson.type !== 'sticky') return;
+      // As the note reads, lists and all, and through the shared helper, whose
+      // fallback still copies where the async clipboard is missing: any page
+      // served over plain http, such as the board opened by address on a LAN.
+      void copyText(stickyPlainText(item.artifactJson)).then((copied) =>
+        showNotice(copied ? 'Copied to clipboard' : 'Could not copy that text'),
+      );
+    },
+    [showNotice],
+  );
 
   /**
    * Where each card sits in the shared stack, 0 at the bottom.
@@ -766,11 +782,15 @@ export function PinboardCanvas({
                     isOwn={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
                     boardOpen={boardOpen}
-                    onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
+                    onOpenEditor={
+                      boardOpen && toolsFree && canReopen(item) ? openEditorForEdit : undefined
+                    }
                     // Anyone may build on any card, their own included, as
                     // long as its editor has something to open — the same
                     // rule as Edit.
-                    onExtend={boardOpen && canReopen(item) ? openEditorForExtend : undefined}
+                    onExtend={
+                      boardOpen && toolsFree && canReopen(item) ? openEditorForExtend : undefined
+                    }
                     canMove={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }
@@ -846,7 +866,7 @@ export function PinboardCanvas({
                   role="status"
                   className="pointer-events-auto rounded-full border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-[11.5px] font-medium text-rt-secondary-deep shadow-sm"
                 >
-                  {notice}
+                  {notice.text}
                 </p>
               ) : null}
             </div>

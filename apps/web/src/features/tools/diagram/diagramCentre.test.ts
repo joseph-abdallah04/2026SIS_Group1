@@ -13,6 +13,7 @@ import {
   centreStudioContent,
   diagramContentBounds,
   prepareDiagram,
+  preparedDiagramKey,
 } from './diagramModel';
 
 const box = (id: string, x: number, y: number): DiagramNode => ({ id, label: id, x, y });
@@ -115,5 +116,36 @@ describe('centreStudioContent', () => {
     const after = prepareDiagram(centred.nodes, [], centred.ink);
     expect(before.ok && after.ok).toBe(true);
     if (before.ok && after.ok) expect(after.artifact).toEqual(before.artifact);
+  });
+});
+
+describe('preparedDiagramKey', () => {
+  const layout = () => ({ nodes: [box('n1', 24, 24), box('n2', 260, 90)], edges: [] });
+
+  // What an extension is judged on: moving everything together is undone by
+  // proposing, so it stores the same thing and is not a change.
+  it('is the same for a copy moved as a whole', () => {
+    const moved = {
+      nodes: layout().nodes.map((node) => ({ ...node, x: node.x + 137, y: node.y + 61 })),
+      edges: [],
+    };
+    expect(preparedDiagramKey(moved)).toBe(preparedDiagramKey(layout()));
+  });
+
+  it('differs once one element moves relative to another', () => {
+    const [first, second] = layout().nodes;
+    const nudged = { nodes: [first!, { ...second!, x: second!.x + 8 }], edges: [] };
+    expect(preparedDiagramKey(nudged)).not.toBe(preparedDiagramKey(layout()));
+  });
+
+  it('differs once a label changes', () => {
+    const [first, second] = layout().nodes;
+    const relabelled = { nodes: [{ ...first!, label: 'Other' }, second!], edges: [] };
+    expect(preparedDiagramKey(relabelled)).not.toBe(preparedDiagramKey(layout()));
+  });
+
+  // Nothing to propose is never "unchanged": the editor says why instead.
+  it('is null for a canvas that could not be proposed', () => {
+    expect(preparedDiagramKey({ nodes: [], edges: [] })).toBeNull();
   });
 });

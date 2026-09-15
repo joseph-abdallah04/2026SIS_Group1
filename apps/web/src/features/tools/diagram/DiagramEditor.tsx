@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -173,6 +174,7 @@ import {
   normalizeRect,
   pasteDiagramFragment,
   prepareDiagram,
+  preparedDiagramKey,
   prepareEdgeLabel,
   prepareNodeLabel,
   renameEdge,
@@ -187,7 +189,7 @@ import {
   type DiagramRect,
   type DiagramResizeCorner,
 } from './diagramModel';
-import { diagramSnapshotKey, type DiagramSnapshot } from './diagramHistory';
+import { type DiagramSnapshot } from './diagramHistory';
 import {
   DIAGRAM_DEFAULT_VIEW,
   DIAGRAM_ZOOM_STEP,
@@ -1002,7 +1004,9 @@ export function DiagramEditor() {
     // its card on the board. Opened for editing or extending, it is centred
     // instead; proposing tucks it back, so the card looks the same after.
     const source = sourceArtifact ? centreStudioContent(toSnapshot(sourceArtifact)) : null;
-    sourceKeyRef.current = source ? diagramSnapshotKey(source) : null;
+    // What the source would store if proposed as it stands, not where it sits
+    // on the canvas: see `preparedDiagramKey`.
+    sourceKeyRef.current = source ? preparedDiagramKey(source) : null;
     // A kept draft is what was last on this canvas, so it wins over the source
     // it was started from — the source is already in it — and it opens exactly
     // where it was left rather than being moved.
@@ -1017,12 +1021,17 @@ export function DiagramEditor() {
    * history started, so a restored draft that already differs is not held
    * back — and undoing every change holds it back again. Reuse is exempt:
    * bringing an idea to a new question unchanged is the point of it.
+   *
+   * Judged on what proposing would store, so moving everything together — which
+   * proposing undoes — is not a change. Worked out once per change to the
+   * canvas, not on every render the pointer causes.
    */
-  const unchangedExtension =
-    extensionSource !== null &&
-    !isReusing &&
-    sourceKeyRef.current !== null &&
-    diagramSnapshotKey(history.snapshot) === sourceKeyRef.current;
+  const extending = extensionSource !== null && !isReusing && sourceKeyRef.current !== null;
+  const canvasKey = useMemo(
+    () => (extending ? preparedDiagramKey(history.snapshot) : null),
+    [extending, history.snapshot],
+  );
+  const unchangedExtension = extending && canvasKey !== null && canvasKey === sourceKeyRef.current;
   const { nodes, edges } = history.snapshot;
   const ink = history.snapshot.ink ?? [];
   const paths = history.snapshot.paths ?? [];
@@ -4887,14 +4896,10 @@ export function DiagramEditor() {
       setValidationError(prepared.error);
       return;
     }
-    // Ctrl+Enter submits without going through the disabled button. Checked
-    // against the canvas as it is now, after any label being typed was committed.
-    if (
-      extensionSource !== null &&
-      !isReusing &&
-      sourceKeyRef.current !== null &&
-      diagramSnapshotKey(graph) === sourceKeyRef.current
-    ) {
+    // Ctrl+Enter submits without going through the disabled button. Checked on
+    // the very artifact about to be sent, after any label being typed was
+    // committed.
+    if (extending && JSON.stringify(prepared.artifact) === sourceKeyRef.current) {
       setValidationError(EXTEND_UNCHANGED_HINT);
       return;
     }

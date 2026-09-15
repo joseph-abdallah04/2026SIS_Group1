@@ -39,6 +39,7 @@ function renderStudio(overrides: Partial<CreativeToolsContextValue>) {
   tools = {
     activeTool: 'drawing',
     closeTool: vi.fn(),
+    draftScope: { sessionId: 's1', questionId: 'q1', viewerId: 'viewer' },
     editSource: null,
     extensionSource: null,
     isReusing: false,

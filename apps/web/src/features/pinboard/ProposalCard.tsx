@@ -93,6 +93,8 @@ function formatTime(iso: string): string {
 
 /** How long the pointer rests on a mark before its explanation appears. */
 const MARK_TOOLTIP_DELAY_MS = 250;
+/** Room a tooltip needs above its mark: its height and the gap, with a little over. */
+const MARK_TOOLTIP_ROOM_PX = 32;
 
 /**
  * A small word in the byline that explains itself on hover.
@@ -109,7 +111,7 @@ const MARK_TOOLTIP_DELAY_MS = 250;
 function FootMark({ tooltip, children }: { tooltip: string; children: ReactNode }) {
   const markRef = useRef<HTMLSpanElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number; below: boolean } | null>(null);
 
   const hide = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -120,7 +122,11 @@ function FootMark({ tooltip, children }: { tooltip: string; children: ReactNode 
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       const rect = markRef.current?.getBoundingClientRect();
-      if (rect) setAnchor({ x: rect.left + rect.width / 2, y: rect.top });
+      if (!rect) return;
+      // Above the mark, unless that would put it off the top of the window —
+      // a card near the top edge of the board — in which case below it.
+      const below = rect.top < MARK_TOOLTIP_ROOM_PX;
+      setAnchor({ x: rect.left + rect.width / 2, y: below ? rect.bottom : rect.top, below });
     }, MARK_TOOLTIP_DELAY_MS);
   };
 
@@ -157,10 +163,11 @@ function FootMark({ tooltip, children }: { tooltip: string; children: ReactNode 
               role="presentation"
               aria-hidden="true"
               className="rt-studio-fade pointer-events-none fixed z-50 rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-white shadow-lg"
+              data-placement={anchor.below ? 'below' : 'above'}
               style={{
                 left: anchor.x,
-                top: anchor.y - 6,
-                transform: 'translate(-50%, -100%)',
+                top: anchor.below ? anchor.y + 6 : anchor.y - 6,
+                transform: anchor.below ? 'translateX(-50%)' : 'translate(-50%, -100%)',
               }}
             >
               {tooltip}

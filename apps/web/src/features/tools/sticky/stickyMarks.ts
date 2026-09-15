@@ -700,6 +700,27 @@ export function stickyBlocks(content: StickyContent): StickyBlock[] {
   return blocks;
 }
 
+/**
+ * The note as plain text that reads the way it looks, for the clipboard.
+ *
+ * The stored words alone lose the lists: bullets and numbers are drawn from the
+ * line styles, not written into the text, so a copied numbered list would paste
+ * as lines run together. Here every list line gets the marker the card shows —
+ * "•", or the same "1."/"a."/"i." `stickyBlocks` counts — indented two spaces
+ * a level. Formatting and link addresses have no plain-text form and are left
+ * behind; the words they were on are not.
+ */
+export function stickyPlainText(content: StickyContent): string {
+  return stickyBlocks(content)
+    .map((block) => {
+      const words = block.segments.map((segment) => segment.text).join('');
+      if (!block.list) return words;
+      const marker = block.list === 'bullet' ? '•' : `${block.label}.`;
+      return `${'  '.repeat(block.level)}${marker} ${words}`;
+    })
+    .join('\n');
+}
+
 /** A line's runs, gathered into the links they are in, so each link is drawn as one. */
 export function linkRuns(
   segments: readonly StickySegment[],

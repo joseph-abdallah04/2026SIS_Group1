@@ -448,6 +448,42 @@ describe('PositionedProposal actions menu', () => {
     expect(document.activeElement?.textContent).toBe('Delete');
   });
 
+  // Whatever the viewer may do can change under an open menu; one left with
+  // nothing in it would be an empty box over the board.
+  it('closes its menu when there is no longer anything in it', async () => {
+    const view = renderMenuCard({ item: DIAGRAM });
+    await openFromButton();
+    expect(screen.getByRole('menu')).toBeTruthy();
+
+    // The board closes: no Extend, and a diagram has no Copy.
+    view.rerender(
+      <PositionedProposal
+        item={DIAGRAM}
+        position={{ x: 40, y: 40 }}
+        isNew={false}
+        isOwn={false}
+        isAuthorLeader={false}
+        boardOpen={false}
+        canMove={false}
+        canDelete={false}
+        canArrange={false}
+        stackIndex={1}
+        stackSize={3}
+        isDragging={false}
+        dragHandlers={dragHandlers}
+        viewerId="viewer"
+        isShortlisted={false}
+        canToggleShortlist={false}
+        onToggleShortlist={() => undefined}
+        onArrange={view.onArrange}
+        onCopyText={view.onCopyText}
+        onDelete={view.onDelete}
+      />,
+    );
+
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('raises the card while its menu is open', async () => {
     const { container } = renderMenuCard({ stackIndex: 0, stackSize: 3 });
     const card = cardWrapper(container);

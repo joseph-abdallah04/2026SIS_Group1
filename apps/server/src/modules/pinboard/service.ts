@@ -204,7 +204,7 @@ export async function createProposal({
         deletedAt: null,
         question: { sessionId: question.sessionId },
       },
-      select: { id: true },
+      select: { id: true, questionId: true, type: true, artifactJson: true },
     });
     if (!parent) {
       throw new ApiError(
@@ -213,32 +213,92 @@ export async function createProposal({
         'INVALID_EXTENDS',
       );
     }
+    // An extension has to add something to the idea it builds on. The editors
+    // already refuse to send an unchanged copy; this is the rule itself, so an
+    // old tab or another client cannot put a clone on the board marked as
+    // building on the original. A reuse — a source from an earlier question —
+    // may be brought forward exactly as it was, which is the point of it.
+    if (
+      parent.questionId === questionId &&
+      parent.type === input.type &&
+      canonicalJson(parent.artifactJson) === canonicalJson(input.artifactJson)
+    ) {
+      throw new ApiError(
+        400,
+        'Change something before proposing this as an extension',
+        'EXTENSION_UNCHANGED',
+      );
+    }
   }
 
-  // A new card lands on top of the stack, including above anything the leader
-  // has brought to the front: something just proposed should never appear
-  // underneath a card it happens to overlap. Two proposals racing here can
-  // share a value, and creation order already breaks that tie the same way.
-  const top = await prisma.proposal.aggregate({
-    where: { questionId, deletedAt: null },
-    _max: { z: true },
-  });
+  return prisma.$transaction(async (tx) => {
+    // A new card lands on top of the stack, including above anything the
+    // leader has brought to the front: something just proposed should never
+    // appear underneath a card it happens to overlap. Under the same lock as
+    // restacking, so two writes on one board never pick the same value.
+    await lockQuestionStack(tx, questionId);
+    const top = await tx.proposal.aggregate({
+      where: { questionId, deletedAt: null },
+      _max: { z: true },
+    });
 
-  const row = await prisma.proposal.create({
-    data: {
-      questionId,
-      authorId,
-      type: input.type,
-      artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
-      x: input.x,
-      y: input.y,
-      z: (top._max.z ?? 0) + 1,
-      extendsProposalId: input.extendsProposalId ?? null,
-    },
-    include: BOARD_ITEM_INCLUDE,
-  });
+    const row = await tx.proposal.create({
+      data: {
+        questionId,
+        authorId,
+        type: input.type,
+        artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
+        x: input.x,
+        y: input.y,
+        z: (top._max.z ?? 0) + 1,
+        extendsProposalId: input.extendsProposalId ?? null,
+      },
+      include: BOARD_ITEM_INCLUDE,
+    });
 
-  return toBoardItem(row);
+    return toBoardItem(row);
+  });
+}
+
+/**
+ * An artifact as a string two equal artifacts always agree on.
+ *
+ * Keys are sorted, because Postgres stores JSON with its keys in an order of
+ * its own, and absent values and empty lists are dropped, because a note with
+ * no formatting may carry `marks: []` or no `marks` at all. Anything this does
+ * not reconcile only makes two equal artifacts look different, which lets a
+ * write through rather than wrongly refusing one.
+ */
+function canonicalJson(value: unknown): string {
+  const canonical = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(canonical);
+    if (node === null || typeof node !== 'object') return node;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(node).sort()) {
+      const child = (node as Record<string, unknown>)[key];
+      if (child === undefined || (Array.isArray(child) && child.length === 0)) continue;
+      out[key] = canonical(child);
+    }
+    return out;
+  };
+  return JSON.stringify(canonical(value));
+}
+
+/** Arbitrary, and only here to keep this lock apart from any other advisory lock. */
+const STACK_LOCK_NAMESPACE = 0x5354;
+
+/**
+ * Hold one board's stacking order for the rest of a transaction.
+ *
+ * Creating a card and restacking one both read the top or bottom of the stack
+ * and write one past it. Without this, two of them on the same board could read
+ * the same value and write the same `z`, and a restack could decide from a
+ * stack another write was halfway through changing. A Postgres advisory lock,
+ * per question, released when the transaction ends; `SELECT 1 FROM` because
+ * the lock function returns `void`, which Prisma cannot read back.
+ */
+async function lockQuestionStack(tx: Prisma.TransactionClient, questionId: string) {
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(${STACK_LOCK_NAMESPACE}::int4, hashtext(${questionId}))`;
 }
 
 /**
@@ -301,13 +361,22 @@ export async function updateProposal({
     );
   }
 
+  // Reopening a proposal and saving it untouched sends back what is already
+  // stored. That is not an edit: writing it would mark the card "Edited" when
+  // nobody changed a word, so the artifact is left alone.
+  const rewritesContent =
+    input.artifactJson !== undefined &&
+    canonicalJson(input.artifactJson) !== canonicalJson(row.artifactJson);
+  const moves = input.x !== undefined || input.y !== undefined;
+  if (!rewritesContent && !moves) return toBoardItem(row);
+
   const updated = await prisma.proposal.update({
     where: { id: proposalId },
     data: {
       // `editedAt` moves with the artifact and only with it. A payload that
       // carries coordinates alone is a move, and a move leaves no trace on the
       // card beyond its new position.
-      ...(input.artifactJson
+      ...(rewritesContent
         ? {
             artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
             editedAt: new Date(),
@@ -326,8 +395,15 @@ export async function updateProposal({
  * Bring a proposal to the front of its board or send it to the back.
  *
  * The new value is worked out here from what is stored, one past the current
- * top or bottom, never taken from the client. A card that already sits alone
- * at that end is returned as it is: restacking it would only grow the numbers.
+ * top or bottom, never taken from the client.
+ *
+ * Returns null when there is nothing to change — the card is alone, or already
+ * at that end — so the caller has nothing to announce. Every decision is made
+ * from the card as it is inside the transaction, under the board's stack lock,
+ * not from the copy read to check permissions: in between, another leader's
+ * tab may have moved it, or someone may have removed it, and announcing that
+ * stale copy would paint a stack the board no longer has or put a removed card
+ * back on everyone's screen.
  */
 export async function arrangeProposal({
   proposalId,
@@ -337,10 +413,20 @@ export async function arrangeProposal({
   proposalId: string;
   actor: Actor;
   to: ProposalArrangeInput['to'];
-}): Promise<BoardItem> {
-  const { row } = await loadForMutation(proposalId, actor, 'arrange');
+}): Promise<BoardItem | null> {
+  // Permission, session and phase. The row it returns is not used past here.
+  const { row: checked } = await loadForMutation(proposalId, actor, 'arrange');
+  const notFound = () => new ApiError(404, 'Proposal not found', 'PROPOSAL_NOT_FOUND');
 
   return prisma.$transaction(async (tx) => {
+    await lockQuestionStack(tx, checked.questionId);
+
+    const row = await tx.proposal.findFirst({
+      where: { id: proposalId, deletedAt: null },
+      select: { id: true, z: true, questionId: true },
+    });
+    if (!row) throw notFound();
+
     const others = await tx.proposal.aggregate({
       where: { questionId: row.questionId, deletedAt: null, id: { not: row.id } },
       _max: { z: true },
@@ -348,16 +434,21 @@ export async function arrangeProposal({
     });
 
     // Nothing else on the board: there is no stack to move within.
-    if (others._max.z === null || others._min.z === null) return toBoardItem(row);
+    if (others._max.z === null || others._min.z === null) return null;
+    if (to === 'front' && row.z > others._max.z) return null;
+    if (to === 'back' && row.z < others._min.z) return null;
 
-    if (to === 'front' && row.z > others._max.z) return toBoardItem(row);
-    if (to === 'back' && row.z < others._min.z) return toBoardItem(row);
-
-    const updated = await tx.proposal.update({
-      where: { id: row.id },
+    const written = await tx.proposal.updateMany({
+      where: { id: row.id, deletedAt: null },
       data: { z: to === 'front' ? others._max.z + 1 : others._min.z - 1 },
+    });
+    if (written.count === 0) throw notFound();
+
+    const updated = await tx.proposal.findFirst({
+      where: { id: row.id, deletedAt: null },
       include: BOARD_ITEM_INCLUDE,
     });
+    if (!updated) throw notFound();
     return toBoardItem(updated);
   });
 }

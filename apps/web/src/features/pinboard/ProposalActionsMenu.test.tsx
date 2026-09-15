@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Copy, Trash2 } from 'lucide-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -106,5 +106,49 @@ describe('ProposalActionsMenu', () => {
     unmount();
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
+  });
+
+  // A second right-click, or the Menu key, opens the same menu somewhere new
+  // without closing it first. It has to go to the new spot.
+  it('moves to a new anchor while it is open', () => {
+    sizeMenus();
+    const sections = [[{ id: 'copy', label: 'Copy text', icon: Copy, onSelect: vi.fn() }]];
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <ProposalActionsMenu
+        anchor={{ kind: 'point', x: 100, y: 50 }}
+        label="Actions"
+        onClose={onClose}
+        sections={sections}
+      />,
+    );
+    expect(screen.getByRole('menu').style.left).toBe('100px');
+
+    rerender(
+      <ProposalActionsMenu
+        anchor={{ kind: 'point', x: 300, y: 200 }}
+        label="Actions"
+        onClose={onClose}
+        sections={sections}
+      />,
+    );
+    expect(screen.getByRole('menu').style.left).toBe('300px');
+    expect(screen.getByRole('menu').style.top).toBe('200px');
+  });
+
+  // The Menu key on another card opens its menu with no press to close this
+  // one, which would leave two menus open.
+  it('closes when a context menu opens anywhere outside it', () => {
+    const { onClose } = renderMenu({ kind: 'point', x: 0, y: 0 });
+
+    fireEvent.contextMenu(document.body);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('stays open for a right-click inside itself', () => {
+    const { menu, onClose } = renderMenu({ kind: 'point', x: 0, y: 0 });
+
+    fireEvent.contextMenu(menu);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

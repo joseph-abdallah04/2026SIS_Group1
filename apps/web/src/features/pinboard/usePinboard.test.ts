@@ -191,6 +191,35 @@ describe('usePinboard room wiring', () => {
     expect(result.current.newItemIds.has('p2')).toBe(false);
   });
 
+  // An update and a removal broadcast close together can arrive the other way
+  // round. The update must not put the removed card back on the board.
+  it('does not bring back a card removed before its update arrived', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+
+    act(() => {
+      emitServer('proposalCreated', { proposal: sticky('p3') });
+      emitServer('proposalDeleted', { proposalId: 'p3', questionId: 'q1' });
+      emitServer('proposalUpdated', { proposal: sticky('p3', { z: 9 }) });
+    });
+
+    expect(result.current.board?.items).toEqual([]);
+  });
+
+  it('applies an update to a card that is on the board', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+
+    act(() => {
+      emitServer('proposalCreated', { proposal: sticky('p4') });
+      emitServer('proposalUpdated', { proposal: sticky('p4', { z: 9, x: 70 }) });
+    });
+
+    expect(result.current.board?.items).toEqual([
+      expect.objectContaining({ id: 'p4', z: 9, x: 70 }),
+    ]);
+  });
+
   it('ignores a proposal event for a different question than the one on screen', async () => {
     const { result } = renderHook(() => usePinboard('s1'));
     await waitFor(() => expect(result.current.board).not.toBeNull());

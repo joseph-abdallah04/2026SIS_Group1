@@ -72,7 +72,15 @@ export function CreativeToolsProvider({
 
   // The three entry points are mutually exclusive, so each clears the others:
   // a stale source would decide whether the next save creates or overwrites.
+  //
+  // None of them opens while a proposal is on its way. Opening resets the
+  // submission, and resetting it mid-send releases the lock that stops a second
+  // send and pins the first one's result on whatever opened next. The toolbar
+  // already refuses by going dim; a card's menu can be reached without it.
+  const sending = () => submission.status === 'submitting';
+
   function openTool(tool: ToolKind) {
+    if (sending()) return;
     submission.reset();
     setExtensionSource(null);
     setEditSource(null);
@@ -80,6 +88,7 @@ export function CreativeToolsProvider({
   }
 
   function openCopy(proposal: BoardItem, kind: 'extend' | 'reuse') {
+    if (sending()) return;
     submission.reset();
     setEditSource(null);
     setExtensionSource(proposal);
@@ -91,6 +100,7 @@ export function CreativeToolsProvider({
   const openEditorForReuse = (proposal: BoardItem) => openCopy(proposal, 'reuse');
 
   function openEditorForEdit(proposal: BoardItem) {
+    if (sending()) return;
     submission.reset();
     setExtensionSource(null);
     setEditSource(proposal);

@@ -35,11 +35,19 @@ export function CreativeStudio() {
   // banner.
   const action = editSource ? 'Edit' : extensionSource ? (isReusing ? 'Reuse' : 'Extend') : 'New';
   const title = `${action} ${TOOL_LABELS[activeTool].toLowerCase()}`;
+  // Keyed like the sticky above, and for a sharper reason. The studio can be
+  // minimised with the board still live, so Edit or Extend on another card can
+  // arrive while an editor is open on a different one. An editor that stayed
+  // mounted would keep the first card's canvas under the second card's name,
+  // and saving would write one card's work over another. A new key is a new
+  // canvas; the one it replaces keeps its work as a draft of its own. The
+  // overlay is outside the key, so the minimised face does not flash.
+  const editorKey = `${draftScope.questionId}:${action}:${editSource?.id ?? extensionSource?.id ?? 'new'}`;
 
   return (
     <StudioOverlay onClose={closeTool} proposed={submissionStatus === 'success'} title={title}>
-      {activeTool === 'drawing' ? <DrawingEditor /> : null}
-      {activeTool === 'diagram' ? <DiagramEditor /> : null}
+      {activeTool === 'drawing' ? <DrawingEditor key={editorKey} /> : null}
+      {activeTool === 'diagram' ? <DiagramEditor key={editorKey} /> : null}
     </StudioOverlay>
   );
 }
