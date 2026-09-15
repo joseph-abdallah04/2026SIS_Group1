@@ -4,11 +4,15 @@ import type { QuestionStatus } from '@roundtable/shared';
 // F16 - who may edit, move or remove a proposal on the shared board. Prisma and
 // the sessions adapter are stubbed so each rule stands on its own; the queries
 // themselves are the integration smoke test's job.
-vi.mock('../../db.js', () => ({
-  prisma: {
-    proposal: { findUnique: vi.fn(), update: vi.fn() },
-  },
-}));
+vi.mock('../../db.js', () => {
+  const prisma = {
+    proposal: { findUnique: vi.fn(), update: vi.fn(), aggregate: vi.fn() },
+    // Runs the callback against the same stubs, so a transaction's queries
+    // are observable exactly like any other.
+    $transaction: vi.fn(async (run: (tx: unknown) => unknown) => run(prisma)),
+  };
+  return { prisma };
+});
 
 vi.mock('./sessionsAdapter.js', () => ({
   getQuestion: vi.fn(),
@@ -19,11 +23,12 @@ vi.mock('./sessionsAdapter.js', () => ({
 
 const { prisma } = await import('../../db.js');
 const { getQuestion, getSession } = await import('./sessionsAdapter.js');
-const { deleteProposal, updateProposal } = await import('./service.js');
+const { arrangeProposal, deleteProposal, updateProposal } = await import('./service.js');
 const { requireMutableProposal } = await import('./permissions.js');
 
 const findUnique = vi.mocked(prisma.proposal.findUnique);
 const update = vi.mocked(prisma.proposal.update);
+const aggregate = vi.mocked(prisma.proposal.aggregate);
 const question = vi.mocked(getQuestion);
 const session = vi.mocked(getSession);
 
@@ -50,6 +55,7 @@ function row(overrides: Record<string, unknown> = {}) {
     artifactJson: { type: 'sticky', text: 'Hello', color: 'yellow' },
     x: 10,
     y: 20,
+    z: 0,
     extendsProposalId: null,
     reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
@@ -303,6 +309,101 @@ describe('moving a proposal', () => {
         },
       }),
     ).rejects.toMatchObject({ code: 'NOT_PROPOSAL_AUTHOR' });
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('arranging the stack', () => {
+  const q = questionRef();
+  const someoneElses = { id: 'p1', authorId: 'u1', deletedAt: null };
+
+  it('lets the leader restack any card, their own included', () => {
+    const arrange = { mutation: 'arrange', isLeader: true } as const;
+    expect(requireMutableProposal(someoneElses, q, LEADER, arrange)).toBe(someoneElses);
+    expect(
+      requireMutableProposal({ ...someoneElses, authorId: 'leader-1' }, q, LEADER, arrange),
+    ).toBeTruthy();
+  });
+
+  // Stacking decides what covers what for the whole room, so authorship is not
+  // enough: a participant cannot push their own card over everyone else's.
+  it('refuses the author, who is not the leader', () => {
+    let thrown: unknown;
+    try {
+      requireMutableProposal(someoneElses, q, AUTHOR, { mutation: 'arrange', isLeader: false });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toMatchObject({ status: 403, code: 'NOT_SESSION_LEADER' });
+  });
+
+  it('still hides another session’s proposal rather than confirming it exists', () => {
+    expect(() =>
+      requireMutableProposal(someoneElses, questionRef('discussion', 'other'), AUTHOR, {
+        mutation: 'arrange',
+        isLeader: false,
+      }),
+    ).toThrow(/not found/);
+  });
+
+  it('respects the phase lock', () => {
+    expect(() =>
+      requireMutableProposal(someoneElses, questionRef('voting'), LEADER, {
+        mutation: 'arrange',
+        isLeader: true,
+      }),
+    ).toThrow(/the board is closed/);
+  });
+
+  it('brings a card to one above the current top', async () => {
+    aggregate.mockResolvedValue({ _max: { z: 7 }, _min: { z: -2 } } as never);
+    await arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'front' });
+
+    expect(update.mock.calls[0]?.[0].data).toEqual({ z: 8 });
+    // Measured against the rest of the live board, not the card itself.
+    expect(aggregate.mock.calls[0]?.[0]).toMatchObject({
+      where: { questionId: 'q1', deletedAt: null, id: { not: 'p1' } },
+    });
+  });
+
+  it('sends a card to one below the current bottom', async () => {
+    aggregate.mockResolvedValue({ _max: { z: 7 }, _min: { z: -2 } } as never);
+    await arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'back' });
+
+    expect(update.mock.calls[0]?.[0].data).toEqual({ z: -3 });
+  });
+
+  it('writes nothing for a card already alone on top', async () => {
+    findUnique.mockResolvedValue(row({ z: 9 }) as never);
+    aggregate.mockResolvedValue({ _max: { z: 7 }, _min: { z: 0 } } as never);
+
+    const item = await arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'front' });
+    expect(update).not.toHaveBeenCalled();
+    expect(item.z).toBe(9);
+  });
+
+  // A tie is not the top: creation order decides who paints above, so a card
+  // sharing the highest value may still be underneath.
+  it('still raises a card that only ties the top', async () => {
+    findUnique.mockResolvedValue(row({ z: 7 }) as never);
+    aggregate.mockResolvedValue({ _max: { z: 7 }, _min: { z: 0 } } as never);
+
+    await arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'front' });
+    expect(update.mock.calls[0]?.[0].data).toEqual({ z: 8 });
+  });
+
+  it('writes nothing when the card is alone on the board', async () => {
+    aggregate.mockResolvedValue({ _max: { z: null }, _min: { z: null } } as never);
+
+    await arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'back' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('refuses the author before touching the stack', async () => {
+    await expect(
+      arrangeProposal({ proposalId: 'p1', actor: AUTHOR, to: 'front' }),
+    ).rejects.toMatchObject({ status: 403, code: 'NOT_SESSION_LEADER' });
+    expect(aggregate).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@ import {
 } from '@roundtable/shared';
 import {
   artifactJsonSchema,
+  type ProposalArrangeInput,
   type ProposalCreateInput,
   type ProposalUpdateInput,
 } from '@roundtable/shared/schemas';
@@ -93,6 +94,7 @@ export function toBoardItem(row: ProposalRow): BoardItem {
     artifactJson: parsed.data,
     x: row.x,
     y: row.y,
+    z: row.z,
     createdAt: row.createdAt.toISOString(),
     editedAt: row.editedAt?.toISOString() ?? null,
     extendsProposalId: row.extendsProposalId,
@@ -190,6 +192,15 @@ export async function createProposal({
     }
   }
 
+  // A new card lands on top of the stack, including above anything the leader
+  // has brought to the front: something just proposed should never appear
+  // underneath a card it happens to overlap. Two proposals racing here can
+  // share a value, and creation order already breaks that tie the same way.
+  const top = await prisma.proposal.aggregate({
+    where: { questionId, deletedAt: null },
+    _max: { z: true },
+  });
+
   const row = await prisma.proposal.create({
     data: {
       questionId,
@@ -198,6 +209,7 @@ export async function createProposal({
       artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
       x: input.x,
       y: input.y,
+      z: (top._max.z ?? 0) + 1,
       extendsProposalId: input.extendsProposalId ?? null,
     },
     include: BOARD_ITEM_INCLUDE,
@@ -285,6 +297,46 @@ export async function updateProposal({
   });
 
   return toBoardItem(updated);
+}
+
+/**
+ * Bring a proposal to the front of its board or send it to the back.
+ *
+ * The new value is worked out here from what is stored, one past the current
+ * top or bottom, never taken from the client. A card that already sits alone
+ * at that end is returned as it is: restacking it would only grow the numbers.
+ */
+export async function arrangeProposal({
+  proposalId,
+  actor,
+  to,
+}: {
+  proposalId: string;
+  actor: Actor;
+  to: ProposalArrangeInput['to'];
+}): Promise<BoardItem> {
+  const { row } = await loadForMutation(proposalId, actor, 'arrange');
+
+  return prisma.$transaction(async (tx) => {
+    const others = await tx.proposal.aggregate({
+      where: { questionId: row.questionId, deletedAt: null, id: { not: row.id } },
+      _max: { z: true },
+      _min: { z: true },
+    });
+
+    // Nothing else on the board: there is no stack to move within.
+    if (others._max.z === null || others._min.z === null) return toBoardItem(row);
+
+    if (to === 'front' && row.z > others._max.z) return toBoardItem(row);
+    if (to === 'back' && row.z < others._min.z) return toBoardItem(row);
+
+    const updated = await tx.proposal.update({
+      where: { id: row.id },
+      data: { z: to === 'front' ? others._max.z + 1 : others._min.z - 1 },
+      include: BOARD_ITEM_INCLUDE,
+    });
+    return toBoardItem(updated);
+  });
 }
 
 /**

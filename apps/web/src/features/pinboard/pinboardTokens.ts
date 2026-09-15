@@ -94,6 +94,15 @@ export const REMOVE_HOVER_FILL = '#FDECEC';
 export const REMOVE_HOVER_BORDER = '#EFBDBD';
 export const REMOVE_HOVER_INK = '#A93B34';
 
+/**
+ * The outline on a card whose action menu is open.
+ *
+ * Blue, deliberately outside the warm palette: it is the selection colour
+ * people know from design tools, and it must never be mistaken for the amber
+ * shortlist ring a card can carry at the same time.
+ */
+export const MENU_TARGET_OUTLINE = '#3B82F6';
+
 /** Plate behind a drawing's artwork. */
 export const THUMB_BACKGROUND = '#F7F7F8';
 

@@ -1,14 +1,15 @@
 // Realtime pinboard sync — F15 (create) and F16 (author edit/move/delete).
 //
 // The write path is server-authoritative (docs/02 §4): a client sends the
-// *intent* (`proposalCreate`, `proposalUpdate`, `proposalDelete`,
-// `proposalReact`), this module
+// *intent* (`proposalCreate`, `proposalUpdate`, `proposalArrange`,
+// `proposalDelete`, `proposalReact`), this module
 // validates and persists it, then broadcasts the resulting *fact* to
 // `session:{id}`. Nobody renders a change the server has not accepted, so
 // boards cannot diverge.
 import type { BoardItem, ReactionGroup } from '@roundtable/shared';
 import type { ClientToServerEvents, WriteAck } from '@roundtable/shared/events';
 import {
+  proposalArrangeSchema,
   proposalCreateSchema,
   proposalDeleteSchema,
   proposalReactSchema,
@@ -19,7 +20,13 @@ import type { ZodType } from 'zod';
 import { sessionRoom, type RealtimeServer, type RealtimeSocket } from '../../realtime/types.js';
 import { ApiError } from '../../middleware/error.js';
 import type { Actor } from './permissions.js';
-import { createProposal, deleteProposal, toggleReaction, updateProposal } from './service.js';
+import {
+  arrangeProposal,
+  createProposal,
+  deleteProposal,
+  toggleReaction,
+  updateProposal,
+} from './service.js';
 import { getActiveQuestion } from './sessionsAdapter.js';
 
 /**
@@ -109,7 +116,7 @@ function onWriteIntent<TPayload>(
   socket: RealtimeSocket,
   intent: keyof Pick<
     ClientToServerEvents,
-    'proposalCreate' | 'proposalUpdate' | 'proposalDelete' | 'proposalReact'
+    'proposalCreate' | 'proposalUpdate' | 'proposalArrange' | 'proposalDelete' | 'proposalReact'
   >,
   schema: ZodType<TPayload>,
   run: (input: TPayload, actor: Actor) => Promise<void>,
@@ -162,6 +169,11 @@ export function registerPinboardSocketHandlers(io: RealtimeServer, socket: Realt
 
   onWriteIntent(socket, 'proposalUpdate', proposalUpdateSchema, async (input, actor) => {
     const proposal = await updateProposal({ proposalId: input.id, actor, input });
+    emitProposalUpdated(io, actor.sessionId, proposal);
+  });
+
+  onWriteIntent(socket, 'proposalArrange', proposalArrangeSchema, async (input, actor) => {
+    const proposal = await arrangeProposal({ proposalId: input.id, actor, to: input.to });
     emitProposalUpdated(io, actor.sessionId, proposal);
   });
 

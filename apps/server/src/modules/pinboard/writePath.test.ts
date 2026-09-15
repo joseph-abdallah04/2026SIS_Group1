@@ -4,11 +4,19 @@ import type { QuestionStatus } from '@roundtable/shared';
 // The write path's rules are the interesting part, not Prisma. Both the
 // database and the sessions adapter are stubbed so each rule can be exercised
 // on its own; the queries themselves are covered by the integration smoke test.
-vi.mock('../../db.js', () => ({
-  prisma: {
-    proposal: { create: vi.fn(), findFirst: vi.fn() },
-  },
-}));
+vi.mock('../../db.js', () => {
+  const prisma = {
+    proposal: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      aggregate: vi.fn(),
+    },
+    $transaction: vi.fn(async (run: (tx: unknown) => unknown) => run(prisma)),
+  };
+  return { prisma };
+});
 
 vi.mock('./sessionsAdapter.js', () => ({
   getQuestion: vi.fn(),
@@ -24,6 +32,9 @@ const { registerPinboardSocketHandlers } = await import('./socket.js');
 
 const create = vi.mocked(prisma.proposal.create);
 const findFirst = vi.mocked(prisma.proposal.findFirst);
+const findUnique = vi.mocked(prisma.proposal.findUnique);
+const update = vi.mocked(prisma.proposal.update);
+const aggregate = vi.mocked(prisma.proposal.aggregate);
 const question = vi.mocked(getQuestion);
 const activeQuestion = vi.mocked(getActiveQuestion);
 const session = vi.mocked(getSession);
@@ -49,6 +60,7 @@ function createdRow(overrides: Record<string, unknown> = {}) {
     artifactJson: { type: 'sticky', text: 'Hello', color: 'yellow' },
     x: 0,
     y: 0,
+    z: 1,
     extendsProposalId: null,
     reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
@@ -69,6 +81,7 @@ beforeEach(() => {
     votingTimerSeconds: null,
   });
   create.mockResolvedValue(createdRow() as never);
+  aggregate.mockResolvedValue({ _max: { z: null }, _min: { z: null } } as never);
 });
 
 describe('createProposal', () => {
@@ -76,6 +89,18 @@ describe('createProposal', () => {
     const proposal = await createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY });
     expect(proposal.id).toBe('p-new');
     expect(proposal.authorName).toBe('Alice');
+  });
+
+  // Something just proposed should never land underneath a card it overlaps.
+  it('stacks a new proposal above everything already on the board', async () => {
+    aggregate.mockResolvedValue({ _max: { z: 12 }, _min: { z: -3 } } as never);
+    await createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY });
+    expect(create.mock.calls[0]?.[0].data).toMatchObject({ z: 13 });
+  });
+
+  it('stacks the first proposal on an empty board at 1', async () => {
+    await createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY });
+    expect(create.mock.calls[0]?.[0].data).toMatchObject({ z: 1 });
   });
 
   it('takes the author from its argument, never from the input', async () => {
@@ -997,5 +1022,60 @@ describe('proposalCreate handler', () => {
       ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
       expect(create).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('proposalArrange handler', () => {
+  function register(data: { user: { id: string } | null; sessionId: string | null }) {
+    const handlers = new Map<string, (payload: unknown, ack: unknown) => void>();
+    const emit = vi.fn();
+    const socket = {
+      data,
+      on: (event: string, fn: (payload: unknown, ack: unknown) => void) => {
+        handlers.set(event, fn);
+      },
+    };
+    registerPinboardSocketHandlers({ to: () => ({ emit }) } as never, socket as never);
+    const arrange = (payload: unknown): Promise<{ ok: boolean; code?: string }> =>
+      new Promise((resolve) => {
+        handlers.get('proposalArrange')?.(payload, resolve);
+      });
+    return { arrange, emit };
+  }
+
+  beforeEach(() => {
+    findUnique.mockResolvedValue(createdRow({ id: 'p1', z: 0 }) as never);
+    aggregate.mockResolvedValue({ _max: { z: 4 }, _min: { z: 0 } } as never);
+    update.mockResolvedValue(createdRow({ id: 'p1', z: 5 }) as never);
+  });
+
+  it('restacks for the leader and broadcasts the row as an update', async () => {
+    const { arrange, emit } = register({ user: { id: 'leader-1' }, sessionId: 's1' });
+
+    expect(await arrange({ id: 'p1', to: 'front' })).toEqual({ ok: true });
+    expect(emit).toHaveBeenCalledWith('proposalUpdated', {
+      proposal: expect.objectContaining({ id: 'p1', z: 5 }),
+    });
+  });
+
+  it('refuses a participant, even on their own card, and broadcasts nothing', async () => {
+    const { arrange, emit } = register({ user: { id: 'u1' }, sessionId: 's1' });
+
+    expect(await arrange({ id: 'p1', to: 'back' })).toMatchObject({
+      ok: false,
+      code: 'NOT_SESSION_LEADER',
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a direction that is not front or back', async () => {
+    const { arrange } = register({ user: { id: 'leader-1' }, sessionId: 's1' });
+
+    expect(await arrange({ id: 'p1', to: 'middle' })).toMatchObject({
+      ok: false,
+      code: 'INVALID_PROPOSAL',
+    });
+    expect(findUnique).not.toHaveBeenCalled();
   });
 });

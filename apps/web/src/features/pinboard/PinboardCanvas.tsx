@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
-import type { ProposalUpdateInput } from '@roundtable/shared/schemas';
+import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 import { Scan } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
@@ -86,6 +86,8 @@ interface PinboardCanvasProps {
    */
   viewerId: string | null;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
+  /** Bring to front / send to back. Leader only; the server re-checks. */
+  arrangeProposal: (proposalId: string, to: ProposalArrangeInput['to']) => Promise<void>;
   deleteProposal: (proposalId: string) => Promise<void>;
   reactToProposal: (proposalId: string, emoji: string) => Promise<void>;
   /** Ids currently on the F27 shortlist — rings on those cards. */
@@ -192,6 +194,7 @@ export function PinboardCanvas({
   joinCode,
   viewerId,
   editProposal,
+  arrangeProposal,
   deleteProposal,
   reactToProposal,
   shortlist,
@@ -203,7 +206,7 @@ export function PinboardCanvas({
   headerTimer,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
-  const [writeError, setWriteError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const scale = ZOOM_SCALE[zoom];
 
   /**
@@ -251,17 +254,18 @@ export function PinboardCanvas({
 
   // A rejected write is the one thing the board cannot show by itself: the card
   // simply stays where it was, which on its own looks like nothing happened.
+  // Copying a note has the same problem, so its confirmation shares the pill.
   useEffect(() => {
-    if (!writeError) return;
-    const timer = setTimeout(() => setWriteError(null), 5000);
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
     return () => clearTimeout(timer);
-  }, [writeError]);
+  }, [notice]);
 
   const { positionOf, draggingId, dragHandlers } = useProposalDrag({
     items: board.items,
     scale,
     onCommit: (proposalId, at) => editProposal({ id: proposalId, x: at.x, y: at.y }),
-    onError: setWriteError,
+    onError: setNotice,
   });
 
   // The sheet on screen. Fixed in board units, so zooming only ever changes how
@@ -410,7 +414,7 @@ export function PinboardCanvas({
       try {
         await editProposal({ id: item.id, artifactJson: { ...item.artifactJson, text } });
       } catch (err) {
-        setWriteError(err instanceof Error ? err.message : 'Could not save that edit');
+        setNotice(err instanceof Error ? err.message : 'Could not save that edit');
         throw err;
       }
     },
@@ -422,7 +426,7 @@ export function PinboardCanvas({
       try {
         await deleteProposal(item.id);
       } catch (err) {
-        setWriteError(err instanceof Error ? err.message : 'Could not remove that proposal');
+        setNotice(err instanceof Error ? err.message : 'Could not remove that proposal');
         throw err;
       }
     },
@@ -441,11 +445,57 @@ export function PinboardCanvas({
       try {
         await reactToProposal(item.id, emoji);
       } catch (err) {
-        setWriteError(err instanceof Error ? err.message : 'Could not save that reaction');
+        setNotice(err instanceof Error ? err.message : 'Could not save that reaction');
       }
     },
     [reactToProposal],
   );
+
+  /**
+   * Restack a card. Settles rather than rethrows, like `onReact`: the menu has
+   * already closed, so nothing is waiting on the promise to release itself.
+   */
+  const onArrange = useCallback(
+    (item: BoardItem, to: ProposalArrangeInput['to']) => {
+      void arrangeProposal(item.id, to).catch((err: unknown) => {
+        setNotice(err instanceof Error ? err.message : 'Could not restack that proposal');
+      });
+    },
+    [arrangeProposal],
+  );
+
+  /**
+   * Copy a sticky's words. Said out loud either way: a clipboard write has no
+   * visible result of its own, so without the note it looks like nothing
+   * happened.
+   */
+  const onCopyText = useCallback((item: BoardItem) => {
+    if (item.artifactJson.type !== 'sticky') return;
+    const text = item.artifactJson.text;
+    const write = navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('unavailable'));
+    void write.then(
+      () => setNotice('Copied to clipboard'),
+      () => setNotice('Could not copy that text'),
+    );
+  }, []);
+
+  /**
+   * Where each card sits in the shared stack, 0 at the bottom.
+   *
+   * By `z`, then creation order for equal values, which is how every card
+   * painted before stacking was stored. A rank rather than the raw value keeps
+   * the numbers the page sees small and dense, whatever the server's have grown
+   * to after a session of restacking.
+   */
+  const stackIndexById = useMemo(() => {
+    const stacked = [...board.items].sort(
+      (a, b) =>
+        a.z - b.z ||
+        (a.createdAt === b.createdAt ? 0 : a.createdAt < b.createdAt ? -1 : 1) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    return new Map(stacked.map((item, index) => [item.id, index]));
+  }, [board.items]);
 
   const onZoomIn = useCallback(() => zoomFromCentre('in'), [zoomFromCentre]);
   const onZoomOut = useCallback(() => zoomFromCentre('out'), [zoomFromCentre]);
@@ -726,6 +776,7 @@ export function PinboardCanvas({
                     isNew={newItemIds.has(item.id)}
                     isOwn={viewerId !== null && item.authorId === viewerId}
                     isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
+                    boardOpen={boardOpen}
                     onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
                     canMove={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
@@ -733,10 +784,15 @@ export function PinboardCanvas({
                     canDelete={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }
+                    canArrange={boardOpen && isLeader}
+                    stackIndex={stackIndexById.get(item.id) ?? 0}
+                    stackSize={board.items.length}
                     isDragging={draggingId === item.id}
                     dragHandlers={dragHandlers}
                     onEditText={onEditText}
                     onDelete={onDelete}
+                    onArrange={onArrange}
+                    onCopyText={onCopyText}
                     viewerId={viewerId}
                     onReact={boardOpen ? onReact : undefined}
                     isShortlisted={shortlist.includes(item.id)}
@@ -793,12 +849,12 @@ export function PinboardCanvas({
                   clear of the nav bar. `bottom-19` is the bar's `bottom-6` plus
                   its `h-11` plus an 8px gap. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
-              {writeError ? (
+              {notice ? (
                 <p
                   role="status"
                   className="pointer-events-auto rounded-full border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-[11.5px] font-medium text-rt-secondary-deep shadow-sm"
                 >
-                  {writeError}
+                  {notice}
                 </p>
               ) : null}
             </div>

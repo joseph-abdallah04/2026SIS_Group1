@@ -158,7 +158,8 @@ Event names are **camelCase** (`sessionState`, not `session:state`) — they are
 | C→S       | `proposalCreate`  | `{type, artifactJson, x, y, extendsProposalId?}` | _(built)_ validated vs phase=discussion       |
 | S→C       | `proposalCreated` | `{proposal}`                                     | _(built)_ broadcast, author included          |
 | C→S       | `proposalUpdate`  | `{id, artifactJson?, x?, y?}`                    | author-only, phase=discussion                 |
-| S→C       | `proposalUpdated` | `{proposal}`                                     | broadcast                                     |
+| C→S       | `proposalArrange` | `{id, to: 'front' or 'back'}`                    | leader-only, phase=discussion; server picks z |
+| S→C       | `proposalUpdated` | `{proposal}`                                     | broadcast (edits, moves and restacks)         |
 | C→S       | `proposalDelete`  | `{id}`                                           | author-or-leader                              |
 | S→C       | `proposalDeleted` | `{proposalId, questionId}`                       | broadcast                                     |
 | C→S       | `reactionToggle`  | `{proposalId, emoji}`                            | any member, discussion phase                  |

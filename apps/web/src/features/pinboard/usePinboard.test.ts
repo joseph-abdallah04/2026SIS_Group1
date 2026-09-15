@@ -51,6 +51,7 @@ function sticky(id: string, overrides: Partial<BoardItem> = {}): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
     reactions: [],
@@ -324,5 +325,38 @@ describe('usePinboard write intents', () => {
       await result.current.deleteProposal('p1');
     });
     expect(socket.emit).toHaveBeenCalledWith('proposalDelete', { id: 'p1' }, expect.any(Function));
+  });
+
+  it('emits proposalArrange with a direction, never a number', async () => {
+    socket.emit.mockImplementation(
+      (_event: string, _payload: unknown, ack?: (res: { ok: boolean }) => void) => {
+        ack?.({ ok: true });
+      },
+    );
+    const { result } = renderHook(() => usePinboard('s1'));
+
+    await act(async () => {
+      await result.current.arrangeProposal('p1', 'front');
+    });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'proposalArrange',
+      { id: 'p1', to: 'front' },
+      expect.any(Function),
+    );
+  });
+
+  it('rejects when the server refuses a restack', async () => {
+    socket.emit.mockImplementation(
+      (_event: string, _payload: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+        ack?.({ ok: false, error: 'Only the session leader can do that' });
+      },
+    );
+    const { result } = renderHook(() => usePinboard('s1'));
+
+    await act(async () => {
+      await expect(result.current.arrangeProposal('p1', 'back')).rejects.toThrow(
+        /Only the session leader/,
+      );
+    });
   });
 });

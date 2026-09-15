@@ -151,6 +151,13 @@ export interface BoardItem {
   artifactJson: ArtifactJson;
   x: number;
   y: number;
+  /**
+   * Stacking order on the board: higher paints above lower, with creation
+   * order breaking ties. Only the leader rearranges it (bring to front / send
+   * to back), and it is shared, so every participant sees the same stack. It
+   * is not the list order — `compareBoardItems` stays chronological.
+   */
+  z: number;
   createdAt: string;
   /**
    * When this proposal's content was last rewritten, or null if it never has

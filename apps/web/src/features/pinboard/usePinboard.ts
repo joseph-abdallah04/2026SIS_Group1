@@ -6,7 +6,11 @@ import {
   type ReactionGroup,
 } from '@roundtable/shared';
 import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
-import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
+import type {
+  ProposalArrangeInput,
+  ProposalCreateInput,
+  ProposalUpdateInput,
+} from '@roundtable/shared/schemas';
 
 import { api } from '../../lib/api';
 import { getSocket, joinSessionRoom, scheduleLeaveSessionRoom } from '../../lib/socket';
@@ -311,6 +315,20 @@ export function usePinboard(sessionId: string) {
   );
 
   /**
+   * Bring a proposal to the front or send it to the back — the leader
+   * arranging the board. Nothing is restacked locally: the server picks the new
+   * value and the row arrives on `proposalUpdated` for the whole room.
+   */
+  const arrangeProposal = useCallback(
+    (proposalId: string, to: ProposalArrangeInput['to']) =>
+      writeIntent(
+        (ack) => getSocket().emit('proposalArrange', { id: proposalId, to }, ack),
+        'That proposal could not be restacked',
+      ),
+    [],
+  );
+
+  /**
    * Remove a proposal: your own (F16), or anyone's if you lead the session
    * (F17). The server re-checks that before it soft-deletes and broadcasts.
    */
@@ -347,6 +365,7 @@ export function usePinboard(sessionId: string) {
     reload,
     propose,
     editProposal,
+    arrangeProposal,
     deleteProposal,
     reactToProposal,
     isLive,

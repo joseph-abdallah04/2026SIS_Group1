@@ -27,6 +27,7 @@ function proposal(): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-07T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
     reactions: [],
