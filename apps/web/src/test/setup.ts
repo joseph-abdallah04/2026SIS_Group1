@@ -41,6 +41,12 @@ if (!HTMLDialogElement.prototype.showModal) {
   };
 }
 
+if (!HTMLDialogElement.prototype.show) {
+  HTMLDialogElement.prototype.show = function show() {
+    this.setAttribute('open', '');
+  };
+}
+
 if (!HTMLDialogElement.prototype.close) {
   HTMLDialogElement.prototype.close = function close() {
     this.removeAttribute('open');

@@ -77,8 +77,15 @@ describe('motion in the studio and on the board', () => {
   it('keeps the studio entrances short enough not to be waited for', () => {
     // Toolbars come and go with every selection. Anything slower than a couple
     // of frames of settle reads as the interface lagging behind the pointer.
-    for (const [, duration] of css.matchAll(/\.rt-studio-[\w-]+\s*\{[^}]*?(\d+)ms/g)) {
-      expect(Number(duration)).toBeLessThanOrEqual(180);
+    //
+    // The one exception is the whole studio sliding down to rest over the board
+    // and back up. It travels most of the height of the window, and held to
+    // 180ms it covered half that distance in its first frame and read as a
+    // jump, so it is allowed a little longer, and no more.
+    for (const match of css.matchAll(/\.rt-studio-[\w-]+\s*\{[^}]*?(\d+)ms/g)) {
+      const head = css.slice(css.lastIndexOf('}', match.index) + 1, css.indexOf('{', match.index));
+      const limit = /\.rt-studio-slide(?![\w-])/.test(head) ? 300 : 180;
+      expect(Number(match[1])).toBeLessThanOrEqual(limit);
     }
   });
 });
