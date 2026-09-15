@@ -6,8 +6,15 @@ import { TOOL_LABELS } from './toolRegistry';
 import { useCreativeTools } from './CreativeToolsContext';
 
 export function CreativeStudio() {
-  const { activeTool, closeTool, draftScope, editSource, extensionSource, isReusingOwn, isLive } =
-    useCreativeTools();
+  const {
+    activeTool,
+    closeTool,
+    draftScope,
+    editSource,
+    extensionSource,
+    isReusingOwn,
+    submissionStatus,
+  } = useCreativeTools();
   if (!activeTool) return null;
 
   // A sticky is one line of text and a colour, so it is written in a popup
@@ -36,7 +43,7 @@ export function CreativeStudio() {
   const title = `${action} ${TOOL_LABELS[activeTool].toLowerCase()}`;
 
   return (
-    <StudioOverlay isLive={isLive} onClose={closeTool} title={title}>
+    <StudioOverlay onClose={closeTool} proposed={submissionStatus === 'success'} title={title}>
       {activeTool === 'drawing' ? <DrawingEditor /> : null}
       {activeTool === 'diagram' ? <DiagramEditor /> : null}
     </StudioOverlay>
