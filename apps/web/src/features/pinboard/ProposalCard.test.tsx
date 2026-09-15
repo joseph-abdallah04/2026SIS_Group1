@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { BoardItem, DiagramNode } from '@roundtable/shared';
+import type { BoardItem, DiagramNode, StickyMark } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
@@ -144,10 +144,189 @@ describe('sticky card', () => {
       />,
     );
 
-    const note = screen.getByText(/Ship the API/);
-    expect(note.textContent).toBe(text);
+    const lines = [...document.querySelectorAll('.rt-sticky-line')];
+    // A line for every line written, the blank one included, spaces kept.
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Ship the API',
+      '',
+      '    then   the UI',
+    ]);
     // Preserves spaces as well as breaks; pre-line would collapse the spaces.
-    expect(note).toHaveClass('whitespace-pre-wrap');
+    expect(document.querySelector('[data-sticky-note]')).toHaveClass('whitespace-pre-wrap');
+  });
+
+  function stickyItem(text: string, marks?: StickyMark[]): BoardItem {
+    return {
+      ...diagramItem([]),
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text, color: 'yellow', ...(marks ? { marks } : {}) },
+    };
+  }
+
+  it('shows each word in the styles it was written in', () => {
+    const { container } = render(
+      <ProposalCard
+        item={stickyItem('Ship the beta, not the bug', [
+          { from: 0, to: 4, style: 'bold' },
+          { from: 9, to: 13, style: 'italic' },
+          { from: 15, to: 18, style: 'underline' },
+          { from: 15, to: 18, style: 'strike' },
+        ])}
+      />,
+    );
+
+    const styled = [...container.querySelectorAll('[data-sticky-note] span')];
+    expect(styled.map((span) => span.textContent)).toEqual(['Ship', 'beta', 'not']);
+    expect(styled[0]).toHaveStyle({ fontWeight: '700' });
+    expect(styled[1]).toHaveStyle({ fontStyle: 'italic' });
+    expect((styled[2] as HTMLElement).style.textDecorationLine).toBe('underline line-through');
+    expect(container.querySelector('[data-sticky-note]')?.textContent).toBe(
+      'Ship the beta, not the bug',
+    );
+  });
+
+  // Ranges a stored note no longer has words for are clamped, never an error.
+  it('shows lists as they were written, numbered from 1', () => {
+    render(
+      <ProposalCard
+        item={{
+          ...stickyItem('Plan\nDraft\nReview\nNote'),
+          artifactJson: {
+            type: 'sticky',
+            text: 'Plan\nDraft\nReview\nNote',
+            color: 'yellow',
+            lines: [null, 'number', 'number', 'bullet'],
+          },
+        }}
+      />,
+    );
+
+    const lines = [...document.querySelectorAll('.rt-sticky-line')];
+    expect(
+      lines.map((line) => [line.getAttribute('data-list'), line.getAttribute('data-number')]),
+    ).toEqual([
+      [null, null],
+      ['number', '1'],
+      ['number', '2'],
+      ['bullet', null],
+    ]);
+  });
+
+  it('shows a note whose formatting runs past its words', () => {
+    render(<ProposalCard item={stickyItem('Hi', [{ from: 0, to: 40, style: 'bold' }])} />);
+
+    expect(screen.getByText('Hi')).toHaveStyle({ fontWeight: '700' });
+  });
+
+  // Longer than even the largest square holds: every word stays on the card,
+  // which keeps the largest width and is left to grow taller.
+  // jsdom lays nothing out, so the height itself is measured in a browser. What
+  // this holds is the contract that lets the card grow: the square is a floor,
+  // and nothing between the card and the note can be squeezed below the note,
+  // which in a column that fills its card is what cut a long one off.
+  it('lets a note too long for the largest square make the card taller', () => {
+    const text = `Start${'\n'.repeat(20)}the end`;
+    const { container } = render(<ProposalCard item={stickyItem(text)} />);
+
+    const card = container.querySelector('article')!;
+    const note = container.querySelector<HTMLElement>('[data-sticky-note]')!;
+    expect(card.style.width).toBe('339px');
+    expect(card.style.minHeight).toBe('339px');
+    expect(card.style.height).toBe('');
+    for (let box: HTMLElement | null = note; box && box !== card; box = box.parentElement) {
+      expect(box.className).not.toMatch(/\bmin-h-0\b|\boverflow-(hidden|auto|clip)\b/);
+      expect(box.style.height).toBe('');
+      expect(box.style.maxHeight).toBe('');
+    }
+    expect(note.textContent).toContain('the end');
+    expect(screen.queryByRole('button', { name: 'Read more' })).toBeNull();
+  });
+
+  it('nests list items, each level numbered its own way', () => {
+    render(
+      <ProposalCard
+        item={{
+          ...stickyItem(''),
+          artifactJson: {
+            type: 'sticky',
+            text: 'Plan\nScope\nBudget\nShip',
+            color: 'yellow',
+            lines: ['number', 'number', 'bullet', 'number'],
+            levels: [0, 1, 2, 0],
+          },
+        }}
+      />,
+    );
+
+    const lines = [...document.querySelectorAll('.rt-sticky-line')];
+    expect(
+      lines.map((line) => [line.getAttribute('data-level'), line.getAttribute('data-number')]),
+    ).toEqual([
+      [null, '1'],
+      ['1', 'a'],
+      ['2', null],
+      [null, '2'],
+    ]);
+  });
+
+  function linkedItem(href: string): BoardItem {
+    return {
+      ...stickyItem(''),
+      artifactJson: {
+        type: 'sticky',
+        text: 'Read the spec first',
+        color: 'yellow',
+        links: [{ from: 9, to: 13, href }],
+      },
+    };
+  }
+
+  // Opened in a new tab, with nothing of the board handed to the site.
+  it('opens a link in a new tab, telling the site nothing about the board', () => {
+    render(<ProposalCard item={linkedItem('https://example.com/spec')} />);
+
+    const link = screen.getByRole('link', { name: 'spec' });
+    expect(link).toHaveAttribute('href', 'https://example.com/spec');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  // A stored note is only as trustworthy as whoever wrote it.
+  it('never draws a link that would run something, only its words', () => {
+    const { container } = render(
+      <ProposalCard item={linkedItem('javascript:alert(document.cookie)')} />,
+    );
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(container.querySelector('[data-sticky-note]')?.textContent).toBe('Read the spec first');
+  });
+
+  // Pressing a link is not picking the card up, or pressing the card.
+  it('keeps a press on a link to the link', () => {
+    const onPointerDown = vi.fn();
+    const onClick = vi.fn();
+    render(
+      <div onPointerDown={onPointerDown} onClick={onClick}>
+        <ProposalCard item={linkedItem('https://example.com/spec')} />
+      </div>,
+    );
+
+    const link = screen.getByRole('link', { name: 'spec' });
+    link.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.pointerDown(link);
+    fireEvent.click(link);
+
+    expect(onPointerDown).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  // On a ballot the card is the vote button, and a link inside a button is
+  // neither one thing nor the other.
+  it('draws links as words only where the card is itself a press', () => {
+    render(<ProposalCard item={linkedItem('https://example.com/spec')} interactive={false} />);
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('spec')).toHaveClass('rt-sticky-link');
   });
 });
 

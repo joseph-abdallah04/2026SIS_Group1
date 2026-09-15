@@ -240,13 +240,15 @@ export function PinboardCanvas({
    * Whether a proposal can be reopened in the tool that made it.
    *
    * It depends on whether the artifact still holds what the editor works on. A
-   * diagram always does: its nodes and edges are the artifact. A drawing does
+   * sticky and a diagram always do: a note's words and formatting, and a
+   * diagram's nodes and edges, are the artifact. A drawing does
    * only if its strokes were stored — ones proposed before that kept just the
    * rendered SVG, and reopening those would mean starting from a blank canvas
    * and replacing the artwork instead of changing it.
    */
   const canReopen = useCallback(
     (item: BoardItem) =>
+      item.artifactJson.type === 'sticky' ||
       item.artifactJson.type === 'diagram' ||
       (item.artifactJson.type === 'drawing' && (item.artifactJson.strokes?.length ?? 0) > 0),
     [],
@@ -408,19 +410,6 @@ export function PinboardCanvas({
   // write failed, but only the card knows it is holding an editor open or a
   // confirmation waiting on that promise, and swallowing the rejection here
   // would leave either of them stuck mid-action with nothing to release them.
-  const onEditText = useCallback(
-    async (item: BoardItem, text: string) => {
-      if (item.artifactJson.type !== 'sticky') return;
-      try {
-        await editProposal({ id: item.id, artifactJson: { ...item.artifactJson, text } });
-      } catch (err) {
-        setNotice(err instanceof Error ? err.message : 'Could not save that edit');
-        throw err;
-      }
-    },
-    [editProposal],
-  );
-
   const onDelete = useCallback(
     async (item: BoardItem) => {
       try {
@@ -778,14 +767,10 @@ export function PinboardCanvas({
                     isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
                     boardOpen={boardOpen}
                     onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
-                    // Anyone may build on any card, their own included. A
-                    // sticky is always copyable; anything else only if its
-                    // editor has something to open, the same rule as Edit.
-                    onExtend={
-                      boardOpen && (item.type === 'sticky' || canReopen(item))
-                        ? openEditorForExtend
-                        : undefined
-                    }
+                    // Anyone may build on any card, their own included, as
+                    // long as its editor has something to open — the same
+                    // rule as Edit.
+                    onExtend={boardOpen && canReopen(item) ? openEditorForExtend : undefined}
                     canMove={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }
@@ -797,7 +782,6 @@ export function PinboardCanvas({
                     stackSize={board.items.length}
                     isDragging={draggingId === item.id}
                     dragHandlers={dragHandlers}
-                    onEditText={onEditText}
                     onDelete={onDelete}
                     onArrange={onArrange}
                     onCopyText={onCopyText}

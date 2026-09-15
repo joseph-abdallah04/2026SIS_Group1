@@ -6622,12 +6622,13 @@ export function DiagramEditor() {
           disabled={!isLive || unchangedExtension}
           submitting={isSubmitting}
           sending={showSubmitting}
+          editing={editSource !== null}
           title={
             !isLive
-              ? 'Reconnect before proposing'
+              ? `Reconnect before ${editSource ? 'updating' : 'proposing'}`
               : unchangedExtension
                 ? EXTEND_UNCHANGED_HINT
-                : 'Propose diagram (Ctrl+Enter)'
+                : `${editSource ? 'Update proposal' : 'Propose diagram'} (Ctrl+Enter)`
           }
         />
       </StudioActions>

@@ -243,6 +243,11 @@ function ExtendButton({ proposal }: { proposal: BoardItem }) {
   return <button onClick={() => openEditorForExtend(proposal)}>Extend diagram fixture</button>;
 }
 
+function EditButton({ proposal }: { proposal: BoardItem }) {
+  const { openEditorForEdit } = useCreativeTools();
+  return <button onClick={() => openEditorForEdit(proposal)}>Edit diagram fixture</button>;
+}
+
 function mockSurface(canvas: Element, surface: { width: number; height: number }) {
   vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
     x: 0,
@@ -627,6 +632,46 @@ describe('diagram editor', () => {
 
     expect(screen.getByRole('button', { name: 'Rounded rectangle: Client' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Arrow from Client to Server' })).toBeInTheDocument();
+  });
+
+  // An edit rewrites a proposal already on the board, and the button says so.
+  it('offers to update the proposal being edited rather than propose it again', async () => {
+    const user = userEvent.setup();
+    const proposal: BoardItem = {
+      id: 'edited-diagram',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [{ id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' }],
+        edges: [],
+      },
+      x: 0,
+      y: 0,
+      z: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
+      extendsProposalId: null,
+      extendsFrom: null,
+      reactions: [],
+    };
+    render(
+      <Harness propose={vi.fn(async () => undefined)}>
+        <EditButton proposal={proposal} />
+        <ExtendButton proposal={proposal} />
+      </Harness>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Edit diagram fixture' }));
+    const update = screen.getByRole('button', { name: 'Update proposal' });
+    expect(update).toHaveAttribute('title', 'Update proposal (Ctrl+Enter)');
+    expect(screen.queryByRole('button', { name: 'Propose' })).toBeNull();
+
+    // Extending makes a new proposal, so it still proposes.
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    expect(await screen.findByRole('button', { name: 'Propose' })).toBeInTheDocument();
   });
 
   // Clearing is one step Undo brings back, so it does not ask first, and it

@@ -14,12 +14,29 @@ import type { StickyColor } from '@roundtable/shared';
 import { Button } from '../../../components/ui/Button';
 import { closingFades } from '../../../lib/motion';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
-import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
+import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
 import { EXTEND_UNCHANGED_HINT } from '../proposeErrors';
-import { clearStickyDraft, readStickyDraft, writeStickyDraft } from './stickyDraft';
-import { fitToSticky, STICKY_TOO_TALL, stickyFits } from './stickyPresentation';
-import { useNoteAutoGrow } from './useNoteAutoGrow';
+import {
+  NO_STICKY_FORMAT,
+  RichStickyField,
+  StickyFormatBar,
+  type RichStickyFieldHandle,
+  type StickyFormat,
+} from './RichStickyField';
+import {
+  clearStickyDraft,
+  readStickyDraft,
+  sourceDraftKeyFor,
+  writeStickyDraft,
+} from './stickyDraft';
+import {
+  formatForArtifact,
+  lineCount,
+  sameNote,
+  toStickyNote,
+  type StickyNote,
+} from './stickyMarks';
 
 const STICKY_COLORS: StickyColor[] = ['yellow', 'pink', 'blue', 'green'];
 
@@ -33,6 +50,12 @@ const EDGE_PX = 16;
 const EXIT_MS = 150;
 /** The toolbar button for the tool that is already open. */
 const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
+/**
+ * How tall the note grows before it scrolls: about a dozen lines at the popup's
+ * size, which a note at the limit in ordinary prose stays within, and short
+ * enough that the popup and its close button stay on a small laptop's screen.
+ */
+const NOTE_MAX_HEIGHT_PX = 360;
 
 /** With no toolbar to rest on, as in the tools workbench: the middle of the window. */
 const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
@@ -72,7 +95,7 @@ function placeAboveFooter(): CSSProperties | null {
 /**
  * Writing a sticky, as a note you write on rather than a room you enter.
  *
- * A sticky is one short line of text and a colour. A full-screen studio for
+ * A sticky is a short note and a colour. A full-screen studio for
  * that asks somebody to leave the board, lose sight of what everyone else has
  * just proposed, and come back — for a sentence. So this is a popup over the
  * board: the paper you are writing on, in the colour you picked, with the
@@ -102,7 +125,7 @@ export function StickyEditor() {
     submitArtifact,
   } = useCreativeTools();
   const panelRef = useRef<HTMLDivElement>(null);
-  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useRef<RichStickyFieldHandle>(null);
   // Read while rendering, before the note takes focus, so this is whatever
   // opened the popup: the toolbar button, or a card's Extend.
   const [opener] = useState(() => document.activeElement);
@@ -111,43 +134,44 @@ export function StickyEditor() {
   const sourceArtifact =
     sourceProposal?.artifactJson.type === 'sticky' ? sourceProposal.artifactJson : null;
   /**
-   * Only a new sticky is a draft. Editing and extending both open on a
-   * proposal that already exists, so there is nothing to lose by closing them,
-   * and letting them read or write the draft would put one note's words into
-   * another.
+   * Every sticky being written is a draft: a new one, and each proposal being
+   * edited or extended, apart from one another and keyed to that proposal. So
+   * closing the popup loses nothing, whatever it was opened for, and one note's
+   * words never open in another.
    *
-   * Decided once, when the popup opens. Closing an extension clears its source
-   * a render before the popup itself goes, and a key worked out afresh in that
-   * render would take the extension for a new sticky and save its words over
-   * the draft.
+   * Decided once, when the popup opens, along with whether it is an edit and
+   * what it was opened on. Closing clears the source a render before the popup
+   * itself goes, and a key worked out afresh in that render would take an edit
+   * for a new sticky and save its words over the new sticky's draft.
    */
-  const [draftKey] = useState(() => (editSource || extensionSource ? null : stickyDraftKey));
-  // Cut to what the largest sticky holds before it is shown: a draft saved
-  // under older rules could be far taller than the popup can sensibly be.
-  const [saved] = useState(() => {
-    const draft = draftKey ? readStickyDraft(draftKey) : null;
-    return draft ? { ...draft, text: fitToSticky(draft.text) } : null;
-  });
-  const [text, setText] = useState(sourceArtifact?.text ?? saved?.text ?? '');
-  const [color, setColor] = useState<StickyColor>(
-    sourceArtifact?.color ?? saved?.color ?? 'yellow',
+  const [draftKey] = useState(() =>
+    stickyDraftKey && sourceProposal
+      ? sourceDraftKeyFor(stickyDraftKey, editSource ? 'edit' : 'extend', sourceProposal.id)
+      : stickyDraftKey,
   );
+  const [editing] = useState(() => editSource !== null);
+  // Decided once for the same reason: closing clears what the popup was opened
+  // from a render before the popup goes.
+  const [reusing] = useState(() => isReusing);
+  const [source] = useState(() => sourceArtifact);
+  const [saved] = useState(() => (draftKey ? readStickyDraft(draftKey) : null));
+  // A kept draft is what was last written, so it wins over the proposal it was
+  // started from: that proposal is already in it.
+  const [note, setNote] = useState<StickyNote>(() => toStickyNote(saved ?? source ?? { text: '' }));
+  const [color, setColor] = useState<StickyColor>(saved?.color ?? source?.color ?? 'yellow');
   const [validationError, setValidationError] = useState<string | null>(null);
+  // What the selection is set in, for the toolbar.
+  const [format, setFormat] = useState<StickyFormat>(NO_STICKY_FORMAT);
   /**
-   * An extension that still says exactly what its original says. Proposing it
-   * would put an identical card on the board marked as building on the first,
-   * so Propose waits for a change — the words or the colour. Reuse is exempt:
-   * bringing your idea to a new question unchanged is the point of it.
+   * An extension that still says exactly what its original says, set the same
+   * way. Proposing it would put an identical card on the board marked as
+   * building on the first, so Propose waits for a change — the words, their
+   * formatting, or the colour. Reuse is exempt: bringing your idea to a new
+   * question unchanged is the point of it. Measured against the source as it
+   * was when the popup opened, which closing does not clear.
    */
   const unchangedExtension =
-    extensionSource !== null &&
-    !isReusing &&
-    sourceArtifact !== null &&
-    text === sourceArtifact.text &&
-    color === sourceArtifact.color;
-  // The last keystroke was refused because the note had filled the largest
-  // sticky, which the character count alone would not show.
-  const [paperFull, setPaperFull] = useState(false);
+    !editing && !reusing && source !== null && color === source.color && sameNote(note, source);
 
   const theme = STICKY_THEMES[color];
   const [placement, setPlacement] = useState(placeAboveFooter);
@@ -157,10 +181,6 @@ export function StickyEditor() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-
-  // The paper grows instead of scrolling, so a long note is never written
-  // into a box that hides its own first line.
-  useNoteAutoGrow(noteRef, text);
 
   /**
    * Nothing to acknowledge. The sticky lands on the board directly behind this
@@ -219,7 +239,7 @@ export function StickyEditor() {
   }, [submissionStatus, beginClose]);
 
   /**
-   * Saved as it is typed, colour included, so closing the popup by any route —
+   * Saved as it is typed, colour and formatting included, so closing the popup by any route —
    * a press outside it, Escape, the close button, a refresh — keeps the note.
    *
    * Not once it has been proposed, and not while it is on its way out. The
@@ -235,8 +255,15 @@ export function StickyEditor() {
   const proposedRef = useRef(false);
   useEffect(() => {
     if (!draftKey || closingRef.current || proposedRef.current) return;
-    writeStickyDraft(draftKey, { text, color });
-  }, [draftKey, text, color]);
+    // An edit or extension left exactly as the proposal it opened on is not a
+    // draft, so an untouched popup keeps nothing, and opens on the proposal as
+    // it is next time.
+    if (source && color === source.color && sameNote(note, source)) {
+      clearStickyDraft(draftKey);
+    } else {
+      writeStickyDraft(draftKey, { ...note, color });
+    }
+  }, [draftKey, note, color, source]);
 
   /**
    * A press anywhere outside the popup closes it, and still does whatever it
@@ -279,21 +306,19 @@ export function StickyEditor() {
     event.preventDefault();
     // Ctrl+Enter submits without going through the disabled button.
     if (unchangedExtension) return;
-    const prepared = prepareStickyText(text);
+    const prepared = prepareStickyText(note.text);
     if (!prepared.ok) {
       setValidationError(prepared.error);
       return;
     }
-    // The editor refuses text that outgrows the paper as it is typed, but a
-    // note can arrive already too long for it: an extension of one written
-    // under other rules, or a draft saved before line breaks counted.
-    if (!stickyFits(prepared.text)) {
-      setValidationError(STICKY_TOO_TALL);
-      return;
-    }
 
     setValidationError(null);
-    const proposed = await submitArtifact({ type: 'sticky', text: prepared.text, color });
+    const proposed = await submitArtifact({
+      type: 'sticky',
+      text: prepared.text,
+      color,
+      ...formatForArtifact(note),
+    });
     // Cleared once it has landed, here rather than when the popup closes: the
     // popup can be closed while the proposal is still on its way, and a note
     // already on the board should not come back as a draft next time.
@@ -311,7 +336,8 @@ export function StickyEditor() {
   }
 
   const error = validationError ?? submissionError;
-  const noteFull = text.length >= STICKY_TEXT_LIMIT || paperFull;
+  const noteFull = note.text.length >= STICKY_TEXT_LIMIT;
+  const linesFull = lineCount(note.text) >= STICKY_MAX_LINES;
   const label = editSource
     ? 'Edit sticky'
     : extensionSource
@@ -322,10 +348,10 @@ export function StickyEditor() {
           : `Extending ${extensionSource.authorName}'s sticky`
       : 'New sticky';
   const proposeTitle = !isLive
-    ? 'Reconnect before proposing'
+    ? `Reconnect before ${editing ? 'updating' : 'proposing'}`
     : unchangedExtension
       ? EXTEND_UNCHANGED_HINT
-      : 'Propose sticky (Ctrl+Enter)';
+      : `${editing ? 'Update proposal' : 'Propose sticky'} (Ctrl+Enter)`;
 
   // Portalled to the body, like the board's other popovers, so the canvas's
   // scale transform is not its containing block and it is placed against the
@@ -376,43 +402,39 @@ export function StickyEditor() {
           </button>
         </div>
 
-        <label htmlFor="sticky-text" className="sr-only">
-          Note
-        </label>
-        <textarea
-          id="sticky-text"
-          ref={noteRef}
-          autoFocus
-          maxLength={STICKY_TEXT_LIMIT}
-          rows={1}
-          placeholder="Capture the idea in one clear note"
-          value={text}
-          readOnly={closing}
-          onChange={(event) => {
-            // On its way out, so there is nowhere for more writing to go.
-            if (closingRef.current) return;
-            const next = event.target.value;
-            // Refused only when it adds text, so deleting always works, even
-            // on a note that arrived too long for its paper.
-            if (next.length > text.length && !stickyFits(next)) {
-              // Full once what was typed will not go in. A line break is the
-              // exception: the sticky can run out of lines while the last line
-              // still has room for words, and then the note is not full, the
-              // Enter just does not happen.
-              const onlyLineBreaks = next.replace(/\n/g, '') === text.replace(/\n/g, '');
-              setPaperFull(onlyLineBreaks ? !stickyFits(`${text}a`) : true);
-              return;
-            }
-            // Still full after trailing spaces go in: they take no room, so
-            // the note is no less full for them. Anything else changes what the
-            // paper holds, and the next refusal will say so if it is still full.
-            if (next.trim() !== text.trim()) setPaperFull(false);
-            setText(next);
-            setValidationError(null);
-            if (submissionError) resetSubmission();
-          }}
-          className="mt-3 min-h-[124px] w-full resize-none overflow-hidden bg-transparent text-[19px] leading-relaxed font-medium text-rt-ink outline-none transition-[height] duration-150 ease-out placeholder:text-rt-ink/35 motion-reduce:transition-none"
+        {/* The note's formatting, above the note it applies to. Pressing a
+            button keeps the selection in the note, so it styles what was
+            selected, or what is typed next. */}
+        <StickyFormatBar
+          field={fieldRef}
+          active={format}
+          disabled={closing}
+          className="mt-2 -ml-1.5"
         />
+
+        <div className="mt-1">
+          <RichStickyField
+            ref={fieldRef}
+            id="sticky-text"
+            label="Note"
+            value={note}
+            limit={STICKY_TEXT_LIMIT}
+            lineLimit={STICKY_MAX_LINES}
+            autoFocus
+            readOnly={closing}
+            maxHeight={NOTE_MAX_HEIGHT_PX}
+            placeholder="Capture the idea in one clear note"
+            onFormatChange={setFormat}
+            onChange={(next) => {
+              // On its way out, so there is nowhere for more writing to go.
+              if (closingRef.current) return;
+              setNote(next);
+              setValidationError(null);
+              if (submissionError) resetSubmission();
+            }}
+            className="min-h-[124px] text-[19px] leading-relaxed font-medium text-rt-ink"
+          />
+        </div>
 
         {error ? (
           <p role="alert" className="mb-1 text-[12px] leading-relaxed text-rt-secondary-deep">
@@ -452,19 +474,23 @@ export function StickyEditor() {
             })}
           </fieldset>
 
-          {/* "Full" once nothing more will go in, whichever limit stopped it.
-              Wide letters fill the paper before the count runs out, and a
-              count reading 280 of 290 on a note that takes no more says there
-              is room that is not there. */}
+          {/* "Full" once the note is at its limit and nothing more will go in,
+              and the line limit once Enter will not start another line. */}
           <span
             className={`ml-auto text-[12px] tabular-nums ${
-              noteFull ? 'font-semibold text-rt-secondary-deep' : 'text-rt-ink/55'
+              noteFull || linesFull ? 'font-semibold text-rt-secondary-deep' : 'text-rt-ink/55'
             }`}
             aria-live="polite"
           >
-            {noteFull ? 'Full' : `${text.length} / ${STICKY_TEXT_LIMIT}`}
+            {noteFull
+              ? 'Full'
+              : linesFull
+                ? `${STICKY_MAX_LINES} lines max`
+                : `${note.text.length} / ${STICKY_TEXT_LIMIT}`}
           </span>
 
+          {/* An edit rewrites a proposal already on the board, so it says so
+              rather than offering to propose it again. */}
           <Button
             type="submit"
             disabled={!isLive || unchangedExtension || submissionStatus === 'submitting'}
@@ -473,7 +499,13 @@ export function StickyEditor() {
             {submissionStatus === 'submitting' ? (
               <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
             ) : null}
-            {submissionStatus === 'submitting' ? 'Proposing' : 'Propose'}
+            {submissionStatus === 'submitting'
+              ? editing
+                ? 'Updating'
+                : 'Proposing'
+              : editing
+                ? 'Update proposal'
+                : 'Propose'}
           </Button>
         </div>
       </form>

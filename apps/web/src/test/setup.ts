@@ -35,6 +35,11 @@ if (!Element.prototype.setPointerCapture) {
   Element.prototype.hasPointerCapture = () => true;
 }
 
+// jsdom lays nothing out, and leaves a range with no box at all.
+if (!Range.prototype.getBoundingClientRect) {
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}
+
 if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function showModal() {
     this.setAttribute('open', '');

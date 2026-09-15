@@ -6,7 +6,7 @@ import type { ProposalCreateInput } from '@roundtable/shared/schemas';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CreativeToolbar } from '../toolbar/CreativeToolbar';
-import { STICKY_TEXT_LIMIT } from './artifactLimits';
+import { STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from './artifactLimits';
 import { CreativeStudio } from './CreativeStudio';
 import { useCreativeTools } from './CreativeToolsContext';
 import { CreativeToolsProvider } from './CreativeToolsProvider';
@@ -52,6 +52,33 @@ function Harness({
   );
 }
 
+/**
+ * Selects characters `from` to `to` of the note, as a drag across them would.
+ * Every line is an element of its own, and the break between two counts once.
+ */
+function selectInNote(note: HTMLElement, from: number, to: number) {
+  const points: { node: Node; offset: number }[] = [];
+  let reached = 0;
+  for (const line of note.querySelectorAll('.rt-sticky-line')) {
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const length = (node as Text).data.length;
+      for (const target of [from, to]) {
+        if (points.length < 2 && target >= reached && target <= reached + length) {
+          points.push({ node, offset: target - reached });
+        }
+      }
+      reached += length;
+    }
+    reached += 1;
+  }
+  const [start, end] = points;
+  if (!start || !end) throw new Error('selection outside the note');
+  const selection = document.getSelection()!;
+  selection.setBaseAndExtent(start.node, start.offset, end.node, end.offset);
+  document.dispatchEvent(new Event('selectionchange'));
+}
+
 function ExtendButton({ proposal }: { proposal: BoardItem }) {
   const { openEditorForExtend } = useCreativeTools();
   return <button onClick={() => openEditorForExtend(proposal)}>Extend fixture</button>;
@@ -60,6 +87,11 @@ function ExtendButton({ proposal }: { proposal: BoardItem }) {
 function ReuseButton({ proposal }: { proposal: BoardItem }) {
   const { openEditorForReuse } = useCreativeTools();
   return <button onClick={() => openEditorForReuse(proposal)}>Reuse fixture</button>;
+}
+
+function EditButton({ proposal, label = 'Edit fixture' }: { proposal: BoardItem; label?: string }) {
+  const { openEditorForEdit } = useCreativeTools();
+  return <button onClick={() => openEditorForEdit(proposal)}>{label}</button>;
 }
 
 describe('creative sticky flow', () => {
@@ -138,119 +170,168 @@ describe('creative sticky flow', () => {
     expect(screen.getByRole('button', { name: 'Sticky' })).toBeEnabled();
   });
 
-  it('stops taking text once the note fills the largest sticky', async () => {
-    // A stand-in layout in which a note longer than twelve characters overflows
-    // the largest sticky, whatever the character count says.
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const note = this.querySelector('p')?.textContent ?? '';
-        const width = parseFloat(this.style.width) || 0;
-        return { width, height: note.length > 12 ? width + 50 : 100 } as DOMRect;
-      });
-    try {
-      const user = userEvent.setup();
-      render(<Harness propose={vi.fn(async () => undefined)} />);
+  // Enter held down stops at the line limit, and the count says why.
+  it('stops starting new lines at the line limit, and says so', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={vi.fn(async () => undefined)} />);
 
-      await user.click(screen.getByRole('button', { name: 'Sticky' }));
-      await user.type(screen.getByLabelText('Note'), 'Keep the idea focused.');
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    await user.type(screen.getByLabelText('Note'), `Idea${'{Enter}'.repeat(STICKY_MAX_LINES + 5)}`);
 
-      // Only visible text is refused; spaces at the end of a line take no room.
-      expect((screen.getByLabelText('Note') as HTMLTextAreaElement).value.trim()).toBe(
-        'Keep the ide',
-      );
-      // Not "22 / 290": nothing more will go in, whatever the count says.
-      expect(screen.getByText('Full')).toBeInTheDocument();
-    } finally {
-      rect.mockRestore();
-    }
+    expect(screen.getByLabelText('Note').querySelectorAll('.rt-sticky-line')).toHaveLength(
+      STICKY_MAX_LINES,
+    );
+    expect(screen.getByText(`${STICKY_MAX_LINES} lines max`)).toBeInTheDocument();
+
+    await user.keyboard('{Backspace}');
+    expect(screen.queryByText(`${STICKY_MAX_LINES} lines max`)).toBeNull();
   });
 
-  // Line breaks take room on the paper now, so Enter held down stops where the
-  // note would outgrow the largest sticky, instead of growing the popup forever.
-  // Running out of lines is not the note being full, though: the last line can
-  // still take words, so the count stays a count until it cannot.
-  it('stops taking line breaks at the last line, and says Full only once that line is full', async () => {
-    // A stand-in layout: twenty characters to a line and ten lines to the
-    // largest sticky, so running out of lines and running out of room on the
-    // last line are different moments.
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const note = this.querySelector('p')?.textContent ?? '';
-        const width = parseFloat(this.style.width) || 0;
-        const lines = note
-          .split('\n')
-          .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 20)), 0);
-        return { width, height: lines > 10 ? width + 50 : 100 } as DOMRect;
-      });
-    try {
-      const user = userEvent.setup();
-      render(<Harness propose={vi.fn(async () => undefined)} />);
-      const note = () => screen.getByLabelText('Note') as HTMLTextAreaElement;
+  // The limit is a count of characters. Past it, nothing more goes in, pasted
+  // or typed, and the count says Full rather than a number.
+  it('stops at the character limit and says Full', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={vi.fn(async () => undefined)} />);
 
-      await user.click(screen.getByRole('button', { name: 'Sticky' }));
-      await user.type(note(), `Idea${'{Enter}'.repeat(30)}`);
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    await user.click(screen.getByLabelText('Note'));
+    await user.paste('a'.repeat(STICKY_TEXT_LIMIT + 40));
 
-      expect(note().value.split('\n')).toHaveLength(10);
-      expect(screen.queryByText('Full')).toBeNull();
-      expect(screen.getByText(`${note().value.length} / ${STICKY_TEXT_LIMIT}`)).toBeInTheDocument();
+    expect(screen.getByLabelText('Note').textContent).toHaveLength(STICKY_TEXT_LIMIT);
+    expect(screen.getByText('Full')).toBeInTheDocument();
 
-      await user.type(note(), 'x'.repeat(30));
-
-      expect(note().value.endsWith('x'.repeat(20))).toBe(true);
-      expect(note().value.endsWith('x'.repeat(21))).toBe(false);
-      expect(screen.getByText('Full')).toBeInTheDocument();
-    } finally {
-      rect.mockRestore();
-    }
+    await user.type(screen.getByLabelText('Note'), 'more');
+    expect(screen.getByLabelText('Note').textContent).toHaveLength(STICKY_TEXT_LIMIT);
   });
 
-  // Typing cannot make a note too tall for any sticky, but an extension of
-  // one written under other rules can open like that. Proposing checks again.
-  it('will not propose a note too tall for any sticky', async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const text = this.querySelector('p')?.textContent ?? '';
-        const width = parseFloat(this.style.width) || 0;
-        return { width, height: text.includes('too tall') ? width + 50 : 100 } as DOMRect;
-      });
-    try {
-      const user = userEvent.setup();
-      const propose = vi.fn(async () => undefined);
-      const source: BoardItem = {
-        id: 'old-1',
-        questionId: 'question-1',
-        authorId: 'user-2',
-        authorName: 'Alice',
-        type: 'sticky',
-        artifactJson: { type: 'sticky', text: 'An old note, too tall', color: 'blue' },
-        x: 0,
-        y: 0,
-        createdAt: '2026-09-02T00:00:00.000Z',
-        z: 0,
-        editedAt: null,
-        extendsProposalId: null,
-        extendsFrom: null,
-        reactions: [],
-      };
-      render(
-        <Harness propose={propose} proposals={[source]}>
-          <ExtendButton proposal={source} />
-        </Harness>,
-      );
+  it('proposes the formatting with the words', async () => {
+    const user = userEvent.setup();
+    const propose = vi.fn(async () => undefined);
+    render(<Harness propose={propose} />);
 
-      await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
-      // An extension has to change something before it can be proposed at all.
-      await user.click(screen.getByRole('button', { name: 'yellow sticky' }));
-      await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    const note = screen.getByLabelText('Note');
+    await user.type(note, 'Ship the beta');
+    selectInNote(note, 0, 4);
+    await user.click(screen.getByRole('button', { name: 'Bold' }));
+    selectInNote(note, 9, 13);
+    await user.click(screen.getByRole('button', { name: 'Italic' }));
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
 
-      expect(propose).not.toHaveBeenCalled();
-      expect(screen.getByRole('alert')).toHaveTextContent('too long to fit on a sticky');
-    } finally {
-      rect.mockRestore();
-    }
+    expect(propose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactJson: {
+          type: 'sticky',
+          text: 'Ship the beta',
+          color: 'yellow',
+          marks: [
+            { from: 0, to: 4, style: 'bold' },
+            { from: 9, to: 13, style: 'italic' },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('proposes links and nested lists with the words', async () => {
+    const user = userEvent.setup();
+    const propose = vi.fn(async () => undefined);
+    render(<Harness propose={propose} />);
+
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    const note = screen.getByLabelText('Note');
+    await user.type(note, '- Plan{Enter}Read the spec{Tab}');
+    selectInNote(note, 14, 18);
+    await user.click(screen.getByRole('button', { name: 'Link' }));
+    // Enter in the address applies the link; it must not propose the sticky.
+    await user.type(screen.getByRole('textbox', { name: 'Link address' }), 'example.com{Enter}');
+    expect(propose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    expect(propose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactJson: {
+          type: 'sticky',
+          text: 'Plan\nRead the spec',
+          color: 'yellow',
+          lines: ['bullet', 'bullet'],
+          levels: [0, 1],
+          links: [{ from: 14, to: 18, href: 'https://example.com/' }],
+        },
+      }),
+    );
+  });
+
+  // Bold pressed with nothing selected is for what is typed next, the way a
+  // word processor carries on.
+  it('types in bold after Bold is pressed with nothing selected, until it is pressed again', async () => {
+    const user = userEvent.setup();
+    const propose = vi.fn(async () => undefined);
+    render(<Harness propose={propose} />);
+
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    const note = screen.getByLabelText('Note');
+    await user.click(note);
+    await user.click(screen.getByRole('button', { name: 'Bold' }));
+    expect(screen.getByRole('button', { name: 'Bold' })).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('Loud');
+    await user.click(screen.getByRole('button', { name: 'Bold' }));
+    await user.keyboard(' quiet');
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    expect(propose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactJson: expect.objectContaining({
+          text: 'Loud quiet',
+          marks: [{ from: 0, to: 4, style: 'bold' }],
+        }),
+      }),
+    );
+  });
+
+  it('formats with the keyboard shortcuts too', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={vi.fn(async () => undefined)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    const note = screen.getByLabelText('Note');
+    await user.type(note, 'Underlined');
+    selectInNote(note, 0, 10);
+    await user.keyboard('{Control>}u{/Control}');
+
+    expect(note.querySelector('[data-sticky-styles="underline"]')).toHaveTextContent('Underlined');
+    expect(screen.getByRole('button', { name: 'Underline' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  // Only the words come in. Whatever was pasted is never read as markup.
+  it('pastes only the words, never markup', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={vi.fn(async () => undefined)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    const note = screen.getByLabelText('Note');
+    await user.click(note);
+    await user.paste('<b onmouseover="alert(1)">Loud</b>');
+
+    expect(note.textContent).toBe('<b onmouseover="alert(1)">Loud</b>');
+    expect(note.querySelector('b')).toBeNull();
+  });
+
+  it('undoes and redoes what was written', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={vi.fn(async () => undefined)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Sticky' }));
+    const note = screen.getByLabelText('Note');
+    await user.type(note, 'Hello');
+    await user.keyboard('{Control>}z{/Control}');
+    expect(note.textContent).toBe('');
+
+    await user.keyboard('{Control>}y{/Control}');
+    expect(note.textContent).toBe('Hello');
   });
 
   it('disables creation while offline', () => {
@@ -312,7 +393,7 @@ describe('creative sticky flow', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
-    expect(screen.getByLabelText('Note')).toHaveValue('Original idea');
+    expect(screen.getByLabelText('Note')?.textContent).toBe('Original idea');
     expect(screen.getByText("Extending Alice's sticky")).toBeInTheDocument();
 
     // Unchanged, it waits, and says why.
@@ -473,7 +554,7 @@ describe('sticky drafts', () => {
   };
 
   const inSession = { sessionId: 'session-1', viewerId: 'user-1' };
-  const note = () => screen.queryByLabelText('Note') as HTMLTextAreaElement | null;
+  const note = () => screen.queryByLabelText('Note') as HTMLElement | null;
 
   beforeEach(() => {
     localStorage.clear();
@@ -491,7 +572,7 @@ describe('sticky drafts', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
 
-    expect(note()).toHaveValue('Half an idea');
+    expect(note()?.textContent).toBe('Half an idea');
     expect(screen.getByRole('button', { name: 'pink sticky' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -517,7 +598,7 @@ describe('sticky drafts', () => {
     expect(onBoard).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
-    expect(note()).toHaveValue('Half an idea');
+    expect(note()?.textContent).toBe('Half an idea');
   });
 
   it('stays open on a press inside it', async () => {
@@ -566,7 +647,7 @@ describe('sticky drafts', () => {
     await waitFor(() => expect(note()).toBeNull());
 
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
-    expect(note()).toHaveValue('');
+    expect(note()?.textContent).toBe('');
   });
 
   // The popup can be closed while a proposal is still on its way. The note
@@ -589,7 +670,7 @@ describe('sticky drafts', () => {
     await act(async () => land?.());
 
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
-    expect(note()).toHaveValue('');
+    expect(note()?.textContent).toBe('');
   });
 
   // Extending opens on somebody else's words. Reading the draft into it would
@@ -607,12 +688,154 @@ describe('sticky drafts', () => {
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
-    expect(note()).toHaveValue('Original idea');
+    expect(note()?.textContent).toBe('Original idea');
     await user.type(note()!, ' and more');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
-    expect(note()).toHaveValue('My own idea');
+    expect(note()?.textContent).toBe('My own idea');
+  });
+
+  describe('while editing a sticky', () => {
+    const mine: BoardItem = { ...parent, id: 'proposal-mine', authorId: 'user-1' };
+    const other: BoardItem = {
+      ...mine,
+      id: 'proposal-other',
+      artifactJson: { type: 'sticky', text: 'Second idea', color: 'green' },
+    };
+
+    // Closing an edit halfway, by a press on the board, keeps what was changed.
+    it('keeps the edit as a draft of its own, and opens it again on that sticky', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness propose={vi.fn(async () => undefined)} proposals={[mine]} {...inSession}>
+          <EditButton proposal={mine} />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      await user.type(note()!, ' made better');
+      await user.click(screen.getByRole('button', { name: 'pink sticky' }));
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      expect(note()?.textContent).toBe('Original idea made better');
+      expect(screen.getByRole('button', { name: 'pink sticky' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    it('keeps each edit apart, and apart from the new sticky being written', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness propose={vi.fn(async () => undefined)} proposals={[mine, other]} {...inSession}>
+          <EditButton proposal={mine} />
+          <EditButton proposal={other} label="Edit other fixture" />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Sticky' }));
+      await user.type(note()!, 'Brand new');
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      await user.type(note()!, ' one');
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+      await user.click(screen.getByRole('button', { name: 'Edit other fixture' }));
+      await user.type(note()!, ' two');
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      expect(note()?.textContent).toBe('Original idea one');
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+      await user.click(screen.getByRole('button', { name: 'Edit other fixture' }));
+      expect(note()?.textContent).toBe('Second idea two');
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+      await user.click(screen.getByRole('button', { name: 'Sticky' }));
+      expect(note()?.textContent).toBe('Brand new');
+    });
+
+    /**
+     * Every popup the page draws while `act` runs, however briefly. The router
+     * moves to a new address a render after an ordinary state change, so a
+     * popup that is drawn and taken away again inside one close would be gone
+     * again before any assertion could look for it.
+     */
+    function watchPopupLabels() {
+      const labels: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          record.addedNodes.forEach((node) => {
+            if (!(node instanceof HTMLElement)) return;
+            const label = node.querySelector('#sticky-composer-label') ?? null;
+            if (label?.textContent) labels.push(label.textContent);
+          });
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      return () => {
+        observer.takeRecords();
+        observer.disconnect();
+        return labels;
+      };
+    }
+
+    // Closing takes the sticky it was opened on away a render before the tool,
+    // and for that render the popup was a new sticky's: a flash of the wrong
+    // popup on every close and every update.
+    it.each([
+      ['closed', 'Close'],
+      ['updated', 'Update proposal'],
+    ])('draws no other popup in its place as an edit is %s', async (_, button) => {
+      const user = userEvent.setup();
+      render(
+        <Harness propose={vi.fn(async () => undefined)} proposals={[mine]} {...inSession}>
+          <EditButton proposal={mine} />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      await user.type(note()!, ' made better');
+      const stop = watchPopupLabels();
+      await user.click(screen.getByRole('button', { name: button }));
+      await waitFor(() => expect(note()).toBeNull());
+
+      expect(stop()).toEqual([]);
+    });
+
+    it('keeps nothing for an edit opened and closed without a change', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness propose={vi.fn(async () => undefined)} proposals={[mine]} {...inSession}>
+          <EditButton proposal={mine} />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      await user.type(note()!, '!');
+      await user.keyboard('{Backspace}');
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+
+      expect(localStorage.length).toBe(0);
+    });
+
+    // Once the proposal is updated, the next edit starts from the proposal.
+    it('says Update proposal, and drops the draft once the proposal is updated', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness propose={vi.fn(async () => undefined)} proposals={[mine]} {...inSession}>
+          <EditButton proposal={mine} />
+        </Harness>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit fixture' }));
+      expect(screen.queryByRole('button', { name: 'Propose' })).toBeNull();
+      await user.type(note()!, ' made better');
+      await user.click(screen.getByRole('button', { name: 'Update proposal' }));
+      await waitFor(() => expect(note()).toBeNull());
+
+      expect(localStorage.length).toBe(0);
+    });
   });
 
   // No session or no signed-in viewer means nowhere to keep a draft for.
@@ -625,13 +848,13 @@ describe('sticky drafts', () => {
     await user.click(screen.getByRole('button', { name: 'Close' }));
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
 
-    expect(note()).toHaveValue('');
+    expect(note()?.textContent).toBe('');
     expect(localStorage.length).toBe(0);
   });
 });
 
 describe('sticky drafts across questions', () => {
-  const note = () => screen.queryByLabelText('Note') as HTMLTextAreaElement | null;
+  const note = () => screen.queryByLabelText('Note') as HTMLElement | null;
   const board = (questionId: string) => (
     <Harness
       propose={vi.fn(async () => undefined)}
@@ -657,13 +880,13 @@ describe('sticky drafts across questions', () => {
 
     rerender(board('question-2'));
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
-    expect(note()).toHaveValue('');
+    expect(note()?.textContent).toBe('');
     await user.type(note()!, 'For question two');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     rerender(board('question-1'));
     await user.click(screen.getByRole('button', { name: 'Sticky' }));
-    expect(note()).toHaveValue('For question one');
+    expect(note()?.textContent).toBe('For question one');
   });
 
   // Moving on while the popup is open must not carry the note across, or keep
@@ -676,13 +899,13 @@ describe('sticky drafts across questions', () => {
     await user.type(note()!, 'For question one');
     rerender(board('question-2'));
 
-    expect(note()).toHaveValue('');
+    expect(note()?.textContent).toBe('');
     expect(localStorage.getItem(draftKeyFor('session-1', 'question-2', 'user-1'))).toBeNull();
   });
 });
 
 describe('closing the sticky popup', () => {
-  const note = () => screen.queryByLabelText('Note') as HTMLTextAreaElement | null;
+  const note = () => screen.queryByLabelText('Note') as HTMLElement | null;
 
   /** Answers media queries the way a browser would, with or without reduced motion. */
   function motion({ reduced }: { reduced: boolean }) {
@@ -749,7 +972,7 @@ describe('closing the sticky popup', () => {
     // Well past the fade: a close that was not cancelled would have landed.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    expect(note()).toHaveValue('Wait');
+    expect(note()?.textContent).toBe('Wait');
     expect(note()?.closest('form')).toHaveClass('rt-sticky-popup-rise');
   });
 
@@ -796,13 +1019,13 @@ describe('closing the sticky popup', () => {
       // Landed, draft cleared, and fading with the note still focused.
       await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
       expect(note()?.closest('form')).toHaveClass('rt-sticky-popup-fade');
-      fireEvent.change(note()!, { target: { value: 'Ship it, and again' } });
+      await user.keyboard(', and again');
       expect(localStorage.getItem(key)).toBeNull();
 
       act(() => finishFade?.());
       expect(note()).toBeNull();
       await user.click(screen.getByRole('button', { name: 'Sticky' }));
-      expect(note()).toHaveValue('');
+      expect(note()?.textContent).toBe('');
     } finally {
       timers.mockRestore();
     }

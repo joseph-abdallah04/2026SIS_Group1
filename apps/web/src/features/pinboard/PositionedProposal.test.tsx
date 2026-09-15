@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import type { BoardItem } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { STICKY_TEXT_LIMIT } from '../tools/artifactLimits';
 import { PositionedProposal } from './PositionedProposal';
 
 function stickyItem(text: string): BoardItem {
@@ -25,19 +24,20 @@ function stickyItem(text: string): BoardItem {
   };
 }
 
-/** The viewer owns this card, so Edit and the inline editor are offered. */
-function renderOwnSticky(text = 'Ship the beta') {
-  const onEditText = vi.fn(async () => {});
+/** The viewer owns this card, so Edit is offered in its menu. */
+function renderOwnSticky({ boardOpen = true }: { boardOpen?: boolean } = {}) {
+  const onOpenEditor = vi.fn();
   render(
     <PositionedProposal
-      item={stickyItem(text)}
+      item={stickyItem('Ship the beta')}
       position={{ x: 0, y: 0 }}
       isNew={false}
       isOwn
       isAuthorLeader={false}
-      boardOpen
-      canMove
-      canDelete
+      boardOpen={boardOpen}
+      onOpenEditor={boardOpen ? onOpenEditor : undefined}
+      canMove={boardOpen}
+      canDelete={boardOpen}
       canArrange={false}
       stackIndex={0}
       stackSize={1}
@@ -50,7 +50,6 @@ function renderOwnSticky(text = 'Ship the beta') {
         onPointerUp: vi.fn(),
         onPointerCancel: vi.fn(),
       }}
-      onEditText={onEditText}
       onDelete={vi.fn(async () => {})}
       viewerId="viewer"
       onReact={vi.fn(async () => {})}
@@ -59,181 +58,29 @@ function renderOwnSticky(text = 'Ship the beta') {
       onToggleShortlist={vi.fn()}
     />,
   );
-  return { onEditText };
+  return { onOpenEditor };
 }
 
-const openEditor = async () => {
-  await userEvent.click(screen.getByRole('button', { name: 'Proposal actions' }));
-  await userEvent.click(screen.getByRole('menuitem', { name: 'Edit' }));
-  return screen.getByRole('textbox', { name: 'Edit sticky note text' });
-};
+describe('editing a sticky', () => {
+  // A sticky reopens in its popup, where its formatting can be changed. A plain
+  // box on the card would have flattened a formatted note the moment it opened.
+  it('opens the sticky editor rather than a box on the card', async () => {
+    const { onOpenEditor } = renderOwnSticky();
 
-describe('editing a sticky in place', () => {
-  it('saves the edited text', async () => {
-    const { onEditText } = renderOwnSticky();
+    await userEvent.click(screen.getByRole('button', { name: 'Proposal actions' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit' }));
 
-    const box = await openEditor();
-    await userEvent.clear(box);
-    await userEvent.type(box, 'Ship the beta on Friday');
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(onEditText).toHaveBeenCalledWith(expect.anything(), 'Ship the beta on Friday');
+    expect(onOpenEditor).toHaveBeenCalledWith(expect.objectContaining({ id: 'sticky-1' }));
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  // Whitespace may be deliberate: a blank line between thoughts, an indent.
-  it('saves the note exactly as typed, whitespace included', async () => {
-    const { onEditText } = renderOwnSticky();
+  it('offers no edit once the board is closed to changes', async () => {
+    renderOwnSticky({ boardOpen: false });
 
-    const box = await openEditor();
-    await userEvent.clear(box);
-    await userEvent.type(box, '  Ship it{Shift>}{Enter}{Enter}{/Shift}    then celebrate  ');
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(onEditText).toHaveBeenCalledWith(expect.anything(), '  Ship it\n\n    then celebrate  ');
-  });
-
-  // The rule that applies when a sticky is written has to apply when it is
-  // rewritten, or the cap is a formality that one click undoes.
-  it('stops typing at the same limit the tool enforces', async () => {
-    renderOwnSticky();
-
-    const box = await openEditor();
-
-    expect(box.getAttribute('maxlength')).toBe(String(STICKY_TEXT_LIMIT));
-  });
-
-  it('counts down against that limit while you type', async () => {
-    renderOwnSticky('Hello');
-
-    await openEditor();
-
-    expect(screen.getByText(`5/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
-  });
-
-  // The box stops at the limit counting every character, so the count has to
-  // as well, or it reads short of the limit while refusing the next key.
-  it('reads Full at the character limit rather than a count', async () => {
-    renderOwnSticky('x'.repeat(STICKY_TEXT_LIMIT));
-
-    await openEditor();
-
-    expect(screen.getByText('Full')).toBeTruthy();
-  });
-
-  it('counts spaces at the end of the note', async () => {
-    renderOwnSticky('Hello');
-
-    const box = await openEditor();
-    await userEvent.type(box, '{End}  ');
-
-    expect(screen.getByText(`7/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
-  });
-
-  // A note written before the cap existed, or through another client, opens
-  // longer than the limit. Save is closed, and the reason is on screen rather
-  // than waiting for a press that cannot land.
-  it('refuses a note that is already over the limit, and says why', async () => {
-    const { onEditText } = renderOwnSticky('x'.repeat(STICKY_TEXT_LIMIT + 20));
-
-    await openEditor();
-
-    expect(screen.getByRole('alert').textContent).toContain(String(STICKY_TEXT_LIMIT));
-    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
-    expect(onEditText).not.toHaveBeenCalled();
-  });
-
-  // The character cap counts characters; wide letters fill the paper first.
-  // There is no size past the largest, so the editor stops taking text there.
-  it('stops taking text once the note fills the largest sticky', async () => {
-    // A stand-in layout in which a note longer than twelve characters overflows
-    // the largest sticky, whatever the character count says.
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const note = this.querySelector('p')?.textContent ?? '';
-        const width = parseFloat(this.style.width) || 0;
-        return { width, height: note.length > 12 ? width + 50 : 100 } as DOMRect;
-      });
-    try {
-      renderOwnSticky();
-      const box = await openEditor();
-      await userEvent.clear(box);
-      await userEvent.type(box, 'Ship the beta on Friday');
-
-      // Only visible text is refused; spaces at the end of a line take no room.
-      expect((box as HTMLTextAreaElement).value.trim()).toBe('Ship the bet');
-      // And the count says so, rather than showing room that is not there.
-      expect(screen.getByText('Full')).toBeTruthy();
-
-      // Taking text out makes room, and the count comes back.
-      await userEvent.clear(box);
-      expect(screen.getByText(`0/${STICKY_TEXT_LIMIT}`)).toBeTruthy();
-    } finally {
-      rect.mockRestore();
-    }
-  });
-
-  it('refuses a new line past the last one without calling the note full', async () => {
-    // A stand-in layout: twenty characters to a line and ten lines to the
-    // largest sticky, so running out of lines and running out of room on the
-    // last line are different moments.
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const note = this.querySelector('p')?.textContent ?? '';
-        const width = parseFloat(this.style.width) || 0;
-        const lines = note
-          .split('\n')
-          .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 20)), 0);
-        return { width, height: lines > 10 ? width + 50 : 100 } as DOMRect;
-      });
-    try {
-      renderOwnSticky('Idea');
-      const box = await openEditor();
-      await userEvent.type(box, `{End}${'{Shift>}{Enter}{/Shift}'.repeat(20)}`);
-
-      expect((box as HTMLTextAreaElement).value.split('\n')).toHaveLength(10);
-      expect(screen.queryByText('Full')).toBeNull();
-
-      await userEvent.type(box, 'x'.repeat(30));
-      expect(screen.getByText('Full')).toBeTruthy();
-    } finally {
-      rect.mockRestore();
-    }
-  });
-
-  // A note can open already too tall for any sticky, though typing cannot
-  // make one. Save stays closed, and the reason is on screen.
-  it('will not save a note too tall for any sticky, and says why', async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const text = this.querySelector('p')?.textContent ?? '';
-        const width = parseFloat(this.style.width) || 0;
-        return { width, height: text.length > 15 ? width + 50 : 100 } as DOMRect;
-      });
-    try {
-      const { onEditText } = renderOwnSticky('This note is far too tall');
-      const box = await openEditor();
-      // Shortened, but not enough: deleting is always allowed.
-      await userEvent.type(box, '{End}{Backspace}');
-
-      expect(screen.getByRole('alert').textContent).toContain('too long to fit on a sticky');
-      expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
-      expect(onEditText).not.toHaveBeenCalled();
-    } finally {
-      rect.mockRestore();
-    }
-  });
-
-  it('will not save an empty note', async () => {
-    const { onEditText } = renderOwnSticky();
-
-    const box = await openEditor();
-    await userEvent.clear(box);
-
-    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
-    expect(onEditText).not.toHaveBeenCalled();
+    // Copying the words is still on offer; changing them is not.
+    await userEvent.click(screen.getByRole('button', { name: 'Proposal actions' }));
+    expect(screen.queryByRole('menuitem', { name: 'Edit' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Copy text' })).toBeTruthy();
   });
 });
 
@@ -286,7 +133,6 @@ function renderCard({
         onCopyText={() => undefined}
         isDragging={false}
         dragHandlers={dragHandlers}
-        onEditText={async () => undefined}
         onDelete={async () => undefined}
         viewerId="leader-1"
         isShortlisted={false}
@@ -358,7 +204,6 @@ function renderMenuCard(props: MenuCardProps = {}) {
       stackSize={3}
       isDragging={false}
       dragHandlers={dragHandlers}
-      onEditText={async () => undefined}
       viewerId="viewer"
       isShortlisted={false}
       canToggleShortlist={false}
@@ -536,6 +381,32 @@ describe('PositionedProposal actions menu', () => {
     expect(cardWrapper(container).style.outlineColor).toBe('rgb(59, 130, 246)');
   });
 
+  // Opening a sticky's link in a new tab, or copying its address, is what a
+  // right-click on it is for.
+  it('leaves the browser menu alone over a link in a sticky', () => {
+    renderMenuCard({
+      item: {
+        ...ITEM,
+        artifactJson: {
+          type: 'sticky',
+          text: 'See the spec',
+          color: 'yellow',
+          links: [{ from: 8, to: 12, href: 'https://example.com/spec' }],
+        },
+      },
+    });
+
+    const link = screen.getByRole('link', { name: 'spec' });
+    expect(fireEvent.contextMenu(link, { clientX: 10, clientY: 10 })).toBe(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    // Anywhere else on the same card still opens the card's own menu.
+    expect(fireEvent.contextMenu(screen.getByText('See the'), { clientX: 10, clientY: 10 })).toBe(
+      false,
+    );
+    expect(screen.getByRole('menu')).toBeTruthy();
+  });
+
   it('leaves the browser menu alone when there is nothing to offer', () => {
     // A diagram on a closed board: no copy, no extend, nothing else allowed.
     renderMenuCard({ item: DIAGRAM, boardOpen: false, onExtend: undefined });
@@ -545,15 +416,6 @@ describe('PositionedProposal actions menu', () => {
       clientX: 10,
       clientY: 10,
     });
-    expect(notCancelled).toBe(true);
-    expect(screen.queryByRole('menu')).toBeNull();
-  });
-
-  it('keeps the browser menu inside the note editor', async () => {
-    renderOwnSticky();
-    const box = await openEditor();
-
-    const notCancelled = fireEvent.contextMenu(box, { clientX: 10, clientY: 10 });
     expect(notCancelled).toBe(true);
     expect(screen.queryByRole('menu')).toBeNull();
   });

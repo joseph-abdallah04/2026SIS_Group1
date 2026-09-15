@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { startTransition, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
@@ -101,9 +101,16 @@ export function CreativeToolsProvider({
     if (closeGuardRef.current && !closeGuardRef.current()) return false;
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('tool');
-    setSearchParams(nextParams, { replace: true });
-    setExtensionSource(null);
-    setEditSource(null);
+    // What the tool was opened on goes in the same render as the tool. The
+    // router moves to the new address as a transition, so a source cleared
+    // straight away went a render before the tool did, and for that render the
+    // tool still open was one opened on nothing: an edit's popup swapped for a
+    // new sticky's, flashing up as it closed.
+    startTransition(() => {
+      setSearchParams(nextParams, { replace: true });
+      setExtensionSource(null);
+      setEditSource(null);
+    });
     if (submission.status !== 'submitting') submission.reset();
     return true;
   }
