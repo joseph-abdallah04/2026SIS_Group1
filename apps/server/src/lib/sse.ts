@@ -54,12 +54,14 @@ export class SseWriter<TEvent> {
     if (this.isClosed) return;
     // JSON.stringify never emits a raw newline, so a single data: line is always valid.
     this.res.write(`data: ${JSON.stringify(event)}\n\n`);
+    this.flush();
   }
 
   /** Write a comment frame (ignored by EventSource; keeps the connection warm). */
   comment(text: string): void {
     if (this.isClosed) return;
     this.res.write(`: ${text}\n\n`);
+    this.flush();
   }
 
   /** End the stream. Safe to call more than once. */
@@ -79,5 +81,14 @@ export class SseWriter<TEvent> {
       clearInterval(this.heartbeat);
       this.heartbeat = undefined;
     }
+  }
+
+  /**
+   * Compression (and some proxies) otherwise hold a frame until the tick ends, so a
+   * tool-running frame never leaves the process before the artifacts that follow it.
+   */
+  private flush(): void {
+    const flush = (this.res as Response & { flush?: () => void }).flush;
+    flush?.();
   }
 }

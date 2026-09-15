@@ -18,8 +18,9 @@
 import type { AssistantStreamEvent } from '@roundtable/shared';
 
 import { runAssistantTurn } from '../agent.js';
-import type { LlmCredentials } from '../llm.js';
 import { buildSystemPrompt } from '../prompt.js';
+import { createAssistantModel, type LlmCredentials } from '../provider.js';
+import { createAssistantTools, ToolOutcomeSink } from '../tools/index.js';
 import { EVAL_CASES, type EvalCase } from './cases.js';
 
 const TURN_TIMEOUT_MS = 90_000;
@@ -56,18 +57,24 @@ async function runCase(testCase: EvalCase, credentials: LlmCredentials): Promise
   const timer = setTimeout(() => controller.abort(), TURN_TIMEOUT_MS);
   const startedAt = Date.now();
 
+  const sink = new ToolOutcomeSink();
+
   try {
     await runAssistantTurn({
-      credentials,
-      systemPrompt: buildSystemPrompt({
-        sessionId: 'eval-session',
-        sessionTitle: 'Eval',
-        block: testCase.contextBlock ?? '',
-      }),
+      model: createAssistantModel(credentials),
+      instructions: buildSystemPrompt(
+        {
+          sessionId: 'eval-session',
+          sessionTitle: 'Eval',
+          block: testCase.contextBlock ?? '',
+        },
+        testCase.history ?? [],
+      ),
       history: testCase.history ?? [],
       message: testCase.message,
       emit: (event) => events.push(event),
       signal: controller.signal,
+      tools: { toolSet: createAssistantTools(sink), sink },
     });
   } catch (cause) {
     clearTimeout(timer);

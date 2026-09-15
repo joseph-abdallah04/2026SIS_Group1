@@ -97,4 +97,19 @@ describe('layoutDiagram', () => {
     );
     expect(nodes.map((n) => n.id)).toEqual(['z', 'y']);
   });
+
+  it('gives a long label a taller box rather than overflowing the column', () => {
+    const nodes = layoutDiagram(
+      [
+        { id: 'short', label: 'API' },
+        { id: 'long', label: 'Collaboration Service layer' },
+      ],
+      [{ from: 'short', to: 'long' }],
+    );
+    const short = nodes.find((n) => n.id === 'short');
+    const long = nodes.find((n) => n.id === 'long');
+    expect(short?.width).toBe(120);
+    expect(long?.width).toBe(120);
+    expect(long?.height).toBeGreaterThan(short?.height ?? 0);
+  });
 });

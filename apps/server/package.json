@@ -18,9 +18,11 @@
     "eval": "dotenv -e ../../.env -- tsx --conditions=development src/modules/assistant/eval/run.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.48",
     "@prisma/client": "^6.19.3",
     "@resvg/resvg-js": "^2.6.2",
     "@roundtable/shared": "*",
+    "ai": "^7.0.101",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -29,6 +31,7 @@
     "livekit-server-sdk": "^2.18.0",
     "pdfkit": "^0.20.2",
     "socket.io": "^4.8.1",
+    "undici": "^7.29.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {

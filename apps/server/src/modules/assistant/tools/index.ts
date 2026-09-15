@@ -1,10 +1,22 @@
-// F36 — the three agent tools, and the registry the tool-calling loop iterates.
+// F36 — the three agent tools.
 //
 // Design note: `create_diagram` and `sticky_ideation` do not call the LLM again. The model
 // already produced the content when it filled in the tool arguments; the tool's job is to
 // validate that content, give it a deterministic layout/shape, and hand back a real
 // artifact. That keeps one user turn to one LLM round trip per step and makes the tools
 // unit-testable without a provider.
+//
+// Each tool is split in two:
+//
+//   - a `run*` function that is pure input → outcome, with no streaming and no SDK types,
+//     which is what the unit tests exercise
+//   - a thin `tool()` wrapper that reports the outcome to a per-turn sink and returns the
+//     model-facing text
+//
+// The sink exists because artifacts must reach the client in a fixed order relative to the
+// tool frames around them (`tool` → `artifact`… → `tool-result`). Emitting from inside
+// `execute` would race the agent's own reading of the stream, so execution records what
+// happened and the agent emits it when it sees the matching `tool-result`.
 import {
   parseArtifact,
   STICKY_COLORS,
@@ -16,94 +28,86 @@ import {
   type StickyColor,
   type WebSearchResult,
 } from '@roundtable/shared';
+import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 
-import type { LlmToolDefinition } from '../llm.js';
 import { layoutDiagram } from './layout.js';
 import { searchWeb } from './webSearch.js';
 
-export interface ToolRunContext {
-  signal: AbortSignal;
-  /** Streams an artifact to the client the moment it exists, before the model replies. */
-  emitArtifact(artifact: ArtifactJson, source: AssistantToolName): void;
-}
-
-export interface ToolRunResult {
+/** What a tool produced, in the terms the chat panel needs. */
+export interface ToolOutcome {
   ok: boolean;
   /** One line for the UI's tool-result chip. */
   summary: string;
   /** Text handed back to the model as the tool message — this is what it reasons over. */
   modelText: string;
+  /** Streamed to the client as `artifact` frames, each with a Propose button. */
+  artifacts?: ArtifactJson[];
   results?: WebSearchResult[];
 }
 
-export interface AssistantTool {
-  name: AssistantToolName;
-  definition: LlmToolDefinition;
-  run(rawArguments: unknown, context: ToolRunContext): Promise<ToolRunResult>;
+/** Collects outcomes during a turn so the agent can emit them in stream order. */
+export class ToolOutcomeSink {
+  private readonly outcomes = new Map<string, ToolOutcome>();
+
+  record(toolCallId: string, outcome: ToolOutcome): void {
+    this.outcomes.set(toolCallId, outcome);
+  }
+
+  /** Reads and forgets the outcome for a call. */
+  take(toolCallId: string): ToolOutcome | undefined {
+    const outcome = this.outcomes.get(toolCallId);
+    this.outcomes.delete(toolCallId);
+    return outcome;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // web_search
 // ---------------------------------------------------------------------------
 
-const webSearchArgsSchema = z.object({
-  query: z.string().min(1).max(300),
+const webSearchInput = z.object({
+  query: z.string().min(1).max(300).describe('Search query, phrased as you would type it.'),
 });
 
-const webSearchTool: AssistantTool = {
-  name: 'web_search',
-  definition: {
-    type: 'function',
-    function: {
-      name: 'web_search',
-      description:
-        'Search the public web for current facts, comparisons, prices, docs or prior art. Use it when the answer depends on information you do not reliably know, and cite the sources you use.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search query, phrased as you would type it.' },
-        },
-        required: ['query'],
-        additionalProperties: false,
-      },
-    },
-  },
-  async run(rawArguments, context) {
-    const args = webSearchArgsSchema.safeParse(rawArguments);
-    if (!args.success) {
-      return invalidArgs('web_search', args.error);
-    }
+export async function runWebSearch(
+  input: z.infer<typeof webSearchInput>,
+  signal?: AbortSignal,
+): Promise<ToolOutcome> {
+  const outcome = await searchWeb(input.query, signal);
 
-    const outcome = await searchWeb(args.data.query, context.signal);
-    if (outcome.results.length === 0) {
-      return {
-        ok: false,
-        summary: 'No results',
-        modelText:
-          outcome.note ??
-          'No results found. Tell the user search came back empty and answer from what you know, flagging the uncertainty.',
-      };
-    }
-
-    const modelText = outcome.results
-      .map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet}`)
-      .join('\n\n');
-
+  if (outcome.results.length === 0) {
     return {
-      ok: true,
-      summary: `${outcome.results.length} result${outcome.results.length === 1 ? '' : 's'}`,
-      modelText: outcome.note ? `${outcome.note}\n\n${modelText}` : modelText,
-      results: outcome.results,
+      ok: false,
+      summary: 'No results',
+      modelText:
+        outcome.note ??
+        'No results found. Tell the user search came back empty and answer from what you know, flagging the uncertainty.',
     };
-  },
-};
+  }
+
+  const modelText = outcome.results
+    .map((result, index) => `[${index + 1}] ${result.title}\n${result.url}\n${result.snippet}`)
+    .join('\n\n');
+
+  return {
+    ok: true,
+    summary: `${outcome.results.length} result${outcome.results.length === 1 ? '' : 's'}`,
+    modelText: outcome.note ? `${outcome.note}\n\n${modelText}` : modelText,
+    results: outcome.results,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // create_diagram
 // ---------------------------------------------------------------------------
 
-const createDiagramArgsSchema = z.object({
+// Every rule here is one the board itself enforces. Anything stricter is a call the model
+// gets rejected for writing something the pinboard would have accepted — and a rejected
+// call produces no artifact at all, which the user sees as the tool simply not working.
+// Node ids in particular were once restricted to `[A-Za-z0-9_-]`, so a flowchart with an
+// id like "Enter Credentials" failed in full; the board asks only that an id be non-empty.
+const createDiagramInput = z.object({
   nodes: z
     .array(
       z.object({
@@ -111,227 +115,135 @@ const createDiagramArgsSchema = z.object({
           .string()
           .min(1)
           .max(64)
-          .regex(
-            /^[A-Za-z0-9_-]+$/,
-            'Node ids may use letters, digits, hyphen and underscore only',
-          ),
-        label: z.string().min(1).max(120),
+          .describe('Short unique id, e.g. "api" or "step1". Referenced by edges.'),
+        label: z.string().min(1).max(120).describe('Text shown inside the box.'),
       }),
     )
     .min(2, 'A diagram needs at least two nodes')
-    .max(24),
+    .max(24)
+    .describe('Boxes in the diagram, 2-24 of them.'),
   edges: z
     .array(
       z.object({
         from: z.string().min(1).max(64),
         to: z.string().min(1).max(64),
-        label: z.string().max(80).optional(),
+        // Models routinely fill an optional field with null rather than omitting it, and
+        // failing the whole diagram over that is not worth the strictness.
+        label: z
+          .string()
+          .max(80)
+          .nullish()
+          .transform((value) => value ?? undefined)
+          .describe('Optional text on the arrow.'),
       }),
     )
     .max(60)
-    .default([]),
+    .default([])
+    .describe('Arrows between nodes, referencing node ids.'),
 });
 
-const createDiagramTool: AssistantTool = {
-  name: 'create_diagram',
-  definition: {
-    type: 'function',
-    function: {
-      name: 'create_diagram',
-      description:
-        'Draw a node-and-arrow diagram (architecture, flow, sequence of steps, decision tree) that the user can propose onto the pinboard. Give structure only — positions are computed for you. Use this ONLY when a picture answers the question better than a sentence would.',
-      parameters: {
-        type: 'object',
-        properties: {
-          nodes: {
-            type: 'array',
-            description: 'Boxes in the diagram, 2–24 of them.',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: 'Short unique id, e.g. "api" or "step1".' },
-                label: { type: 'string', description: 'Text shown inside the box.' },
-              },
-              required: ['id', 'label'],
-              additionalProperties: false,
-            },
-          },
-          edges: {
-            type: 'array',
-            description: 'Arrows between nodes, referencing node ids.',
-            items: {
-              type: 'object',
-              properties: {
-                from: { type: 'string' },
-                to: { type: 'string' },
-                label: { type: 'string', description: 'Optional text on the arrow.' },
-              },
-              required: ['from', 'to'],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ['nodes'],
-        additionalProperties: false,
-      },
-    },
-  },
-  async run(rawArguments, context) {
-    const args = createDiagramArgsSchema.safeParse(rawArguments);
-    if (!args.success) {
-      return invalidArgs('create_diagram', args.error);
-    }
-
-    const ids = new Set(args.data.nodes.map((n) => n.id));
-    const danglingEdge = args.data.edges.find((e) => !ids.has(e.from) || !ids.has(e.to));
-    if (danglingEdge) {
-      return {
-        ok: false,
-        summary: 'Invalid diagram',
-        modelText: `Edge ${danglingEdge.from} → ${danglingEdge.to} references a node id that is not in the nodes array. Call create_diagram again with matching ids.`,
-      };
-    }
-
-    // The board's write path rejects self-edges and repeated directed edges, and a model
-    // describing the same relationship twice produces both routinely. Those are the model
-    // being sloppy, not the user being wrong, so they are cleaned up here rather than
-    // surfaced as a Propose that fails in the user's hand. Node ids and dangling edges are
-    // checked above and below, because those mean the model got the *structure* wrong and it
-    // should be told to try again.
-    const edges = dropRedundantEdges(args.data.edges);
-
-    const candidate: DiagramArtifact = {
-      type: 'diagram',
-      nodes: layoutDiagram(args.data.nodes, edges),
-      edges,
-    };
-
-    const parsed = parseArtifact(candidate);
-    if (!parsed.ok) {
-      return {
-        ok: false,
-        summary: 'Invalid diagram',
-        modelText: `Diagram rejected: ${parsed.error}`,
-      };
-    }
-
-    context.emitArtifact(parsed.artifact, 'create_diagram');
+export function runCreateDiagram(input: z.infer<typeof createDiagramInput>): ToolOutcome {
+  const ids = new Set(input.nodes.map((node) => node.id));
+  const dangling = input.edges.find((edge) => !ids.has(edge.from) || !ids.has(edge.to));
+  if (dangling) {
     return {
-      ok: true,
-      summary: `Diagram: ${candidate.nodes.length} nodes`,
-      modelText: `Diagram created and shown to the user (${summarizeArtifact(parsed.artifact)}). They can propose it to the pinboard with one click — do not repeat the diagram as text.`,
+      ok: false,
+      summary: 'Invalid diagram',
+      modelText: `Edge ${dangling.from} → ${dangling.to} references a node id that is not in the nodes array. Call create_diagram again with matching ids.`,
     };
-  },
-};
+  }
+
+  // The board's write path rejects self-edges and repeated directed edges, and a model
+  // describing the same relationship twice produces both routinely. Those are the model
+  // being sloppy, not the user being wrong, so they are cleaned up here rather than
+  // surfaced as a Propose that fails in the user's hand. Node ids and dangling edges are
+  // checked separately, because those mean the model got the *structure* wrong and it
+  // should be told to try again.
+  const edges = dropRedundantEdges(input.edges);
+
+  const candidate: DiagramArtifact = {
+    type: 'diagram',
+    nodes: layoutDiagram(input.nodes, edges),
+    edges,
+  };
+
+  const parsed = parseArtifact(candidate);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      summary: 'Invalid diagram',
+      modelText: `Diagram rejected: ${parsed.error}`,
+    };
+  }
+
+  return {
+    ok: true,
+    summary: `Diagram: ${candidate.nodes.length} nodes`,
+    modelText: `Diagram created and shown to the user (${summarizeArtifact(parsed.artifact)}). They can propose it to the pinboard with one click — do not repeat the diagram as text.`,
+    artifacts: [parsed.artifact],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // sticky_ideation
 // ---------------------------------------------------------------------------
 
-const stickyIdeationArgsSchema = z.object({
+const stickyIdeationInput = z.object({
   ideas: z
     .array(
       z.object({
-        text: z.string().min(1).max(280),
+        text: z
+          .string()
+          .min(1)
+          .max(280)
+          .describe('The note text — one idea, ideally under 20 words.'),
         color: z.enum(STICKY_COLORS).optional(),
       }),
     )
     .min(1)
-    .max(8),
+    .max(8)
+    .describe('Three to five distinct ideas.'),
 });
 
-const stickyIdeationTool: AssistantTool = {
-  name: 'sticky_ideation',
-  definition: {
-    type: 'function',
-    function: {
-      name: 'sticky_ideation',
-      description:
-        'Turn ideas into 3–5 candidate sticky notes the user can propose onto the pinboard. Each note should stand alone as one idea, phrased tightly enough to read at a glance. Use this ONLY when the user is asking for notes, options or a brainstorm to put on the board — an ordinary question wants a prose answer, even if an earlier message in the conversation asked for sticky notes.',
-      parameters: {
-        type: 'object',
-        properties: {
-          ideas: {
-            type: 'array',
-            description: 'Three to five distinct ideas.',
-            items: {
-              type: 'object',
-              properties: {
-                text: {
-                  type: 'string',
-                  description: 'The note text — one idea, ideally under 20 words.',
-                },
-                color: { type: 'string', enum: [...STICKY_COLORS] },
-              },
-              required: ['text'],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ['ideas'],
-        additionalProperties: false,
-      },
-    },
-  },
-  async run(rawArguments, context) {
-    const args = stickyIdeationArgsSchema.safeParse(rawArguments);
-    if (!args.success) {
-      return invalidArgs('sticky_ideation', args.error);
-    }
+export function runStickyIdeation(input: z.infer<typeof stickyIdeationInput>): ToolOutcome {
+  // Cap at five: more than that stops being a shortlist and starts being a wall.
+  const ideas = input.ideas.slice(0, 5);
+  const accepted: StickyArtifact[] = [];
+  const artifacts: ArtifactJson[] = [];
+  const rejected: string[] = [];
 
-    // Cap at five: more than that stops being a shortlist and starts being a wall.
-    const ideas = args.data.ideas.slice(0, 5);
-    const accepted: StickyArtifact[] = [];
-    const rejected: string[] = [];
-
-    ideas.forEach((idea, index) => {
-      const candidate: StickyArtifact = {
-        type: 'sticky',
-        text: idea.text.trim(),
-        color: idea.color ?? rotateColor(index),
-      };
-      const parsed = parseArtifact(candidate);
-      if (parsed.ok) {
-        accepted.push(parsed.artifact as StickyArtifact);
-        context.emitArtifact(parsed.artifact, 'sticky_ideation');
-      } else {
-        rejected.push(parsed.error);
-      }
-    });
-
-    if (accepted.length === 0) {
-      return {
-        ok: false,
-        summary: 'No usable notes',
-        modelText: `Every sticky note was rejected: ${rejected.join('; ')}`,
-      };
-    }
-
-    return {
-      ok: true,
-      summary: `${accepted.length} sticky note${accepted.length === 1 ? '' : 's'}`,
-      modelText: `${accepted.length} sticky notes created and shown to the user: ${accepted
-        .map((s) => `"${s.text}"`)
-        .join(
-          ', ',
-        )}. They can propose any of them with one click — introduce them in a sentence rather than listing them again.`,
+  ideas.forEach((idea, index) => {
+    const candidate: StickyArtifact = {
+      type: 'sticky',
+      text: idea.text.trim(),
+      color: idea.color ?? rotateColor(index),
     };
-  },
-};
+    const parsed = parseArtifact(candidate);
+    if (parsed.ok) {
+      accepted.push(parsed.artifact as StickyArtifact);
+      artifacts.push(parsed.artifact);
+    } else {
+      rejected.push(parsed.error);
+    }
+  });
 
-/** Cycles the palette so a batch of notes is visually distinguishable by default. */
-function rotateColor(index: number): StickyColor {
-  return STICKY_COLORS[index % STICKY_COLORS.length] as StickyColor;
-}
+  if (accepted.length === 0) {
+    return {
+      ok: false,
+      summary: 'No usable notes',
+      modelText: `Every sticky note was rejected: ${rejected.join('; ')}`,
+    };
+  }
 
-function invalidArgs(tool: AssistantToolName, error: z.ZodError): ToolRunResult {
-  const detail = error.issues
-    .map((issue) => `${issue.path.join('.') || 'arguments'}: ${issue.message}`)
-    .join('; ');
   return {
-    ok: false,
-    summary: 'Invalid arguments',
-    modelText: `${tool} was called with invalid arguments (${detail}). Fix them and call the tool again.`,
+    ok: true,
+    summary: `${accepted.length} sticky note${accepted.length === 1 ? '' : 's'}`,
+    modelText: `${accepted.length} sticky notes created and shown to the user: ${accepted
+      .map((sticky) => `"${sticky.text}"`)
+      .join(
+        ', ',
+      )}. They can propose any of them with one click — introduce them in a sentence rather than listing them again.`,
+    artifacts,
   };
 }
 
@@ -339,11 +251,68 @@ function invalidArgs(tool: AssistantToolName, error: z.ZodError): ToolRunResult 
 // Registry
 // ---------------------------------------------------------------------------
 
-export const assistantTools: Record<AssistantToolName, AssistantTool> = {
-  web_search: webSearchTool,
-  create_diagram: createDiagramTool,
-  sticky_ideation: stickyIdeationTool,
-};
+/**
+ * Builds the tool set for one turn, bound to the sink that collects what each call
+ * produced.
+ *
+ * Failures are caught and returned as text rather than thrown: a flaky search should let
+ * the model explain itself and carry on, not kill the turn the user is waiting on.
+ */
+export function createAssistantTools(sink: ToolOutcomeSink): ToolSet {
+  const record = (toolCallId: string, outcome: ToolOutcome): string => {
+    sink.record(toolCallId, outcome);
+    return outcome.modelText;
+  };
+
+  return {
+    web_search: tool({
+      description:
+        'Search the public web for current facts, comparisons, prices, docs or prior art. Use it when the answer depends on information you do not reliably know, and cite the sources you use.',
+      inputSchema: webSearchInput,
+      execute: async (input, { toolCallId, abortSignal }) =>
+        record(toolCallId, await guard('web_search', () => runWebSearch(input, abortSignal))),
+    }),
+
+    create_diagram: tool({
+      description:
+        'Draw a node-and-arrow diagram (architecture, flow, sequence of steps, decision tree) that the user can propose onto the pinboard. Give structure only — positions are computed for you. Use this ONLY when a picture answers the question better than a sentence would.',
+      inputSchema: createDiagramInput,
+      execute: async (input, { toolCallId }) =>
+        record(toolCallId, await guard('create_diagram', () => runCreateDiagram(input))),
+    }),
+
+    sticky_ideation: tool({
+      description:
+        'Turn ideas into 3–5 candidate sticky notes the user can propose onto the pinboard. Each note should stand alone as one idea, phrased tightly enough to read at a glance. Use this ONLY when the user is asking for notes, options or a brainstorm to put on the board — an ordinary question wants a prose answer, even if an earlier message in the conversation asked for sticky notes.',
+      inputSchema: stickyIdeationInput,
+      execute: async (input, { toolCallId }) =>
+        record(toolCallId, await guard('sticky_ideation', () => runStickyIdeation(input))),
+    }),
+  };
+}
+
+/** Turns a thrown tool into an outcome the model can read and recover from. */
+async function guard(
+  name: AssistantToolName,
+  run: () => ToolOutcome | Promise<ToolOutcome>,
+): Promise<ToolOutcome> {
+  try {
+    return await run();
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === 'AbortError') throw cause;
+    const detail = cause instanceof Error ? cause.message : 'unknown error';
+    return {
+      ok: false,
+      summary: 'Tool failed',
+      modelText: `${name} failed: ${detail}. Continue without it and tell the user what you could not do.`,
+    };
+  }
+}
+
+/** Cycles the palette so a batch of notes is visually distinguishable by default. */
+function rotateColor(index: number): StickyColor {
+  return STICKY_COLORS[index % STICKY_COLORS.length] as StickyColor;
+}
 
 /**
  * Removes edges the pinboard's write path would reject: a node pointing at itself, and the
@@ -361,10 +330,7 @@ function dropRedundantEdges<T extends { from: string; to: string }>(edges: T[]):
   });
 }
 
-export const assistantToolDefinitions: LlmToolDefinition[] = Object.values(assistantTools).map(
-  (tool) => tool.definition,
-);
-
-export function findTool(name: string): AssistantTool | undefined {
-  return (assistantTools as Record<string, AssistantTool>)[name];
+/** Narrows a tool name off the stream to the union the stream events are typed with. */
+export function isAssistantToolName(name: string): name is AssistantToolName {
+  return name === 'web_search' || name === 'create_diagram' || name === 'sticky_ideation';
 }

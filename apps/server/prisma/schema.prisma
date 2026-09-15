@@ -27,6 +27,7 @@ model User {
   ledSessions        Session[]       @relation("SessionLeader")
   sessionMemberships SessionMember[]
   llmConfig          UserLLMConfig?
+  assistantUsage     AssistantTurnUsage[]
   proposals          Proposal[]
   reactions          ProposalReaction[]
   votes              Vote[]
@@ -301,4 +302,36 @@ model UserLLMConfig {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_llm_configs")
+}
+
+// One row per assistant turn, written even when the turn errors or is cancelled — a turn
+// that burned tokens and then failed is the one worth knowing about.
+model AssistantTurnUsage {
+  id     String @id @default(cuid())
+  userId String
+  // Not a foreign key on purpose: deleting a session should not erase the record of what
+  // it cost.
+  sessionId String
+  // Host of the base URL (e.g. `api.groq.com`), never the URL itself and never the key.
+  providerHost String
+  model        String
+
+  inputTokens       Int?
+  outputTokens      Int?
+  totalTokens       Int?
+  reasoningTokens   Int?
+  cachedInputTokens Int?
+
+  // Model round trips in the turn, and how it ended: complete | max-steps | aborted | error.
+  steps      Int
+  durationMs Int
+  outcome    String
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([sessionId])
+  @@map("assistant_turn_usage")
 }

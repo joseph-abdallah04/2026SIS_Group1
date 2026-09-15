@@ -6,6 +6,24 @@ afterEach(cleanup);
 
 window.confirm = () => true;
 
+// jsdom ships no media-query engine at all. Anything asking about
+// prefers-reduced-motion gets "no preference", which is what a default browser
+// would say — so a component that honours the preference still takes its
+// ordinary animated path under test.
+if (!window.matchMedia) {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
 if (!globalThis.PointerEvent) {
   class TestPointerEvent extends MouseEvent {
     readonly pointerId: number;

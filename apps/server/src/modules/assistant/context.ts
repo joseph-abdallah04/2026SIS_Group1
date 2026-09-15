@@ -1,15 +1,20 @@
 // F35 — assembles what the agent knows about the session it is sitting in.
 //
-// Two sources, deliberately:
-//   1. The client sends what is on screen (active question, selected proposal, recent
-//      proposals). It is the only place that knows what the user is looking at.
-//   2. The server reads what it can verify (the session row today; questions and proposals
-//      once those modules exist) via the provider registry below.
+// Everything in the prompt is read server-side, from the same services the board itself
+// reads. The client sends what is on screen, but that is used only to pick *which* of the
+// server's own facts to highlight — never as a source of facts.
+//
+// The distinction matters because the caller controls the request body. When the prompt
+// was built from `request.context`, anyone could put words in the assistant's mouth:
+// invent proposals that were never made, rename the question under discussion, or claim a
+// teammate said something they did not. Membership was checked, so the caller was entitled
+// to *read* the board — but not to rewrite it on its way into the model.
 //
 // The assistant's view is strictly read-only (docs/06): it never mutates session state.
-import type { AssistantContext } from '@roundtable/shared';
+import type { AssistantContext, BoardItem } from '@roundtable/shared';
+import { summarizeArtifact } from '@roundtable/shared';
 
-import { prisma } from '../../db.js';
+import { getBoardForSession } from '../pinboard/index.js';
 
 /**
  * Extension point for the Session / Pinboard / Voting owners.
@@ -18,10 +23,10 @@ import { prisma } from '../../db.js';
  * assistant prompt for that session — no change needed in the assistant module:
  *
  *   registerAssistantContextProvider({
- *     name: 'agenda',
+ *     name: 'voting',
  *     async describe(sessionId) {
- *       const q = await getActiveQuestion(sessionId);
- *       return q ? `Active question: ${q.text} (phase: ${q.phase})` : null;
+ *       const round = await getOpenRound(sessionId);
+ *       return round ? `A ballot is open with ${round.options.length} options` : null;
  *     },
  *   });
  */
@@ -43,44 +48,43 @@ export function clearAssistantContextProviders(): void {
   providers.length = 0;
 }
 
+/** How many proposals to describe. Beyond this the prompt costs more than it informs. */
+const MAX_DESCRIBED_PROPOSALS = 12;
+
 export interface SessionContext {
   sessionId: string;
   sessionTitle?: string;
-  /** Rendered block injected into the system prompt. */
+  /** The question the board is on, needed by "Propose" (F37). */
+  activeQuestionId?: string;
+  /** Rendered block injected into the instructions. */
   block: string;
 }
 
 export async function buildSessionContext(
   sessionId: string,
   userId: string,
-  clientContext: AssistantContext,
+  clientHints: AssistantContext,
 ): Promise<SessionContext> {
+  const board = await readBoard(sessionId);
   const lines: string[] = [];
 
-  const session = await readSession(sessionId);
-  const title = session?.title ?? clientContext.sessionTitle;
+  if (board?.sessionTitle) lines.push(`Session focus: ${board.sessionTitle}`);
 
-  if (title) lines.push(`Session focus: ${title}`);
-  if (session?.status) lines.push(`Session status: ${session.status}`);
-
-  if (clientContext.activeQuestion) {
-    lines.push(`Current question being discussed: ${clientContext.activeQuestion}`);
-  }
-  if (clientContext.phase) {
-    lines.push(`Current phase: ${clientContext.phase}`);
+  if (board?.questionText) {
+    lines.push(`Current question being discussed: ${board.questionText}`);
+    if (board.questionStatus) lines.push(`Current phase: ${board.questionStatus}`);
   }
 
-  const proposals = clientContext.recentProposals ?? [];
-  if (proposals.length > 0) {
-    lines.push('Recent proposals on the pinboard:');
-    for (const proposal of proposals) {
-      const author = proposal.authorName ? ` — ${proposal.authorName}` : '';
-      const selected =
-        proposal.id === clientContext.selectedProposalId ? ' (the user has this one selected)' : '';
-      lines.push(`  - [${proposal.type}] ${proposal.summary}${author}${selected}`);
+  if (board) {
+    if (board.items.length > 0) {
+      lines.push(...describeProposals(board.items, clientHints.selectedProposalId));
+    } else {
+      // Always say so. Omitting this line made the model treat earlier chat
+      // ("there are three stickies") as still true after the user cleared the board.
+      lines.push(
+        'The pinboard is empty — there are currently 0 proposals on it. If earlier messages in this conversation mention proposals, they have been removed and must not be treated as still there.',
+      );
     }
-  } else if (clientContext.recentProposalIds?.length) {
-    lines.push(`${clientContext.recentProposalIds.length} proposals are on the pinboard.`);
   }
 
   for (const provider of providers) {
@@ -99,26 +103,52 @@ export async function buildSessionContext(
 
   return {
     sessionId,
-    ...(title ? { sessionTitle: title } : {}),
+    ...(board?.sessionTitle ? { sessionTitle: board.sessionTitle } : {}),
+    ...(board?.questionId ? { activeQuestionId: board.questionId } : {}),
     block: lines.join('\n'),
   };
 }
 
 /**
- * Reads the session row if it exists.
+ * Describes the board, newest last.
  *
- * Tolerant on purpose: the sessions module is still being built, so a missing row (or a
- * database that is not reachable in a local dev setup) degrades the assistant's context
- * rather than failing the request.
+ * `selectedProposalId` is the one thing taken from the client — it is a statement about
+ * the user's screen, not about the session. It is only ever used to annotate a proposal
+ * the server already read, so a forged id annotates nothing.
  */
-async function readSession(sessionId: string): Promise<{ title: string; status: string } | null> {
+function describeProposals(items: BoardItem[], selectedProposalId: string | undefined): string[] {
+  const recent = items.slice(-MAX_DESCRIBED_PROPOSALS);
+  const omitted = items.length - recent.length;
+
+  const lines = [
+    omitted > 0
+      ? `Proposals on the pinboard (${items.length} total, showing the ${recent.length} most recent):`
+      : 'Proposals on the pinboard:',
+  ];
+
+  for (const item of recent) {
+    const selected = item.id === selectedProposalId ? ' (the user has this one selected)' : '';
+    lines.push(
+      `  - [${item.type}] ${summarizeArtifact(item.artifactJson)} — ${item.authorName}${selected}`,
+    );
+  }
+
+  return lines;
+}
+
+/**
+ * Reads the board, tolerating failure.
+ *
+ * A session that has no open question, or a database hiccup, should cost the assistant its
+ * context rather than cost the user their turn.
+ */
+async function readBoard(
+  sessionId: string,
+): Promise<Awaited<ReturnType<typeof getBoardForSession>> | null> {
   try {
-    return await prisma.session.findUnique({
-      where: { id: sessionId },
-      select: { title: true, status: true },
-    });
+    return await getBoardForSession(sessionId);
   } catch (cause) {
-    console.warn('assistant: could not read session for context', cause);
+    console.warn('assistant: could not read the board for context', cause);
     return null;
   }
 }

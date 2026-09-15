@@ -1,7 +1,13 @@
 import type { AssistantStreamEvent } from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
-import { applyEvent, type ChatEntry } from './useAssistantChat';
+import {
+  applyEvent,
+  reconcileProposed,
+  transcriptToHistory,
+  type ChatEntry,
+  type ProposeState,
+} from './useAssistantChat';
 
 const delta = (content: string): AssistantStreamEvent => ({
   type: 'message',
@@ -97,6 +103,14 @@ describe('applyEvent', () => {
     ]);
   });
 
+  it('does not append a second running chip for the same in-flight tool', () => {
+    const entries = reduceUnderStrictMode([
+      { type: 'tool', toolName: 'create_diagram', status: 'running', args: {} },
+      { type: 'tool', toolName: 'create_diagram', status: 'running', args: { nodes: [] } },
+    ]);
+    expect(entries.filter((entry) => entry.kind === 'tool')).toHaveLength(1);
+  });
+
   it('shows an error frame and lets the next turn start clean', () => {
     const entries = reduceUnderStrictMode([
       { type: 'error', message: 'The model ran out of tokens.' },
@@ -115,5 +129,121 @@ describe('applyEvent', () => {
       'First answer.',
       'Second answer.',
     ]);
+  });
+
+  it('does not write a Thinking frame into the transcript', () => {
+    const entries = reduceUnderStrictMode([{ type: 'status', phase: 'thinking' }, delta('Hi.')]);
+    expect(entries).toEqual([{ kind: 'assistant', id: 'e2', text: 'Hi.', streaming: true }]);
+  });
+
+  it('marks a stopped reply so the next turn can tell the model', () => {
+    const entries = reduceUnderStrictMode([
+      delta('Half of an answ'),
+      { type: 'done', reason: 'aborted' },
+    ]);
+    expect(entries).toEqual([
+      { kind: 'assistant', id: 'e1', text: 'Half of an answ', streaming: false, interrupted: true },
+    ]);
+    expect(transcriptToHistory(entries)[0]?.content).toMatch(/stopped this reply/i);
+  });
+
+  it('fails a running tool when the user stops the turn', () => {
+    const entries = reduceUnderStrictMode([
+      { type: 'tool', toolName: 'web_search', status: 'running', args: {} },
+      { type: 'done', reason: 'aborted' },
+    ]);
+    expect(entries.find((e) => e.kind === 'tool')).toMatchObject({
+      status: 'failed',
+      summary: 'Stopped',
+    });
+    expect(transcriptToHistory(entries).some((m) => /stopped this reply/i.test(m.content))).toBe(
+      true,
+    );
+  });
+});
+
+describe('transcriptToHistory', () => {
+  const turn = (): ChatEntry[] => [
+    { kind: 'user', id: 'u1', text: 'five notes please' },
+    { kind: 'tool', id: 't1', toolName: 'sticky_ideation', status: 'done' },
+    {
+      kind: 'artifact',
+      id: 'a1',
+      source: 'sticky_ideation',
+      artifact: { type: 'sticky', text: 'One', color: 'yellow' },
+      propose: 'idle',
+    },
+    { kind: 'assistant', id: 'm1', text: 'Here you go.', streaming: false },
+  ];
+
+  // The note this replaced was prepended to the assistant's own words, and the model
+  // copied it back out as visible chat — along with the claim that artifacts existed.
+  it('keeps what was said separate from what was made', () => {
+    const [, assistantTurn] = transcriptToHistory(turn());
+    expect(assistantTurn).toEqual({
+      role: 'assistant',
+      content: 'Here you go.',
+      artifacts: ['sticky'],
+    });
+  });
+
+  it('records a failed tool so the next turn cannot call it a success', () => {
+    const history = transcriptToHistory([
+      { kind: 'user', id: 'u1', text: 'draw a login flow' },
+      { kind: 'tool', id: 't1', toolName: 'create_diagram', status: 'failed' },
+      { kind: 'assistant', id: 'm1', text: 'That did not work.', streaming: false },
+    ]);
+
+    expect(history[1]).toMatchObject({ failedTools: ['create_diagram'] });
+    expect(history[1]?.artifacts).toBeUndefined();
+  });
+
+  it('still reports artifacts from a turn that said nothing', () => {
+    const entries = turn().slice(0, -1);
+    expect(transcriptToHistory(entries).at(-1)).toEqual({
+      role: 'assistant',
+      content: '',
+      artifacts: ['sticky'],
+    });
+  });
+
+  it('strips the old note out of a transcript restored from storage', () => {
+    const history = transcriptToHistory([
+      {
+        kind: 'assistant',
+        id: 'm1',
+        text: '(Created 1 diagram for the user; they are already on screen.) Here it is.',
+        streaming: false,
+      },
+    ]);
+
+    expect(history[0]?.content).toBe('Here it is.');
+  });
+});
+
+describe('reconcileProposed', () => {
+  const card = (
+    propose: ProposeState,
+    seenOnBoard?: boolean,
+  ): Extract<ChatEntry, { kind: 'artifact' }> => ({
+    kind: 'artifact',
+    id: 'art-1',
+    source: 'create_diagram',
+    artifact: { type: 'diagram', nodes: [], edges: [] },
+    propose,
+    ...(seenOnBoard ? { seenOnBoard: true } : {}),
+  });
+
+  it('does not unlock Propose before the board item has appeared', () => {
+    const entries = [card('proposed')];
+    expect(reconcileProposed(entries, [])).toBe(entries);
+  });
+
+  it('remembers the item once it lands, then unlocks after a delete', () => {
+    const diagram = { type: 'diagram' as const, nodes: [], edges: [] };
+    const proposed = card('proposed');
+    const seen = reconcileProposed([proposed], [diagram]);
+    expect(seen[0]).toMatchObject({ propose: 'proposed', seenOnBoard: true });
+    expect(reconcileProposed(seen, [])[0]).toMatchObject({ propose: 'idle', seenOnBoard: false });
   });
 });

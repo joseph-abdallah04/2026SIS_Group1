@@ -16,6 +16,7 @@ function fakeResponse() {
       headers[name] = value;
     },
     flushHeaders: vi.fn(),
+    flush: vi.fn(),
     write: (chunk: string) => {
       written.push(chunk);
       return true;
@@ -33,6 +34,7 @@ function fakeResponse() {
     res: res as unknown as Response,
     written,
     headers,
+    flush: res.flush,
     emit: (event: string) => listeners[event]?.forEach((handler) => handler()),
   };
 }
@@ -47,11 +49,12 @@ describe('SseWriter', () => {
   });
 
   it('writes one data frame per event', () => {
-    const { res, written } = fakeResponse();
+    const { res, written, flush } = fakeResponse();
     const stream = new SseWriter<{ type: string }>(res, { heartbeatMs: 0 });
     stream.send({ type: 'message' });
     stream.send({ type: 'done' });
     expect(written).toEqual(['data: {"type":"message"}\n\n', 'data: {"type":"done"}\n\n']);
+    expect(flush).toHaveBeenCalledTimes(2);
   });
 
   it('keeps multi-line content inside a single frame', () => {

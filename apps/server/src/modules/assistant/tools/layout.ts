@@ -5,10 +5,14 @@
 // identical for the same input every time.
 import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
 
-export const NODE_SPACING_X = 190;
-export const NODE_SPACING_Y = 96;
+export const NODE_SPACING_X = 200;
+export const NODE_SPACING_Y = 108;
 export const ORIGIN_X = 60;
 export const ORIGIN_Y = 60;
+
+const NODE_MIN_WIDTH = 120;
+const NODE_MIN_HEIGHT = 56;
+const NODE_TALL_HEIGHT = 72;
 
 export interface UnpositionedNode {
   id: string;
@@ -79,14 +83,17 @@ export function layoutDiagram(nodes: UnpositionedNode[], edges: DiagramEdge[]): 
   for (const [col, bucket] of [...columns.entries()].sort(([a], [b]) => a - b)) {
     const offset = ((tallest - bucket.length) * NODE_SPACING_Y) / 2;
     bucket.forEach((node, row) => {
+      const size = nodeSizeForLabel(node.label);
       positioned.push({
         id: node.id,
         label: node.label,
-        // Box geometry (120x56 via diagramNodeSize) — the default shape is a 72x32 dot,
-        // which is too small for the labels the model writes.
+        // Sized for the label so a long name is not clipped by the default 72x32 dot,
+        // and so neighbouring columns (NODE_SPACING_X) still clear the widest box.
         shape: 'box',
         x: ORIGIN_X + col * NODE_SPACING_X,
         y: ORIGIN_Y + offset + row * NODE_SPACING_Y,
+        width: size.width,
+        height: size.height,
       });
     });
   }
@@ -94,4 +101,13 @@ export function layoutDiagram(nodes: UnpositionedNode[], edges: DiagramEdge[]): 
   // Preserve the caller's node order so the output reads the way the model wrote it.
   const byId = new Map(positioned.map((n) => [n.id, n]));
   return nodes.map((n) => byId.get(n.id) as DiagramNode);
+}
+
+/** Keep a fixed column pitch; long labels wrap inside a taller box rather than widening it. */
+function nodeSizeForLabel(label: string): { width: number; height: number } {
+  const chars = label.trim().length;
+  return {
+    width: NODE_MIN_WIDTH,
+    height: chars > 16 ? NODE_TALL_HEIGHT : NODE_MIN_HEIGHT,
+  };
 }

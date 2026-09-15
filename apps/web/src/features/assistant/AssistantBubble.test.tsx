@@ -31,7 +31,7 @@ describe('bubble and panel', () => {
     expect(panel()).toBeNull();
 
     await user.click(bubble()!);
-    // The two are never on screen together: the panel grows into the space the button held.
+    // The launch button is gone while the rail is up — the same shell grew into the panel.
     expect(panel()).toBeTruthy();
     expect(bubble()).toBeNull();
 

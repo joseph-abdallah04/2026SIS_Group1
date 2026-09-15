@@ -4,10 +4,10 @@
 // above it is the user's alone, and what the button sends goes through the Creative Tools
 // submit path — the same one the sticky and drawing editors use — so an AI-suggested
 // proposal is authored, validated and broadcast exactly like a hand-made one.
-import type { ArtifactJson } from '@roundtable/shared';
+import type { ArtifactJson, StickyColor } from '@roundtable/shared';
 
-import { Button } from '../../components/ui/Button';
-import { CARD_INK, STICKY_RADIUS, STICKY_THEMES } from '../pinboard/pinboardTokens';
+import { CARD_INK, STICKY_THEMES } from '../pinboard/pinboardTokens';
+import { stickyTypography } from '../tools/sticky/stickyPresentation';
 import { DiagramPreview } from './DiagramPreview';
 import type { ProposeState } from './useAssistantChat';
 
@@ -33,65 +33,78 @@ export function ArtifactCard({
   canPropose,
   onPropose,
 }: ArtifactCardProps) {
-  const proposed = propose === 'proposed';
-
   return (
-    <div className="rounded-xl border border-rt-tertiary bg-rt-surface p-2.5">
-      <div className="mb-2 text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase">
-        {TYPE_LABELS[artifact.type]}
-      </div>
+    <div className="rt-assistant-card rt-assistant-artifact">
+      <div className="rt-assistant-card-label">{TYPE_LABELS[artifact.type]}</div>
 
-      {artifact.type === 'sticky' && (
-        <div
-          className="px-3 py-2.5 text-sm leading-snug"
-          style={{
-            borderRadius: STICKY_RADIUS,
-            background: STICKY_THEMES[artifact.color].bg,
-            border: `1px solid ${STICKY_THEMES[artifact.color].border}`,
-            color: CARD_INK,
-          }}
-        >
-          {artifact.text}
-        </div>
-      )}
+      {artifact.type === 'sticky' && <StickyPreview text={artifact.text} color={artifact.color} />}
 
       {artifact.type === 'diagram' && (
-        <div className="overflow-x-auto rounded-lg bg-rt-surface-sunken p-2">
+        <div className="rt-assistant-card-well p-2">
           <DiagramPreview diagram={artifact} />
         </div>
       )}
 
       {artifact.type === 'drawing' && (
         <div
-          className="overflow-hidden rounded-lg bg-rt-surface-sunken p-2 [&_svg]:h-auto [&_svg]:w-full"
+          className="rt-assistant-card-well p-2 [&_svg]:h-auto [&_svg]:w-full"
           // Drawings are SVG produced by the tools module, not by the model, and are
           // size-capped at validation time.
           dangerouslySetInnerHTML={{ __html: artifact.svg }}
         />
       )}
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <Button
-          variant={proposed ? 'secondary' : 'primary'}
-          disabled={!canPropose || proposed || propose === 'sending'}
+      <div className="rt-assistant-artifact-actions">
+        {/* Not the shared `Button`: inside the panel the palette is monochrome, and a gold
+            pill on black glass is the one thing that breaks it. */}
+        <button
+          type="button"
+          disabled={!canPropose || propose === 'proposed' || propose === 'sending'}
           onClick={onPropose}
-          className="min-h-8 px-3 text-[12px]"
+          className={`rt-assistant-action${propose === 'proposed' ? ' rt-assistant-action--done' : ''}`}
         >
-          {proposed
+          {propose === 'proposed'
             ? 'On the pinboard'
             : propose === 'sending'
               ? 'Proposing…'
               : propose === 'failed'
                 ? 'Try again'
                 : 'Propose'}
-        </Button>
-        {!canPropose && !proposed && (
-          <span className="text-xs text-rt-ink-faint">Available once the board is connected</span>
+        </button>
+        {!canPropose && propose !== 'proposed' && (
+          <span className="text-xs" style={{ color: 'var(--rt-assistant-muted)' }}>
+            Available once the board is connected
+          </span>
         )}
         {propose === 'failed' && proposeError && (
-          <span className="text-xs text-red-600">{proposeError}</span>
+          <span className="text-xs text-[#ffc9c3]">{proposeError}</span>
         )}
       </div>
     </div>
+  );
+}
+
+function StickyPreview({ text, color }: { text: string; color: StickyColor }) {
+  const theme = STICKY_THEMES[color];
+
+  return (
+    <article
+      className="rt-assistant-sticky"
+      style={{
+        background: theme.bg,
+        color: CARD_INK,
+      }}
+    >
+      {/* Same anatomy as a board sticky: the note sits at the top of the paper,
+          and a byline holds the bottom edge so it reads as a pad, not a swatch. */}
+      <p className="rt-assistant-sticky-text" style={stickyTypography(text)}>
+        {text}
+      </p>
+      {/* Propose authors the note as you, the same way a hand-written sticky
+          does. The agent drafted the text; it is never the author. */}
+      <footer className="rt-assistant-sticky-foot">
+        <span>You</span>
+      </footer>
+    </article>
   );
 }

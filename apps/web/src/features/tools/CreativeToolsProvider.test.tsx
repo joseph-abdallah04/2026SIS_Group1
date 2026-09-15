@@ -72,6 +72,7 @@ describe('creative sticky flow', () => {
     render(
       <MemoryRouter initialEntries={['/sessions/demo']}>
         <CreativeToolsProvider
+          viewerId={null}
           isLive
           proposals={[]}
           propose={propose}

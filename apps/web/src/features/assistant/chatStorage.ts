@@ -115,7 +115,13 @@ function reviveEntry(value: unknown): ChatEntry | null {
 
     case 'assistant':
       return typeof entry.text === 'string'
-        ? { kind: 'assistant', id, text: entry.text, streaming: false }
+        ? {
+            kind: 'assistant',
+            id,
+            text: entry.text,
+            streaming: false,
+            ...(entry.interrupted === true ? { interrupted: true } : {}),
+          }
         : null;
 
     case 'tool': {
@@ -154,6 +160,9 @@ function reviveEntry(value: unknown): ChatEntry | null {
         source: entry.source as AssistantToolName,
         artifact: artifact.artifact,
         propose,
+        // A restored "on the pinboard" has already been on the board; if it is gone
+        // now, reconcile will unlock Propose instead of leaving the button stuck.
+        ...(propose === 'proposed' ? { seenOnBoard: true } : {}),
         ...(propose === 'failed' && typeof entry.proposeError === 'string'
           ? { proposeError: entry.proposeError }
           : {}),

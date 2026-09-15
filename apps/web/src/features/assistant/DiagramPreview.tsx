@@ -1,134 +1,150 @@
 // Renders a diagram artifact as inline SVG, at chat-panel scale.
 //
-// Node sizes and edge anchors come from the shared geometry helpers the board uses
-// (`diagramNodeSize` / `diagramEdgeGeometry`), so what you see in chat is what lands on the
-// pinboard when you press Propose — same boxes, same arrows, just smaller.
-import { useId } from 'react';
-import { diagramEdgeGeometry, diagramNodeSize, type DiagramArtifact } from '@roundtable/shared';
+// Geometry, palettes, routing and outlines are the same helpers the pinboard
+// card uses, so a preview is a smaller print of what Propose will drop — not a
+// second drawing of the graph. The SVG keeps its own aspect ratio and is
+// fitted into a bounded well, so a tall stack does not blow the rail open and
+// a wide chain does not get letterboxed into unreadably small boxes.
+import { useId, type CSSProperties } from 'react';
+import {
+  DIAGRAM_LABEL_INK,
+  diagramEdgeDash,
+  diagramEdgeRoutes,
+  diagramEdgeStroke,
+  diagramEdgeStrokeWidth,
+  diagramNodeFill,
+  diagramNodeLabelLayout,
+  diagramNodeStroke,
+  diagramNodeStrokeWidth,
+  diagramNodesInDrawOrder,
+  effectiveDiagramNodeSize,
+  type DiagramArtifact,
+} from '@roundtable/shared';
 
-const PADDING = 20;
-const CHARS_PER_LINE = 18;
-const MAX_LINES = 2;
+import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
+
+const PAD_X = 28;
+const PAD_Y = 24;
 
 export function DiagramPreview({ diagram }: { diagram: DiagramArtifact }) {
-  // Marker ids must be unique per rendered diagram or arrows from one card leak into another.
-  const arrowId = `rt-assistant-arrow-${useId().replace(/:/g, '')}`;
-  const nodeById = new Map(diagram.nodes.map((node) => [node.id, node]));
+  const uid = useId().replace(/:/g, '');
+  const { nodes, edges } = diagram;
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const svgWidth =
+    Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + PAD_X;
+  const svgHeight =
+    Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) + PAD_Y;
+  const arrowId = (color: string) => `rt-assistant-arrow-${uid}-${color.replace('#', '')}`;
+  const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
+  const edgeRoutes = diagramEdgeRoutes(nodes, edges);
 
-  const width =
-    Math.max(...diagram.nodes.map((n) => n.x + diagramNodeSize(n.shape).width), 72) + PADDING;
-  const height =
-    Math.max(...diagram.nodes.map((n) => n.y + diagramNodeSize(n.shape).height), 32) + PADDING;
+  if (nodes.length === 0) {
+    return <div className="rt-assistant-diagram-fit" aria-label="Empty diagram" />;
+  }
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="h-auto w-full"
-      role="img"
-      aria-label="Generated diagram"
+    <div
+      className="rt-assistant-diagram-fit"
+      style={
+        {
+          '--rt-diagram-w': String(svgWidth),
+          '--rt-diagram-h': String(svgHeight),
+        } as CSSProperties
+      }
     >
-      <defs>
-        <marker
-          id={arrowId}
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="6"
-          markerHeight="6"
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#8CA4AC" />
-        </marker>
-      </defs>
-
-      {diagram.edges.map((edge, index) => {
-        const from = nodeById.get(edge.from);
-        const to = nodeById.get(edge.to);
-        if (!from || !to) return null;
-        const geometry = diagramEdgeGeometry(from, to);
-
-        return (
-          <g key={`${edge.from}-${edge.to}-${index}`}>
-            <line
-              x1={geometry.x1}
-              y1={geometry.y1}
-              x2={geometry.x2}
-              y2={geometry.y2}
-              stroke="#8CA4AC"
-              strokeWidth={1.5}
-              markerEnd={`url(#${arrowId})`}
-            />
-            {edge.label && (
+      <svg
+        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label="Generated diagram"
+      >
+        <defs>
+          {arrowColors.map((color) => (
+            <marker
+              key={color}
+              id={arrowId(color)}
+              markerWidth="8"
+              markerHeight="8"
+              refX="6"
+              refY="3"
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <path d="M0,0 L6,3 L0,6 Z" fill={color} />
+            </marker>
+          ))}
+        </defs>
+        {edges.map((edge, index) => {
+          const from = nodeById.get(edge.from);
+          const to = nodeById.get(edge.to);
+          const route = edgeRoutes[index];
+          if (!from || !to || !route) return null;
+          const stroke = diagramEdgeStroke(edge);
+          const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
+          return (
+            <g key={`${edge.from}-${edge.to}-${index}`}>
+              <path
+                d={route.path}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                markerEnd={`url(#${arrowId(stroke)})`}
+                {...diagramEdgeDash(edge, strokeWidth)}
+              />
+              {edge.label ? (
+                <text
+                  x={route.labelX}
+                  y={route.labelY}
+                  textAnchor="middle"
+                  fill="#5A5F68"
+                  stroke="#FFFFFF"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  style={{ fontSize: '9px', fontFamily: 'Inter, system-ui, sans-serif' }}
+                >
+                  {edge.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+        {diagramNodesInDrawOrder(nodes).map((node) => {
+          const shape = node.shape ?? 'box';
+          const size = effectiveDiagramNodeSize(node);
+          const label = diagramNodeLabelLayout(node);
+          return (
+            <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+              <DiagramShapeOutline
+                shape={shape}
+                size={size}
+                fill={shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node)}
+                stroke={diagramNodeStroke(node, '#8CA4AC')}
+                strokeWidth={diagramNodeStrokeWidth(node, 1)}
+                containerDashArray="4 3"
+              />
               <text
-                x={geometry.labelX}
-                y={geometry.labelY}
                 textAnchor="middle"
-                className="text-[10px]"
-                fill="#5A5F68"
-                style={{ paintOrder: 'stroke', stroke: '#FFFFFF', strokeWidth: 4 }}
+                fill={DIAGRAM_LABEL_INK}
+                style={{
+                  fontSize: `${label.fontSize}px`,
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  fontWeight: shape === 'text' ? 600 : 400,
+                }}
               >
-                {edge.label}
+                {label.lines.map((line, lineIndex) => (
+                  <tspan
+                    key={line + String(lineIndex)}
+                    x={size.width / 2}
+                    y={label.firstBaselineY + lineIndex * label.lineHeight}
+                  >
+                    {line}
+                  </tspan>
+                ))}
               </text>
-            )}
-          </g>
-        );
-      })}
-
-      {diagram.nodes.map((node) => {
-        const size = diagramNodeSize(node.shape);
-        const lines = wrap(node.label);
-        return (
-          <g key={node.id}>
-            <rect
-              x={node.x}
-              y={node.y}
-              width={size.width}
-              height={size.height}
-              rx={10}
-              fill="#FFFFFF"
-              stroke="#8CA4AC"
-              strokeWidth={1.5}
-            />
-            {lines.map((line, i) => (
-              <text
-                key={i}
-                x={node.x + size.width / 2}
-                y={node.y + size.height / 2 + (i - (lines.length - 1) / 2) * 13 + 4}
-                textAnchor="middle"
-                className="text-[11px] font-medium"
-                fill="#080C15"
-              >
-                {line}
-              </text>
-            ))}
-          </g>
-        );
-      })}
-    </svg>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
-}
-
-/** Greedy word wrap; the last visible line is ellipsised rather than overflowing the box. */
-function wrap(label: string): string[] {
-  const words = label.split(/\s+/);
-  const lines: string[] = [];
-  let current = '';
-
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= CHARS_PER_LINE) {
-      current = candidate;
-    } else {
-      if (current) lines.push(current);
-      current = word;
-    }
-  }
-  if (current) lines.push(current);
-
-  if (lines.length > MAX_LINES) {
-    const kept = lines.slice(0, MAX_LINES);
-    kept[MAX_LINES - 1] = `${(kept[MAX_LINES - 1] ?? '').slice(0, CHARS_PER_LINE - 1)}…`;
-    return kept;
-  }
-  return lines.length > 0 ? lines : [label];
 }

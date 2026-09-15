@@ -1,12 +1,5 @@
-import { useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  SHORTLIST_MIN,
-  summarizeArtifact,
-  type AssistantContext,
-  type BoardResponse,
-  type Question,
-} from '@roundtable/shared';
+import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { PhaseTimer } from '../../components/PhaseTimer';
@@ -86,9 +79,6 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
   // Called before any early return so the room is not torn down and rebuilt
   // every time the board flips between loading, error and loaded.
   const voice = useVoiceRoom(sessionId);
-  // Also before the early returns, for the same reason. Reads `board` at call time, so the
-  // assistant is handed the board as it is when the user hits send (F35).
-  const buildAssistantContext = useCallback((): AssistantContext => describeBoard(board), [board]);
 
   // The room's own name for us, minted into the token server-side — the only
   // name F12's toggle can show that is guaranteed to match what the rest of the
@@ -310,30 +300,9 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
         <SessionJoinNotices />
       </main>
       <CreativeStudio />
-      <AssistantBubble sessionId={sessionId} getContext={buildAssistantContext} />
+      {/* Propose reads these items so it can unlock after a delete. The model
+          still reads the board server-side on every turn (F35). */}
+      <AssistantBubble sessionId={sessionId} boardItems={board.items} />
     </CreativeToolsProvider>
   );
-}
-
-/**
- * What the assistant is told about the board (F35). Read fresh on every send, so a question
- * like "what have we proposed so far?" sees the board as it is now rather than as it was
- * when the panel opened. The server merges this with anything it can see server-side; the
- * client is a convenience, never the authority.
- */
-function describeBoard(board: BoardResponse | null): AssistantContext {
-  if (!board) return {};
-  const recent = board.items.slice(-8);
-  return {
-    sessionTitle: board.sessionTitle,
-    ...(board.questionText ? { activeQuestion: board.questionText } : {}),
-    ...(board.questionId ? { activeQuestionId: board.questionId } : {}),
-    ...(board.questionStatus ? { phase: board.questionStatus } : {}),
-    recentProposals: recent.map((item) => ({
-      id: item.id,
-      type: item.type,
-      authorName: item.authorName,
-      summary: summarizeArtifact(item.artifactJson),
-    })),
-  };
 }

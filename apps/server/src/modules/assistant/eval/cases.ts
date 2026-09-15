@@ -24,8 +24,8 @@ const AFTER_STICKIES: AssistantHistoryMessage[] = [
   { role: 'user', content: 'Give me 5 sticky notes for this question' },
   {
     role: 'assistant',
-    content:
-      '(Created 5 stickys for the user; they are already on screen.) Here are five angles to start from.',
+    content: 'Here are five angles to start from.',
+    artifacts: ['sticky', 'sticky', 'sticky', 'sticky', 'sticky'],
   },
 ];
 

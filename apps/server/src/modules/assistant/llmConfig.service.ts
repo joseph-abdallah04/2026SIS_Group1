@@ -14,13 +14,21 @@ import { prisma } from '../../db.js';
 import { env } from '../../env.js';
 import { decryptSecret, encryptSecret, SecretCryptoError } from '../../lib/crypto.js';
 import { ApiError } from '../../middleware/error.js';
-import { probeChatCompletion, type LlmCredentials } from './llm.js';
+import {
+  assertCredentialsAllowed,
+  describeProviderError,
+  probeCredentials,
+  type LlmCredentials,
+} from './provider.js';
 
+// Production refuses to boot without this (see env.ts), so reaching the throw means a
+// development server that has not finished its .env — which is worth saying plainly
+// rather than failing somewhere deeper with a crypto error.
 function encryptionSecret(): string {
   if (!env.LLM_KEY_ENCRYPTION_SECRET) {
     throw new ApiError(
       500,
-      'LLM_KEY_ENCRYPTION_SECRET is not set — the server cannot store API keys safely',
+      'LLM_KEY_ENCRYPTION_SECRET is not set — the server cannot store API keys safely. Generate one with `openssl rand -base64 32`.',
       'LLM_ENCRYPTION_UNCONFIGURED',
     );
   }
@@ -46,6 +54,10 @@ export async function saveLlmConfig(
   userId: string,
   input: LlmConfigUpsert,
 ): Promise<LlmConfigPublic> {
+  // Rejected here as well as at call time, so a base URL the server will never agree to
+  // fetch fails while the user is still looking at the form that produced it.
+  await assertCredentialsAllowed({ baseUrl: input.baseUrl, model: input.model, apiKey: '' });
+
   const apiKeyEncrypted = input.apiKey
     ? encryptSecret(input.apiKey, encryptionSecret())
     : await existingApiKeyEncrypted(userId);
@@ -158,12 +170,13 @@ export async function testLlmConfig(
   }
 
   try {
-    const probe = await probeChatCompletion(credentials);
+    const probe = await probeCredentials(credentials);
     return { ok: true, latencyMs: probe.latencyMs, ...(probe.model ? { model: probe.model } : {}) };
   } catch (cause) {
-    return {
-      ok: false,
-      error: cause instanceof Error ? cause.message : 'Could not reach the provider',
-    };
+    // A failed test is a normal result, not a server error — but the *reason* is the whole
+    // point of the button, so it goes through the same translation as a failed turn.
+    const described =
+      cause instanceof ApiError ? cause : describeProviderError(cause, credentials.baseUrl);
+    return { ok: false, error: described.message };
   }
 }

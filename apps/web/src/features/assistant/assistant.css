@@ -1,36 +1,895 @@
 /*
- * Animations for the assistant bubble and panel (F34).
+ * Assistant chrome (F34).
  *
- * Kept in the feature folder rather than the global stylesheet so the assistant owns its
- * own presentation, and so deleting the feature deletes its CSS with it.
+ * One shell, two shapes: a corner orb that opens into a slim right-hand rail.
  *
- * Everything here respects prefers-reduced-motion at the bottom of the file: an idle
- * bubble that never stops moving is exactly the kind of thing that hurts to sit next to
- * for an hour-long session.
+ * The palette here is deliberately monochrome — near-black glass, pure white
+ * type, grey for anything secondary — and it is the one place in the app that
+ * does not wear the gold. That is on purpose: this is a layer floating over the
+ * session rather than part of it, and the board's cream-and-gold chrome reads
+ * as clutter once it is stacked on top of itself. The only colour that survives
+ * inside the panel is colour that carries meaning: a sticky's own swatch in an
+ * artifact preview, and red on a failure.
+ *
+ * THE GLASS. One surface, not stacked cards. The tint is a vertical fade:
+ * almost solid black at the top (the Spotlight search field) opening into a
+ * lighter, milky frost further down, where the board is supposed to show
+ * through as a colour wash. A uniform dark fill reads as a grey card no
+ * matter how much blur you put on it, which is why earlier passes missed.
+ * Header, transcript and composer sit on that one fill — they do not paint
+ * their own backgrounds.
+ *
+ * HOW THE MORPH WORKS, and why it is not width/height.
+ *
+ * The obvious version animates the box from 56px to a full rail. It stutters:
+ * every frame is a fresh layout of the transcript inside, and `backdrop-filter`
+ * has to re-blur a backdrop whose geometry just changed. Two of the most
+ * expensive things a browser does, sixty times a second.
+ *
+ * So the shell is ALWAYS the full rail — same position, same size, laid out
+ * once — and `clip-path` reveals it. Closed, the clip is a 56px rounded square
+ * in the bottom-right corner, which is the orb. Open, it is the whole panel.
+ * Nothing reflows, the blur is computed against a box that never moves, and the
+ * corner radius travels with the clip so the circle genuinely becomes the rail.
+ *
+ * `clip-path` also clips hit-testing, so the invisible part of the shell does
+ * not swallow clicks meant for the board underneath.
+ *
+ * The transcript does not fade in until the clip has finished travelling —
+ * `is-revealed`, set from AssistantBubble. Content arriving inside a panel that
+ * is still growing looks half-built, and it is the one part of this that a
+ * duration alone cannot fix.
+ *
+ * prefers-reduced-motion at the bottom turns the whole thing into a cut.
  */
 
-@keyframes rt-float {
+.rt-assistant {
+  --rt-assistant-orb: 3.5rem;
+  --rt-assistant-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Kept in step with EXPAND_MS in AssistantBubble.tsx, which waits it out
+     before showing the transcript. */
+  --rt-assistant-expand: 520ms;
+
+  /*
+   * The glass is a VERTICAL fade of opacity, not a flat colour. Spotlight's
+   * material is almost solid black at the top (the search field) and opens into
+   * a lighter frost at the bottom, where the board is meant to show through as
+   * a blur. A uniform tint — even a dark one — reads as a grey card, which is
+   * what this replaced.
+   *
+   * The shell always paints this fade. Closed, a black overlay sits on top so
+   * the orb reads as the dark chip; it lifts off as the panel opens. Overlay
+   * opacity interpolates reliably; two different gradient values do not.
+   */
+  --rt-assistant-glass:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.04) 3%,
+      transparent 7%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.98) 0%,
+      rgba(0, 0, 0, 0.96) 10%,
+      rgba(0, 0, 0, 0.88) 16%,
+      rgba(16, 16, 18, 0.58) 32%,
+      rgba(22, 22, 26, 0.5) 48%,
+      rgba(28, 28, 32, 0.44) 100%
+    );
+  /* Heavy blur, modest saturation: the sticky behind should read as a colour
+     wash, not as a gold tint on the whole panel. The floor of the fade is set
+     so white type still has a dark enough backing — go much lighter and the
+     transcript dissolves into the board, which is what this replaced. */
+  --rt-assistant-blur: blur(72px) saturate(160%);
+
+  --rt-assistant-ink: #ffffff;
+  --rt-assistant-muted: rgba(255, 255, 255, 0.86);
+  --rt-assistant-faint: rgba(255, 255, 255, 0.7);
+  --rt-assistant-line: rgba(255, 255, 255, 0.18);
+  --rt-assistant-fill: rgba(255, 255, 255, 0.14);
+  --rt-assistant-fill-strong: rgba(255, 255, 255, 0.22);
+
+  /* The rail's footprint, and the orb is its bottom-right corner. Fixed at all
+     times: the open/close animation never touches these. */
+  position: fixed;
+  top: 4.75rem;
+  right: 1.5rem;
+  bottom: 5.75rem;
+  width: min(24rem, calc(100vw - 3rem));
+  z-index: 50;
+  /* The shell and the launch button opt back in. Everything else here is a
+     positioning wrapper the board should be clickable through. */
+  pointer-events: none;
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The glass itself — one surface. Header, transcript and composer sit on it;
+   they do not get their own fills, or the panel splits into stacked cards. */
+.rt-assistant-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1.75rem;
+  color: var(--rt-assistant-ink);
+  background: var(--rt-assistant-glass);
+  backdrop-filter: var(--rt-assistant-blur);
+  -webkit-backdrop-filter: var(--rt-assistant-blur);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 22px 60px rgba(0, 0, 0, 0.32),
+    0 2px 10px rgba(0, 0, 0, 0.18);
+  /* Promote once, up front, rather than letting the compositor discover it
+     mid-gesture — that discovery is itself a visible hitch on the first open. */
+  will-change: clip-path;
+  transform: translateZ(0);
+  isolation: isolate;
+  transition:
+    clip-path var(--rt-assistant-expand) var(--rt-assistant-ease),
+    box-shadow 320ms ease;
+}
+
+/* Extra black so the closed orb matches the dark top of the glass, not the
+   transparent bottom the clip would otherwise show. Lifts off as it opens. */
+.rt-assistant-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.78);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms var(--rt-assistant-ease);
+}
+
+.rt-assistant.is-closed .rt-assistant-shell::after {
+  opacity: 1;
+}
+
+.rt-assistant.is-closed .rt-assistant-shell {
+  /* The bottom-right corner, rounded into a circle: the orb. */
+  clip-path: inset(
+    calc(100% - var(--rt-assistant-orb)) 0px 0px calc(100% - var(--rt-assistant-orb)) round
+      calc(var(--rt-assistant-orb) / 2)
+  );
+  pointer-events: none;
+}
+
+.rt-assistant.is-open .rt-assistant-shell {
+  clip-path: inset(0px 0px 0px 0px round 1.75rem);
+  pointer-events: auto;
+}
+
+/*
+ * The invisible hit target over the orb. Outside the clipped shell so the aura
+ * around it is not clipped away, and so hover is tied to the circle the user
+ * can actually see rather than the whole rail-shaped footprint.
+ */
+.rt-assistant-launch {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: var(--rt-assistant-orb);
+  height: var(--rt-assistant-orb);
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 260ms var(--rt-assistant-ease);
+}
+
+.rt-assistant-launch:hover,
+.rt-assistant-launch:focus-visible {
+  transform: scale(1.08);
+}
+
+.rt-assistant-launch:focus {
+  outline: none;
+}
+
+.rt-assistant-launch:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 5px;
+}
+
+/* The orb grows with its hit target, and the glass under it follows. */
+.rt-assistant:has(.rt-assistant-launch:hover) .rt-assistant-shell,
+.rt-assistant:has(.rt-assistant-launch:focus-visible) .rt-assistant-shell {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 16px 40px rgba(0, 0, 0, 0.32),
+    0 0 24px rgba(255, 255, 255, 0.12);
+}
+
+.rt-assistant-mark {
+  width: 1.75rem;
+  height: 1.75rem;
+  fill: #ffffff;
+  filter: drop-shadow(0 0 7px rgba(255, 255, 255, 0.35));
+}
+
+/* The sparkle sits inside the clip, so it is hidden with the rest of the orb
+   as the panel opens. */
+.rt-assistant-orb {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: var(--rt-assistant-orb);
+  height: var(--rt-assistant-orb);
+  pointer-events: none;
+  transition:
+    opacity 200ms ease,
+    transform 260ms var(--rt-assistant-ease);
+}
+
+.rt-assistant.is-open .rt-assistant-orb {
+  opacity: 0;
+  /* Out of the way early, so it is gone before the clip reaches the corner. */
+  transition-duration: 140ms;
+}
+
+.rt-assistant:has(.rt-assistant-launch:hover) .rt-assistant-orb,
+.rt-assistant:has(.rt-assistant-launch:focus-visible) .rt-assistant-orb {
+  transform: scale(1.08);
+}
+
+/*
+ * Orbiting ring — the "ready to go" cue. Hidden until hover, so an idle session
+ * is not a spinning object in the corner for an hour. Silver rather than the
+ * brand gold, to match the monochrome panel it belongs to.
+ */
+.rt-assistant-aura,
+.rt-assistant-aura-spin,
+.rt-assistant-aura-glow {
+  position: absolute;
+  pointer-events: none;
+}
+
+.rt-assistant-aura {
+  right: -7px;
+  bottom: -7px;
+  width: calc(var(--rt-assistant-orb) + 14px);
+  height: calc(var(--rt-assistant-orb) + 14px);
+  border-radius: 9999px;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.rt-assistant.is-closed:has(.rt-assistant-launch:hover) .rt-assistant-aura,
+.rt-assistant.is-closed:has(.rt-assistant-launch:focus-visible) .rt-assistant-aura,
+.rt-assistant.is-closed.is-busy .rt-assistant-aura {
+  opacity: 1;
+}
+
+.rt-assistant-aura-spin {
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 40deg,
+    rgba(255, 255, 255, 0.2) 70deg,
+    rgba(255, 255, 255, 0.95) 105deg,
+    rgba(255, 255, 255, 0.7) 130deg,
+    transparent 165deg,
+    transparent 230deg,
+    rgba(255, 255, 255, 0.45) 280deg,
+    transparent 330deg
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 2px),
+    #000 calc(100% - 1.5px)
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  animation: rt-assistant-orbit 2.6s linear infinite;
+}
+
+.rt-assistant-aura-spin--counter {
+  inset: -3px;
+  opacity: 0.4;
+  animation-duration: 5.2s;
+  animation-direction: reverse;
+  background: conic-gradient(
+    from 180deg,
+    transparent 0deg,
+    transparent 50deg,
+    rgba(255, 255, 255, 0.55) 90deg,
+    transparent 140deg,
+    transparent 210deg,
+    rgba(255, 255, 255, 0.75) 260deg,
+    transparent 310deg
+  );
+}
+
+.rt-assistant-aura-glow {
+  inset: 6px;
+  border-radius: inherit;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.22), transparent 68%);
+  animation: rt-assistant-breathe 2.2s ease-in-out infinite;
+}
+
+.rt-assistant.is-closed.is-busy .rt-assistant-aura-glow {
+  animation-duration: 1.1s;
+}
+
+.rt-assistant-badge {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 0 0 2px rgba(6, 6, 7, 0.9);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.rt-assistant-badge--dot {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+/*
+ * Inner rail. Held at zero until `is-revealed`, which AssistantBubble sets once
+ * the clip has finished expanding — see the note at the top of this file.
+ */
+.rt-assistant-rail {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  opacity: 0;
+  /* Closing: leave fast, so nothing is still fading while the clip eats it. */
+  transition: opacity 140ms ease;
+  /* HUD shadow: the board can still wash through as colour, but the letters
+     keep an edge. Without this, white type on a pale sticky is unreadable. */
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.72),
+    0 0 12px rgba(0, 0, 0, 0.4);
+}
+
+.rt-assistant.is-revealed .rt-assistant-rail {
+  opacity: 1;
+  transition: opacity 260ms ease;
+}
+
+.rt-assistant-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem 0.8rem;
+}
+
+.rt-assistant-kicker {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rt-assistant-ink);
+}
+
+.rt-assistant-meta {
+  margin: 0.1rem 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--rt-assistant-muted);
+}
+
+.rt-assistant-icon-btn {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.55rem;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--rt-assistant-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.rt-assistant-icon-btn:hover:not(:disabled) {
+  background: var(--rt-assistant-fill-strong);
+  color: var(--rt-assistant-ink);
+}
+
+.rt-assistant-icon-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.rt-assistant-feed {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-height: 0;
+  padding: 1rem 1rem 1.25rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+/* A reply followed by anything else — a sticky, a diagram, a tool chip —
+   needs more air than two messages in a row. */
+.rt-assistant-feed > .rt-assistant-reply + * {
+  margin-top: 0.85rem;
+}
+
+.rt-assistant-feed::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rt-assistant-feed::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+}
+
+/* White on black, the other way round from the assistant's own replies — the
+   only distinction the transcript needs once the palette is monochrome. */
+.rt-assistant-user {
+  max-width: 85%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 1rem 1rem 0.25rem 1rem;
+  background: #ffffff;
+  color: #07070a;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: pre-wrap;
+  text-shadow: none;
+}
+
+.rt-assistant-reply {
+  max-width: 92%;
+  margin: 0;
+  color: var(--rt-assistant-ink);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.rt-assistant-stopped {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--rt-assistant-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.rt-assistant-activity {
+  margin: 0.15rem 0 0;
+  min-height: 1.2rem;
+}
+
+.rt-assistant-activity-label {
+  display: inline-block;
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  /* The rail's HUD shadow is for type sitting on the board. Clipped shine plus
+     that halo is what made "Thinking" look like grey metal instead of a word. */
+  text-shadow: none;
+  animation: rt-assistant-activity-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes rt-assistant-activity-pulse {
   0%,
   100% {
-    transform: translateY(0);
+    opacity: 0.85;
   }
   50% {
-    transform: translateY(-5px);
+    opacity: 1;
   }
 }
 
-@keyframes rt-ring {
-  0% {
-    transform: scale(1);
-    opacity: 0.55;
+.rt-assistant-error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 138, 128, 0.3);
+  background: rgba(120, 22, 15, 0.32);
+  color: #ffc9c3;
+  font-size: 0.75rem;
+}
+
+.rt-assistant-composer {
+  padding: 0.75rem 0.85rem 0.9rem;
+  overflow: visible;
+}
+
+.rt-assistant-input {
+  max-height: 8rem;
+  min-height: 2.5rem;
+  flex: 1;
+  resize: none;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 1.15rem;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.6rem 0.9rem;
+  color: var(--rt-assistant-ink);
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  text-shadow: none;
+}
+
+.rt-assistant-input::placeholder {
+  color: var(--rt-assistant-muted);
+}
+
+.rt-assistant-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.rt-assistant-input:disabled {
+  opacity: 0.55;
+}
+
+/* Primary action: white pill, black label. */
+.rt-assistant-send {
+  display: inline-flex;
+  min-height: 2.4rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem;
+  border: 0;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #07070a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-shadow: none;
+  transition:
+    background 160ms ease,
+    opacity 160ms ease;
+}
+
+.rt-assistant-send:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.rt-assistant-send:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.rt-assistant-send:focus-visible,
+.rt-assistant-stop:focus-visible,
+.rt-assistant-action:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.rt-assistant-stop {
+  position: relative;
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #07070a;
+  cursor: pointer;
+  overflow: visible;
+  transition:
+    background 160ms ease,
+    opacity 160ms ease;
+}
+
+.rt-assistant-stop:hover {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.rt-assistant-stop-track {
+  position: absolute;
+  inset: -5px;
+  pointer-events: none;
+}
+
+.rt-assistant-stop-arc {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background: conic-gradient(#ffffff 0deg, #ffffff 88deg, transparent 110deg 360deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: rt-assistant-stop-spin 0.85s linear infinite;
+}
+
+@keyframes rt-assistant-stop-spin {
+  to {
+    transform: rotate(360deg);
   }
-  70% {
-    transform: scale(1.7);
-    opacity: 0;
+}
+
+.rt-assistant-stop-square {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #07070a;
+}
+
+.rt-assistant-empty {
+  margin: 0;
+  color: var(--rt-assistant-ink);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.rt-assistant-chip {
+  border: 0;
+  border-radius: 9999px;
+  background: var(--rt-assistant-fill);
+  padding: 0.3rem 0.7rem;
+  color: var(--rt-assistant-ink);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.rt-assistant-chip:hover {
+  background: var(--rt-assistant-fill-strong);
+  color: var(--rt-assistant-ink);
+}
+
+.rt-assistant-setup {
+  padding: 0.85rem;
+  border-radius: 1rem;
+  background: rgba(0, 0, 0, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.rt-assistant-setup p {
+  margin: 0;
+  color: var(--rt-assistant-ink);
+}
+
+.rt-assistant-setup p + p {
+  color: var(--rt-assistant-muted);
+}
+
+.rt-assistant-setup a {
+  color: var(--rt-assistant-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Artifact sitting in a frosted frame (the white hairline). The paper fills
+   that frame — a 210px island in a 320px well is what read as unfinished. */
+.rt-assistant-artifact {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
+}
+
+.rt-assistant-artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rt-assistant-sticky {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 7.25rem;
+  overflow: hidden;
+  border-radius: 0.7rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 8px 16px -8px rgba(8, 12, 21, 0.35);
+  /* The rail's HUD text-shadow is for white type on glass. Ink on paper
+     does not want it. */
+  text-shadow: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.rt-assistant-sticky-text {
+  margin: 0;
+  min-height: 0;
+  flex: 1;
+  padding: 0.85rem 0.9rem 0.35rem;
+  overflow: hidden;
+  font-weight: 500;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.rt-assistant-sticky-foot {
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 0.9rem 0.7rem;
+  color: rgba(8, 12, 21, 0.48);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.rt-assistant-card {
+  padding: 0.75rem;
+  border-radius: 1rem;
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.rt-assistant-card-label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rt-assistant-muted);
+}
+
+/* Artifact previews keep a light backing: a diagram or drawing is drawn in
+   board ink, and inverting it here would misrepresent what Propose sends. */
+.rt-assistant-card-well {
+  overflow: hidden;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* Width fills the well for landscape graphs; tall stacks shrink in width so
+   their height never exceeds 11rem. --rt-diagram-w/h come from the viewBox. */
+.rt-assistant-diagram-fit {
+  width: min(100%, calc(11rem * (var(--rt-diagram-w, 1) / var(--rt-diagram-h, 1))));
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: var(--rt-diagram-w, 1) / var(--rt-diagram-h, 1);
+  max-height: 11rem;
+  margin-inline: auto;
+}
+
+.rt-assistant-diagram-fit svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Secondary action on an artifact card, and its spent state. */
+.rt-assistant-action {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.85rem;
+  border: 0;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #07070a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-shadow: none;
+  transition:
+    background 160ms ease,
+    opacity 160ms ease;
+}
+
+.rt-assistant-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.rt-assistant-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.rt-assistant-action--done {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--rt-assistant-ink);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.rt-assistant-action--done:disabled {
+  opacity: 1;
+}
+
+.rt-assistant-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.3rem 0.7rem;
+  color: var(--rt-assistant-ink);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.rt-assistant-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--rt-assistant-muted);
+}
+
+.rt-assistant-dot--running {
+  background: #ffffff;
+  animation: rt-assistant-breathe 1.4s ease-in-out infinite;
+}
+
+/* Red survives the monochrome rule: a failed tool is information, not styling. */
+.rt-assistant-dot--failed {
+  background: #ff6b5e;
+}
+
+.rt-assistant-source {
+  color: var(--rt-assistant-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.55);
+  text-underline-offset: 2px;
+}
+
+.rt-assistant-source:hover {
+  text-decoration-color: rgba(255, 255, 255, 0.95);
+}
+
+.rt-assistant-snippet {
+  color: var(--rt-assistant-muted);
+}
+
+@keyframes rt-assistant-orbit {
+  to {
+    transform: rotate(360deg);
   }
+}
+
+@keyframes rt-assistant-breathe {
+  0%,
   100% {
-    transform: scale(1.7);
-    opacity: 0;
+    opacity: 0.35;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1);
   }
 }
 
@@ -46,17 +905,6 @@
   }
 }
 
-@keyframes rt-panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 @keyframes rt-caret {
   0%,
   49% {
@@ -66,15 +914,6 @@
   100% {
     opacity: 0;
   }
-}
-
-.rt-bubble {
-  animation: rt-float 4.5s ease-in-out infinite;
-}
-
-/* Pulses only while the agent is working, so the idle state is calm. */
-.rt-bubble-ring {
-  animation: rt-ring 2s ease-out infinite;
 }
 
 .rt-sparkle {
@@ -87,20 +926,64 @@
   animation-delay: 1.1s;
 }
 
-.rt-panel {
-  animation: rt-panel-in 180ms ease-out;
+.rt-assistant:has(.rt-assistant-launch:hover) .rt-sparkle,
+.rt-assistant:has(.rt-assistant-launch:focus-visible) .rt-sparkle {
+  animation-duration: 1.15s;
 }
 
 .rt-caret {
   animation: rt-caret 1s step-end infinite;
+  color: var(--rt-assistant-ink);
+}
+
+@media (max-width: 640px) {
+  .rt-assistant {
+    top: 4.5rem;
+    right: 1rem;
+    bottom: 5.5rem;
+    width: calc(100vw - 2rem);
+  }
+}
+
+/* No backdrop blur (older Firefox): fall back to near-opaque black, since a
+   transparent panel with nothing blurring behind it is unreadable. */
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .rt-assistant-shell {
+    background: rgba(8, 8, 10, 0.96);
+  }
+
+  .rt-assistant-shell::after {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rt-bubble,
-  .rt-bubble-ring,
+  .rt-assistant-shell,
+  .rt-assistant-shell::after,
+  .rt-assistant-rail,
+  .rt-assistant.is-revealed .rt-assistant-rail,
+  .rt-assistant-orb,
+  .rt-assistant-launch,
+  .rt-assistant-aura {
+    transition: none;
+  }
+
+  .rt-assistant-aura-spin,
+  .rt-assistant-aura-glow,
+  .rt-assistant-dot--running,
+  .rt-assistant-activity-label,
+  .rt-assistant-stop-arc,
   .rt-sparkle,
-  .rt-panel,
   .rt-caret {
     animation: none;
+  }
+
+  .rt-assistant-activity-label {
+    opacity: 1;
+  }
+
+  .rt-assistant-launch:hover,
+  .rt-assistant-launch:focus-visible {
+    transform: none;
   }
 }

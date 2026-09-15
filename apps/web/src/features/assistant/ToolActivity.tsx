@@ -4,11 +4,7 @@
 // the user should be able to see the query ran and follow the links themselves.
 import type { AssistantToolName, WebSearchResult } from '@roundtable/shared';
 
-const TOOL_LABELS: Record<AssistantToolName, { running: string; done: string }> = {
-  web_search: { running: 'Searching the web…', done: 'Searched the web' },
-  create_diagram: { running: 'Drawing a diagram…', done: 'Drew a diagram' },
-  sticky_ideation: { running: 'Generating sticky notes…', done: 'Generated sticky notes' },
-};
+import { TOOL_ACTIVITY_LABELS } from './assistantActivity';
 
 export interface ToolActivityProps {
   toolName: AssistantToolName;
@@ -18,24 +14,26 @@ export interface ToolActivityProps {
 }
 
 export function ToolActivity({ toolName, status, summary, results }: ToolActivityProps) {
-  const labels = TOOL_LABELS[toolName];
-  const label = status === 'running' ? labels.running : labels.done;
+  const labels = TOOL_ACTIVITY_LABELS[toolName];
+  const label = status === 'running' ? `${labels.running}…` : labels.done;
 
   return (
     <div className="space-y-1.5">
-      <div className="inline-flex items-center gap-2 rounded-full bg-rt-primary-tint px-2.5 py-1 text-xs text-rt-ink-muted">
-        {status === 'running' ? (
-          <span
-            className="size-2 animate-pulse rounded-full bg-rt-primary-deep"
-            aria-hidden="true"
-          />
-        ) : status === 'failed' ? (
-          <span className="size-2 rounded-full bg-red-500" aria-hidden="true" />
-        ) : (
-          <span className="size-2 rounded-full bg-rt-primary" aria-hidden="true" />
-        )}
+      <div className="rt-assistant-tool">
+        <span
+          className={`rt-assistant-dot${
+            status === 'running'
+              ? ' rt-assistant-dot--running'
+              : status === 'failed'
+                ? ' rt-assistant-dot--failed'
+                : ''
+          }`}
+          aria-hidden="true"
+        />
         <span>{status === 'failed' ? `${labels.done} — failed` : label}</span>
-        {summary && status !== 'running' && <span className="text-rt-ink-faint">· {summary}</span>}
+        {summary && status !== 'running' && (
+          <span style={{ color: 'var(--rt-assistant-muted)' }}>· {summary}</span>
+        )}
       </div>
 
       {results && results.length > 0 && (
@@ -46,11 +44,13 @@ export function ToolActivity({ toolName, status, summary, results }: ToolActivit
                 href={result.url}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="font-medium text-rt-primary-deep hover:underline"
+                className="rt-assistant-source"
               >
                 {result.title}
               </a>
-              {result.snippet && <p className="line-clamp-2 text-rt-ink-muted">{result.snippet}</p>}
+              {result.snippet && (
+                <p className="rt-assistant-snippet line-clamp-2">{result.snippet}</p>
+              )}
             </li>
           ))}
         </ol>

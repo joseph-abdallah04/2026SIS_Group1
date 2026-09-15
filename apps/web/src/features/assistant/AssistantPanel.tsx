@@ -1,17 +1,20 @@
-// The chat side panel (F34/F35) — transcript, composer, artifact cards.
+// The chat rail (F34/F35) — transcript, composer, artifact cards.
 //
 // The conversation itself does NOT live here. `AssistantBubble` owns it, because F34
 // requires the thread to survive collapsing the panel — and this component unmounts when
 // the panel closes. The panel is a view over state it does not hold.
-import { useContext, useEffect, useRef, useState, type PointerEvent } from 'react';
+//
+// Layout lives on the shared `.rt-assistant` shell. This file is the inside of that shell
+// once it has grown into the rail.
+import { useContext, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { Button } from '../../components/ui/Button';
 import { CreativeToolsContext } from '../tools/CreativeToolsContext';
+import { AgentActivity } from './AgentActivity';
 import { ArtifactCard } from './ArtifactCard';
+import { shouldRenderToolEntry } from './assistantActivity';
 import { ToolActivity } from './ToolActivity';
 import type { AssistantChat } from './useAssistantChat';
-import { usePanelGeometry, type ResizeHandle } from './usePanelGeometry';
 
 const SUGGESTIONS = [
   'Give me 5 sticky notes for this question',
@@ -29,7 +32,7 @@ export interface AssistantPanelProps {
 }
 
 export function AssistantPanel({ chat, onClose, configured, modelLabel }: AssistantPanelProps) {
-  const { entries, streaming, send, stop, clear, setProposeState } = chat;
+  const { entries, streaming, thinking, send, stop, clear, setProposeState } = chat;
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -40,18 +43,23 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
   const creativeTools = useContext(CreativeToolsContext);
   const canPropose = Boolean(creativeTools?.isLive);
 
-  const { geometry, dragging, startMove, startResize, onPointerMove, endGesture, reset } =
-    usePanelGeometry();
-
   // Follow the tail as tokens arrive — and on reopen, land at the newest message.
   useEffect(() => {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [entries]);
+  }, [entries, streaming, thinking]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Grow with the draft up to the CSS max-height, then scroll inside the field.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = '0px';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   const submit = () => {
     if (!draft.trim() || streaming) return;
@@ -76,48 +84,24 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
   };
 
   return (
-    <aside
-      className="rt-panel pointer-events-auto fixed flex flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-2xl"
-      // Position and size are the user's, not the layout's — see usePanelGeometry. The size
-      // it ships with clears the board header, which the old fixed height was covering.
-      style={{
-        left: geometry.x,
-        top: geometry.y,
-        width: geometry.width,
-        height: geometry.height,
-        // Stops the transcript being text-selected while the panel is being dragged around.
-        userSelect: dragging ? 'none' : undefined,
-      }}
-      onPointerMove={onPointerMove}
-      onPointerUp={endGesture}
-      onPointerCancel={endGesture}
-      role="dialog"
-      aria-label="AI assistant"
-    >
-      <header
-        className={`flex items-center gap-2 border-b border-rt-primary-tint px-4 py-3 ${
-          dragging ? 'cursor-grabbing' : 'cursor-grab'
-        }`}
-        onPointerDown={startMove}
-        onDoubleClick={reset}
-        title="Drag to move · double-click to reset"
-      >
+    <div className="rt-assistant-rail">
+      <header className="rt-assistant-header">
         <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] font-semibold text-rt-ink">Assistant</h2>
-          <p className="truncate text-[11px] text-rt-ink-faint">
+          <h2 className="rt-assistant-kicker">Assistant</h2>
+          <p className="rt-assistant-meta">
             {modelLabel ? `${modelLabel} · private to you` : 'Private to you'}
           </p>
         </div>
         {entries.length > 0 && (
-          <Button variant="quiet" onClick={clear} className="min-h-8 px-2 text-[12px]">
+          <button type="button" onClick={clear} className="rt-assistant-icon-btn">
             Clear
-          </Button>
+          </button>
         )}
-        <Button
-          variant="quiet"
+        <button
+          type="button"
           onClick={onClose}
           aria-label="Close assistant"
-          className="min-h-8 px-2"
+          className="rt-assistant-icon-btn"
         >
           <svg
             viewBox="0 0 20 20"
@@ -128,10 +112,10 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
           >
             <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
           </svg>
-        </Button>
+        </button>
       </header>
 
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="rt-assistant-feed">
         {configured === false && <NotConfigured />}
 
         {configured !== false && entries.length === 0 && (
@@ -148,25 +132,21 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
             case 'user':
               return (
                 <div key={entry.id} className="flex justify-end">
-                  <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-rt-primary-deep px-3 py-2 text-sm whitespace-pre-wrap text-white">
-                    {entry.text}
-                  </p>
+                  <p className="rt-assistant-user">{entry.text}</p>
                 </div>
               );
 
             case 'assistant':
               return (
-                <p
-                  key={entry.id}
-                  className="max-w-[92%] text-sm leading-relaxed whitespace-pre-wrap text-rt-ink"
-                >
+                <p key={entry.id} className="rt-assistant-reply">
                   {entry.text}
-                  {entry.streaming && <span className="rt-caret ml-0.5 text-rt-primary">▍</span>}
+                  {entry.streaming && <span className="rt-caret ml-0.5">▍</span>}
+                  {entry.interrupted && <span className="rt-assistant-stopped">Stopped</span>}
                 </p>
               );
 
             case 'tool':
-              return (
+              return shouldRenderToolEntry(entry, streaming) ? (
                 <ToolActivity
                   key={entry.id}
                   toolName={entry.toolName}
@@ -174,7 +154,7 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
                   {...(entry.summary ? { summary: entry.summary } : {})}
                   {...(entry.results ? { results: entry.results } : {})}
                 />
-              );
+              ) : null;
 
             case 'artifact':
               return (
@@ -190,18 +170,16 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
 
             case 'error':
               return (
-                <p
-                  key={entry.id}
-                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
-                >
+                <p key={entry.id} className="rt-assistant-error">
                   {entry.message}
                 </p>
               );
           }
         })}
+        <AgentActivity entries={entries} streaming={streaming} thinking={thinking} />
       </div>
 
-      <div className="border-t border-rt-primary-tint p-3">
+      <div className="rt-assistant-composer">
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}
@@ -217,92 +195,47 @@ export function AssistantPanel({ chat, onClose, configured, modelLabel }: Assist
             rows={1}
             placeholder="Ask the assistant…"
             disabled={configured === false}
-            className="max-h-32 min-h-[38px] flex-1 resize-none rounded-lg bg-rt-surface px-3 py-2 text-sm text-rt-ink ring-1 ring-rt-tertiary ring-inset placeholder:text-rt-ink-faint focus:ring-2 focus:ring-rt-primary-deep focus:outline-none disabled:bg-rt-surface-alt"
+            className="rt-assistant-input"
           />
           {streaming ? (
-            <Button variant="secondary" onClick={stop} title="Stop generating">
-              Stop
-            </Button>
+            <button
+              type="button"
+              onClick={stop}
+              title="Stop generating"
+              aria-label="Stop generating"
+              aria-busy="true"
+              className="rt-assistant-stop"
+            >
+              <span className="rt-assistant-stop-track" aria-hidden="true">
+                <span className="rt-assistant-stop-arc" />
+              </span>
+              <span className="rt-assistant-stop-square" />
+            </button>
           ) : (
-            <Button onClick={submit} disabled={!draft.trim() || configured === false}>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!draft.trim() || configured === false}
+              className="rt-assistant-send"
+            >
               Send
-            </Button>
+            </button>
           )}
         </div>
       </div>
-
-      <ResizeHandles onStart={startResize} />
-    </aside>
-  );
-}
-
-/**
- * Eight resize targets: the four sides and the four corners.
- *
- * Rendered as the LAST children of the panel on purpose. They used to come first, which meant
- * the header and the composer painted over three of the four — only the top-left corner, which
- * happens to sit on the header's own grab area, was reachable. Painting order is the fix;
- * `z-20` is belt and braces.
- *
- * Sides are deliberately thin. The transcript's scrollbar runs down the right edge, and a fat
- * handle there would swallow it.
- */
-function ResizeHandles({
-  onStart,
-}: {
-  onStart: (handle: ResizeHandle) => (event: PointerEvent<HTMLElement>) => void;
-}) {
-  // Corners after sides, so a corner wins where the two overlap.
-  const handles: Array<{ handle: ResizeHandle; className: string; label: string }> = [
-    { handle: 'n', className: 'top-0 right-0 left-0 h-1 cursor-ns-resize', label: 'top edge' },
-    {
-      handle: 's',
-      className: 'right-0 bottom-0 left-0 h-1 cursor-ns-resize',
-      label: 'bottom edge',
-    },
-    { handle: 'w', className: 'top-0 bottom-0 left-0 w-1 cursor-ew-resize', label: 'left edge' },
-    { handle: 'e', className: 'top-0 right-0 bottom-0 w-1 cursor-ew-resize', label: 'right edge' },
-    { handle: 'nw', className: 'top-0 left-0 size-3.5 cursor-nwse-resize', label: 'top left' },
-    { handle: 'ne', className: 'top-0 right-0 size-3.5 cursor-nesw-resize', label: 'top right' },
-    {
-      handle: 'sw',
-      className: 'bottom-0 left-0 size-3.5 cursor-nesw-resize',
-      label: 'bottom left',
-    },
-    {
-      handle: 'se',
-      className: 'right-0 bottom-0 size-3.5 cursor-nwse-resize',
-      label: 'bottom right',
-    },
-  ];
-
-  return (
-    <>
-      {handles.map(({ handle, className, label }) => (
-        <div
-          key={handle}
-          onPointerDown={onStart(handle)}
-          aria-hidden="true"
-          title={`Drag to resize (${label})`}
-          className={`absolute z-20 ${className}`}
-        />
-      ))}
-    </>
+    </div>
   );
 }
 
 function NotConfigured() {
   return (
-    <div className="rounded-xl border border-rt-secondary-tint bg-rt-secondary-wash p-3 text-sm text-rt-ink">
+    <div className="rt-assistant-setup text-sm">
       <p className="font-semibold">No AI provider set up yet</p>
-      <p className="mt-1 text-xs leading-relaxed text-rt-ink-muted">
+      <p className="mt-1 text-xs leading-relaxed">
         The assistant runs on your own LLM provider — RoundTable never pays for or sees your
         inference. Add a base URL, API key and model in settings to switch it on.
       </p>
-      <Link
-        to="/settings"
-        className="mt-2 inline-block text-xs font-semibold text-rt-secondary-deep underline underline-offset-2"
-      >
+      <Link to="/settings" className="mt-2 inline-block underline underline-offset-2">
         Open settings →
       </Link>
     </div>
@@ -312,9 +245,9 @@ function NotConfigured() {
 function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-relaxed text-rt-ink-muted">
-        Your private ideation buddy. It can see the board around you, search the web, and draft
-        sticky notes or diagrams you can drop onto the pinboard.
+      <p className="rt-assistant-empty">
+        Hi — I&apos;m your private ideation buddy. I can see the board around you, search the web,
+        and draft sticky notes or diagrams you can drop onto the pinboard.
       </p>
       <div className="flex flex-wrap gap-1.5">
         {SUGGESTIONS.map((suggestion) => (
@@ -322,7 +255,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
             key={suggestion}
             type="button"
             onClick={() => onPick(suggestion)}
-            className="rounded-full bg-rt-primary-tint px-2.5 py-1 text-xs text-rt-ink-muted transition-colors hover:bg-rt-tertiary"
+            className="rt-assistant-chip"
           >
             {suggestion}
           </button>

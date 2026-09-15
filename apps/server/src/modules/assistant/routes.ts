@@ -4,6 +4,7 @@
 //   PUT    /api/me/llm-config        → save provider config
 //   DELETE /api/me/llm-config        → forget it
 //   POST   /api/me/llm-config/test   → "Test connection"
+//   GET    /api/me/assistant-usage   → token spend, per model
 //   POST   /api/sessions/:id/assistant/chat → SSE stream of the assistant's turn
 import { Router } from 'express';
 import type { Response } from 'express';
@@ -11,8 +12,10 @@ import {
   assistantChatRequestSchema,
   llmConfigUpsertSchema,
   type AssistantStreamEvent,
+  type AssistantUsage,
 } from '@roundtable/shared';
 
+import { env } from '../../env.js';
 import { SseWriter } from '../../lib/sse.js';
 import { getUserId, requireAuth } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
@@ -27,6 +30,13 @@ import {
   testLlmConfig,
 } from './llmConfig.service.js';
 import { buildSystemPrompt } from './prompt.js';
+import {
+  assertCredentialsAllowed,
+  createAssistantModel,
+  describeProviderError,
+} from './provider.js';
+import { createAssistantTools, ToolOutcomeSink } from './tools/index.js';
+import { recordTurnUsage, summarizeUsage, type TurnOutcomeLabel } from './usage.service.js';
 
 export const assistantRouter: Router = Router();
 
@@ -74,6 +84,20 @@ assistantRouter.post('/me/llm-config/test', requireAuth, async (req, res, next) 
     const parsed = llmConfigUpsertSchema.safeParse(req.body);
     if (!parsed.success) throw validationError(parsed.error.issues);
     res.json(await testLlmConfig(getUserId(req), parsed.data));
+  } catch (cause) {
+    next(cause);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Token spend
+// ---------------------------------------------------------------------------
+
+assistantRouter.get('/me/assistant-usage', requireAuth, async (req, res, next) => {
+  try {
+    const days = Number(req.query.days);
+    const windowDays = Number.isInteger(days) && days > 0 && days <= 365 ? days : undefined;
+    res.json(await summarizeUsage(getUserId(req), windowDays));
   } catch (cause) {
     next(cause);
   }
@@ -131,38 +155,70 @@ async function streamAssistantTurn(
   const abort = new AbortController();
   res.on('close', () => abort.abort());
 
+  // Declared out here so the `finally` can bill a turn that ended by throwing.
+  let credentials: Awaited<ReturnType<typeof getLlmCredentials>> | undefined;
+  let outcome: TurnOutcomeLabel = 'error';
+  let usage: AssistantUsage | undefined;
+
   try {
     // Credentials are fetched first: "no provider configured" is the single most common
     // failure and deserves a clean error frame rather than a half-started stream.
-    const credentials = await getLlmCredentials(input.userId);
-    const context = await buildSessionContext(input.sessionId, input.userId, input.request.context);
+    credentials = await getLlmCredentials(input.userId);
+    await assertCredentialsAllowed(credentials);
 
-    const reason = await runAssistantTurn({
-      credentials,
-      systemPrompt: buildSystemPrompt(context),
+    const context = await buildSessionContext(input.sessionId, input.userId, input.request.context);
+    const sink = new ToolOutcomeSink();
+
+    const result = await runAssistantTurn({
+      model: createAssistantModel(credentials),
+      instructions: buildSystemPrompt(context, input.request.history),
       history: input.request.history,
       message: input.request.message,
       emit: (event) => stream.send(event),
       signal: abort.signal,
+      maxOutputTokens: env.ASSISTANT_MAX_OUTPUT_TOKENS,
+      tools: { toolSet: createAssistantTools(sink), sink },
+      // Set before any throw can escape, so the `finally` below bills a failed turn too.
+      onUsage: (reported) => {
+        usage = reported;
+      },
     });
 
-    stream.send({ type: 'done', reason });
+    outcome = result.reason;
+    stream.send({ type: 'done', reason: result.reason, usage: result.usage });
   } catch (cause) {
     if (abort.signal.aborted) {
+      outcome = 'aborted';
       stream.send({ type: 'done', reason: 'aborted' });
     } else {
-      const apiError = cause instanceof ApiError ? cause : null;
-      if (!apiError) console.error('assistant: chat turn failed', cause);
+      const apiError =
+        cause instanceof ApiError
+          ? cause
+          : describeProviderError(cause, credentials?.baseUrl ?? '');
       stream.send({
         type: 'error',
-        message: apiError?.message ?? 'The assistant hit an unexpected error.',
-        ...(apiError?.code ? { code: apiError.code } : {}),
+        message: apiError.message,
+        ...(apiError.code ? { code: apiError.code } : {}),
       });
       // Every stream terminates with `done`, including on error (docs/06 acceptance criteria).
       stream.send({ type: 'done', reason: 'error' });
     }
   } finally {
     stream.close();
+
+    // Billed after the stream closes so bookkeeping never delays the last frame, and
+    // billed even on failure — a turn that burned tokens and then timed out still cost
+    // the user money.
+    if (credentials && usage) {
+      await recordTurnUsage({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        baseUrl: credentials.baseUrl,
+        model: credentials.model,
+        usage,
+        outcome,
+      });
+    }
   }
 }
 

@@ -166,36 +166,69 @@ export const LLM_PROVIDER_PRESETS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// F36 — agent tools
+//
+// Declared ahead of the F35 history contract below, which names the tools a past turn
+// tried and failed to run.
+// ---------------------------------------------------------------------------
+
+export const ASSISTANT_TOOL_NAMES = ['web_search', 'create_diagram', 'sticky_ideation'] as const;
+export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];
+
+export interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+// ---------------------------------------------------------------------------
 // F35 — session context sent with each chat turn
 // ---------------------------------------------------------------------------
 
-export const assistantContextProposalSchema = z.object({
-  id: z.string().max(64),
-  type: z.string().max(24),
-  authorName: z.string().max(80).optional(),
-  summary: z.string().max(300),
-});
-
 /**
- * Context the client already has on screen. The server merges this with whatever it can
- * read server-side (session row today; questions/proposals once those modules land) —
- * the client is a convenience, never the authority.
+ * The little the client is allowed to tell the server about a turn.
+ *
+ * This used to carry the session title, the active question and a summary of every recent
+ * proposal, and the server rendered all of it straight into the prompt. That made the
+ * request body an editor for the assistant's view of reality: a member could invent
+ * proposals, rename the question, or attribute a quote to a teammate, and the model would
+ * repeat it back to the room as fact.
+ *
+ * So the session's facts are now read server-side, from the same services the board reads,
+ * and the only thing left here is a statement about the user's *screen* — which the server
+ * genuinely cannot know, and which is safe because it is only ever used to annotate a
+ * proposal the server already loaded. A forged id annotates nothing.
  */
 export const assistantContextSchema = z.object({
-  sessionTitle: z.string().max(200).optional(),
-  activeQuestion: z.string().max(500).optional(),
-  /** Needed by "Propose" (F37): a proposal belongs to a question, not to the session. */
-  activeQuestionId: z.string().max(64).optional(),
-  phase: z.string().max(40).optional(),
+  /** Which card the user has selected, so "this one" in a question means something. */
   selectedProposalId: z.string().max(64).optional(),
-  recentProposalIds: z.array(z.string().max(64)).max(50).optional(),
-  recentProposals: z.array(assistantContextProposalSchema).max(20).optional(),
 });
 export type AssistantContext = z.infer<typeof assistantContextSchema>;
 
+/**
+ * One past turn.
+ *
+ * `content` is only ever what was actually said. What a turn *did* — the artifacts it
+ * produced, the tools that failed — rides alongside as structured fields, and the server
+ * renders it into the instructions rather than into the conversation.
+ *
+ * That split is not tidiness. These facts used to be prepended to the assistant's own
+ * words as "(Created 1 diagram for the user; they are already on screen.) …", and small
+ * models copy the shape of their own last turn: the note came back out as visible chat,
+ * and with it the claim that a diagram existed — on turns where the tool had failed, or
+ * had never been called at all. A fact the model reads about itself is far harder to
+ * mistake for a sentence it is supposed to write.
+ */
 export const assistantHistoryMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string().max(8000),
+  /** Artifact types this turn actually produced and showed to the user. */
+  artifacts: z
+    .array(z.enum(['sticky', 'drawing', 'diagram']))
+    .max(20)
+    .optional(),
+  /** Tools this turn called that failed, producing nothing. */
+  failedTools: z.array(z.enum(ASSISTANT_TOOL_NAMES)).max(8).optional(),
 });
 export type AssistantHistoryMessage = z.infer<typeof assistantHistoryMessageSchema>;
 
@@ -209,21 +242,30 @@ export const assistantChatRequestSchema = z.object({
 export type AssistantChatRequest = z.infer<typeof assistantChatRequestSchema>;
 
 // ---------------------------------------------------------------------------
-// F36 — agent tools
-// ---------------------------------------------------------------------------
-
-export const ASSISTANT_TOOL_NAMES = ['web_search', 'create_diagram', 'sticky_ideation'] as const;
-export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];
-
-export interface WebSearchResult {
-  title: string;
-  url: string;
-  snippet: string;
-}
-
-// ---------------------------------------------------------------------------
 // SSE stream events (assistant owner's "Also owns" item 1, docs/06)
 // ---------------------------------------------------------------------------
+
+/**
+ * Token accounting for one turn.
+ *
+ * Every field is optional because it is the provider that decides what to report, and
+ * plenty of OpenAI-compatible servers report nothing at all. Treat a missing number as
+ * "unknown", never as zero — a cost display that silently reads 0 is worse than one that
+ * admits it does not know.
+ */
+export interface AssistantUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  /** Portion of the output spent on hidden reasoning, where the provider separates it. */
+  reasoningTokens?: number;
+  /** Portion of the input served from the provider's prompt cache, billed at a discount. */
+  cachedInputTokens?: number;
+  /** Model round trips in the turn — one per step of the tool loop. */
+  steps: number;
+  /** Wall-clock time from the first request to the last frame. */
+  durationMs: number;
+}
 
 /**
  * One frame of the assistant response stream.
@@ -253,7 +295,17 @@ export type AssistantStreamEvent =
       artifact: ArtifactJson;
     }
   | { type: 'error'; message: string; code?: string }
-  | { type: 'done'; reason: 'complete' | 'error' | 'max-steps' | 'aborted' };
+  | {
+      /** The model started a reasoning block. Not a token of the visible reply. */
+      type: 'status';
+      phase: 'thinking';
+    }
+  | {
+      type: 'done';
+      reason: 'complete' | 'error' | 'max-steps' | 'aborted';
+      /** Present once the provider reported usage — absent when it reported none. */
+      usage?: AssistantUsage;
+    };
 
 /**
  * Every stream ends with exactly one `done`, including on error (docs/06 acceptance
@@ -265,6 +317,7 @@ export const ASSISTANT_STREAM_TERMINATOR = 'done' satisfies AssistantStreamEvent
 export function isAssistantStreamEvent(value: unknown): value is AssistantStreamEvent {
   if (typeof value !== 'object' || value === null) return false;
   const type = (value as { type?: unknown }).type;
+  if (type === 'status') return (value as { phase?: unknown }).phase === 'thinking';
   return (
     type === 'message' ||
     type === 'tool' ||

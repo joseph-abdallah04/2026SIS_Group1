@@ -104,6 +104,10 @@ export async function streamAssistantChat(options: StreamAssistantChatOptions): 
       const parsed = safeParse(payload);
       if (parsed && isAssistantStreamEvent(parsed)) {
         onEvent(parsed);
+        // A tool-running frame often shares a TCP chunk with the artifacts that
+        // follow it. Yielding a frame lets the status line paint before those
+        // results fold into the same React batch.
+        if (parsed.type === 'tool') await yieldForPaint();
       }
     }
   } catch (cause) {
@@ -152,4 +156,14 @@ function safeParse(payload: string): unknown {
 
 function describe(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
+}
+
+function yieldForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
 }
