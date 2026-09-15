@@ -337,6 +337,44 @@ describe('VotingBallot', () => {
 
   // A sticky grows with its note. A slot sized for the smallest sticky left a
   // long note spilling out of it, past the ring that marks the winner.
+  // The card is the vote button, so a long sticky is all there on it to read,
+  // with nothing to press inside the button.
+  it('shows the whole of a long sticky on the ballot, with nothing to press inside it', () => {
+    const onVote = vi.fn();
+    const long = sticky('p2', `Why${'\n'.repeat(20)}because`);
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[sticky('p1', 'Ship the API'), long]}
+        tallies={[]}
+        myVote={null}
+        votedCount={0}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
+        busy={false}
+        error={null}
+        onVote={onVote}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    const voteButtons = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('aria-pressed'));
+    const longCard = voteButtons.find((button) => button.textContent?.includes('Why'));
+    expect(longCard).toHaveTextContent('because');
+    expect(longCard?.querySelector('button, a')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Read more' })).toBeNull();
+    expect(onVote).not.toHaveBeenCalled();
+  });
+
   it('gives a long sticky a slot as wide as its card, and wider than a short one', () => {
     const long = sticky('p2', 'a'.repeat(280));
     render(

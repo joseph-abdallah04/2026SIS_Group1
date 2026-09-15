@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compareBoardItems, type BoardItem } from '@roundtable/shared';
-import { proposalCreateSchema } from '@roundtable/shared/schemas';
+import { proposalCreateSchema, proposalUpdateSchema } from '@roundtable/shared/schemas';
 
 import { toBoardItem } from './service.js';
 
@@ -199,5 +199,201 @@ describe('proposalCreateSchema', () => {
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data).not.toHaveProperty('authorId');
     expect(parsed.success && parsed.data).not.toHaveProperty('questionId');
+  });
+});
+
+describe('sticky formatting', () => {
+  const withMarks = (text: string, marks: unknown) => ({
+    type: 'sticky',
+    artifactJson: { type: 'sticky', text, color: 'yellow', marks },
+    x: 0,
+    y: 0,
+  });
+
+  it('accepts ranges that cover part of the note', () => {
+    const parsed = proposalCreateSchema.safeParse(
+      withMarks('Ship the beta', [
+        { from: 0, to: 4, style: 'bold' },
+        { from: 5, to: 13, style: 'italic' },
+      ]),
+    );
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.artifactJson).toMatchObject({
+      marks: [
+        { from: 0, to: 4, style: 'bold' },
+        { from: 5, to: 13, style: 'italic' },
+      ],
+    });
+  });
+
+  it('accepts a sticky with no formatting, as every earlier note is', () => {
+    expect(proposalCreateSchema.safeParse(withMarks('Hello', undefined)).success).toBe(true);
+  });
+
+  it('refuses a range that runs past the end of the note', () => {
+    expect(
+      proposalCreateSchema.safeParse(withMarks('Hi', [{ from: 0, to: 5, style: 'bold' }])).success,
+    ).toBe(false);
+  });
+
+  it('refuses an empty or backwards range', () => {
+    expect(
+      proposalCreateSchema.safeParse(withMarks('Hello', [{ from: 3, to: 3, style: 'bold' }]))
+        .success,
+    ).toBe(false);
+    expect(
+      proposalCreateSchema.safeParse(withMarks('Hello', [{ from: 4, to: 1, style: 'bold' }]))
+        .success,
+    ).toBe(false);
+  });
+
+  it('refuses a style the board does not have', () => {
+    expect(
+      proposalCreateSchema.safeParse(withMarks('Hello', [{ from: 0, to: 2, style: 'comic-sans' }]))
+        .success,
+    ).toBe(false);
+  });
+
+  // An edit is a write, so it faces the same rules as a create.
+  it('holds an edit to the same rules', () => {
+    const edit = (marks: unknown) => ({
+      id: 'p1',
+      artifactJson: { type: 'sticky', text: 'Hi', color: 'yellow', marks },
+    });
+    expect(
+      proposalUpdateSchema.safeParse(edit([{ from: 0, to: 2, style: 'underline' }])).success,
+    ).toBe(true);
+    expect(
+      proposalUpdateSchema.safeParse(edit([{ from: 0, to: 9, style: 'underline' }])).success,
+    ).toBe(false);
+  });
+
+  it('accepts a list style for each line of the note', () => {
+    const listed = {
+      type: 'sticky',
+      artifactJson: {
+        type: 'sticky',
+        text: 'Plan\nDraft',
+        color: 'yellow',
+        lines: [null, 'number'],
+      },
+      x: 0,
+      y: 0,
+    };
+    expect(proposalCreateSchema.safeParse(listed).success).toBe(true);
+  });
+
+  it('refuses a list style for a line the note does not have, or a style it cannot be', () => {
+    const withLines = (lines: unknown) => ({
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text: 'One line', color: 'yellow', lines },
+      x: 0,
+      y: 0,
+    });
+    expect(proposalCreateSchema.safeParse(withLines(['bullet', 'bullet'])).success).toBe(false);
+    expect(proposalCreateSchema.safeParse(withLines(['checkbox'])).success).toBe(false);
+  });
+
+  it('accepts nesting for the lines of a list, as deep as a sticky goes', () => {
+    const nested = (levels: unknown) => ({
+      type: 'sticky',
+      artifactJson: {
+        type: 'sticky',
+        text: 'Plan\nDraft\nReview',
+        color: 'yellow',
+        lines: ['bullet', 'bullet', 'bullet'],
+        levels,
+      },
+      x: 0,
+      y: 0,
+    });
+    expect(proposalCreateSchema.safeParse(nested([0, 1, 2])).success).toBe(true);
+    expect(proposalCreateSchema.safeParse(nested([0, 1, 3])).success).toBe(false);
+    expect(proposalCreateSchema.safeParse(nested([0, 1, 1, 1])).success).toBe(false);
+    expect(proposalCreateSchema.safeParse(nested([0, 0.5])).success).toBe(false);
+  });
+
+  describe('links', () => {
+    const withLinks = (text: string, links: unknown) => ({
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text, color: 'yellow', links },
+      x: 0,
+      y: 0,
+    });
+
+    it('accepts a link to a website over part of the note', () => {
+      const parsed = proposalCreateSchema.safeParse(
+        withLinks('Read the spec', [{ from: 9, to: 13, href: 'https://example.com/spec' }]),
+      );
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.artifactJson).toMatchObject({
+        links: [{ from: 9, to: 13, href: 'https://example.com/spec' }],
+      });
+    });
+
+    // Everybody on the board presses these, so nothing but a website gets in.
+    it.each([
+      'javascript:alert(document.cookie)',
+      'JavaScript:alert(1)',
+      'data:text/html,<script>alert(1)</script>',
+      'vbscript:msgbox',
+      'file:///etc/passwd',
+      'mailto:someone@example.com',
+      'https://trusted.example@evil.example',
+      '//example.com',
+      'example.com',
+    ])('refuses a link that opens %s', (href) => {
+      expect(
+        proposalCreateSchema.safeParse(withLinks('Press here', [{ from: 0, to: 5, href }])).success,
+      ).toBe(false);
+    });
+
+    it('refuses a link past the end of the note, empty, or over another link', () => {
+      const href = 'https://example.com/';
+      expect(
+        proposalCreateSchema.safeParse(withLinks('Hi', [{ from: 0, to: 5, href }])).success,
+      ).toBe(false);
+      expect(
+        proposalCreateSchema.safeParse(withLinks('Hello', [{ from: 2, to: 2, href }])).success,
+      ).toBe(false);
+      expect(
+        proposalCreateSchema.safeParse(
+          withLinks('Hello there', [
+            { from: 6, to: 11, href },
+            { from: 0, to: 7, href },
+          ]),
+        ).success,
+      ).toBe(false);
+    });
+
+    it('holds an edit to the same rules', () => {
+      const edit = (href: string) => ({
+        id: 'p1',
+        artifactJson: {
+          type: 'sticky',
+          text: 'Hi',
+          color: 'yellow',
+          links: [{ from: 0, to: 2, href }],
+        },
+      });
+      expect(proposalUpdateSchema.safeParse(edit('https://example.com/')).success).toBe(true);
+      expect(proposalUpdateSchema.safeParse(edit('javascript:alert(1)')).success).toBe(false);
+    });
+  });
+
+  // Reading is tolerant: a stored note is shown, and the board clamps a range
+  // to the text it has, rather than the whole board failing on one card.
+  it('still reads a stored note whose ranges no longer fit', () => {
+    const item = toBoardItem(
+      row({
+        artifactJson: {
+          type: 'sticky',
+          text: 'Hi',
+          color: 'yellow',
+          marks: [{ from: 0, to: 9, style: 'bold' }],
+        },
+      }),
+    );
+    expect(item.artifactJson).toMatchObject({ text: 'Hi' });
   });
 });

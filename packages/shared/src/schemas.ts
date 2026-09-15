@@ -9,6 +9,16 @@ import {
 } from './drawingContract.js';
 import { isEmoji, MAX_REACTION_LENGTH } from './reactionContract.js';
 import {
+  STICKY_HREF_MAX_LENGTH,
+  STICKY_LINE_LIMIT,
+  STICKY_LINE_STYLES,
+  STICKY_LINK_LIMIT,
+  STICKY_LIST_MAX_LEVEL,
+  STICKY_MARK_LIMIT,
+  STICKY_MARK_STYLES,
+  stickyLinkHref,
+} from './stickyContract.js';
+import {
   DIAGRAM_FILL_KEYS,
   DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_FONT_SIZE_PRESETS,
@@ -236,10 +246,86 @@ export type AddSessionQuestionInput = z.infer<typeof addSessionQuestionSchema>;
 
 const stickyColorSchema = z.enum(['yellow', 'pink', 'blue', 'green']);
 
+const stickyMarkSchema = z.object({
+  from: z.number().int().min(0),
+  to: z.number().int().min(0),
+  style: z.enum(STICKY_MARK_STYLES),
+});
+
+const stickyLinkSchema = z.object({
+  from: z.number().int().min(0),
+  to: z.number().int().min(0),
+  href: z.string().max(STICKY_HREF_MAX_LENGTH),
+});
+
 export const stickyArtifactSchema = z.object({
   type: z.literal('sticky'),
   text: z.string().max(2000),
   color: stickyColorSchema,
+  marks: z.array(stickyMarkSchema).max(STICKY_MARK_LIMIT).optional(),
+  lines: z.array(z.enum(STICKY_LINE_STYLES).nullable()).max(STICKY_LINE_LIMIT).optional(),
+  levels: z
+    .array(z.number().int().min(0).max(STICKY_LIST_MAX_LEVEL))
+    .max(STICKY_LINE_LIMIT)
+    .optional(),
+  links: z.array(stickyLinkSchema).max(STICKY_LINK_LIMIT).optional(),
+});
+
+/**
+ * A sticky as written: every range covers some of the note and none runs past
+ * its end, there is no list style or nesting for a line the note does not have,
+ * and every link opens a website, with no two links over the same words.
+ *
+ * Only on the way in. Reading stays tolerant, and the board clamps a range to
+ * the text it has and draws no link it would not have accepted, so a stored
+ * note is always shown rather than refused.
+ */
+export const stickyWriteArtifactSchema = stickyArtifactSchema.superRefine((value, context) => {
+  value.marks?.forEach((mark, index) => {
+    if (mark.from >= mark.to || mark.to > value.text.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Formatting must cover part of the note',
+        path: ['marks', index],
+      });
+    }
+  });
+  const lineCount = value.text.split('\n').length;
+  if (value.lines && value.lines.length > lineCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A list style must be for a line of the note',
+      path: ['lines'],
+    });
+  }
+  if (value.levels && value.levels.length > lineCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Nesting must be for a line of the note',
+      path: ['levels'],
+    });
+  }
+  let reached = 0;
+  (value.links ?? [])
+    .map((link, index) => ({ link, index }))
+    .sort((a, b) => a.link.from - b.link.from)
+    .forEach(({ link, index }) => {
+      if (link.from >= link.to || link.to > value.text.length || link.from < reached) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'A link must cover part of the note, and no other link',
+          path: ['links', index],
+        });
+      }
+      if (stickyLinkHref(link.href) !== link.href) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'A link must open a website',
+          path: ['links', index, 'href'],
+        });
+      }
+      reached = Math.max(reached, link.to);
+    });
 });
 
 /**
@@ -915,7 +1001,7 @@ export const proposalCreateSchema = z
         ? diagramWriteArtifactSchema
         : value.artifactJson.type === 'drawing'
           ? drawingWriteArtifactSchema
-          : null;
+          : stickyWriteArtifactSchema;
 
     if (writeSchema) {
       const parsed = writeSchema.safeParse(value.artifactJson);
@@ -967,7 +1053,9 @@ export const proposalUpdateSchema = z
         ? diagramWriteArtifactSchema
         : value.artifactJson?.type === 'drawing'
           ? drawingWriteArtifactSchema
-          : null;
+          : value.artifactJson?.type === 'sticky'
+            ? stickyWriteArtifactSchema
+            : null;
 
     if (writeSchema && value.artifactJson) {
       const parsed = writeSchema.safeParse(value.artifactJson);

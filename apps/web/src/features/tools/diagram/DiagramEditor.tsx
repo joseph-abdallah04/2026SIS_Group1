@@ -8,13 +8,13 @@ import {
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  useId,
 } from 'react';
 import {
   ArrowDown,
   ArrowDownFromLine,
   ArrowRight,
   ArrowUpFromLine,
-  CheckCircle2,
   Columns3,
   Circle,
   Database,
@@ -27,7 +27,6 @@ import {
   Eraser,
   Grid2x2,
   Link2,
-  LoaderCircle,
   LayoutTemplate,
   CornerDownRight,
   Minus,
@@ -39,7 +38,6 @@ import {
   RotateCcw,
   RectangleHorizontal,
   Rows3,
-  Send,
   BringToFront,
   SendToBack,
   SquareDashed,
@@ -311,6 +309,8 @@ import { arrowTargets } from '../studio/studioArrowTargets';
 import { StudioArrowView } from '../studio/StudioArrowView';
 import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
+import { StudioActions, StudioProposeButton, useReportStudioStatus } from '../StudioOverlay';
+import { useSlowSubmission } from '../useProposalSubmission';
 
 /**
  * What a press on empty canvas does. Shapes, arrows and selection are unchanged
@@ -949,8 +949,9 @@ function nodeOrigins(
 }
 
 export function DiagramEditor() {
+  // Propose sits in the studio's header, outside the form, and submits it by id.
+  const formId = useId();
   const {
-    closeTool,
     draftScope,
     extensionSource,
     isReusingOwn,
@@ -1001,6 +1002,20 @@ export function DiagramEditor() {
   const ink = history.snapshot.ink ?? [];
   const paths = history.snapshot.paths ?? [];
   const arrows = history.snapshot.arrows ?? [];
+  // Worded as the footer words them, for the bar the studio minimises to when
+  // somebody peeks at the board. Connections and standalone arrows are one
+  // count, as they are to whoever drew them.
+  const plural = (count: number, one: string, many: string) =>
+    `${count} ${count === 1 ? one : many}`;
+  useReportStudioStatus([
+    plural(nodes.length, 'element', 'elements'),
+    plural(edges.length + arrows.length, 'arrow', 'arrows'),
+    ...(ink.length > 0 ? [plural(ink.length, 'stroke', 'strokes')] : []),
+    ...(paths.length > 0 ? [plural(paths.length, 'path', 'paths')] : []),
+    ...(history.snapshot.tables?.length
+      ? [plural(history.snapshot.tables.length, 'table', 'tables')]
+      : []),
+  ]);
   const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
@@ -1196,6 +1211,9 @@ export function DiagramEditor() {
         : null
     : null;
   const isSubmitting = submissionStatus === 'submitting';
+  // Controls grey out only for a send that is taking a while; see
+  // `useSlowSubmission`. `isSubmitting` still refuses input from the start.
+  const showSubmitting = useSlowSubmission(isSubmitting);
   const zoomPercent = Math.round(diagramViewZoom(view) * 100);
   // Undo can take the container away while its delete question is still open.
   const containerAwaitingDelete = nodes.some((node) => node.id === pendingContainerDelete)
@@ -1210,6 +1228,8 @@ export function DiagramEditor() {
   const pathById = new Map(paths.map((path) => [path.id, path]));
   const selectedPath = selectedPathId ? (pathById.get(selectedPathId) ?? null) : null;
   const tables = history.snapshot.tables ?? [];
+  const canvasHasContent =
+    nodes.length + edges.length + ink.length + paths.length + tables.length + arrows.length > 0;
   const tableById = new Map(tables.map((table) => [table.id, table]));
   const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
   const selectedArrow = selectedArrowId ? (arrowById.get(selectedArrowId) ?? null) : null;
@@ -1701,7 +1721,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={<PaintBucket aria-hidden="true" size={15} />}
           >
@@ -1716,7 +1736,7 @@ export function DiagramEditor() {
                   selectedPath?.fillColor ??
                   (selectedTable ? (tableCellAt(selectedTable, 0, 0)?.fill ?? null) : null)
                 }
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onSelect={(key) => {
                   applySelectionStyle({ fillColor: key });
                   close();
@@ -1736,7 +1756,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={<PaintBucket aria-hidden="true" size={15} />}
           >
@@ -1747,7 +1767,7 @@ export function DiagramEditor() {
                 keys={QUICK_FILL_KEYS}
                 colorFor={(key) => DIAGRAM_FILL_COLORS[key]}
                 activeKey={null}
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onSelect={(key) => {
                   if (selectedTable && cellRange) {
                     replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id);
@@ -1776,7 +1796,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={
               // The swatch is the icon: a line-shaped glyph says which control
@@ -1795,7 +1815,7 @@ export function DiagramEditor() {
                 keys={QUICK_STROKE_KEYS}
                 colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
                 activeKey={selectedNode?.strokeColor ?? selectedPath?.strokeColor ?? null}
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onSelect={(key) => {
                   applySelectionStyle({ strokeColor: key });
                   close();
@@ -1817,7 +1837,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={<StrokeWeightIcon weight={3.5} />}
           >
@@ -1830,7 +1850,7 @@ export function DiagramEditor() {
                       label={<StrokeWeightIcon weight={STROKE_WIDTH_SAMPLE[preset]} />}
                       name={`${STROKE_WIDTH_LABELS[preset]} width`}
                       active={selectedNode?.strokeWidthPreset === preset}
-                      disabled={isSubmitting}
+                      disabled={showSubmitting}
                       onSelect={() => {
                         applySelectionStyle({ strokeWidthPreset: preset });
                         close();
@@ -1846,7 +1866,7 @@ export function DiagramEditor() {
                         label={<StrokeStyleIcon dash={STROKE_STYLE_DASH[style]} />}
                         name={`${STROKE_STYLE_LABELS[style]} style`}
                         active={(selectedPath?.strokeStyle ?? selectedEdge?.strokeStyle) === style}
-                        disabled={isSubmitting}
+                        disabled={showSubmitting}
                         onSelect={() => {
                           applySelectionStyle({ strokeStyle: style });
                           close();
@@ -1866,7 +1886,7 @@ export function DiagramEditor() {
             <button
               type="button"
               aria-label={property.label}
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onClick={() => beginArrowLabelEdit()}
               className={BAR_CONTROL}
             >
@@ -1887,7 +1907,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={
               <span className={end === 'startCap' ? 'rotate-180' : undefined}>
@@ -1903,7 +1923,7 @@ export function DiagramEditor() {
                     type="button"
                     aria-label={`${ARROW_CAP_LABELS[cap]} ${end === 'startCap' ? 'start' : 'end'}`}
                     aria-pressed={current === cap}
-                    disabled={isSubmitting}
+                    disabled={showSubmitting}
                     onClick={() => {
                       applyArrowSetting({ [end]: cap });
                       close();
@@ -1927,7 +1947,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={
               current === 'elbow' ? (
@@ -1950,7 +1970,7 @@ export function DiagramEditor() {
                     type="button"
                     aria-label={name}
                     aria-pressed={current === value}
-                    disabled={isSubmitting}
+                    disabled={showSubmitting}
                     onClick={() => {
                       applyArrowSetting({ route: value });
                       close();
@@ -2028,7 +2048,7 @@ export function DiagramEditor() {
           <BarMenu
             openMenu={openBarMenu}
             onOpenChange={setOpenBarMenu}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             label={property.label}
             icon={<Type aria-hidden="true" size={15} />}
           >
@@ -2045,7 +2065,7 @@ export function DiagramEditor() {
                       }
                       name={`${preset} text`}
                       active={size === preset}
-                      disabled={isSubmitting}
+                      disabled={showSubmitting}
                       onSelect={() => {
                         if (selectedTable) styleCells({ fontSizePreset: preset });
                         else applySelectionStyle({ fontSizePreset: preset });
@@ -2059,7 +2079,7 @@ export function DiagramEditor() {
                     label={<Bold aria-hidden="true" size={15} />}
                     name="Bold cell text"
                     active={bold}
-                    disabled={isSubmitting}
+                    disabled={showSubmitting}
                     onSelect={() => setBold(!bold)}
                   />
                 </ToolStripGroup>
@@ -2078,7 +2098,7 @@ export function DiagramEditor() {
                         label={<SideIcon aria-hidden="true" size={15} />}
                         name={name}
                         active={arrowLabelSide(selectedArrow) === side}
-                        disabled={isSubmitting}
+                        disabled={showSubmitting}
                         onSelect={() => applyArrowSetting({ labelSide: side })}
                       />
                     ))}
@@ -2097,7 +2117,7 @@ export function DiagramEditor() {
                           label={<AlignIcon aria-hidden="true" size={15} />}
                           name={`Align ${option}`}
                           active={align === option}
-                          disabled={isSubmitting}
+                          disabled={showSubmitting}
                           onSelect={() => setAlign(option)}
                         />
                       );
@@ -2115,7 +2135,7 @@ export function DiagramEditor() {
                       ? null
                       : (selectedNode?.labelColor ?? selectedArrow?.labelColor ?? null)
                   }
-                  disabled={isSubmitting}
+                  disabled={showSubmitting}
                   onSelect={setTextColor}
                 />
               </div>
@@ -3351,7 +3371,7 @@ export function DiagramEditor() {
               key={mode}
               name={modeLabel}
               active={canvasTool === mode}
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onSelect={() => selectCanvasTool(mode)}
               label={<ModeIcon aria-hidden="true" size={14} />}
             />
@@ -3367,7 +3387,7 @@ export function DiagramEditor() {
               label={<StrokeWeightIcon weight={STROKE_WIDTH_SAMPLE[preset]} />}
               name={`${STROKE_WIDTH_LABELS[preset]} pen`}
               active={inkWidth === preset}
-              disabled={isSubmitting || canvasTool === 'erase'}
+              disabled={showSubmitting || canvasTool === 'erase'}
               onSelect={() => setInkWidth(preset)}
             />
           ))}
@@ -3378,7 +3398,7 @@ export function DiagramEditor() {
           keys={QUICK_STROKE_KEYS}
           colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
           activeKey={inkColor}
-          disabled={isSubmitting || canvasTool === 'erase'}
+          disabled={showSubmitting || canvasTool === 'erase'}
           onSelect={setInkColor}
         />
       </div>
@@ -3416,7 +3436,7 @@ export function DiagramEditor() {
               active={
                 selectedPath ? selectedPath.strokeWidthPreset === preset : pathWidth === preset
               }
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onSelect={() => {
                 setPathWidth(preset);
                 if (selectedPath) {
@@ -3436,7 +3456,7 @@ export function DiagramEditor() {
               active={
                 selectedPath ? (selectedPath.strokeStyle ?? 'solid') === style : pathStyle === style
               }
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onSelect={() => {
                 setPathStyle(style);
                 if (selectedPath) {
@@ -3456,14 +3476,14 @@ export function DiagramEditor() {
               label={<PaintBucket aria-hidden="true" size={14} />}
               name="Fill the shape"
               active={filled}
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onSelect={() => setFilled(true)}
             />
             <PresetButton
               label={<DropletOff aria-hidden="true" size={14} />}
               name="Leave the shape transparent"
               active={!filled}
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onSelect={() => setFilled(false)}
             />
           </ToolStripGroup>
@@ -3474,7 +3494,7 @@ export function DiagramEditor() {
           keys={QUICK_STROKE_KEYS}
           colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
           activeKey={selectedPath ? (selectedPath.strokeColor ?? null) : pathColor}
-          disabled={isSubmitting}
+          disabled={showSubmitting}
           onSelect={(key) => {
             setPathColor(key);
             if (!selectedPath) return;
@@ -3528,7 +3548,7 @@ export function DiagramEditor() {
    * by the rail button or by a press somewhere that is not the canvas.
    */
   function renderShapeOptions() {
-    const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || isSubmitting;
+    const disabled = nodes.length >= DIAGRAM_NODE_LIMIT || showSubmitting;
     return (
       <div role="group" aria-label="Elements" className="flex flex-col items-center gap-1">
         {DIAGRAM_SHAPE_PALETTE_ORDER.map((shape) => {
@@ -3561,7 +3581,7 @@ export function DiagramEditor() {
           type="button"
           aria-label="Line"
           aria-pressed={canvasTool === 'line'}
-          disabled={isSubmitting}
+          disabled={showSubmitting}
           onClick={() => selectCanvasTool('line')}
           title="Draw a straight line; hold Shift to constrain the angle"
           className={tileClass(canvasTool === 'line')}
@@ -3581,7 +3601,7 @@ export function DiagramEditor() {
             type="button"
             aria-label={arrowLabel}
             aria-pressed={canvasTool === 'arrow' && pendingArrowRoute === route}
-            disabled={isSubmitting}
+            disabled={showSubmitting}
             onClick={() => {
               setPendingArrowRoute(route);
               setArrowDraft(null);
@@ -3753,7 +3773,7 @@ export function DiagramEditor() {
                 label={<Icon aria-hidden="true" size={15} />}
                 name={label}
                 active={layoutDirection === direction}
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onSelect={() => setLayoutDirection(direction)}
               />
             ))}
@@ -3765,7 +3785,7 @@ export function DiagramEditor() {
           // Distinct from the rail button that opens this panel, which is also
           // called Arrange: one opens the choices, this one acts on them.
           aria-label="Arrange the diagram"
-          disabled={nodes.length < 2 || isSubmitting}
+          disabled={nodes.length < 2 || showSubmitting}
           // Says "connections" rather than "arrows": it lays out by `edges`,
           // and Connect has written standalone arrows since the studio gained
           // them, so a diagram drawn here has connections this cannot see.
@@ -3796,7 +3816,7 @@ export function DiagramEditor() {
               key={template.id}
               type="button"
               title={template.hint}
-              disabled={isSubmitting}
+              disabled={showSubmitting}
               onClick={() => {
                 setPendingTemplate(template);
                 selectCanvasTool('template');
@@ -3881,15 +3901,25 @@ export function DiagramEditor() {
   }, [history.snapshot]);
 
   /**
-   * Throws the canvas away, as opposed to leaving it for later.
+   * Empties the canvas, as the drawing studio's Clear does: one step, which Undo
+   * brings back, so there is nothing to ask first.
    *
-   * Closing the studio keeps everything, so this is the only way out that
-   * destroys anything — which is why it is the only one that asks.
+   * It closes nothing. Leaving is the back arrow, and an empty canvas is not
+   * kept as a draft, so clearing and then leaving is how a canvas is thrown
+   * away. Whatever was in hand is put down first, so nothing is left pointing
+   * at an element that has gone.
    */
-  function discardCanvas() {
-    if (history.isDirty && !window.confirm('Discard this canvas?')) return;
-    clearStudioDraft(draftStorage, draftKeyScope);
-    closeTool();
+  function clearCanvas() {
+    if (!canvasHasContent) return;
+    clearError();
+    cancelPlacement();
+    cancelConnection();
+    clearAllSelection();
+    setPendingContainerDelete(null);
+    setEditingNodeId(null);
+    setEditingCell(null);
+    setEditingArrowId(null);
+    history.commit({ nodes: [], edges: [], ink: [], paths: [], tables: [], arrows: [], z: [] });
   }
 
   /** Puts down whatever is being carried, without placing it. */
@@ -4839,23 +4869,6 @@ export function DiagramEditor() {
     if (sent) clearStudioDraft(draftStorage, draftKeyScope);
   }
 
-  if (submissionStatus === 'success') {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 bg-rt-surface-sunken px-6 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rt-primary-tint text-rt-primary-deep">
-          <CheckCircle2 aria-hidden="true" size={28} strokeWidth={1.7} />
-        </span>
-        <div>
-          <h2 className="text-[20px] font-semibold text-rt-ink">Studio canvas proposed</h2>
-          <p role="status" className="mt-1 text-[13px] text-rt-ink-muted">
-            It is now on the shared pinboard.
-          </p>
-        </div>
-        <Button onClick={closeTool}>Back to pinboard</Button>
-      </div>
-    );
-  }
-
   const error = validationError ?? submissionError;
   /**
    * The properties bar, or nothing.
@@ -4895,7 +4908,7 @@ export function DiagramEditor() {
                   type="button"
                   aria-label={pathEditing ? 'Done editing points' : 'Edit points'}
                   aria-pressed={pathEditing}
-                  disabled={isSubmitting}
+                  disabled={showSubmitting}
                   onClick={() => setPathEditing((current) => !current)}
                   className={`${BAR_CONTROL} ${pathEditing ? 'bg-rt-primary-tint text-rt-ink' : ''}`}
                 >
@@ -4919,7 +4932,7 @@ export function DiagramEditor() {
                       ? 'Make corner'
                       : 'Make curve'
                   }
-                  disabled={isSubmitting}
+                  disabled={showSubmitting}
                   onClick={() =>
                     replacePath(toggleAnchorSmooth(selectedPath, selectedAnchor), selectedPath.id)
                   }
@@ -4935,7 +4948,7 @@ export function DiagramEditor() {
                   type="button"
                   aria-label="Connect"
                   aria-pressed={connectionMode}
-                  disabled={isSubmitting}
+                  disabled={showSubmitting}
                   onClick={() => (connectionMode ? cancelConnection() : startConnection())}
                   className={`${BAR_CONTROL} ${connectionMode ? 'bg-rt-primary-tint text-rt-ink' : ''}`}
                 >
@@ -4947,7 +4960,7 @@ export function DiagramEditor() {
               <button
                 type="button"
                 aria-label="Bring selection to front"
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onClick={() => reorderSelection('front')}
                 className={BAR_CONTROL}
               >
@@ -4958,7 +4971,7 @@ export function DiagramEditor() {
               <button
                 type="button"
                 aria-label="Send selection to back"
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onClick={() => reorderSelection('back')}
                 className={BAR_CONTROL}
               >
@@ -4969,7 +4982,7 @@ export function DiagramEditor() {
               <button
                 type="button"
                 aria-label="Delete selection"
-                disabled={isSubmitting}
+                disabled={showSubmitting}
                 onClick={deleteSelection}
                 className={BAR_CONTROL}
               >
@@ -6052,6 +6065,7 @@ export function DiagramEditor() {
 
   return (
     <form
+      id={formId}
       // Not clipped on a wide screen: this box starts at the header's lower
       // edge, and the bar's panels open upward — so anything that had to reach
       // past the top of the canvas was cut off here and looked like it was
@@ -6092,7 +6106,7 @@ export function DiagramEditor() {
         <StudioToolRail
           tool={canvasTool}
           onToolChange={selectCanvasTool}
-          disabled={isSubmitting}
+          disabled={showSubmitting}
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid((current) => !current)}
           snapEnabled={snapEnabled}
@@ -6107,6 +6121,8 @@ export function DiagramEditor() {
           canRedo={history.canRedo}
           onUndo={undoDiagram}
           onRedo={redoDiagram}
+          canClear={canvasHasContent}
+          onClear={clearCanvas}
         />
 
         {/* Navigation and help, top right: out of the way of the tools on the
@@ -6165,7 +6181,10 @@ export function DiagramEditor() {
           // Edge to edge. The sheet keeps its own proportions inside — SVG
           // scales the view to fit and centres the remainder, which is why every
           // conversion between screen and scene goes through `diagramSurfaceFit`.
-          className={`h-full w-full touch-none bg-white select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-primary focus-visible:outline-none ${canvasCursor}`}
+          // No browser outline, whatever brought focus here. Every press on the
+          // canvas focuses it so its keys work, and the browser outlined the
+          // whole canvas in black each time it did.
+          className={`h-full w-full touch-none bg-white outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-primary ${canvasCursor}`}
           onPointerDown={onCanvasPointerDown}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
@@ -6539,43 +6558,37 @@ export function DiagramEditor() {
         </svg>
       </section>
 
-      <footer className="sticky bottom-0 z-10 col-span-full flex shrink-0 flex-wrap items-center gap-3 border-t border-rt-tertiary bg-rt-surface px-4 py-3 shadow-[0_-4px_16px_rgba(8,12,21,0.06)] sm:px-6 md:static md:shadow-none">
-        <div className="min-w-0 flex-1">
-          {error ? (
-            <p role="alert" className="text-[12px] text-rt-secondary-deep">
-              {error}
-            </p>
-          ) : (
-            <p className="text-[11px] text-rt-ink-faint" aria-live="polite">
-              {nodes.length} {nodes.length === 1 ? 'element' : 'elements'} ·{' '}
-              {/* Both kinds together: a connection between two shapes and a
-                  standalone arrow are one thing to whoever drew them, whatever
-                  the artifact calls each. */}
-              {edges.length + arrows.length}{' '}
-              {edges.length + arrows.length === 1 ? 'arrow' : 'arrows'}
-              {ink.length > 0 ? ` · ${ink.length} ${ink.length === 1 ? 'stroke' : 'strokes'}` : ''}
-              {paths.length > 0
-                ? ` · ${paths.length} ${paths.length === 1 ? 'path' : 'paths'}`
-                : ''}
-            </p>
-          )}
-        </div>
-        <Button variant="secondary" onClick={discardCanvas}>
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-          disabled={!isLive || isSubmitting}
-          title={isLive ? 'Propose diagram (Ctrl+Enter)' : 'Reconnect before proposing'}
-        >
-          {isSubmitting ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />
-          ) : (
-            <Send aria-hidden="true" size={16} />
-          )}
-          {isSubmitting ? 'Proposing' : 'Propose'}
-        </Button>
-      </footer>
+      <StudioActions
+        error={error}
+        footerClassName="sticky bottom-0 z-10 col-span-full flex shrink-0 flex-wrap items-center gap-3 border-t border-rt-tertiary bg-rt-surface px-4 py-3 shadow-[0_-4px_16px_rgba(8,12,21,0.06)] sm:px-6 md:static md:shadow-none"
+        summary={
+          <>
+            {nodes.length} {nodes.length === 1 ? 'element' : 'elements'} ·{' '}
+            {/* Both kinds together: a connection between two shapes and a
+                standalone arrow are one thing to whoever drew them, whatever
+                the artifact calls each. */}
+            {edges.length + arrows.length} {edges.length + arrows.length === 1 ? 'arrow' : 'arrows'}
+            {ink.length > 0 ? ` · ${ink.length} ${ink.length === 1 ? 'stroke' : 'strokes'}` : ''}
+            {paths.length > 0 ? ` · ${paths.length} ${paths.length === 1 ? 'path' : 'paths'}` : ''}
+            {tables.length > 0
+              ? ` · ${tables.length} ${tables.length === 1 ? 'table' : 'tables'}`
+              : ''}
+          </>
+        }
+      >
+        <StudioProposeButton
+          form={formId}
+          disabled={!isLive}
+          submitting={isSubmitting}
+          sending={showSubmitting}
+          editing={editSource !== null}
+          title={
+            isLive
+              ? `${editSource ? 'Update proposal' : 'Propose diagram'} (Ctrl+Enter)`
+              : `Reconnect before ${editSource ? 'updating' : 'proposing'}`
+          }
+        />
+      </StudioActions>
     </form>
   );
 }

@@ -94,7 +94,7 @@ interface PinboardCanvasProps {
   onToggleShortlist: (id: string) => void;
   /** F27 header chrome (count / “leader is selecting”). */
   shortlistControl?: ReactNode;
-  /** Leader shortlist prompt, stacked just above the floating toolbar. */
+  /** Leader shortlist prompt. Takes the floating toolbar's place while the board is closed. */
   boardOverlay?: ReactNode;
   /** F28 ballot — covers the board + rails until the leader ends the vote. */
   ballot?: ReactNode;
@@ -302,13 +302,15 @@ export function PinboardCanvas({
    * Whether a proposal can be reopened in the tool that made it.
    *
    * It depends on whether the artifact still holds what the editor works on. A
-   * diagram always does: its nodes and edges are the artifact. A drawing does
+   * sticky and a diagram always do: a note's words and formatting, and a
+   * diagram's nodes and edges, are the artifact. A drawing does
    * only if its strokes were stored — ones proposed before that kept just the
    * rendered SVG, and reopening those would mean starting from a blank canvas
    * and replacing the artwork instead of changing it.
    */
   const canReopen = useCallback(
     (item: BoardItem) =>
+      item.artifactJson.type === 'sticky' ||
       item.artifactJson.type === 'diagram' ||
       (item.artifactJson.type === 'drawing' && (item.artifactJson.strokes?.length ?? 0) > 0),
     [],
@@ -469,19 +471,6 @@ export function PinboardCanvas({
   // write failed, but only the card knows it is holding an editor open or a
   // confirmation waiting on that promise, and swallowing the rejection here
   // would leave either of them stuck mid-action with nothing to release them.
-  const onEditText = useCallback(
-    async (item: BoardItem, text: string) => {
-      if (item.artifactJson.type !== 'sticky') return;
-      try {
-        await editProposal({ id: item.id, artifactJson: { ...item.artifactJson, text } });
-      } catch (err) {
-        setWriteError(err instanceof Error ? err.message : 'Could not save that edit');
-        throw err;
-      }
-    },
-    [editProposal],
-  );
-
   const onDelete = useCallback(
     async (item: BoardItem) => {
       try {
@@ -738,6 +727,9 @@ export function PinboardCanvas({
       */}
           <div
             ref={viewportRef}
+            // Marked so a minimised studio can sit at the bottom of the board
+            // itself, beside the agenda rather than across it.
+            data-board-frame
             className="relative h-full min-h-0 min-w-0 overflow-hidden bg-rt-surface-alt"
             style={{
               // Only promise a grab when one is actually on offer. Showing `grab`
@@ -802,7 +794,6 @@ export function PinboardCanvas({
                       }
                       isDragging={draggingId === item.id}
                       dragHandlers={dragHandlers}
-                      onEditText={onEditText}
                       onDelete={onDelete}
                       viewerId={viewerId}
                       onReact={boardOpen ? onReact : undefined}
@@ -856,13 +847,11 @@ export function PinboardCanvas({
             element the containing block for anything `fixed` inside, and
             nothing on the board should be caught by that. */}
           <div className="@container/board pointer-events-none absolute inset-0 z-20">
-            {/* What has to be said about the toolbar, stacked above it: the
-                  leader's shortlist prompt and a refused write. It stays
-                  centred when the bar moves left, because at this height it
-                  is already clear of the nav bar. `bottom-19` is the bar's
-                  `bottom-6` plus its `h-11` plus an 8px gap. */}
+            {/* A refused write, stacked above the toolbar. It stays centred
+                  when the bar moves left, because at this height it is already
+                  clear of the nav bar. `bottom-19` is the bar's `bottom-6` plus
+                  its `h-11` plus an 8px gap. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
-              {boardOverlay}
               {writeError ? (
                 <p
                   role="status"
@@ -880,12 +869,20 @@ export function PinboardCanvas({
                   `bottom-6` clears the horizontal scrollbar. On a board too
                   narrow even for icons (~320px) the two can still touch.
 
+                  The leader's shortlist bar, which takes this slot while the
+                  board is closed, is wider (~490px) and meets the nav bar on a
+                  board narrower than ~930px, so it anchors left from 60rem.
+
                   Marked so the sticky popup can centre itself over the board
                   this row spans, rather than over a window the side panels
                   make lopsided, and rest just above the toolbar. */}
             <div
               data-board-toolbar
-              className="absolute inset-x-0 bottom-6 flex justify-center px-6 @max-[48rem]/board:justify-start"
+              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
+                !boardOpen && boardOverlay
+                  ? '@max-[60rem]/board:justify-start'
+                  : '@max-[48rem]/board:justify-start'
+              }`}
             >
               <div className="pointer-events-auto min-w-0">
                 {boardOpen ? (
@@ -895,11 +892,14 @@ export function PinboardCanvas({
                   // the same reason they do: with the board closed there is
                   // nothing to reuse onto.
                   <CreativeToolbar>{myProposals}</CreativeToolbar>
+                ) : boardOverlay ? (
+                  // One bar for the leader: the shortlist controls stand in for
+                  // the locked message rather than stacking on top of it.
+                  boardOverlay
                 ) : (
                   // A sentence cannot shrink to an icon, so it truncates
                   // instead, capped at what the nav bar leaves free.
                   <p
-                    title={closedMessage}
                     className={`${FLOATING_BAR} max-w-[calc(100cqw-15.5rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
                   >
                     <span className="truncate">{closedMessage}</span>

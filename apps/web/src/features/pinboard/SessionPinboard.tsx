@@ -215,6 +215,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                 count={voting.proposalIds.length}
                 busy={voting.busy || phaseBusyId === board.questionId}
                 error={voting.error ?? phaseError}
+                limitHits={voting.limitHits}
                 onProceed={() => void voting.startVote()}
                 onClear={() => void voting.clear()}
                 onBack={() => {
