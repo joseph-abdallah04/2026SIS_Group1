@@ -212,6 +212,7 @@ export function VotingBallot({
                   const card = (
                     <ProposalCard
                       item={item}
+                      viewerId={viewerId}
                       isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
                       isAuthorLeader={item.authorId != null && item.authorId === leaderId}
                       // The card is the vote button, so nothing on it is a

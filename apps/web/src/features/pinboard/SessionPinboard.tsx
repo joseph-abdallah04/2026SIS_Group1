@@ -61,6 +61,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
     reload,
     propose,
     editProposal,
+    arrangeProposal,
     deleteProposal,
     reactToProposal,
     isLive,
@@ -200,6 +201,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           isLeader={isLeader}
           viewerId={viewerId}
           editProposal={editProposal}
+          arrangeProposal={arrangeProposal}
           deleteProposal={deleteProposal}
           shortlist={voting.proposalIds}
           canToggleShortlist={isLeader && selecting && !voting.locked}

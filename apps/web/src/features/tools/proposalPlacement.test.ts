@@ -106,3 +106,27 @@ describe('findOpenProposalPosition', () => {
     });
   });
 });
+
+describe('findOpenProposalPosition beside an original', () => {
+  // An extension belongs next to what it builds on, wherever the viewer is looking.
+  it('lands just to the right of the original, level with its top', () => {
+    setBoardCentre({ x: 2000, y: 1200 });
+    const original = stickyAt(400, 300);
+
+    expect(findOpenProposalPosition([original], STICKY, original)).toEqual({
+      x: 400 + STICKY_WIDTH + 28,
+      y: 300,
+    });
+  });
+
+  it('walks outward from there when the spot beside it is taken', () => {
+    const original = stickyAt(400, 300);
+    const neighbour = stickyAt(400 + STICKY_WIDTH + 28, 300);
+
+    const position = findOpenProposalPosition([original, neighbour], DIAGRAM, original);
+    expect(position).not.toEqual({ x: 400 + STICKY_WIDTH + 28, y: 300 });
+    // Still close by: within one ring of the spot it wanted.
+    expect(Math.abs(position.x - (400 + STICKY_WIDTH + 28))).toBeLessThanOrEqual(CELL_WIDTH);
+    expect(Math.abs(position.y - 300)).toBeLessThanOrEqual(CELL_HEIGHT);
+  });
+});

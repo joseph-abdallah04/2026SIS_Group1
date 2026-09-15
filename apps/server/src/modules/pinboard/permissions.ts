@@ -29,7 +29,7 @@ export interface Actor {
  * What is being attempted. They differ in who may do them, so the rule below
  * cannot be stated without knowing which one this is.
  */
-export type ProposalMutation = 'move' | 'edit' | 'delete' | 'react';
+export type ProposalMutation = 'move' | 'edit' | 'delete' | 'react' | 'arrange';
 
 export interface MutationIntent {
   mutation: ProposalMutation;
@@ -49,6 +49,11 @@ export interface MutationIntent {
  * running the session (F17). The leader may still not *edit* other people's
  * content: moving or removing a proposal is facilitation, but rewriting one
  * puts different words under its author's name.
+ *
+ * Arranging — bringing a card to the front or sending it to the back — is the
+ * leader's alone, their own cards included. Stacking decides what covers what
+ * for the whole room, and one person owning it keeps authors from racing each
+ * other to the top of a crowded board.
  *
  * Reacting is open to everyone in the room, including on your own proposal
  * (F18). It changes nothing about the proposal itself, it is attributed to
@@ -75,8 +80,18 @@ export function requireMutableProposal<T extends MutableProposal>(
     throw new ApiError(404, 'Proposal not found', 'PROPOSAL_NOT_FOUND');
   }
 
+  if (intent.mutation === 'arrange' && !intent.isLeader) {
+    throw new ApiError(
+      403,
+      'Only the session leader can bring proposals to the front or send them to the back',
+      'NOT_SESSION_LEADER',
+    );
+  }
+
   const isAuthor = proposal.authorId === actor.id;
-  const leaderMay = intent.isLeader && (intent.mutation === 'move' || intent.mutation === 'delete');
+  const leaderMay =
+    intent.isLeader &&
+    (intent.mutation === 'move' || intent.mutation === 'delete' || intent.mutation === 'arrange');
   const anyoneMay = intent.mutation === 'react';
 
   if (!anyoneMay && !isAuthor && !leaderMay) {

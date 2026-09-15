@@ -212,7 +212,7 @@ Frontend: apps/web/src/features/pinboard/
 ### Database tables
 
 ```
-Proposal (id, questionId, authorId?, type, artifactJson, x, y, extendsProposalId, createdAt, editedAt, deletedAt)
+Proposal (id, questionId, authorId?, type, artifactJson, x, y, z, extendsProposalId, createdAt, editedAt, deletedAt)
 ProposalReaction (id, proposalId, userId, emoji, createdAt) — unique(proposalId, userId)
 ```
 
@@ -228,6 +228,7 @@ contract these implement.
 # Client → Server (validated: membership + phase + ownership)
 proposalCreate             → { type, artifactJson, x, y, extendsProposalId? }
 proposalUpdate             → { id, artifactJson?, x?, y? }        (author; leader may move)
+proposalArrange            → { id, to: 'front' | 'back' }         (leader only; broadcasts proposalUpdated)
 proposalDelete             → { id }                               (author or leader)
 proposalReact              → { id, emoji }                        (anyone in the session)
 

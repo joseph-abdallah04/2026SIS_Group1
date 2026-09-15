@@ -18,8 +18,10 @@ function sticky(id: string, text: string): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -38,8 +40,10 @@ function drawing(id: string): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -59,8 +63,10 @@ function diagram(id: string): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }

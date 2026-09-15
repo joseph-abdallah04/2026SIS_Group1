@@ -12,6 +12,7 @@ import { Check, Eraser, Pencil, Redo2, Trash2, Undo2 } from 'lucide-react';
 import { IconButton } from '../../../components/ui/IconButton';
 import { DRAWING_SVG_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
+import { EXTEND_UNCHANGED_HINT } from '../proposeErrors';
 import {
   DRAWING_INKS,
   DRAWING_VIEWBOX_HEIGHT,
@@ -25,6 +26,7 @@ import {
   drawingArtifactSize,
   serializeDrawingSvg,
   strokePathData,
+  strokesToData,
   type DrawingInk,
   type DrawingStroke,
   type PenWidth,
@@ -52,6 +54,7 @@ export function DrawingEditor() {
     editSource,
     extensionSource,
     isLive,
+    isReusing,
     resetSubmission,
     submissionError,
     submissionStatus,
@@ -68,6 +71,24 @@ export function DrawingEditor() {
       : [];
   const { strokes, strokesRef, canUndo, canRedo, commit, preview, recordPreview, undo, redo } =
     useDrawingHistory(sourceStrokes);
+  /**
+   * What the extension started from, in the form it would be stored: null
+   * unless this is an extension. Decided once, when the editor opens, because
+   * closing clears the source a render before the editor goes. Reuse is exempt,
+   * since bringing an idea to a new question unchanged is the point of it.
+   */
+  const [sourceKey] = useState(() =>
+    extensionSource !== null && editSource === null && !isReusing
+      ? JSON.stringify(strokesToData(sourceStrokes))
+      : null,
+  );
+  // Compared as stored — simplified and packed — so pointer samples that
+  // simplify away are not a change, exactly as they are not on the board.
+  const strokesKey = useMemo(
+    () => (sourceKey === null ? null : JSON.stringify(strokesToData(strokes))),
+    [sourceKey, strokes],
+  );
+  const unchangedExtension = sourceKey !== null && strokesKey === sourceKey;
   // For the bar the studio minimises to.
   useReportStudioStatus([`${strokes.length} ${strokes.length === 1 ? 'stroke' : 'strokes'}`]);
   const [mode, setMode] = useState<DrawingMode>('pen');
@@ -191,6 +212,11 @@ export function DrawingEditor() {
     const prepared = prepareDrawing(strokes);
     if (!prepared.ok) {
       setValidationError(prepared.error);
+      return;
+    }
+    // Ctrl+Enter submits without going through the disabled button.
+    if (sourceKey !== null && JSON.stringify(prepared.strokes) === sourceKey) {
+      setValidationError(EXTEND_UNCHANGED_HINT);
       return;
     }
 
@@ -383,19 +409,24 @@ export function DrawingEditor() {
           <>
             {strokes.length} {strokes.length === 1 ? 'stroke' : 'strokes'} ·{' '}
             {formatArtifactSize(artifactSize)} of {formatArtifactSize(DRAWING_SVG_LIMIT)}
+            {/* Said beside the count rather than only in the button's tooltip:
+                a Propose that is dead for no visible reason looks broken. */}
+            {unchangedExtension ? <> · {EXTEND_UNCHANGED_HINT}</> : null}
           </>
         }
       >
         <StudioProposeButton
           form={formId}
-          disabled={!isLive}
+          disabled={!isLive || unchangedExtension}
           submitting={isSubmitting}
           sending={showSubmitting}
           editing={editSource !== null}
           title={
-            isLive
-              ? `${editSource ? 'Update proposal' : 'Propose drawing'} (Ctrl+Enter)`
-              : `Reconnect before ${editSource ? 'updating' : 'proposing'}`
+            !isLive
+              ? `Reconnect before ${editSource ? 'updating' : 'proposing'}`
+              : unchangedExtension
+                ? EXTEND_UNCHANGED_HINT
+                : `${editSource ? 'Update proposal' : 'Propose drawing'} (Ctrl+Enter)`
           }
         />
       </StudioActions>

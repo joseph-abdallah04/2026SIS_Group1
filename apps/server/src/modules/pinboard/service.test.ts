@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareBoardItems, type BoardItem } from '@roundtable/shared';
+import { compareBoardItems, DELETED_USER_DISPLAY_NAME, type BoardItem } from '@roundtable/shared';
 import { proposalCreateSchema, proposalUpdateSchema } from '@roundtable/shared/schemas';
 
 import { toBoardItem } from './service.js';
@@ -22,6 +22,7 @@ function row(overrides: Partial<ProposalRow> = {}): ProposalRow {
     extendsProposalId: null,
     reactions: [],
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
+    z: 0,
     editedAt: null,
     deletedAt: null,
     ...overrides,
@@ -39,8 +40,10 @@ function item(overrides: Partial<BoardItem> = {}): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-08-31T10:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
     ...overrides,
   };
@@ -58,8 +61,10 @@ describe('toBoardItem', () => {
       x: 10,
       y: 20,
       createdAt: '2026-08-31T10:00:00.000Z',
+      z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     });
   });
@@ -72,6 +77,52 @@ describe('toBoardItem', () => {
 
   it('keeps the extends link for F23 child proposals', () => {
     expect(toBoardItem(row({ extendsProposalId: 'parent-1' })).extendsProposalId).toBe('parent-1');
+  });
+
+  describe('extendsFrom', () => {
+    const original = (overrides: Record<string, unknown> = {}) => ({
+      questionId: 'q1',
+      authorId: 'u2',
+      author: { displayName: 'Bob' },
+      ...overrides,
+    });
+
+    it('names whose idea an extension on the same question builds on', () => {
+      const mapped = toBoardItem(
+        row({ extendsProposalId: 'parent-1', extendsProposal: original() } as Partial<ProposalRow>),
+      );
+      expect(mapped.extendsFrom).toEqual({ authorId: 'u2', authorName: 'Bob' });
+    });
+
+    // Reuse (F38) records its source the same way, but that source is always
+    // from an earlier question, and the board does not mark it as extended.
+    it('stays empty for a reuse, whose source is on another question', () => {
+      const mapped = toBoardItem(
+        row({
+          extendsProposalId: 'earlier-1',
+          extendsProposal: original({ questionId: 'q0', authorId: 'u1' }),
+        } as Partial<ProposalRow>),
+      );
+      expect(mapped.extendsProposalId).toBe('earlier-1');
+      expect(mapped.extendsFrom).toBeNull();
+    });
+
+    it('stays empty for a proposal that builds on nothing', () => {
+      expect(toBoardItem(row()).extendsFrom).toBeNull();
+    });
+
+    it('still names the original author’s account as deleted once it is gone', () => {
+      const mapped = toBoardItem(
+        row({
+          extendsProposalId: 'parent-1',
+          extendsProposal: original({ authorId: null, author: null }),
+        } as Partial<ProposalRow>),
+      );
+      expect(mapped.extendsFrom).toEqual({
+        authorId: null,
+        authorName: DELETED_USER_DISPLAY_NAME,
+      });
+    });
   });
 
   it.each([

@@ -43,6 +43,7 @@ function row(id: string, questionId: string, text = 'Hello') {
     extendsProposalId: null,
     reactions: [],
     createdAt: new Date('2026-09-07T10:00:00.000Z'),
+    z: 0,
     editedAt: null,
     deletedAt: null,
   };

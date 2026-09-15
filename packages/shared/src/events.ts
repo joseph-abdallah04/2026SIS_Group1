@@ -15,6 +15,7 @@ import type {
   VotingVoterStatus,
 } from './index.js';
 import type {
+  ProposalArrangeInput,
   ProposalCreateInput,
   ProposalDeleteInput,
   ProposalReactInput,
@@ -124,6 +125,12 @@ export interface ClientToServerEvents {
    * and this is the enforcement.
    */
   proposalUpdate(payload: ProposalUpdateInput, ack?: (res: WriteAck) => void): void;
+  /**
+   * Bring a proposal to the front of the board or send it to the back. Leader
+   * only: stacking is part of arranging the shared board. The restacked row
+   * arrives for everyone on `proposalUpdated`.
+   */
+  proposalArrange(payload: ProposalArrangeInput, ack?: (res: WriteAck) => void): void;
   /**
    * Remove a proposal you authored (F16), or — if you lead the session — any
    * proposal on the board (F17). Soft-deleted server-side, so a proposal that

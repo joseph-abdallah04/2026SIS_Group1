@@ -51,8 +51,10 @@ function sticky(id: string, overrides: Partial<BoardItem> = {}): BoardItem {
     x: 0,
     y: 0,
     createdAt: '2026-09-05T00:00:00.000Z',
+    z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
     ...overrides,
   };
@@ -187,6 +189,35 @@ describe('usePinboard room wiring', () => {
       vi.advanceTimersByTime(2400);
     });
     expect(result.current.newItemIds.has('p2')).toBe(false);
+  });
+
+  // An update and a removal broadcast close together can arrive the other way
+  // round. The update must not put the removed card back on the board.
+  it('does not bring back a card removed before its update arrived', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+
+    act(() => {
+      emitServer('proposalCreated', { proposal: sticky('p3') });
+      emitServer('proposalDeleted', { proposalId: 'p3', questionId: 'q1' });
+      emitServer('proposalUpdated', { proposal: sticky('p3', { z: 9 }) });
+    });
+
+    expect(result.current.board?.items).toEqual([]);
+  });
+
+  it('applies an update to a card that is on the board', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+
+    act(() => {
+      emitServer('proposalCreated', { proposal: sticky('p4') });
+      emitServer('proposalUpdated', { proposal: sticky('p4', { z: 9, x: 70 }) });
+    });
+
+    expect(result.current.board?.items).toEqual([
+      expect.objectContaining({ id: 'p4', z: 9, x: 70 }),
+    ]);
   });
 
   it('ignores a proposal event for a different question than the one on screen', async () => {
@@ -324,5 +355,38 @@ describe('usePinboard write intents', () => {
       await result.current.deleteProposal('p1');
     });
     expect(socket.emit).toHaveBeenCalledWith('proposalDelete', { id: 'p1' }, expect.any(Function));
+  });
+
+  it('emits proposalArrange with a direction, never a number', async () => {
+    socket.emit.mockImplementation(
+      (_event: string, _payload: unknown, ack?: (res: { ok: boolean }) => void) => {
+        ack?.({ ok: true });
+      },
+    );
+    const { result } = renderHook(() => usePinboard('s1'));
+
+    await act(async () => {
+      await result.current.arrangeProposal('p1', 'front');
+    });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'proposalArrange',
+      { id: 'p1', to: 'front' },
+      expect.any(Function),
+    );
+  });
+
+  it('rejects when the server refuses a restack', async () => {
+    socket.emit.mockImplementation(
+      (_event: string, _payload: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+        ack?.({ ok: false, error: 'Only the session leader can do that' });
+      },
+    );
+    const { result } = renderHook(() => usePinboard('s1'));
+
+    await act(async () => {
+      await expect(result.current.arrangeProposal('p1', 'back')).rejects.toThrow(
+        /Only the session leader/,
+      );
+    });
   });
 });
