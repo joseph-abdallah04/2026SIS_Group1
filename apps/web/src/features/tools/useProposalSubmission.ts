@@ -8,6 +8,8 @@ import type { ProposalSubmissionStatus } from './CreativeToolsContext';
 
 interface UseProposalSubmissionOptions {
   extensionSource: BoardItem | null;
+  /** The source came from Reuse (F38), so it has no card on this board to sit beside. */
+  isReusing: boolean;
   /** Set when the editor is rewriting a proposal rather than making one. */
   editSource: BoardItem | null;
   isLive: boolean;
@@ -18,6 +20,7 @@ interface UseProposalSubmissionOptions {
 
 export function useProposalSubmission({
   extensionSource,
+  isReusing,
   editSource,
   isLive,
   proposals,
@@ -57,10 +60,17 @@ export function useProposalSubmission({
         // position is computed or sent.
         await editProposal({ id: editSource.id, artifactJson });
       } else {
+        // An extension lands beside the card it builds on, so the two read as
+        // related at a glance. Looked up on the board as it is now: the
+        // original may have moved, or gone, since the editor opened.
+        const original =
+          extensionSource && !isReusing
+            ? proposals.find((item) => item.id === extensionSource.id)
+            : undefined;
         await propose({
           type: artifactJson.type,
           artifactJson,
-          ...findOpenProposalPosition(proposals, artifactJson),
+          ...findOpenProposalPosition(proposals, artifactJson, original),
           ...(extensionSource ? { extendsProposalId: extensionSource.id } : {}),
         });
       }

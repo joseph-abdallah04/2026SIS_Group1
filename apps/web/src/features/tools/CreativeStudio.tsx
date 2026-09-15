@@ -12,7 +12,7 @@ export function CreativeStudio() {
     draftScope,
     editSource,
     extensionSource,
-    isReusingOwn,
+    isReusing,
     submissionStatus,
   } = useCreativeTools();
   if (!activeTool) return null;
@@ -29,17 +29,11 @@ export function CreativeStudio() {
     return <StickyEditor key={`${draftScope.questionId}:${source}`} />;
   }
 
-  // Reuse (F38) and Extend (F23) share one write path, so the source alone
-  // says which is happening, and this title is the only label the drawing
-  // and diagram tools share: the drawing editor has a toolbar where the
-  // diagram editor has a banner.
-  const action = editSource
-    ? 'Edit'
-    : extensionSource
-      ? isReusingOwn
-        ? 'Reuse'
-        : 'Extend'
-      : 'New';
+  // Reuse (F38) and Extend (F23) share one write path but open through their
+  // own buttons, and this title is the only label the drawing and diagram tools
+  // share: the drawing editor has a toolbar where the diagram editor has a
+  // banner.
+  const action = editSource ? 'Edit' : extensionSource ? (isReusing ? 'Reuse' : 'Extend') : 'New';
   const title = `${action} ${TOOL_LABELS[activeTool].toLowerCase()}`;
 
   return (

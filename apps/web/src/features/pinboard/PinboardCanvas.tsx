@@ -233,7 +233,7 @@ export function PinboardCanvas({
   // the wrong exit. Either way it only decides what the UI offers — every
   // write is re-checked server-side.
 
-  const { activeTool, openEditorForEdit } = useCreativeTools();
+  const { activeTool, openEditorForEdit, openEditorForExtend } = useCreativeTools();
   const boardOpen = board.questionStatus === 'discussion';
 
   /**
@@ -778,6 +778,14 @@ export function PinboardCanvas({
                     isAuthorLeader={item.authorId != null && item.authorId === board.leaderId}
                     boardOpen={boardOpen}
                     onOpenEditor={boardOpen && canReopen(item) ? openEditorForEdit : undefined}
+                    // Anyone may build on any card, their own included. A
+                    // sticky is always copyable; anything else only if its
+                    // editor has something to open, the same rule as Edit.
+                    onExtend={
+                      boardOpen && (item.type === 'sticky' || canReopen(item))
+                        ? openEditorForExtend
+                        : undefined
+                    }
                     canMove={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }

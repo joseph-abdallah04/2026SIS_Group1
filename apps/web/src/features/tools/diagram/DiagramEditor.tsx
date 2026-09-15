@@ -157,6 +157,7 @@ import {
   DIAGRAM_SHAPE_PALETTE_ORDER,
   DIAGRAM_SHAPE_MEDIA_TYPE,
   addNode,
+  centreStudioContent,
   clampNodesInsideContainer,
   clientPointToDiagramPoint,
   containerAtPoint,
@@ -186,7 +187,7 @@ import {
   type DiagramRect,
   type DiagramResizeCorner,
 } from './diagramModel';
-import { type DiagramSnapshot } from './diagramHistory';
+import { diagramSnapshotKey, type DiagramSnapshot } from './diagramHistory';
 import {
   DIAGRAM_DEFAULT_VIEW,
   DIAGRAM_ZOOM_STEP,
@@ -310,6 +311,7 @@ import { StudioArrowView } from '../studio/StudioArrowView';
 import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
 import { StudioActions, StudioProposeButton, useReportStudioStatus } from '../StudioOverlay';
+import { EXTEND_UNCHANGED_HINT } from '../proposeErrors';
 import { useSlowSubmission } from '../useProposalSubmission';
 
 /**
@@ -954,7 +956,8 @@ export function DiagramEditor() {
   const {
     draftScope,
     extensionSource,
-    isReusingOwn,
+    isReusing,
+    isExtendingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -980,24 +983,46 @@ export function DiagramEditor() {
   const draftStorage = typeof window === 'undefined' ? undefined : window.sessionStorage;
 
   const initialSnapshotRef = useRef<DiagramSnapshot | null>(null);
+  // The source as it opens on the canvas, kept to tell an extension that has
+  // changed from one that has not. Null when there is no source to compare to.
+  const sourceKeyRef = useRef<string | null>(null);
   if (!initialSnapshotRef.current) {
-    // A kept draft is what was last on this canvas, so it wins over the source
-    // it was started from — the source is already in it.
-    const draft = readStudioDraft(draftStorage, draftKeyScope);
-    const from = draft ?? sourceArtifact;
-    initialSnapshotRef.current = {
-      nodes: (from?.nodes ?? []).map((node) => ({ ...node })),
-      edges: (from?.edges ?? []).map((edge) => ({ ...edge })),
+    const toSnapshot = (from: NonNullable<typeof sourceArtifact>): DiagramSnapshot => ({
+      nodes: from.nodes.map((node) => ({ ...node })),
+      edges: from.edges.map((edge) => ({ ...edge })),
       // Prefilling only the shapes would quietly drop half the artifact, which
       // is as true of a restored draft as of an extended canvas.
-      ...(from?.ink?.length ? { ink: dataToInk(from.ink) } : {}),
-      ...(from?.paths?.length ? { paths: from.paths.map((path) => ({ ...path })) } : {}),
-      ...(from?.tables?.length ? { tables: from.tables.map((table) => ({ ...table })) } : {}),
-      ...(from?.arrows?.length ? { arrows: from.arrows.map((arrow) => ({ ...arrow })) } : {}),
-      ...(from?.z?.length ? { z: [...from.z] } : {}),
-    };
+      ...(from.ink?.length ? { ink: dataToInk(from.ink) } : {}),
+      ...(from.paths?.length ? { paths: from.paths.map((path) => ({ ...path })) } : {}),
+      ...(from.tables?.length ? { tables: from.tables.map((table) => ({ ...table })) } : {}),
+      ...(from.arrows?.length ? { arrows: from.arrows.map((arrow) => ({ ...arrow })) } : {}),
+      ...(from.z?.length ? { z: [...from.z] } : {}),
+    });
+    // A proposal is stored tucked into the sheet's top-left corner, framed for
+    // its card on the board. Opened for editing or extending, it is centred
+    // instead; proposing tucks it back, so the card looks the same after.
+    const source = sourceArtifact ? centreStudioContent(toSnapshot(sourceArtifact)) : null;
+    sourceKeyRef.current = source ? diagramSnapshotKey(source) : null;
+    // A kept draft is what was last on this canvas, so it wins over the source
+    // it was started from — the source is already in it — and it opens exactly
+    // where it was left rather than being moved.
+    const draft = readStudioDraft(draftStorage, draftKeyScope);
+    initialSnapshotRef.current = draft ? toSnapshot(draft) : (source ?? { nodes: [], edges: [] });
   }
   const history = useDiagramHistory(initialSnapshotRef.current);
+  /**
+   * An extension that still matches its original. Proposing it would put an
+   * identical card on the board marked as building on the first, so Propose
+   * waits for a change. Compared with the source rather than with where the
+   * history started, so a restored draft that already differs is not held
+   * back — and undoing every change holds it back again. Reuse is exempt:
+   * bringing an idea to a new question unchanged is the point of it.
+   */
+  const unchangedExtension =
+    extensionSource !== null &&
+    !isReusing &&
+    sourceKeyRef.current !== null &&
+    diagramSnapshotKey(history.snapshot) === sourceKeyRef.current;
   const { nodes, edges } = history.snapshot;
   const ink = history.snapshot.ink ?? [];
   const paths = history.snapshot.paths ?? [];
@@ -4862,6 +4887,17 @@ export function DiagramEditor() {
       setValidationError(prepared.error);
       return;
     }
+    // Ctrl+Enter submits without going through the disabled button. Checked
+    // against the canvas as it is now, after any label being typed was committed.
+    if (
+      extensionSource !== null &&
+      !isReusing &&
+      sourceKeyRef.current !== null &&
+      diagramSnapshotKey(graph) === sourceKeyRef.current
+    ) {
+      setValidationError(EXTEND_UNCHANGED_HINT);
+      return;
+    }
 
     setValidationError(null);
     const sent = await submitArtifact(prepared.artifact);
@@ -6079,9 +6115,14 @@ export function DiagramEditor() {
         <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1 sm:top-4 sm:right-4">
           {extensionSource ? (
             <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
-              {isReusingOwn
+              {isReusing
                 ? 'Reusing your diagram'
-                : `Extending ${extensionSource.authorName}'s diagram`}
+                : isExtendingOwn
+                  ? 'Extending your diagram'
+                  : `Extending ${extensionSource.authorName}'s diagram`}
+              {unchangedExtension ? (
+                <span className="block text-rt-secondary-deep/80">{EXTEND_UNCHANGED_HINT}</span>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -6578,10 +6619,16 @@ export function DiagramEditor() {
       >
         <StudioProposeButton
           form={formId}
-          disabled={!isLive}
+          disabled={!isLive || unchangedExtension}
           submitting={isSubmitting}
           sending={showSubmitting}
-          title={isLive ? 'Propose diagram (Ctrl+Enter)' : 'Reconnect before proposing'}
+          title={
+            !isLive
+              ? 'Reconnect before proposing'
+              : unchangedExtension
+                ? EXTEND_UNCHANGED_HINT
+                : 'Propose diagram (Ctrl+Enter)'
+          }
         />
       </StudioActions>
     </form>

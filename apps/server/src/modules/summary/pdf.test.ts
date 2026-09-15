@@ -17,6 +17,7 @@ function sticky(id: string, text: string, authorName = 'Ada'): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }

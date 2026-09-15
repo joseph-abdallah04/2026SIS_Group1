@@ -15,6 +15,7 @@ import {
   DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_STROKE_COLORS,
   diagramNodeSize,
+  effectiveDiagramNodeSize,
 } from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -301,6 +302,7 @@ function connectedFixture(): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -608,6 +610,7 @@ describe('diagram editor', () => {
       z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
     render(
@@ -765,6 +768,7 @@ describe('diagram editor', () => {
       z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
 
@@ -959,6 +963,7 @@ describe('diagram editor', () => {
       z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
     render(
@@ -1385,6 +1390,7 @@ describe('diagram resize and style', () => {
       z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
   }
@@ -1604,6 +1610,8 @@ describe('diagram resize and style', () => {
     expect(styled).toHaveAttribute('fill', DIAGRAM_FILL_COLORS.violet);
     expect(styled).toHaveAttribute('stroke-width', '3');
 
+    // An extension has to differ from its original before it can be proposed.
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     const artifact = send.mock.calls[0]?.[0]?.artifactJson;
@@ -1973,6 +1981,7 @@ describe('diagram routing and graph-aware arrange', () => {
       z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
   }
@@ -2367,6 +2376,7 @@ describe('studio canvas', () => {
       createdAt: '2026-09-03T00:00:00.000Z',
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
 
@@ -2380,6 +2390,8 @@ describe('studio canvas', () => {
     // The inherited stroke is on the canvas, not just in the payload.
     expect(screen.getAllByTestId('ink-stroke')).toHaveLength(1);
 
+    // An extension has to differ from its original before it can be proposed.
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
 
@@ -5068,5 +5080,95 @@ describe('picking things up before putting them down', () => {
     expect(screen.getByRole('button', { name: 'Path with 3 points' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
     expect(pen).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('studio extend and reopen', () => {
+  function oneBox(): BoardItem {
+    return {
+      id: 'one-box',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      // As every proposal is stored: tucked into the sheet's top-left corner.
+      artifactJson: {
+        type: 'diagram',
+        nodes: [{ id: 'n1', label: 'Idea', x: 24, y: 24, shape: 'box' }],
+        edges: [],
+      },
+      x: 0,
+      y: 0,
+      z: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
+      extendsProposalId: null,
+      extendsFrom: null,
+      reactions: [],
+    };
+  }
+
+  it('opens an extended proposal centred on the canvas, not in its corner', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness propose={vi.fn(async () => undefined)}>
+        <ExtendButton proposal={oneBox()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    // The box, whatever size its label gives it, centred on the 960x600 sheet.
+    const artifact = oneBox().artifactJson;
+    if (artifact.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const size = effectiveDiagramNodeSize(artifact.nodes[0]!);
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Idea' })).toHaveAttribute(
+      'transform',
+      `translate(${Math.round((DIAGRAM_CANVAS_WIDTH - size.width) / 2)}, ${Math.round(
+        (DIAGRAM_CANVAS_HEIGHT - size.height) / 2,
+      )})`,
+    );
+  });
+
+  it('holds Propose until the extension differs, then proposes it as an extension', async () => {
+    const user = userEvent.setup();
+    const send = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(
+      <Harness propose={send}>
+        <ExtendButton proposal={oneBox()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    const proposeButton = screen.getByRole('button', { name: 'Propose' });
+    expect(proposeButton).toBeDisabled();
+    expect(screen.getByText('Change something to extend this idea.')).toBeInTheDocument();
+
+    // Ctrl+Enter goes round the button, and is refused the same way.
+    fireEvent.submit(screen.getByRole('application', { name: 'Studio canvas' }).closest('form')!);
+    expect(send).not.toHaveBeenCalled();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    expect(proposeButton).toBeEnabled();
+    await user.click(proposeButton);
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ extendsProposalId: 'one-box' }));
+  });
+
+  it('holds Propose again once the change is undone', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness propose={vi.fn(async () => undefined)}>
+        <ExtendButton proposal={oneBox()} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled();
   });
 });

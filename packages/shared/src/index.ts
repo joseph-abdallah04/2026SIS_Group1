@@ -167,6 +167,16 @@ export interface BoardItem {
   editedAt: string | null;
   extendsProposalId: string | null;
   /**
+   * Whose idea this one builds on (F23), or null when it builds on nobody's.
+   *
+   * Set only when the original is on the same question. Reuse (F38) records its
+   * source in `extendsProposalId` too, but that source is always from an earlier
+   * question, and bringing your own idea forward is not building on one — so
+   * the board marks extensions and leaves reuses unmarked. An original that has
+   * since been deleted still counts: the idea was still built on.
+   */
+  extendsFrom: { authorId: string | null; authorName: string } | null;
+  /**
    * Emoji reactions left on this proposal (F18), only for emoji somebody has
    * actually used. The card offers the whole fixed set regardless, so an empty
    * list is a card nobody has reacted to yet rather than a card without the

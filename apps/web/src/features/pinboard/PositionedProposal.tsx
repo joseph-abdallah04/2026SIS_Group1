@@ -74,6 +74,12 @@ interface PositionedProposalProps {
    */
   onOpenEditor?: (item: BoardItem) => void;
   /**
+   * Open a copy of this proposal to build on it (F23). Absent while the board is
+   * closed, and for a card there is nothing to copy from — a drawing proposed
+   * before its strokes were kept — which is what hides Extend from the menu.
+   */
+  onExtend?: (item: BoardItem) => void;
+  /**
    * The viewer may reposition this card: its author, or the leader arranging
    * the shared board. A move is visible to everyone.
    */
@@ -362,6 +368,7 @@ export function PositionedProposal({
   isAuthorLeader,
   boardOpen,
   onOpenEditor,
+  onExtend,
   canMove,
   canDelete,
   canArrange,
@@ -423,10 +430,9 @@ export function PositionedProposal({
    * What this viewer can do to this card, in the groups the menu rules apart.
    *
    * Anything they are not allowed to do is left out rather than greyed, so the
-   * menu is a list of real options. Extend is the exception: it is shown
-   * disabled because it is on its way, not because it is off limits. Bring to
-   * front and send to back grey out at the end of the stack they would move
-   * the card to, the way desktop apps do, because there they would do nothing.
+   * menu is a list of real options. Bring to front and send to back are the
+   * exception: they grey out at the end of the stack they would move the card
+   * to, the way desktop apps do, because there they would do nothing.
    */
   const sections: ProposalMenuItem[][] = [
     [
@@ -443,17 +449,8 @@ export function PositionedProposal({
             },
           ]
         : []),
-      ...(boardOpen
-        ? [
-            {
-              id: 'extend',
-              label: 'Extend',
-              icon: GitBranchPlus,
-              disabled: true,
-              hint: 'Soon',
-              onSelect: () => {},
-            },
-          ]
+      ...(onExtend
+        ? [{ id: 'extend', label: 'Extend', icon: GitBranchPlus, onSelect: () => onExtend(item) }]
         : []),
     ],
     canArrange
@@ -635,6 +632,7 @@ export function PositionedProposal({
         <>
           <ProposalCard
             item={item}
+            viewerId={viewerId}
             isNew={isNew}
             isOwnedByViewer={isOwn}
             isAuthorLeader={isAuthorLeader}

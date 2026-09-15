@@ -21,6 +21,7 @@ function sticky(id: string, text: string): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -42,6 +43,7 @@ function drawing(id: string): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -64,6 +66,7 @@ function diagram(id: string): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }

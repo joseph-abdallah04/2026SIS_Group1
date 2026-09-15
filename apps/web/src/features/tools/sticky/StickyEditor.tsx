@@ -16,6 +16,7 @@ import { closingFades } from '../../../lib/motion';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
+import { EXTEND_UNCHANGED_HINT } from '../proposeErrors';
 import { clearStickyDraft, readStickyDraft, writeStickyDraft } from './stickyDraft';
 import { fitToSticky, STICKY_TOO_TALL, stickyFits } from './stickyPresentation';
 import { useNoteAutoGrow } from './useNoteAutoGrow';
@@ -90,7 +91,8 @@ export function StickyEditor() {
   const {
     closeTool,
     extensionSource,
-    isReusingOwn,
+    isReusing,
+    isExtendingOwn,
     editSource,
     isLive,
     resetSubmission,
@@ -131,6 +133,18 @@ export function StickyEditor() {
     sourceArtifact?.color ?? saved?.color ?? 'yellow',
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+  /**
+   * An extension that still says exactly what its original says. Proposing it
+   * would put an identical card on the board marked as building on the first,
+   * so Propose waits for a change — the words or the colour. Reuse is exempt:
+   * bringing your idea to a new question unchanged is the point of it.
+   */
+  const unchangedExtension =
+    extensionSource !== null &&
+    !isReusing &&
+    sourceArtifact !== null &&
+    text === sourceArtifact.text &&
+    color === sourceArtifact.color;
   // The last keystroke was refused because the note had filled the largest
   // sticky, which the character count alone would not show.
   const [paperFull, setPaperFull] = useState(false);
@@ -263,6 +277,8 @@ export function StickyEditor() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Ctrl+Enter submits without going through the disabled button.
+    if (unchangedExtension) return;
     const prepared = prepareStickyText(text);
     if (!prepared.ok) {
       setValidationError(prepared.error);
@@ -299,10 +315,17 @@ export function StickyEditor() {
   const label = editSource
     ? 'Edit sticky'
     : extensionSource
-      ? isReusingOwn
+      ? isReusing
         ? 'Reusing your sticky'
-        : `Extending ${extensionSource.authorName}'s sticky`
+        : isExtendingOwn
+          ? 'Extending your sticky'
+          : `Extending ${extensionSource.authorName}'s sticky`
       : 'New sticky';
+  const proposeTitle = !isLive
+    ? 'Reconnect before proposing'
+    : unchangedExtension
+      ? EXTEND_UNCHANGED_HINT
+      : 'Propose sticky (Ctrl+Enter)';
 
   // Portalled to the body, like the board's other popovers, so the canvas's
   // scale transform is not its containing block and it is placed against the
@@ -395,6 +418,10 @@ export function StickyEditor() {
           <p role="alert" className="mb-1 text-[12px] leading-relaxed text-rt-secondary-deep">
             {error}
           </p>
+        ) : unchangedExtension ? (
+          // Said on the paper rather than only in a tooltip: a Propose button
+          // that is dead for no visible reason looks broken.
+          <p className="mb-1 text-[12px] leading-relaxed text-rt-ink/60">{EXTEND_UNCHANGED_HINT}</p>
         ) : null}
 
         {/* Torn along the same line the paper would tear: the note above it,
@@ -440,8 +467,8 @@ export function StickyEditor() {
 
           <Button
             type="submit"
-            disabled={!isLive || submissionStatus === 'submitting'}
-            title={isLive ? 'Propose sticky (Ctrl+Enter)' : 'Reconnect before proposing'}
+            disabled={!isLive || unchangedExtension || submissionStatus === 'submitting'}
+            title={proposeTitle}
           >
             {submissionStatus === 'submitting' ? (
               <LoaderCircle aria-hidden="true" className="animate-spin" size={16} />

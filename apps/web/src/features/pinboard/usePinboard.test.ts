@@ -54,6 +54,7 @@ function sticky(id: string, overrides: Partial<BoardItem> = {}): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
     ...overrides,
   };

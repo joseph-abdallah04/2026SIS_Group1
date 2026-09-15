@@ -3,7 +3,16 @@ const PROPOSAL_ERROR_MESSAGES = {
   NO_ACTIVE_QUESTION: 'Wait for the leader to open a question before proposing.',
   INVALID_PROPOSAL: 'This idea could not be submitted. Review it and try again.',
   QUESTION_CLOSED: 'This question is no longer accepting proposals.',
+  // The server's own wording ("not in this session") reads as a bug to someone
+  // whose original was simply taken off the board while they worked on it.
+  INVALID_EXTENDS: 'The idea you were building on was removed from the board.',
 } as const;
+
+/**
+ * Why Propose is waiting on an extension that still matches its original.
+ * One sentence for every tool, so the rule reads the same wherever it applies.
+ */
+export const EXTEND_UNCHANGED_HINT = 'Change something to extend this idea.';
 
 export type ProposalErrorCode = keyof typeof PROPOSAL_ERROR_MESSAGES;
 

@@ -48,6 +48,11 @@ const BOARD_ITEM_INCLUDE = {
   author: { select: { displayName: true } },
   // Oldest first, so the order people reacted in is the order they are listed.
   reactions: { select: { emoji: true, userId: true }, orderBy: { createdAt: 'asc' } },
+  // Just enough of the original to say whose idea a card builds on, and to
+  // tell an extension (same question) from a reuse (an earlier one).
+  extendsProposal: {
+    select: { questionId: true, authorId: true, author: { select: { displayName: true } } },
+  },
 } satisfies Prisma.ProposalInclude;
 
 type ProposalRow = Prisma.ProposalGetPayload<{ include: typeof BOARD_ITEM_INCLUDE }>;
@@ -98,7 +103,25 @@ export function toBoardItem(row: ProposalRow): BoardItem {
     createdAt: row.createdAt.toISOString(),
     editedAt: row.editedAt?.toISOString() ?? null,
     extendsProposalId: row.extendsProposalId,
+    extendsFrom: toExtendsFrom(row),
     reactions: toReactionGroups(row.reactions),
+  };
+}
+
+/**
+ * Whose idea a proposal builds on, if it is an extension (F23).
+ *
+ * Decided here from the original's question rather than stored: an extension
+ * always names a card on the board it is proposed to, while a reuse (F38) —
+ * which records its source the same way — names one from an earlier question.
+ * No flag to keep in step with the lineage, and no migration.
+ */
+function toExtendsFrom(row: ProposalRow): BoardItem['extendsFrom'] {
+  const original = row.extendsProposal;
+  if (!original || original.questionId !== row.questionId) return null;
+  return {
+    authorId: original.authorId,
+    authorName: original.author?.displayName ?? DELETED_USER_DISPLAY_NAME,
   };
 }
 

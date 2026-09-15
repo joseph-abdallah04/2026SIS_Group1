@@ -20,6 +20,7 @@ function stickyItem(text: string): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -249,6 +250,7 @@ const ITEM: BoardItem = {
   z: 0,
   editedAt: null,
   extendsProposalId: null,
+  extendsFrom: null,
   reactions: [],
 };
 
@@ -339,6 +341,7 @@ function renderMenuCard(props: MenuCardProps = {}) {
     onCopyText: vi.fn(),
     onDelete: vi.fn(async () => undefined),
     onOpenEditor: vi.fn(),
+    onExtend: vi.fn(),
   };
   const view = render(
     <PositionedProposal
@@ -377,7 +380,7 @@ describe('PositionedProposal actions menu', () => {
     renderMenuCard({ isOwn: true, canMove: true, canDelete: true });
     await openFromButton();
 
-    expect(menuLabels()).toEqual(['Copy text', 'Edit', 'ExtendSoon', 'Delete']);
+    expect(menuLabels()).toEqual(['Copy text', 'Edit', 'Extend', 'Delete']);
     // Arranging is the leader's, so its group — and the rule before it — is gone.
     expect(screen.getAllByRole('separator')).toHaveLength(1);
   });
@@ -388,7 +391,7 @@ describe('PositionedProposal actions menu', () => {
 
     expect(menuLabels()).toEqual([
       'Copy text',
-      'ExtendSoon',
+      'Extend',
       'Bring to front',
       'Send to back',
       'Remove',
@@ -400,7 +403,7 @@ describe('PositionedProposal actions menu', () => {
     renderMenuCard();
     await openFromButton();
 
-    expect(menuLabels()).toEqual(['Copy text', 'ExtendSoon']);
+    expect(menuLabels()).toEqual(['Copy text', 'Extend']);
     expect(screen.queryByRole('separator')).toBeNull();
   });
 
@@ -408,18 +411,27 @@ describe('PositionedProposal actions menu', () => {
     renderMenuCard({ item: DIAGRAM });
     await openFromButton();
 
-    expect(menuLabels()).toEqual(['ExtendSoon']);
+    expect(menuLabels()).toEqual(['Extend']);
   });
 
-  it('shows Extend but does nothing with it yet', async () => {
-    renderMenuCard();
+  it('extends the card and closes the menu', async () => {
+    const { onExtend } = renderMenuCard();
     await openFromButton();
 
-    const extend = screen.getByRole('menuitem', { name: /Extend/ });
-    expect(extend.getAttribute('aria-disabled')).toBe('true');
+    const extend = screen.getByRole('menuitem', { name: 'Extend' });
+    expect(extend.getAttribute('aria-disabled')).toBeNull();
     await userEvent.click(extend);
-    // Still open: a disabled item is not a choice.
-    expect(screen.getByRole('menu')).toBeTruthy();
+
+    expect(onExtend).toHaveBeenCalledWith(ITEM);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  // The board decides: closed, or a card with nothing to copy from.
+  it('leaves Extend out when the card cannot be extended', async () => {
+    renderMenuCard({ onExtend: undefined });
+    await openFromButton();
+
+    expect(menuLabels()).toEqual(['Copy text']);
   });
 
   it('copies a sticky’s text and closes', async () => {
@@ -526,7 +538,7 @@ describe('PositionedProposal actions menu', () => {
 
   it('leaves the browser menu alone when there is nothing to offer', () => {
     // A diagram on a closed board: no copy, no extend, nothing else allowed.
-    renderMenuCard({ item: DIAGRAM, boardOpen: false });
+    renderMenuCard({ item: DIAGRAM, boardOpen: false, onExtend: undefined });
 
     expect(screen.queryByRole('button', { name: 'Proposal actions' })).toBeNull();
     const notCancelled = fireEvent.contextMenu(screen.getByRole('article'), {
@@ -547,14 +559,26 @@ describe('PositionedProposal actions menu', () => {
   });
 
   it('moves between items with the arrow keys, skipping disabled ones', async () => {
-    renderMenuCard({ isOwn: true, canMove: true, canDelete: true });
+    // The leader's own card, already on top, so Bring to front is greyed out.
+    renderMenuCard({
+      isOwn: true,
+      canMove: true,
+      canDelete: true,
+      canArrange: true,
+      stackIndex: 2,
+      stackSize: 3,
+    });
     await openFromButton();
 
     expect(document.activeElement?.textContent).toBe('Copy text');
     await userEvent.keyboard('{ArrowDown}');
     expect(document.activeElement?.textContent).toBe('Edit');
     await userEvent.keyboard('{ArrowDown}');
-    // Extend is disabled, so the next stop is Delete.
+    expect(document.activeElement?.textContent).toBe('Extend');
+    await userEvent.keyboard('{ArrowDown}');
+    // Bring to front is disabled, so the next stop is Send to back.
+    expect(document.activeElement?.textContent).toBe('Send to back');
+    await userEvent.keyboard('{ArrowDown}');
     expect(document.activeElement?.textContent).toBe('Delete');
     await userEvent.keyboard('{ArrowDown}');
     expect(document.activeElement?.textContent).toBe('Copy text');

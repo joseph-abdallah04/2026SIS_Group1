@@ -57,6 +57,11 @@ function ExtendButton({ proposal }: { proposal: BoardItem }) {
   return <button onClick={() => openEditorForExtend(proposal)}>Extend fixture</button>;
 }
 
+function ReuseButton({ proposal }: { proposal: BoardItem }) {
+  const { openEditorForReuse } = useCreativeTools();
+  return <button onClick={() => openEditorForReuse(proposal)}>Reuse fixture</button>;
+}
+
 describe('creative sticky flow', () => {
   it('proposes a coloured sticky exactly as typed through the existing write contract', async () => {
     const user = userEvent.setup();
@@ -227,6 +232,7 @@ describe('creative sticky flow', () => {
         z: 0,
         editedAt: null,
         extendsProposalId: null,
+        extendsFrom: null,
         reactions: [],
       };
       render(
@@ -236,6 +242,8 @@ describe('creative sticky flow', () => {
       );
 
       await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
+      // An extension has to change something before it can be proposed at all.
+      await user.click(screen.getByRole('button', { name: 'yellow sticky' }));
       await user.click(screen.getByRole('button', { name: 'Propose' }));
 
       expect(propose).not.toHaveBeenCalled();
@@ -282,6 +290,7 @@ describe('creative sticky flow', () => {
       z: 0,
       editedAt: null,
       extendsProposalId: null,
+      extendsFrom: null,
       reactions: [],
     };
 
@@ -305,11 +314,143 @@ describe('creative sticky flow', () => {
     await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
     expect(screen.getByLabelText('Note')).toHaveValue('Original idea');
     expect(screen.getByText("Extending Alice's sticky")).toBeInTheDocument();
+
+    // Unchanged, it waits, and says why.
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled();
+    expect(screen.getByText('Change something to extend this idea.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Note'), ', with a twist');
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     expect(propose).toHaveBeenCalledWith(
-      expect.objectContaining({ extendsProposalId: 'proposal-parent' }),
+      expect.objectContaining({
+        extendsProposalId: 'proposal-parent',
+        artifactJson: { type: 'sticky', text: 'Original idea, with a twist', color: 'blue' },
+      }),
     );
+    // Beside the original, level with its top, rather than wherever the view is.
+    const placed = (propose.mock.calls[0] as unknown as [{ x: number; y: number }])[0];
+    expect(placed.y).toBe(32);
+    expect(placed.x).toBeGreaterThan(32 + 200);
+  });
+
+  it('holds an extension back again once its change is undone', async () => {
+    const user = userEvent.setup();
+    const parent: BoardItem = {
+      id: 'proposal-parent',
+      questionId: 'question-1',
+      authorId: 'user-1',
+      authorName: 'Alice',
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text: 'Original idea', color: 'blue' },
+      x: 32,
+      y: 32,
+      createdAt: '2026-09-02T00:00:00.000Z',
+      z: 0,
+      editedAt: null,
+      extendsProposalId: null,
+      extendsFrom: null,
+      reactions: [],
+    };
+    render(
+      <Harness propose={vi.fn(async () => undefined)} proposals={[parent]}>
+        <ExtendButton proposal={parent} />
+      </Harness>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
+    await user.click(screen.getByRole('button', { name: 'yellow sticky' }));
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'blue sticky' }));
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled();
+  });
+
+  // Extending your own card is building on it: it says so, and it is still
+  // held to the same rule as extending anyone else's.
+  it('calls extending your own sticky Extend, not Reuse', async () => {
+    const user = userEvent.setup();
+    const mine: BoardItem = {
+      id: 'mine',
+      questionId: 'question-1',
+      authorId: 'viewer-1',
+      authorName: 'Me',
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text: 'My idea', color: 'green' },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-02T00:00:00.000Z',
+      z: 0,
+      editedAt: null,
+      extendsProposalId: null,
+      extendsFrom: null,
+      reactions: [],
+    };
+    render(
+      <MemoryRouter initialEntries={['/sessions/demo']}>
+        <CreativeToolsProvider
+          sessionId="session-1"
+          questionId="question-1"
+          viewerId="viewer-1"
+          isLive
+          proposals={[mine]}
+          propose={vi.fn(async () => undefined)}
+          editProposal={async () => {}}
+        >
+          <ExtendButton proposal={mine} />
+          <ReuseButton proposal={mine} />
+          <CreativeStudio />
+        </CreativeToolsProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Extend fixture' }));
+    expect(screen.getByText('Extending your sticky')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeDisabled();
+  });
+
+  // Reuse brings an idea forward unchanged on purpose, so it is not held back.
+  it('lets a reuse be proposed unchanged, and records where it came from', async () => {
+    const user = userEvent.setup();
+    const propose = vi.fn(async () => undefined);
+    const earlier: BoardItem = {
+      id: 'earlier',
+      questionId: 'question-0',
+      authorId: 'viewer-1',
+      authorName: 'Me',
+      type: 'sticky',
+      artifactJson: { type: 'sticky', text: 'From before', color: 'pink' },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-02T00:00:00.000Z',
+      z: 0,
+      editedAt: null,
+      extendsProposalId: null,
+      extendsFrom: null,
+      reactions: [],
+    };
+    render(
+      <MemoryRouter initialEntries={['/sessions/demo']}>
+        <CreativeToolsProvider
+          sessionId="session-1"
+          questionId="question-1"
+          viewerId="viewer-1"
+          isLive
+          proposals={[]}
+          propose={propose}
+          editProposal={async () => {}}
+        >
+          <ReuseButton proposal={earlier} />
+          <CreativeStudio />
+        </CreativeToolsProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Reuse fixture' }));
+    expect(screen.getByText('Reusing your sticky')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ extendsProposalId: 'earlier' }));
   });
 });
 
@@ -327,6 +468,7 @@ describe('sticky drafts', () => {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 

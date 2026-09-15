@@ -43,8 +43,12 @@ export const CARD_RADIUS_PX = 16;
  * against it: a probe that set the byline differently would size the card for
  * a footer it does not have.
  */
+// Baseline-aligned, not centred: the byline mixes the name and time with smaller
+// marks ("Edited", "Extended", the leader's L), and centring boxes of different
+// sizes leaves each word sitting at a slightly different height. On a shared
+// baseline they read as one straight line of text.
 export const CARD_FOOT_CLASS =
-  'flex items-center justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint';
+  'flex items-baseline justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint';
 export const CARD_RADIUS = `${CARD_RADIUS_PX}px`;
 export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21,0.04)';
 

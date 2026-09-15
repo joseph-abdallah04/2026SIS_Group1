@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   arrowGeometry,
   diagramEdgeDash,
@@ -62,6 +63,8 @@ import {
 
 interface ProposalCardProps {
   item: BoardItem;
+  /** Who is looking, so an extension of their own idea can say "your". */
+  viewerId?: string | null;
   /** The viewer wrote this: show "You" as the author name. */
   isOwnedByViewer?: boolean;
   /** The author runs this session, marked with an L beside their name. */
@@ -81,9 +84,107 @@ function formatTime(iso: string): string {
   });
 }
 
+/** How long the pointer rests on a mark before its explanation appears. */
+const MARK_TOOLTIP_DELAY_MS = 250;
+
+/**
+ * A small word in the byline that explains itself on hover.
+ *
+ * The native `title` waits about a second and is styled by the browser, and the
+ * studio's `Tooltip` is positioned inside its parent — which here is a card that
+ * clips what spills out of it and is scaled with the board's zoom, so the
+ * explanation would be cut off or unreadably small. This one is portalled to the
+ * page and placed against the mark on screen, so it reads the same at any zoom.
+ *
+ * The explanation also goes to screen readers as ordinary text, since a mark is
+ * not something anyone tabs to.
+ */
+function FootMark({ tooltip, children }: { tooltip: string; children: ReactNode }) {
+  const markRef = useRef<HTMLSpanElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+
+  const hide = () => {
+    if (timer.current) clearTimeout(timer.current);
+    setAnchor(null);
+  };
+
+  const show = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      const rect = markRef.current?.getBoundingClientRect();
+      if (rect) setAnchor({ x: rect.left + rect.width / 2, y: rect.top });
+    }, MARK_TOOLTIP_DELAY_MS);
+  };
+
+  useEffect(() => {
+    if (!anchor) return;
+    // The board pans under a wheel, which moves the mark out from under an
+    // explanation placed once.
+    window.addEventListener('wheel', hide, { passive: true });
+    return () => window.removeEventListener('wheel', hide);
+  }, [anchor]);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  return (
+    <span
+      ref={markRef}
+      data-foot-mark
+      className="shrink-0 text-[10px]"
+      onPointerEnter={show}
+      onPointerLeave={hide}
+      // Picking the card up is not reading its byline.
+      onPointerDown={hide}
+    >
+      <span aria-hidden="true">{children}</span>
+      <span className="sr-only">{tooltip}</span>
+      {anchor
+        ? createPortal(
+            <span
+              role="presentation"
+              aria-hidden="true"
+              className="rt-studio-fade pointer-events-none fixed z-50 rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-white shadow-lg"
+              style={{
+                left: anchor.x,
+                top: anchor.y - 6,
+                transform: 'translate(-50%, -100%)',
+              }}
+            >
+              {tooltip}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
+/**
+ * The least room, in pixels, the byline keeps between its two sides before
+ * "Extended" gives way to "Ext.".
+ *
+ * Shortened while there is still a clear gap rather than at the moment the two
+ * sides touch: a byline squeezed to its last pixel reads as crowded well before
+ * anything actually overlaps, and cards on the same board flipping at slightly
+ * different widths would look arbitrary.
+ */
+const FOOT_MIN_GAP_PX = 20;
+
 /**
  * Who wrote this and when, along the bottom of the card: author left, time
  * pushed to the right edge, and "edited" after it once the words have changed.
+ *
+ * An extension is marked beside the author, not beside the time. "Extended"
+ * says where the idea came from, which belongs with who wrote it, and keeping
+ * it apart from "Edited" stops the right-hand side becoming a row of labels on
+ * a card that is both. Where the full word would crowd the byline, it becomes
+ * "Ext."; hovering either explains whose idea it builds on.
  *
  * The mark is about the content, not the row: dragging a card across the board
  * leaves no trace on it, because nothing anyone reads has changed. Hovering
@@ -102,35 +203,121 @@ function formatTime(iso: string): string {
  */
 function CardFoot({
   item,
+  viewerId,
   isOwnedByViewer,
   isAuthorLeader,
 }: {
   item: BoardItem;
+  viewerId: string | null;
   isOwnedByViewer: boolean;
   isAuthorLeader: boolean;
 }) {
+  const original = item.extendsFrom;
+  // Hovering names whose idea it was, which is the question the mark prompts.
+  const extendedTooltip = original
+    ? original.authorId !== null && original.authorId === viewerId
+      ? 'Extended: builds on your idea'
+      : `Extended: builds on ${original.authorName}'s idea`
+    : null;
+
+  const footRef = useRef<HTMLElement>(null);
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const metaRef = useRef<HTMLSpanElement>(null);
+  const fullMarkRef = useRef<HTMLSpanElement>(null);
+  const [compact, setCompact] = useState(false);
+  const authorLabel = isOwnedByViewer ? 'You' : item.authorName;
+
+  /**
+   * Whether "Extended" fits with room to spare, measured on the card as laid out.
+   *
+   * Measured rather than estimated from character counts: names and times are
+   * set in a proportional face, and a card's width depends on what a sticky
+   * says. The full word is kept in an invisible copy so the decision is always
+   * made against it, not against whichever label happens to be showing — which
+   * would flip back and forth. Widths are layout widths, untouched by the board's
+   * zoom, so zooming never changes the choice.
+   */
+  useLayoutEffect(() => {
+    if (!extendedTooltip) return;
+    const foot = footRef.current;
+    const name = nameRef.current;
+    const meta = metaRef.current;
+    const fullMark = fullMarkRef.current;
+    if (!foot || !name || !meta || !fullMark) return;
+
+    const measure = () => {
+      const style = getComputedStyle(foot);
+      const inner =
+        foot.clientWidth -
+        parseFloat(style.paddingLeft || '0') -
+        parseFloat(style.paddingRight || '0');
+      // No layout to measure (a hidden card, or a test environment): keep the word.
+      if (inner <= 0) {
+        setCompact(false);
+        return;
+      }
+      // The name at its natural width, even while truncated, plus the mark and
+      // the gap the left group puts between them.
+      const leftGap =
+        parseFloat(getComputedStyle(name.parentElement ?? name).columnGap || '0') || 0;
+      const needed = name.scrollWidth + leftGap + fullMark.offsetWidth + meta.offsetWidth;
+      setCompact(inner - needed < FOOT_MIN_GAP_PX);
+    };
+
+    measure();
+    // A sticky's card grows with its note, and the page's font can arrive after
+    // the first layout; either changes what fits.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(foot);
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) measure();
+    });
+    return () => {
+      live = false;
+      observer?.disconnect();
+    };
+  }, [extendedTooltip, authorLabel, isAuthorLeader, item.createdAt, item.editedAt]);
+
   return (
-    <footer className={CARD_FOOT_CLASS}>
-      <span className="min-w-0 truncate font-medium text-rt-ink-muted">
-        {isOwnedByViewer ? 'You' : item.authorName}
-        {/* Never beside "You": the mark is there to say whose cards belong to the
-            leader, and the viewer does not need telling who they are. */}
-        {isAuthorLeader && !isOwnedByViewer ? (
-          <span title="Session leader" className="ml-1 text-[9.5px]" style={{ color: OWNED_INK }}>
-            L
-          </span>
+    <footer ref={footRef} className={CARD_FOOT_CLASS}>
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span ref={nameRef} className="min-w-0 truncate font-medium text-rt-ink-muted">
+          {authorLabel}
+          {/* Never beside "You": the mark is there to say whose cards belong to the
+              leader, and the viewer does not need telling who they are. */}
+          {isAuthorLeader && !isOwnedByViewer ? (
+            <span title="Session leader" className="ml-1 text-[9.5px]" style={{ color: OWNED_INK }}>
+              L
+            </span>
+          ) : null}
+        </span>
+        {/* A quiet note about where the idea came from, not a badge competing
+            with what is written on the card. The name gives way first: the
+            mark never truncates. Reuses of your own earlier idea carry no mark
+            (the server leaves `extendsFrom` empty for them). */}
+        {extendedTooltip ? (
+          <>
+            <FootMark tooltip={extendedTooltip}>{compact ? 'Ext.' : 'Extended'}</FootMark>
+            {/* The full word, laid out but never seen, to measure against. */}
+            <span
+              ref={fullMarkRef}
+              aria-hidden="true"
+              className="pointer-events-none invisible absolute text-[10px] whitespace-nowrap"
+            >
+              Extended
+            </span>
+          </>
         ) : null}
       </span>
-      <span className="flex shrink-0 items-center gap-1.5">
+      <span ref={metaRef} className="flex shrink-0 items-baseline gap-1.5">
         <time dateTime={item.createdAt}>{formatTime(item.createdAt)}</time>
         {item.editedAt ? (
           // Set a little smaller than the time rather than run on after it
           // with a separator: that difference is enough to keep the two apart,
           // and the mark should sit quietly beside the byline rather than
           // compete with it.
-          <span title={`Edited at ${formatTime(item.editedAt)}`} className="text-[10px]">
-            Edited
-          </span>
+          <FootMark tooltip={`Edited at ${formatTime(item.editedAt)}`}>Edited</FootMark>
         ) : null}
       </span>
     </footer>
@@ -473,6 +660,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
 
 export function ProposalCard({
   item,
+  viewerId = null,
   isOwnedByViewer = false,
   isAuthorLeader = false,
   isNew = false,
@@ -549,7 +737,12 @@ export function ProposalCard({
             ) : null}
           </CardMedia>
         ) : null}
-        <CardFoot item={item} isOwnedByViewer={isOwnedByViewer} isAuthorLeader={isAuthorLeader} />
+        <CardFoot
+          item={item}
+          viewerId={viewerId}
+          isOwnedByViewer={isOwnedByViewer}
+          isAuthorLeader={isAuthorLeader}
+        />
       </article>
     </div>
   );

@@ -30,6 +30,7 @@ function proposal(): BoardItem {
     z: 0,
     editedAt: null,
     extendsProposalId: null,
+    extendsFrom: null,
     reactions: [],
   };
 }
@@ -40,7 +41,8 @@ function renderStudio(overrides: Partial<CreativeToolsContextValue>) {
     closeTool: vi.fn(),
     editSource: null,
     extensionSource: null,
-    isReusingOwn: false,
+    isReusing: false,
+    isExtendingOwn: false,
     isLive: true,
     ...overrides,
   };
@@ -52,14 +54,19 @@ describe('creative studio title', () => {
   // Reuse (F38) and Extend (F23) share one write path, so the title is the
   // only thing that tells them apart. The drawing editor has no banner of its
   // own, which made reusing your own drawing read as extending it.
-  it('says Reuse when the source is your own proposal', () => {
-    expect(renderStudio({ extensionSource: proposal(), isReusingOwn: true })).toBe('Reuse drawing');
+  it('says Reuse when opened from Reuse', () => {
+    expect(renderStudio({ extensionSource: proposal(), isReusing: true })).toBe('Reuse drawing');
   });
 
-  it('says Extend when the source is somebody else’s', () => {
-    expect(renderStudio({ extensionSource: proposal(), isReusingOwn: false })).toBe(
-      'Extend drawing',
-    );
+  it('says Extend when opened from Extend', () => {
+    expect(renderStudio({ extensionSource: proposal(), isReusing: false })).toBe('Extend drawing');
+  });
+
+  // Extending your own card is building on it, not bringing it forward.
+  it('says Extend, not Reuse, when extending your own proposal', () => {
+    expect(
+      renderStudio({ extensionSource: proposal(), isReusing: false, isExtendingOwn: true }),
+    ).toBe('Extend drawing');
   });
 
   it('says Edit when the proposal is being rewritten', () => {

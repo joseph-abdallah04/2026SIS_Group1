@@ -72,22 +72,29 @@ const MAX_RINGS = 8;
  *
  * Takes the artifact being proposed rather than only its type, because a
  * sticky's width depends on what it says.
+ *
+ * Given `near`, the search starts just to the right of that card instead,
+ * level with its top: an extension belongs beside what it builds on, and the
+ * rings then look for the closest free spot around there.
  */
 export function findOpenProposalPosition(
   items: readonly PositionedProposal[],
   artifact: ArtifactJson,
+  near?: PositionedProposal,
 ): ProposalPosition {
   const width = cardWidth({ type: artifact.type, artifactJson: artifact });
   // Measured once, not once per cell tried against each of them.
   const widths = items.map((item) => cardWidth(item));
   const centre = getBoardCentre();
-  const origin = centre
-    ? {
-        // Centre the card on the view, not its top-left corner on it.
-        x: centre.x - width / 2,
-        y: centre.y - CARD_FOOTPRINT_HEIGHT / 2,
-      }
-    : { x: BOARD_INSET, y: BOARD_INSET };
+  const origin = near
+    ? { x: near.x + cardWidth(near) + CARD_GAP, y: near.y }
+    : centre
+      ? {
+          // Centre the card on the view, not its top-left corner on it.
+          x: centre.x - width / 2,
+          y: centre.y - CARD_FOOTPRINT_HEIGHT / 2,
+        }
+      : { x: BOARD_INSET, y: BOARD_INSET };
 
   for (let r = 0; r <= MAX_RINGS; r += 1) {
     for (const { dx, dy } of ring(r)) {
