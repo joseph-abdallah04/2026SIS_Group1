@@ -22,12 +22,14 @@ import {
   DIAGRAM_NODE_STROKE_WIDTHS,
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
+  rotationTransform,
   wrapDiagramLabel,
   type DiagramEdge,
   type DiagramFillKey,
   type DiagramFontSizePreset,
   type DiagramNode,
   type DiagramNodeSize,
+  type RotatableBox,
   type DiagramStrokeKey,
   type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
@@ -55,6 +57,14 @@ export interface InkElement {
   points: number[];
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
+  /**
+   * v4.5 rotation about the stroke's own bounding-box centre, in degrees.
+   *
+   * An angle rather than rotated points: baking the turn into `points` would
+   * re-round every coordinate to one decimal place each time, so a stroke
+   * nudged round a few degrees at a time would slowly lose its shape.
+   */
+  rotation?: number;
 }
 
 export const INK_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
@@ -150,6 +160,54 @@ export interface PathElement {
   strokeStyle?: DiagramStrokeStyle;
   /** Only meaningful on a closed path; an open one is never filled. */
   fillColor?: DiagramFillKey;
+  /** v4.5 rotation about the path's own bounding-box centre, in degrees. */
+  rotation?: number;
+}
+
+/**
+ * The box a set of scene points describes, before any rotation.
+ *
+ * This is the frame ink and paths are turned in: their points are absolute, so
+ * the centre they pivot about has to come from the points themselves. Shared so
+ * the editor, the board card and the assistant preview all turn a stroke about
+ * exactly the same point — a centre that differed by a pixel between surfaces
+ * would show up as artwork that shifts when a proposal is posted.
+ */
+export function pointsBounds(points: readonly { x: number; y: number }[]): RotatableBox | null {
+  const first = points[0];
+  if (!first) return null;
+  let minX = first.x;
+  let minY = first.y;
+  let maxX = first.x;
+  let maxY = first.y;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** A path's unrotated extent, from its anchors alone. */
+export function pathLocalBounds(path: Pick<PathElement, 'anchors'>): RotatableBox | null {
+  return pointsBounds(path.anchors);
+}
+
+/** The turn to draw a path with, or nothing when it is not turned. */
+export function pathRotationTransform(
+  path: Pick<PathElement, 'anchors' | 'rotation'>,
+): string | undefined {
+  const local = pathLocalBounds(path);
+  return local ? rotationTransform(local, path.rotation) : undefined;
+}
+
+/** The turn to draw a stroke with, given its points already unpacked. */
+export function inkRotationTransform(
+  stroke: Pick<InkElement, 'rotation'> & { points: readonly { x: number; y: number }[] },
+): string | undefined {
+  const local = pointsBounds(stroke.points);
+  return local ? rotationTransform(local, stroke.rotation) : undefined;
 }
 
 export const PATH_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';

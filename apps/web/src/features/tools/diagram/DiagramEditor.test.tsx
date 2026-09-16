@@ -1275,7 +1275,9 @@ describe('diagram viewport and productivity', () => {
     fireEvent.pointerUp(canvas, { pointerId: 661 });
     // Endpoint handles only appear on a selected arrow, so they stand in for
     // "this arrow is selected" throughout.
-    expect(screen.getByRole('button', { name: 'Move the start of this arrow' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Move the start of this arrow' }),
+    ).toBeInTheDocument();
 
     const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
     fireEvent.pointerDown(shape, { button: 0, pointerId: 662 });
@@ -1302,7 +1304,9 @@ describe('diagram viewport and productivity', () => {
       clientY: 330,
     });
     fireEvent.pointerUp(canvas, { pointerId: 664, clientX: 180, clientY: 330 });
-    expect(screen.getByRole('button', { name: 'Move the start of this arrow' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Move the start of this arrow' }),
+    ).toBeInTheDocument();
 
     const line = screen.getByRole('button', { name: 'Path with 2 points' });
     fireEvent.pointerDown(line, { button: 0, pointerId: 665, clientX: 250, clientY: 480 });
@@ -1533,6 +1537,187 @@ describe('diagram resize and style', () => {
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(node.querySelector('rect[width="120"][height="56"]')).not.toBeNull();
+  });
+
+  /**
+   * The default-placed shape is 120x56 at (24, 24), so it turns about (84, 52)
+   * and its rotate grip sits 26 above the top edge at (84, -2) — clamped to the
+   * top of the sheet, which leaves the bearing from the centre unchanged at -90.
+   */
+  function rotateDefaultShape(canvas: Element, pointerId: number, shiftKey = false) {
+    fireEvent.pointerDown(screen.getByTestId('rotate-handle'), {
+      button: 0,
+      pointerId,
+      clientX: 84,
+      clientY: 0,
+    });
+    // (110, 7) is 60 degrees round from the centre, so the pointer has swept 30.
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 110, clientY: 7, shiftKey });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 110, clientY: 7, shiftKey });
+  }
+
+  it('turns a shape in five-degree steps and undoes the whole turn at once', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    rotateDefaultShape(canvas, 90);
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    // Turned about its own centre, so the translate that places it is untouched.
+    expect(node).toHaveAttribute('transform', 'translate(24, 24) rotate(30 60 28)');
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+  });
+
+  it('snaps the turn to 45 degrees while shift is held', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    // The same 30-degree sweep, which rounds up to the nearest 45 instead.
+    rotateDefaultShape(canvas, 91, true);
+
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
+      'transform',
+      'translate(24, 24) rotate(45 60 28)',
+    );
+  });
+
+  it('proposes a turned shape through the real contract', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    rotateDefaultShape(canvas, 92);
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]!.rotation).toBe(30);
+    expect(proposalCreateSchema.safeParse(send.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('leaves no rotation key on a shape that is turned back to square', async () => {
+    // Absent has to keep meaning "never turned", so a shape returned to zero is
+    // indistinguishable from one authored before rotation existed.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    rotateDefaultShape(canvas, 93);
+    // Straight back to where it started: -90 is the bearing the grip began at.
+    fireEvent.pointerDown(screen.getByTestId('rotate-handle'), {
+      button: 0,
+      pointerId: 94,
+      clientX: 110,
+      clientY: 7,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 94, clientX: 84, clientY: 0 });
+    fireEvent.pointerUp(canvas, { pointerId: 94, clientX: 84, clientY: 0 });
+
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
+      'transform',
+      'translate(24, 24)',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).not.toHaveProperty('rotation');
+  });
+
+  /** Arms the shape tool without the auto-place `clickInRailMenu` does. */
+  async function armShapeTool(user: ReturnType<typeof userEvent.setup>) {
+    const trigger = screen.getByRole('button', { name: 'Shapes' });
+    if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+    await user.click(screen.getByRole('button', { name: 'Add rounded rectangle' }));
+  }
+
+  it('drags out a shape at the size it was dragged, previewing as it grows', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 96, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 96, clientX: 400, clientY: 320 });
+
+    // The preview is the rectangle being dragged, not the default footprint.
+    const ghost = screen.getByTestId('placement-ghost');
+    expect(ghost.querySelector('rect[width="200"][height="120"]')).not.toBeNull();
+
+    fireEvent.pointerUp(canvas, { pointerId: 96, clientX: 400, clientY: 320 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node).toHaveAttribute('transform', 'translate(200, 200)');
+    expect(node.querySelector('rect[width="200"][height="120"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ width: 200, height: 120 });
+  });
+
+  it('constrains a dragged-out shape to a square while shift is held', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 97, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 97, clientX: 400, clientY: 320, shiftKey: true });
+    fireEvent.pointerUp(canvas, { pointerId: 97, clientX: 400, clientY: 320, shiftKey: true });
+
+    // The longer side wins, so the 200x120 drag becomes 200x200.
+    expect(
+      screen
+        .getByRole('button', { name: 'Rounded rectangle: Unlabelled' })
+        .querySelector('rect[width="200"][height="200"]'),
+    ).not.toBeNull();
+  });
+
+  it('still places the default size when the press never travels', async () => {
+    // Click-to-place is how every shape was made before drag-to-size, and it has
+    // to keep working for anyone who does not think to drag.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 98, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 98, clientX: 200, clientY: 200 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node.querySelector('rect[width="120"][height="56"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    // A default-sized shape carries no stored size at all, exactly as before.
+    expect(artifact.nodes[0]).not.toHaveProperty('width');
+  });
+
+  it('does not offer a rotate grip on a table', async () => {
+    // A turned table's cells would stop lining up with the rows and columns
+    // people read them by, so tables get the frame without the grip.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Table', '3 by 3 table');
+
+    // A press on a cell outside cell mode picks the whole table up.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Cell row 1 column 1' }), {
+      button: 0,
+      pointerId: 95,
+      clientX: 60,
+      clientY: 60,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 95, clientX: 60, clientY: 60 });
+
+    expect(screen.getByTestId('selection-frame')).toBeInTheDocument();
+    expect(screen.queryByTestId('rotate-handle')).not.toBeInTheDocument();
   });
 
   it('proposes the resized geometry through the real contract', async () => {
@@ -4013,6 +4198,40 @@ describe('studio clipboard and snapping', () => {
 
     // The three-unit nudge is pulled on to the next 8-unit grid line.
     expect(drawnPath()).toBe('M 104 200 L 304 200');
+  });
+
+  it('turns a drawn line about the centre of its own points', async () => {
+    // A path has no box of its own the way a shape does, so it turns about the
+    // centre of the box its anchors describe — 100..300 across, flat at y 200.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 790, 200);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 800,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 800, clientX: 200, clientY: 200 });
+
+    // The grip sits 26 above the middle of the top edge, at (200, 174).
+    fireEvent.pointerDown(screen.getByTestId('rotate-handle'), {
+      button: 0,
+      pointerId: 801,
+      clientX: 200,
+      clientY: 174,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 801, clientX: 240, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 801, clientX: 240, clientY: 200 });
+
+    const group = screen.getAllByTestId('studio-path')[0]!.closest('g');
+    expect(group).toHaveAttribute('transform', 'rotate(90 200 200)');
+    // The anchors themselves are untouched: the turn is drawn, not baked in.
+    expect(drawnPath()).toBe('M 100 200 L 300 200');
   });
 
   it('will not let an arrow-key nudge walk a line off the sheet', async () => {

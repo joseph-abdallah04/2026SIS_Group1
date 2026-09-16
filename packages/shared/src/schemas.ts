@@ -396,6 +396,10 @@ const diagramStrokeStyleSchema = z.enum(DIAGRAM_STROKE_STYLES);
 
 // The strict node, used on the write path. Size bounds, the width/height pair
 // rule and the container rules are added on top in diagramWriteArtifactSchema.
+// v4.5 rotation: degrees clockwise about the element's own centre, one turn
+// only. Shared by nodes, ink and paths — the three kinds that can be turned.
+const diagramRotationSchema = z.number().min(0).lt(360);
+
 export const diagramNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string().max(200),
@@ -417,6 +421,9 @@ export const diagramNodeSchema = z.object({
   labelBold: z.boolean().optional(),
   labelColor: diagramStrokeKeySchema.optional(),
   labelAlign: z.enum(DIAGRAM_TEXT_ALIGNS).optional(),
+  // v4.5 rotation. Bounded rather than free: an angle outside one turn is
+  // either a bug or a crafted payload, and normalising on read would hide both.
+  rotation: diagramRotationSchema.optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -437,6 +444,7 @@ export const inkElementSchema = z.object({
   points: z.array(z.number()).min(2).max(DIAGRAM_INK_POINT_LIMIT),
   strokeColor: diagramStrokeKeySchema.optional(),
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
+  rotation: diagramRotationSchema.optional(),
 });
 
 const pathHandleSchema = z.object({ x: z.number(), y: z.number() });
@@ -459,6 +467,7 @@ export const pathElementSchema = z.object({
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
   strokeStyle: diagramStrokeStyleSchema.optional(),
   fillColor: diagramFillKeySchema.optional(),
+  rotation: diagramRotationSchema.optional(),
 });
 
 // v4.2 arrows. An endpoint always carries a point and may also name the element
@@ -584,6 +593,9 @@ const diagramReadNodeSchema = diagramNodeSchema.extend({
   labelBold: lenient(z.boolean()),
   labelColor: lenient(diagramStrokeKeySchema),
   labelAlign: lenient(z.enum(DIAGRAM_TEXT_ALIGNS)),
+  // An unreadable angle drops to unrotated rather than failing the node, which
+  // would fail the artifact and take the board card down with it.
+  rotation: lenient(diagramRotationSchema),
 });
 
 const diagramReadEdgeSchema = diagramEdgeSchema.extend({
@@ -610,6 +622,7 @@ const diagramReadTableSchema = tableElementSchema.extend({
 
 const diagramReadPathSchema = pathElementSchema.extend({
   closed: lenient(z.boolean()),
+  rotation: lenient(diagramRotationSchema),
   strokeColor: lenient(diagramStrokeKeySchema),
   strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
   strokeStyle: lenient(diagramStrokeStyleSchema),
@@ -631,6 +644,7 @@ const diagramReadArrowSchema = arrowElementSchema.extend({
 const diagramReadInkSchema = inkElementSchema.extend({
   strokeColor: lenient(diagramStrokeKeySchema),
   strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+  rotation: lenient(diagramRotationSchema),
 });
 
 /** Read shape. Stays a plain object so it can join a discriminated union. */

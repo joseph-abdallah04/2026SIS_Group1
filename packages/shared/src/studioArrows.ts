@@ -27,6 +27,7 @@ import {
   type DiagramStrokeKey,
   type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
+  rotatePoint,
 } from './diagramContract.js';
 import { DIAGRAM_PATH_STROKE_WIDTHS } from './studioElements.js';
 
@@ -258,6 +259,13 @@ export interface ArrowTarget {
    * instead, wherever the arrow was aimed.
    */
   freeform?: boolean;
+  /**
+   * The target's own turn, so an arrow pinned to a spot on it follows that spot
+   * round. `box` stays the unturned one: the attachment is a fraction of the
+   * element's own frame, and turning the box first would make `{u, v}` mean
+   * something different at every angle.
+   */
+  rotation?: number;
 }
 
 export type ArrowTargetLookup = (elementId: string) => ArrowTarget | undefined;
@@ -386,7 +394,15 @@ function resolveEnd(endpoint: ArrowEndpoint, lookup: ArrowTargetLookup | undefin
   }
   if (endpoint.at) {
     const attached = attachPointOn(target, endpoint.at);
-    return { anchor: attached.point, target, pinned: true, outward: attached.outward };
+    // Turned into place last: `at` is a fraction of the element's own unturned
+    // frame, so the point is found there and then carried round with it.
+    const anchor = target.rotation
+      ? rotatePoint(attached.point, centreOf(target.box), target.rotation)
+      : attached.point;
+    const outward = target.rotation
+      ? rotatePoint(attached.outward, { x: 0, y: 0 }, target.rotation)
+      : attached.outward;
+    return { anchor, target, pinned: true, outward };
   }
   // No attachment named: aim at the centre and let the clip decide the face,
   // which is how an edge behaves and what a drop into the middle of a shape

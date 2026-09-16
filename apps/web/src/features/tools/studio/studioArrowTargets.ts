@@ -26,7 +26,7 @@ import {
  */
 export interface ArrowTargetScene {
   nodes?: readonly DiagramNode[];
-  ink?: readonly { id: string; points: readonly StrokePoint[] }[];
+  ink?: readonly { id: string; points: readonly StrokePoint[]; rotation?: number }[];
   paths?: readonly PathElement[];
   tables?: readonly TableElement[];
 }
@@ -77,6 +77,7 @@ export function arrowTargets(scene: ArrowTargetScene): Map<string, ArrowTarget> 
       id: node.id,
       box: pad({ x: node.x, y: node.y, width: size.width, height: size.height }),
       shape: node.shape,
+      ...(node.rotation ? { rotation: node.rotation } : {}),
     });
   }
   for (const table of scene.tables ?? []) {
@@ -91,13 +92,27 @@ export function arrowTargets(scene: ArrowTargetScene): Map<string, ArrowTarget> 
   // a drawing should touch the drawing.
   for (const stroke of scene.ink ?? []) {
     const box = boundsOf(stroke.points);
-    if (box) targets.set(stroke.id, { id: stroke.id, box, freeform: true });
+    if (box) {
+      targets.set(stroke.id, {
+        id: stroke.id,
+        box,
+        freeform: true,
+        ...(stroke.rotation ? { rotation: stroke.rotation } : {}),
+      });
+    }
   }
   for (const path of scene.paths ?? []) {
     // The anchors, not the curve: a bezier can bow a little outside the box its
     // anchors describe, and the same approximation is what a marquee sweep uses.
     const box = boundsOf(path.anchors);
-    if (box) targets.set(path.id, { id: path.id, box, freeform: true });
+    if (box) {
+      targets.set(path.id, {
+        id: path.id,
+        box,
+        freeform: true,
+        ...(path.rotation ? { rotation: path.rotation } : {}),
+      });
+    }
   }
 
   return targets;

@@ -16,6 +16,8 @@ import {
   type DiagramStrokeWidthPreset,
   type InkElement,
   type StrokePoint,
+  pointsBounds,
+  toElementSpace,
 } from '@roundtable/shared';
 
 // Deliberately structural rather than importing `DiagramRect` from the diagram
@@ -36,6 +38,8 @@ export interface StudioInkStroke {
   points: StrokePoint[];
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
+  /** Degrees about the stroke's own centre; carried through unpacked, like the style. */
+  rotation?: number;
 }
 
 export function createInkId(): string {
@@ -90,6 +94,7 @@ export function inkToData(strokes: readonly StudioInkStroke[]): InkElement[] {
       points: packInkPoints(stroke.points),
       ...(stroke.strokeColor ? { strokeColor: stroke.strokeColor } : {}),
       ...(stroke.strokeWidthPreset ? { strokeWidthPreset: stroke.strokeWidthPreset } : {}),
+      ...(stroke.rotation ? { rotation: stroke.rotation } : {}),
     }));
 }
 
@@ -100,6 +105,7 @@ export function dataToInk(strokes: readonly InkElement[]): StudioInkStroke[] {
     points: unpackDrawingPoints(stroke.points),
     ...(stroke.strokeColor ? { strokeColor: stroke.strokeColor } : {}),
     ...(stroke.strokeWidthPreset ? { strokeWidthPreset: stroke.strokeWidthPreset } : {}),
+    ...(stroke.rotation ? { rotation: stroke.rotation } : {}),
   }));
 }
 
@@ -109,9 +115,14 @@ export function eraseInkAtPoint(
   point: StrokePoint,
   radius: number,
 ): StudioInkStroke[] {
-  return strokes.filter(
-    (stroke) => !strokePointsTouch(stroke.points, inkStrokeWidth(stroke), point, radius),
-  );
+  return strokes.filter((stroke) => {
+    // A turned stroke is drawn turned but stored unturned, so the eraser is
+    // brought into the stroke's own frame rather than the points being turned
+    // into the canvas's. Same answer, and it does not touch the geometry.
+    const local = pointsBounds(stroke.points);
+    const at = stroke.rotation && local ? toElementSpace(point, local, stroke.rotation) : point;
+    return !strokePointsTouch(stroke.points, inkStrokeWidth(stroke), at, radius);
+  });
 }
 
 /**

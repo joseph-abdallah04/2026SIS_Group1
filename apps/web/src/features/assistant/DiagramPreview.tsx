@@ -113,7 +113,14 @@ export function DiagramPreview({ diagram }: { diagram: DiagramArtifact }) {
           const size = effectiveDiagramNodeSize(node);
           const label = diagramNodeLabelLayout(node);
           return (
-            <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+            <g
+              key={node.id}
+              transform={`translate(${node.x}, ${node.y})${
+                node.rotation
+                  ? ` rotate(${node.rotation} ${size.width / 2} ${size.height / 2})`
+                  : ''
+              }`}
+            >
               <DiagramShapeOutline
                 shape={shape}
                 size={size}

@@ -176,24 +176,9 @@ export function diagramLabelWidthRatio(shape?: DiagramNodeShape): number {
  * boundary and the board card like any other.
  */
 export type DiagramFillKey =
-  | 'neutral'
-  | 'surface'
-  | 'blue'
-  | 'green'
-  | 'amber'
-  | 'rose'
-  | 'violet'
-  | 'transparent';
+  'neutral' | 'surface' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'transparent';
 export type DiagramStrokeKey =
-  | 'slate'
-  | 'grey'
-  | 'blue'
-  | 'green'
-  | 'amber'
-  | 'rose'
-  | 'violet'
-  | 'ink'
-  | 'transparent';
+  'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink' | 'transparent';
 export type DiagramStrokeWidthPreset = 'thin' | 'regular' | 'thick';
 export type DiagramFontSizePreset = 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -385,6 +370,119 @@ export type DiagramStyledEdge = Partial<
 >;
 
 /** The node's stored size when it has one, otherwise its fixed shape size. */
+// --- Rotation (v4.5) ------------------------------------------------------
+//
+// One element's angle, shared by every surface that draws or measures it. The
+// editor, the board card and the assistant preview all rotate about the same
+// centre by the same rule, so a turned shape looks the same everywhere.
+
+/** A box in scene units. Structural, so `DiagramRect` and `ArrowBox` both fit. */
+export interface RotatableBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ScenePoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Rotation steps, in degrees.
+ *
+ * Five is fine enough to line a shape up by eye and coarse enough that it never
+ * lands on an angle nobody asked for. Shift jumps by 45, which is every
+ * diagonal and every right angle — the angles people actually reach for.
+ */
+export const DIAGRAM_ROTATION_STEP = 5;
+export const DIAGRAM_ROTATION_COARSE_STEP = 45;
+
+/** An angle folded into `[0, 360)`, which is the range the write path accepts. */
+export function normalizeRotation(degrees: number): number {
+  if (!Number.isFinite(degrees)) return 0;
+  const wrapped = degrees % 360;
+  const positive = wrapped < 0 ? wrapped + 360 : wrapped;
+  // Rounded away from floating-point dust so a shape turned back to zero
+  // stores 0 rather than 359.99999999999994 and keeps its `rotation` key.
+  return Math.round(positive * 100) / 100;
+}
+
+/** The centre an element turns about: the middle of its unrotated box. */
+export function boxCentre(box: RotatableBox): ScenePoint {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** `point` turned `degrees` clockwise about `origin`. */
+export function rotatePoint(point: ScenePoint, origin: ScenePoint, degrees: number): ScenePoint {
+  if (!degrees) return { x: point.x, y: point.y };
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = point.x - origin.x;
+  const dy = point.y - origin.y;
+  return {
+    x: origin.x + dx * cos - dy * sin,
+    y: origin.y + dx * sin + dy * cos,
+  };
+}
+
+/**
+ * A pointer position expressed in the element's own unrotated frame.
+ *
+ * Hit-testing a rotated element this way means every existing axis-aligned test
+ * keeps working untouched: the shape is never really turned, the question is.
+ */
+export function toElementSpace(
+  point: ScenePoint,
+  box: RotatableBox,
+  rotation: number | undefined,
+): ScenePoint {
+  if (!rotation) return { x: point.x, y: point.y };
+  return rotatePoint(point, boxCentre(box), -rotation);
+}
+
+/**
+ * The axis-aligned box that contains the element once it is turned.
+ *
+ * Always at least as large as the stored box, and larger at every angle that is
+ * not a multiple of 90. This is what clamping and the marquee have to use: the
+ * stored box of a rotated shape describes an area the shape no longer occupies.
+ */
+export function rotatedBounds(box: RotatableBox, rotation: number | undefined): RotatableBox {
+  if (!rotation || rotation % 180 === 0) return { ...box };
+
+  const centre = boxCentre(box);
+  const corners: ScenePoint[] = [
+    { x: box.x, y: box.y },
+    { x: box.x + box.width, y: box.y },
+    { x: box.x + box.width, y: box.y + box.height },
+    { x: box.x, y: box.y + box.height },
+  ].map((corner) => rotatePoint(corner, centre, rotation));
+
+  const xs = corners.map((corner) => corner.x);
+  const ys = corners.map((corner) => corner.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(...xs) - minX,
+    height: Math.max(...ys) - minY,
+  };
+}
+
+/** The SVG transform that turns an element about its own centre, or nothing. */
+export function rotationTransform(
+  box: RotatableBox,
+  rotation: number | undefined,
+): string | undefined {
+  if (!rotation) return undefined;
+  const centre = boxCentre(box);
+  return `rotate(${rotation} ${centre.x} ${centre.y})`;
+}
+
 export function effectiveDiagramNodeSize(
   node: Pick<DiagramNode, 'shape' | 'width' | 'height'>,
 ): DiagramNodeSize {
@@ -716,6 +814,20 @@ export interface DiagramNode {
   labelBold?: boolean;
   labelColor?: DiagramStrokeKey;
   labelAlign?: DiagramTextAlign;
+  /**
+   * v4.5 rotation, in degrees clockwise about the element's own centre.
+   *
+   * Absent means 0, so every diagram authored before this renders untouched.
+   * Stored as an angle rather than baked into `x`/`y` and the label layout
+   * because rotation has to be reversible: a shape turned 5 degrees at a time
+   * and then straightened must come back to exactly where it started, which a
+   * transform applied destructively cannot promise.
+   *
+   * The stored box stays axis-aligned. Everything that reasons about extent —
+   * clamping to the sheet, the marquee, arrow attachment — asks for the rotated
+   * bounding box instead (`rotatedBounds`).
+   */
+  rotation?: number;
 }
 
 export type DiagramParentedNode = Pick<DiagramNode, 'id' | 'parentId'>;

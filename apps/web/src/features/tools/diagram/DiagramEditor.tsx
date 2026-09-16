@@ -87,7 +87,15 @@ import {
   arrowLabelSide,
   arrowRoute,
   arrowStartCap,
+  DIAGRAM_MAX_NODE_HEIGHT,
+  DIAGRAM_MAX_NODE_WIDTH,
+  DIAGRAM_MIN_NODE_HEIGHT,
+  DIAGRAM_MIN_NODE_WIDTH,
+  DIAGRAM_ROTATION_COARSE_STEP,
+  DIAGRAM_ROTATION_STEP,
+  normalizeRotation,
   offsetArrow,
+  rotationTransform,
   arrowStrokeWidth,
   DIAGRAM_FILL_COLORS,
   DIAGRAM_FONT_SIZE_PRESETS,
@@ -129,6 +137,7 @@ import {
   tableColumnOffsets,
   tableRowOffsets,
   tableSize,
+  toElementSpace,
   tableStrokeColor,
   tableStrokeWidth,
   TABLE_DEFAULT_COL_WIDTH,
@@ -171,6 +180,7 @@ import {
   moveNodesBy,
   diagramRectToClientRect,
   nodeBounds,
+  nodeLocalBounds,
   normalizeRect,
   pasteDiagramFragment,
   prepareDiagram,
@@ -231,7 +241,9 @@ import {
 import {
   arrowBoundsIn,
   inkBounds,
+  inkLocalBounds,
   pathBounds,
+  pathLocalBounds,
   tableBounds,
   EMPTY_STUDIO_SELECTION,
   isSelectionEmpty,
@@ -353,6 +365,22 @@ interface ResizeSession {
   start: DiagramRect;
   origin: DiagramPoint;
   previous: DiagramSnapshot;
+}
+
+/** Which kinds can be turned. Arrows and tables are deliberately not among them. */
+type RotatableKind = 'node' | 'ink' | 'path';
+
+interface RotateSession {
+  pointerId: number;
+  kind: RotatableKind;
+  id: string;
+  /** Scene-space point the element turns about, fixed for the whole drag. */
+  centre: DiagramPoint;
+  /** Where the pointer was, as an angle, when the drag began. */
+  startPointerAngle: number;
+  startRotation: number;
+  previous: DiagramSnapshot;
+  moved: boolean;
 }
 
 interface PanSession {
@@ -663,6 +691,23 @@ type Ghost =
   | { kind: 'table'; rows: number; cols: number; size: DiagramNodeSize }
   | { kind: 'template'; size: DiagramNodeSize };
 
+/**
+ * The size a drag-out asks for, held inside what a node may actually be.
+ *
+ * A shape dragged smaller than the minimum still becomes the minimum rather
+ * than being refused: the gesture said "a small one", and the nearest legal
+ * answer is more useful than nothing appearing at all.
+ */
+function shapeSizeFromDrag(rect: DiagramRect, square: boolean): DiagramNodeSize {
+  const side = Math.max(rect.width, rect.height);
+  const clamp = (value: number, min: number, max: number) =>
+    Math.round(Math.min(max, Math.max(min, value)));
+  return {
+    width: clamp(square ? side : rect.width, DIAGRAM_MIN_NODE_WIDTH, DIAGRAM_MAX_NODE_WIDTH),
+    height: clamp(square ? side : rect.height, DIAGRAM_MIN_NODE_HEIGHT, DIAGRAM_MAX_NODE_HEIGHT),
+  };
+}
+
 function emptyTableSize({ rows, cols }: { rows: number; cols: number }): DiagramNodeSize {
   return { width: cols * TABLE_DEFAULT_COL_WIDTH, height: rows * TABLE_DEFAULT_ROW_HEIGHT };
 }
@@ -836,6 +881,50 @@ const RESIZE_CORNERS: { corner: DiagramResizeCorner; label: string; cursor: stri
   { corner: 'sw', label: 'Resize from the bottom left', cursor: 'nesw-resize' },
 ];
 
+/** How far above the selection box the rotate grip floats, in scene units. */
+const ROTATE_HANDLE_REACH = 26;
+
+/**
+ * The dashed box around a selected element.
+ *
+ * Drawn in the element's own frame and rendered inside whatever transform the
+ * element already carries, so on a turned element the box turns with it rather
+ * than growing into the upright rectangle that contains it. That is the whole
+ * point of a selection box you can rotate by: it has to show which way "up" is
+ * for the thing you are holding.
+ *
+ * Every kind uses this. Ink and paths used to show only a halo tracing the
+ * mark, which said what was selected but gave nothing to grab.
+ */
+function SelectionFrame({
+  bounds,
+  inset = 5,
+  accent = SELECTION_ACCENT,
+}: {
+  bounds: DiagramRect;
+  inset?: number;
+  accent?: string;
+}) {
+  return (
+    <rect
+      // Fades up rather than snapping on, so a selection that changes under the
+      // cursor is followed rather than noticed.
+      className="rt-studio-fade"
+      data-testid="selection-frame"
+      x={bounds.x - inset}
+      y={bounds.y - inset}
+      width={bounds.width + inset * 2}
+      height={bounds.height + inset * 2}
+      rx={7}
+      fill="none"
+      stroke={accent}
+      strokeWidth={2}
+      strokeDasharray="4 3"
+      pointerEvents="none"
+    />
+  );
+}
+
 const STROKE_WIDTH_LABELS: Record<DiagramStrokeWidthPreset, string> = {
   thin: 'Thin',
   regular: 'Regular',
@@ -873,8 +962,7 @@ const LAYOUT_DIRECTIONS: {
  */
 const TRANSPARENT_SWATCH_STYLE: CSSProperties = {
   backgroundColor: '#FFFFFF',
-  backgroundImage:
-    'conic-gradient(#C3CFD6 25%, transparent 0 50%, #C3CFD6 0 75%, transparent 0)',
+  backgroundImage: 'conic-gradient(#C3CFD6 25%, transparent 0 50%, #C3CFD6 0 75%, transparent 0)',
   backgroundSize: '7px 7px',
 };
 
@@ -941,6 +1029,28 @@ function PresetButton({
       {label}
     </button>
   );
+}
+
+/**
+ * Where an element is placed, and how far it is turned.
+ *
+ * The rotation is applied *after* the translate and about the element's own
+ * local centre, so the children underneath keep working in the same unrotated
+ * coordinates they always have — a shape's label, its fill and its handles all
+ * come along for free.
+ *
+ * An unrotated element produces exactly the `translate(x, y)` it always did:
+ * this must not start writing a `rotate(0 …)` onto every element on the sheet.
+ */
+function placementTransform(
+  x: number,
+  y: number,
+  size: DiagramNodeSize,
+  rotation?: number,
+): string {
+  const translate = `translate(${x}, ${y})`;
+  if (!rotation) return translate;
+  return `${translate} rotate(${rotation} ${size.width / 2} ${size.height / 2})`;
 }
 
 function displayShape(node: DiagramNode): DiagramNodeShape {
@@ -1085,6 +1195,22 @@ export function DiagramEditor() {
   // Where the element being placed would land. Following the cursor lets it be
   // positioned before it exists, rather than dropped somewhere and dragged.
   const [ghostCursor, setGhostCursor] = useState<DiagramPoint | null>(null);
+  /**
+   * The rectangle being dragged out for a new shape, if one is.
+   *
+   * State rather than a ref alone because the ghost has to redraw as it grows;
+   * the ref beside it is what the pointer handlers read, for the same reason
+   * every other gesture here keeps one.
+   */
+  const [shapeDraft, setShapeDraft] = useState<{
+    origin: DiagramPoint;
+    current: DiagramPoint;
+  } | null>(null);
+  const shapeDraftRef = useRef<{ pointerId: number; origin: DiagramPoint; moved: boolean } | null>(
+    null,
+  );
+  /** Whether shift was held on the last move, which constrains the drag to a square. */
+  const shapeDraftSquareRef = useRef(false);
   // Which of the two arrow tiles is armed, and the arrow being drawn. The draft
   // is the whole of the placement state: a press sets `from`, the pointer sets
   // `to`, and the second press turns it into an element.
@@ -1239,6 +1365,7 @@ export function DiagramEditor() {
   const inlineLabelInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const resizeRef = useRef<ResizeSession | null>(null);
+  const rotateRef = useRef<RotateSession | null>(null);
   const panRef = useRef<PanSession | null>(null);
   const marqueeRef = useRef<MarqueeSession | null>(null);
   const lastNodePressRef = useRef<NodePress | null>(null);
@@ -1312,11 +1439,26 @@ export function DiagramEditor() {
   // What is being carried, if anything. Everything placed by pressing the canvas
   // is previewed the same way, so the answer to "where will this land" is always
   // the thing under the cursor.
+  // Only once the press has actually travelled: a plain click must still place
+  // the default size, which is what it has always done.
+  const shapeDragRect =
+    shapeDraft && shapeDraftRef.current?.moved
+      ? normalizeRect(shapeDraft.origin, shapeDraft.current)
+      : null;
+  const shapeDragSquare = shapeDraftSquareRef.current;
   const ghost = ((): Ghost | null => {
     if (canvasTool === 'text')
       return { kind: 'node', shape: 'text', size: diagramNodeSize('text') };
     if (canvasTool === 'shape') {
-      return { kind: 'node', shape: pendingShape, size: diagramNodeSize(pendingShape) };
+      // Mid drag-out the preview is the rectangle being dragged, so what grows
+      // under the cursor is exactly what lands when the button comes up.
+      return {
+        kind: 'node',
+        shape: pendingShape,
+        size: shapeDragRect
+          ? shapeSizeFromDrag(shapeDragRect, shapeDragSquare)
+          : diagramNodeSize(pendingShape),
+      };
     }
     if (canvasTool === 'table' && pendingTable) {
       return { kind: 'table', ...pendingTable, size: emptyTableSize(pendingTable) };
@@ -1326,10 +1468,15 @@ export function DiagramEditor() {
     }
     return null;
   })();
+  // A dragged-out shape grows from the corner the press started at, so it is
+  // placed at that corner rather than centred under the cursor the way a
+  // single-click placement is.
   const ghostAt =
-    ghost && ghostCursor
-      ? placeNodePosition(centredOnCursor(ghostCursor, ghost.size), ghost.size, snapEnabled)
-      : { x: 0, y: 0 };
+    ghost && shapeDragRect
+      ? placeNodePosition(shapeDragRect, ghost.size, snapEnabled)
+      : ghost && ghostCursor
+        ? placeNodePosition(centredOnCursor(ghostCursor, ghost.size), ghost.size, snapEnabled)
+        : { x: 0, y: 0 };
 
   /**
    * Escape puts down whatever is being carried, from wherever the key is
@@ -1465,9 +1612,14 @@ export function DiagramEditor() {
     clearTableSelection();
   }
 
-  function addElement(shape: DiagramNodeShape, at?: DiagramPoint, parentId: string | null = null) {
+  function addElement(
+    shape: DiagramNodeShape,
+    at?: DiagramPoint,
+    size?: DiagramNodeSize,
+    parentId: string | null = null,
+  ) {
     clearError();
-    const result = addNode(history.snapshotRef.current.nodes, shape, at, snapEnabled);
+    const result = addNode(history.snapshotRef.current.nodes, shape, at, snapEnabled, size);
     if (!result.ok) {
       setValidationError(result.error);
       return;
@@ -2707,6 +2859,223 @@ export function DiagramEditor() {
   }
 
   /**
+   * The grip that turns an element, floating above the middle of its top edge.
+   *
+   * Inside the element's own transform, so it orbits with the shape and always
+   * marks the same corner of it — dragging from wherever the grip has got to is
+   * what makes the gesture read as turning rather than as scrubbing a value.
+   */
+  function renderRotateHandle(kind: RotatableKind, id: string, bounds: DiagramRect) {
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y - ROTATE_HANDLE_REACH;
+    return (
+      <g
+        role="button"
+        aria-label="Rotate this element"
+        tabIndex={-1}
+        data-testid="rotate-handle"
+        style={{ cursor: 'grab' }}
+        onPointerDown={(event) => onRotatePointerDown(event, kind, id)}
+      >
+        {/* A stem back to the box, so the grip reads as attached to the element
+            rather than as something floating loose near it. */}
+        <line
+          x1={x}
+          y1={bounds.y - 5}
+          x2={x}
+          y2={y}
+          stroke={SELECTION_ACCENT}
+          strokeWidth={1.5}
+          pointerEvents="none"
+        />
+        <circle cx={x} cy={y} r={11} fill="transparent" />
+        <circle
+          cx={x}
+          cy={y}
+          r={5}
+          fill="#FFFFFF"
+          stroke={SELECTION_ACCENT}
+          strokeWidth={2}
+          pointerEvents="none"
+        />
+      </g>
+    );
+  }
+
+  /** The pointer's bearing from a centre, in degrees, matching `rotation`. */
+  function pointerAngle(centre: DiagramPoint, point: DiagramPoint): number {
+    return (Math.atan2(point.y - centre.y, point.x - centre.x) * 180) / Math.PI;
+  }
+
+  /** The unrotated box a rotatable element turns about, in scene units. */
+  function localBoundsFor(kind: RotatableKind, id: string): DiagramRect | null {
+    const graph = history.snapshotRef.current;
+    if (kind === 'node') {
+      const node = graph.nodes.find((candidate) => candidate.id === id);
+      return node ? nodeLocalBounds(node) : null;
+    }
+    if (kind === 'ink') {
+      const stroke = (graph.ink ?? []).find((candidate) => candidate.id === id);
+      return stroke ? inkLocalBounds(stroke) : null;
+    }
+    const path = (graph.paths ?? []).find((candidate) => candidate.id === id);
+    return path ? pathLocalBounds(path) : null;
+  }
+
+  function rotationOf(kind: RotatableKind, id: string): number {
+    const graph = history.snapshotRef.current;
+    if (kind === 'node') return graph.nodes.find((n) => n.id === id)?.rotation ?? 0;
+    if (kind === 'ink') return (graph.ink ?? []).find((n) => n.id === id)?.rotation ?? 0;
+    return (graph.paths ?? []).find((n) => n.id === id)?.rotation ?? 0;
+  }
+
+  /**
+   * Write an angle onto one element.
+   *
+   * Zero deletes the key rather than storing it: an unrotated element should be
+   * indistinguishable from one authored before rotation existed, and the write
+   * path rejects an explicit `undefined`.
+   */
+  function withRotation<T extends { rotation?: number }>(element: T, degrees: number): T {
+    if (degrees === 0) {
+      const next = { ...element };
+      delete next.rotation;
+      return next;
+    }
+    return { ...element, rotation: degrees };
+  }
+
+  function previewRotation(kind: RotatableKind, id: string, degrees: number) {
+    const graph = history.snapshotRef.current;
+    if (kind === 'node') {
+      history.preview({
+        nodes: graph.nodes.map((node) => (node.id === id ? withRotation(node, degrees) : node)),
+        edges: graph.edges,
+      });
+      return;
+    }
+    if (kind === 'ink') {
+      history.preview({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        ink: (graph.ink ?? []).map((stroke) =>
+          stroke.id === id ? withRotation(stroke, degrees) : stroke,
+        ),
+      });
+      return;
+    }
+    history.preview({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      paths: (graph.paths ?? []).map((path) =>
+        path.id === id ? withRotation(path, degrees) : path,
+      ),
+    });
+  }
+
+  function updateShapeDraft(event: PointerEvent<SVGSVGElement>): boolean {
+    const draft = shapeDraftRef.current;
+    if (!draft || draft.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+
+    const current = surfacePoint(event);
+    if (
+      !draft.moved &&
+      Math.hypot(current.x - draft.origin.x, current.y - draft.origin.y) > DRAG_THRESHOLD
+    ) {
+      draft.moved = true;
+    }
+    shapeDraftSquareRef.current = event.shiftKey;
+    setShapeDraft({ origin: draft.origin, current });
+    return true;
+  }
+
+  function endShapeDraft(event: PointerEvent<SVGSVGElement>): boolean {
+    const draft = shapeDraftRef.current;
+    if (!draft || draft.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+
+    const current = surfacePoint(event);
+    const dragged =
+      draft.moved ||
+      Math.hypot(current.x - draft.origin.x, current.y - draft.origin.y) > DRAG_THRESHOLD;
+    const square = event.shiftKey || shapeDraftSquareRef.current;
+
+    shapeDraftRef.current = null;
+    shapeDraftSquareRef.current = false;
+    setShapeDraft(null);
+    setGhostCursor(null);
+    releaseCapture(event);
+
+    if (dragged) {
+      const rect = normalizeRect(draft.origin, current);
+      const size = shapeSizeFromDrag(rect, square);
+      addElement(pendingShape, rect, size);
+      return true;
+    }
+
+    // A press that never travelled is the old click-to-place: the default size,
+    // centred where the cursor was.
+    const size = diagramNodeSize(pendingShape);
+    addElement(pendingShape, centredOnCursor(draft.origin, size));
+    return true;
+  }
+
+  function onRotatePointerDown(event: PointerEvent<SVGGElement>, kind: RotatableKind, id: string) {
+    if (event.button !== 0 || isSubmitting) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = canvasRef.current;
+    const local = localBoundsFor(kind, id);
+    if (!canvas || !local) return;
+    canvas.focus({ preventScroll: true });
+    lastNodePressRef.current = null;
+
+    const centre = { x: local.x + local.width / 2, y: local.y + local.height / 2 };
+    rotateRef.current = {
+      pointerId: event.pointerId,
+      kind,
+      id,
+      centre,
+      startPointerAngle: pointerAngle(centre, surfacePoint(event)),
+      startRotation: rotationOf(kind, id),
+      previous: history.snapshotRef.current,
+      moved: false,
+    };
+    canvas.setPointerCapture(event.pointerId);
+  }
+
+  function updateRotate(event: PointerEvent<SVGSVGElement>): boolean {
+    const rotate = rotateRef.current;
+    if (!rotate || rotate.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+
+    // Measured from where the drag started rather than from the handle's own
+    // position, so the shape does not snap round to meet the pointer on the
+    // first pixel of movement.
+    const swept = pointerAngle(rotate.centre, surfacePoint(event)) - rotate.startPointerAngle;
+    const step = event.shiftKey ? DIAGRAM_ROTATION_COARSE_STEP : DIAGRAM_ROTATION_STEP;
+    const stepped = Math.round((rotate.startRotation + swept) / step) * step;
+    const next = normalizeRotation(stepped);
+
+    if (next === rotationOf(rotate.kind, rotate.id) && !rotate.moved) return true;
+    rotate.moved = true;
+    previewRotation(rotate.kind, rotate.id, next);
+    return true;
+  }
+
+  function endRotate(event: PointerEvent<SVGSVGElement>): boolean {
+    const rotate = rotateRef.current;
+    if (!rotate || rotate.pointerId !== event.pointerId) return false;
+    updateRotate(event);
+    // One history entry for the whole turn, the way a resize or a drag is one.
+    if (rotate.moved) history.recordPreview(rotate.previous);
+    rotateRef.current = null;
+    releaseCapture(event);
+    return true;
+  }
+
+  /**
    * Raise or lower the selection through the ink.
    *
    * A container travels with everything it holds: the write path refuses an
@@ -3117,7 +3486,15 @@ export function DiagramEditor() {
     const path = (graph.paths ?? []).find((current) => current.id === session.pathId);
     if (!path) return true;
 
-    const point = surfacePoint(event);
+    // Anchors are stored unturned, but a turned path is *drawn* turned, so the
+    // pointer has to be brought back into the path's own frame before it is
+    // compared with them. Without this, dragging a point on a turned path sends
+    // it off at the angle of the turn.
+    const local = pathLocalBounds(path);
+    const point =
+      path.rotation && local
+        ? toElementSpace(surfacePoint(event), local, path.rotation)
+        : surfacePoint(event);
     const next = session.side
       ? // Alt breaks the tangent, so the two sides bend independently.
         moveHandle(path, session.index, session.side, point, event.altKey)
@@ -4028,6 +4405,11 @@ export function DiagramEditor() {
     setPendingTable(null);
     setPendingTemplate(null);
     setGhostCursor(null);
+    // A half-dragged shape is being carried too, and Escape puts down whatever
+    // is being carried — without placing it.
+    shapeDraftRef.current = null;
+    shapeDraftSquareRef.current = false;
+    setShapeDraft(null);
     setArrowDraft(null);
     setArrowSnap(null);
     arrowPressRef.current = null;
@@ -4226,11 +4608,15 @@ export function DiagramEditor() {
     }
 
     if (canvasTool === 'shape') {
+      // Nothing is placed yet: the press opens a drag-out, and the release
+      // decides whether that was a size or just a click.
       event.preventDefault();
       clearAllSelection();
-      const size = diagramNodeSize(pendingShape);
-      addElement(pendingShape, centredOnCursor(surfacePoint(event), size));
-      setGhostCursor(null);
+      const origin = surfacePoint(event);
+      shapeDraftRef.current = { pointerId: event.pointerId, origin, moved: false };
+      shapeDraftSquareRef.current = false;
+      setShapeDraft({ origin, current: origin });
+      canvasRef.current?.setPointerCapture(event.pointerId);
       return;
     }
 
@@ -4356,6 +4742,11 @@ export function DiagramEditor() {
       return;
     }
 
+    // A shape being dragged out takes the move before the ghost does: the ghost
+    // follows the cursor only while nothing has been pressed yet, and once a
+    // drag is under way the rectangle is what the preview should show.
+    if (updateShapeDraft(event)) return;
+
     if (canvasTool === 'text' || canvasTool === 'shape' || canvasTool === 'template') {
       setGhostCursor(surfacePoint(event));
       return;
@@ -4365,6 +4756,7 @@ export function DiagramEditor() {
       return;
     }
     if (updatePan(event)) return;
+    if (updateRotate(event)) return;
     if (updateResize(event)) return;
     if (updateElementMove(event)) return;
     if (updatePathEdit(event)) return;
@@ -4530,6 +4922,8 @@ export function DiagramEditor() {
     if (endPathEdit(event)) return;
     if (endTableResize(event)) return;
     if (endPath(event)) return;
+    if (endShapeDraft(event)) return;
+    if (endRotate(event)) return;
     if (endResize(event)) return;
     if (endInk(event)) return;
     if (endMarquee(event)) return;
@@ -4573,6 +4967,17 @@ export function DiagramEditor() {
     if (pathPointerRef.current === event.pointerId) {
       pathPointerRef.current = null;
       if (canvasTool === 'line') clearPathDraft();
+    }
+    // A drag-out that loses the pointer places nothing: the release is what
+    // decides the size, and there was none.
+    if (shapeDraftRef.current?.pointerId === event.pointerId) {
+      shapeDraftRef.current = null;
+      shapeDraftSquareRef.current = false;
+      setShapeDraft(null);
+    }
+    if (rotateRef.current?.pointerId === event.pointerId) {
+      if (rotateRef.current.moved) history.recordPreview(rotateRef.current.previous);
+      rotateRef.current = null;
     }
     const move = elementMoveRef.current;
     if (move?.pointerId === event.pointerId) {
@@ -4635,6 +5040,7 @@ export function DiagramEditor() {
     addElement(
       shape,
       { x: point.x - size.width / 2, y: point.y - size.height / 2 },
+      undefined,
       containerAtPoint(history.snapshotRef.current.nodes, point)?.id ?? null,
     );
   }
@@ -4650,9 +5056,7 @@ export function DiagramEditor() {
     // is. Without this a drawing could be nudged off the canvas a step at a time
     // and left somewhere it could never be selected again.
     const startBounds = unionBounds(boundsOfSelection(graph, currentSelection()));
-    const delta = startBounds
-      ? clampDragToCanvas(offsetRect(startBounds, offset), offset)
-      : offset;
+    const delta = startBounds ? clampDragToCanvas(offsetRect(startBounds, offset), offset) : offset;
     if (delta.x === 0 && delta.y === 0) return;
 
     history.commit({
@@ -5327,9 +5731,13 @@ export function DiagramEditor() {
   function renderPath(path: PathElement, key?: string, isDraft = false) {
     const strokeWidth = pathStrokeWidth(path);
     const selected = !isDraft && selectedPathIds.includes(path.id);
+    // Anchors are absolute scene points, so the turn is about a scene centre
+    // rather than a local one — there is no translate underneath it to undo.
+    const local = pathLocalBounds(path);
+    const turn = local ? rotationTransform(local, path.rotation) : undefined;
 
     return (
-      <g key={key ?? path.id}>
+      <g key={key ?? path.id} transform={turn}>
         <path
           data-testid="studio-path"
           d={pathSvgData(path)}
@@ -5406,6 +5814,12 @@ export function DiagramEditor() {
             pointerEvents="none"
           />
         ) : null}
+        {/* Not while the path is open for point editing: the anchors are the
+            subject then, and a box round them is only clutter. */}
+        {selected && !pathEditing && local ? <SelectionFrame bounds={local} /> : null}
+        {selected && !pathEditing && local && selectionSize(currentSelection()) === 1
+          ? renderRotateHandle('path', path.id, local)
+          : null}
         {selected && pathEditing
           ? path.anchors.map((anchor, index) => (
               <g key={`${path.id}-anchor-${index}`}>
@@ -5687,15 +6101,13 @@ export function DiagramEditor() {
 
         {selected ? (
           <>
-            <rect
-              x={-1}
-              y={-1}
-              width={size.width + 2}
-              height={size.height + 2}
-              fill="none"
-              stroke={SELECTION_ACCENT}
-              strokeWidth={1.5}
-              pointerEvents="none"
+            {/* The same frame every other kind shows, but no rotate grip and no
+                corner handles: a turned table's cells would no longer line up
+                with the rows and columns people read them by, and its own
+                column and row grips already resize it from the inside. */}
+            <SelectionFrame
+              bounds={{ x: 0, y: 0, width: size.width, height: size.height }}
+              inset={1}
             />
             {/* Resizing is an inside-the-table gesture, like editing a cell. */}
             {tableEditing
@@ -5922,8 +6334,10 @@ export function DiagramEditor() {
 
   function renderInk(stroke: StudioInkStroke) {
     const selected = selectedInkIds.includes(stroke.id);
+    const local = inkLocalBounds(stroke);
+    const turn = local ? rotationTransform(local, stroke.rotation) : undefined;
     return (
-      <g key={stroke.id}>
+      <g key={stroke.id} transform={turn}>
         {selected ? (
           <path
             d={strokePathData(stroke.points)}
@@ -5936,6 +6350,12 @@ export function DiagramEditor() {
             pointerEvents="none"
           />
         ) : null}
+        {/* The halo says which mark is selected when several overlap; the frame
+            gives it the same box, and the same grip, as every other kind. */}
+        {selected && local ? <SelectionFrame bounds={local} /> : null}
+        {selected && local && selectionSize(currentSelection()) === 1
+          ? renderRotateHandle('ink', stroke.id, local)
+          : null}
         <path
           data-testid="ink-stroke"
           d={strokePathData(stroke.points)}
@@ -6001,7 +6421,7 @@ export function DiagramEditor() {
         aria-label={`${DIAGRAM_SHAPE_LABELS[shape]}: ${node.label || 'Unlabelled'}`}
         aria-pressed={selected}
         tabIndex={-1}
-        transform={`translate(${node.x}, ${node.y})`}
+        transform={placementTransform(node.x, node.y, size, node.rotation)}
         className={connectionMode ? 'cursor-crosshair' : 'cursor-move'}
         onPointerDown={(event) => onNodePointerDown(event, node)}
         onPointerEnter={() => {
@@ -6013,19 +6433,9 @@ export function DiagramEditor() {
         onDoubleClick={() => beginInlineNodeEdit(node)}
       >
         {selected ? (
-          <rect
-            // The ring fades up rather than snapping on, so a selection that
-            // changes under the cursor is followed rather than noticed.
-            className="rt-studio-fade"
-            x={-5}
-            y={-5}
-            width={size.width + 10}
-            height={size.height + 10}
-            rx={7}
-            fill="none"
-            stroke={isConnectionSource ? '#4D6A74' : '#E0A33C'}
-            strokeWidth={2}
-            strokeDasharray="4 3"
+          <SelectionFrame
+            bounds={{ x: 0, y: 0, width: size.width, height: size.height }}
+            accent={isConnectionSource ? '#4D6A74' : SELECTION_ACCENT}
           />
         ) : null}
         {isConnectionSource && !selected ? (
@@ -6173,6 +6583,14 @@ export function DiagramEditor() {
             ))}
           </g>
         ) : null}
+        {isOnlySelection && !connectionMode && !isEditing
+          ? renderRotateHandle('node', node.id, {
+              x: 0,
+              y: 0,
+              width: size.width,
+              height: size.height,
+            })
+          : null}
         {isOnlySelection && !connectionMode && !isEditing
           ? RESIZE_CORNERS.map(({ corner, label, cursor }) => {
               // Sit on the selection outline so the corners stay clear of
@@ -6629,7 +7047,9 @@ export function DiagramEditor() {
                 height={renderedView.height}
                 fill="transparent"
               />
-              {ghostCursor ? (
+              {/* A drag-out has no cursor ghost to follow — the rectangle being
+                  dragged is the preview — so either is reason to draw one. */}
+              {ghostCursor || shapeDragRect ? (
                 <g
                   aria-hidden="true"
                   data-testid="placement-ghost"

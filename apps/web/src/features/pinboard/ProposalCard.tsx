@@ -17,6 +17,8 @@ import {
   pathFill,
   pathStrokeColor,
   pathStrokeWidth,
+  inkRotationTransform,
+  pathRotationTransform,
   pathSvgData,
   strokePathData,
   TABLE_CELL_PADDING,
@@ -463,6 +465,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
     return (
       <path
         key={path.id}
+        transform={pathRotationTransform(path)}
         d={pathSvgData(path)}
         fill={pathFill(path)}
         stroke={pathStrokeColor(path)}
@@ -549,6 +552,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
     return (
       <path
         key={stroke.id}
+        transform={inkRotationTransform(stroke)}
         d={strokePathData(stroke.points)}
         fill="none"
         stroke={inkStrokeColor(stroke)}
@@ -566,7 +570,12 @@ function DiagramBody({ item }: { item: BoardItem }) {
     const labelStyle = diagramNodeLabelStyle(node, size.width);
 
     return (
-      <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
+      <g
+        key={node.id}
+        transform={`translate(${node.x}, ${node.y})${
+          node.rotation ? ` rotate(${node.rotation} ${size.width / 2} ${size.height / 2})` : ''
+        }`}
+      >
         <DiagramShapeOutline
           shape={shape}
           size={size}

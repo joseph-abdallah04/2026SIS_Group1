@@ -22,6 +22,7 @@ import {
   diagramNodeSize,
   effectiveDiagramNodeSize,
   offsetArrow,
+  rotatedBounds,
   tableSize,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
@@ -248,7 +249,28 @@ export function diagramRectToClientRect(
   };
 }
 
+/**
+ * Where a node actually sits on the sheet, turned as it is drawn.
+ *
+ * This is the *visual* extent, not the stored box: a rotated shape no longer
+ * occupies the rectangle its `x`/`y`/`width`/`height` describe. Everything that
+ * asks about extent — the marquee, clamping to the sheet, align and distribute,
+ * fit-to-view, the selection box — wants the turned one, which is why rotation
+ * is folded in here rather than at each of those call sites.
+ *
+ * Resizing is the exception and does not come through here: it works in the
+ * element's own unrotated frame, where a corner drag still means what it says.
+ */
 export function nodeBounds(node: DiagramNode): DiagramRect {
+  const size = effectiveDiagramNodeSize(node);
+  return rotatedBounds(
+    { x: node.x, y: node.y, width: size.width, height: size.height },
+    node.rotation,
+  );
+}
+
+/** The stored, unrotated box — for resizing and for placing the label inside it. */
+export function nodeLocalBounds(node: DiagramNode): DiagramRect {
   const size = effectiveDiagramNodeSize(node);
   return { x: node.x, y: node.y, width: size.width, height: size.height };
 }
@@ -346,15 +368,19 @@ export function addNode(
   shape: DiagramNodeShape,
   at?: DiagramPoint,
   snap = true,
+  /**
+   * An explicit size, from dragging the shape out rather than clicking it down.
+   * Absent keeps the shape's own default, which is what a click still gets.
+   */
+  size?: DiagramNodeSize,
 ): AddNodeResult {
   if (nodes.length >= DIAGRAM_NODE_LIMIT) {
     return { ok: false, error: `A diagram can hold ${DIAGRAM_NODE_LIMIT} elements at most.` };
   }
 
   const id = createNodeId(nodes);
-  const position = at
-    ? placeNodePosition(at, diagramNodeSize(shape), snap)
-    : findFreeNodePosition(nodes, shape);
+  const footprint = size ?? diagramNodeSize(shape);
+  const position = at ? placeNodePosition(at, footprint, snap) : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
     // Empty, not named after its shape: the first thing anyone does with a new
@@ -363,6 +389,9 @@ export function addNode(
     x: position.x,
     y: position.y,
     shape,
+    // Only written when it was actually chosen: a default-sized shape carries no
+    // width/height, exactly as every shape did before drag-to-size existed.
+    ...(size ? { width: size.width, height: size.height } : {}),
   };
 
   return { ok: true, nodes: [...nodes, node], addedId: id };
