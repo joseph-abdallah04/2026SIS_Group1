@@ -48,31 +48,39 @@ function contrastRatio(a: string, b: string): number {
 
 const CANVAS_WHITE = '#FFFFFF';
 
+/**
+ * `transparent` is the one palette entry with no colour of its own, so there is
+ * no ratio to assert: what a transparent fill is read against is whatever the
+ * element happens to sit on. Filtered out here rather than special-cased inside
+ * each assertion, so a future colourless key is excluded once.
+ */
+const opaque = (palette: Record<string, string>): [string, string][] =>
+  Object.entries(palette).filter(([, value]) => value !== 'transparent');
+
+const OPAQUE_FILLS = opaque(DIAGRAM_FILL_COLORS);
+const OPAQUE_STROKES = opaque(DIAGRAM_STROKE_COLORS);
+
 describe('diagram palette accessibility', () => {
   // WCAG 1.4.3: label text on any offered fill.
-  it.each(Object.entries(DIAGRAM_FILL_COLORS))(
-    'keeps label ink readable on the %s fill',
-    (_key, fill) => {
-      expect(contrastRatio(fill, DIAGRAM_LABEL_INK)).toBeGreaterThanOrEqual(4.5);
-    },
-  );
+  it.each(OPAQUE_FILLS)('keeps label ink readable on the %s fill', (_key, fill) => {
+    expect(contrastRatio(fill, DIAGRAM_LABEL_INK)).toBeGreaterThanOrEqual(4.5);
+  });
 
   // WCAG 1.4.11: borders and arrows are graphical objects, not text.
-  it.each(Object.entries(DIAGRAM_STROKE_COLORS))(
-    'keeps the %s stroke visible on the bare canvas',
-    (_key, stroke) => {
-      expect(contrastRatio(stroke, CANVAS_WHITE)).toBeGreaterThanOrEqual(3);
-    },
-  );
+  it.each(OPAQUE_STROKES)('keeps the %s stroke visible on the bare canvas', (_key, stroke) => {
+    expect(contrastRatio(stroke, CANVAS_WHITE)).toBeGreaterThanOrEqual(3);
+  });
 
-  it.each(Object.entries(DIAGRAM_STROKE_COLORS))(
-    'keeps the %s stroke visible on every offered fill',
-    (_key, stroke) => {
-      for (const fill of Object.values(DIAGRAM_FILL_COLORS)) {
-        expect(contrastRatio(stroke, fill)).toBeGreaterThanOrEqual(3);
-      }
-    },
-  );
+  it.each(OPAQUE_STROKES)('keeps the %s stroke visible on every offered fill', (_key, stroke) => {
+    for (const [, fill] of OPAQUE_FILLS) {
+      expect(contrastRatio(stroke, fill)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('offers transparent as a colourless choice in both palettes', () => {
+    expect(DIAGRAM_FILL_COLORS.transparent).toBe('transparent');
+    expect(DIAGRAM_STROKE_COLORS.transparent).toBe('transparent');
+  });
 });
 
 describe('style resolvers', () => {

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
@@ -30,6 +31,7 @@ import {
   Link2,
   LayoutTemplate,
   CornerDownRight,
+  GitBranch,
   Minus,
   MoveRight,
   MoveHorizontal,
@@ -48,7 +50,6 @@ import {
   Triangle,
   Type,
   Ungroup,
-  X,
   ZoomIn,
   ZoomOut,
   type LucideIcon,
@@ -144,7 +145,6 @@ import {
 
 import { Button } from '../../../components/ui/Button';
 import { DiagramShapeOutline } from '../../../components/ui/DiagramShapeOutline';
-import { IconButton } from '../../../components/ui/IconButton';
 import { DIAGRAM_NODE_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
 import {
@@ -222,7 +222,12 @@ import {
   pasteStudioFragment,
   type StudioFragment,
 } from '../studio/studioClipboard';
-import { offsetRect, snapDragToGrid, unionBounds } from '../studio/studioSnapping';
+import {
+  clampDragToCanvas,
+  offsetRect,
+  snapDragToGrid,
+  unionBounds,
+} from '../studio/studioSnapping';
 import {
   arrowBoundsIn,
   inkBounds,
@@ -401,11 +406,26 @@ const QUICK_STROKE_KEYS = ['ink', 'blue', 'green', 'amber', 'rose', 'violet'] as
 const QUICK_FILL_KEYS = ['surface', 'blue', 'green', 'amber', 'rose', 'violet'] as const;
 
 /**
+ * The same lists, plus the option to paint nothing at all.
+ *
+ * Offered for a fill, and for the outline of a shape or a table — things that
+ * still have a body once the paint is gone. Deliberately not offered for ink, a
+ * pen stroke or a label: those *are* their stroke, so a transparent one is an
+ * element that has vanished but still catches clicks, and the only way back is
+ * an undo the user may not realise they need.
+ */
+const FILL_KEYS_WITH_TRANSPARENT = [...QUICK_FILL_KEYS, 'transparent'] as const;
+const OUTLINE_KEYS_WITH_TRANSPARENT = [...QUICK_STROKE_KEYS, 'transparent'] as const;
+
+/**
  * The fill that belongs to each line colour. A closed path is filled with its
  * own stroke colour rather than a separately chosen one, so the fill control is
  * a yes/no rather than a second palette.
  */
 const FILL_FOR_STROKE: Record<DiagramStrokeKey, DiagramFillKey> = {
+  // A path outlined in nothing is filled with nothing: any other answer would
+  // paint a body onto a shape whose author asked for no paint at all.
+  transparent: 'transparent',
   ink: 'neutral',
   slate: 'neutral',
   grey: 'neutral',
@@ -583,8 +603,6 @@ function ColorChoices<K extends string>({
   activeKey,
   disabled,
   onSelect,
-  onClear,
-  clearName,
 }: {
   /** Singular, for each swatch's own name ("rose ink"). */
   itemName: string;
@@ -594,9 +612,6 @@ function ColorChoices<K extends string>({
   activeKey: K | null;
   disabled?: boolean;
   onSelect: (key: K) => void;
-  /** Offered where "none" is a real answer — a shape can have no fill at all. */
-  onClear?: () => void;
-  clearName?: string;
 }) {
   return (
     <ToolStripGroup label={`${itemName} colour`} spacious row={row}>
@@ -610,11 +625,6 @@ function ColorChoices<K extends string>({
           onSelect={() => onSelect(key)}
         />
       ))}
-      {onClear ? (
-        <IconButton label={clearName ?? 'None'} className={SUBTOOL_SIZE} onClick={onClear}>
-          <X aria-hidden="true" size={13} />
-        </IconButton>
-      ) : null}
     </ToolStripGroup>
   );
 }
@@ -854,6 +864,20 @@ const LAYOUT_DIRECTIONS: {
   { direction: 'LR', label: 'Arrange left to right', Icon: ArrowRight },
 ];
 
+/**
+ * The checkerboard every graphics tool uses for "nothing here".
+ *
+ * A transparent swatch painted with its own colour would be an empty circle,
+ * indistinguishable from a white one. Drawn rather than iconified so it sits in
+ * the same swatch row as the colours and answers the same click.
+ */
+const TRANSPARENT_SWATCH_STYLE: CSSProperties = {
+  backgroundColor: '#FFFFFF',
+  backgroundImage:
+    'conic-gradient(#C3CFD6 25%, transparent 0 50%, #C3CFD6 0 75%, transparent 0)',
+  backgroundSize: '7px 7px',
+};
+
 // Sized by its grid column rather than fixed: seven fixed 28px swatches overflow
 // the 260px sidebar.
 function SwatchButton({
@@ -880,7 +904,7 @@ function SwatchButton({
       className={`${SUBTOOL_SWATCH_SIZE} shrink-0 rounded-full border-2 transition-shadow disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
         active ? 'border-rt-ink shadow-[0_0_0_2px_rgba(224,163,60,0.45)]' : 'border-rt-tertiary'
       }`}
-      style={{ backgroundColor: color }}
+      style={color === 'transparent' ? TRANSPARENT_SWATCH_STYLE : { backgroundColor: color }}
     />
   );
 }
@@ -1423,10 +1447,20 @@ export function DiagramEditor() {
    * previously selected stroke or table still highlighted, and the next Delete
    * would take both — selection has to mean one thing across every kind.
    */
+  /**
+   * Select one element and nothing else.
+   *
+   * These three deliberately set each kind rather than going through
+   * `applySelection`: that also steps out of the path and table editing
+   * sub-modes, and a caller here is often about to step *into* one. Every kind
+   * still has to be named, though — arrows were added to the selection and
+   * missed here, which is why picking a shape used to leave an arrow lit up.
+   */
   function selectOnly(id: string | null) {
     setSelectedIds(id ? [id] : []);
     setSelectedEdgeKey(null);
     setSelectedInkIds([]);
+    setSelectedArrowIds([]);
     clearPathSelection();
     clearTableSelection();
   }
@@ -1763,7 +1797,7 @@ export function DiagramEditor() {
               <ColorChoices
                 row
                 itemName="fill"
-                keys={QUICK_FILL_KEYS}
+                keys={FILL_KEYS_WITH_TRANSPARENT}
                 colorFor={(key) => DIAGRAM_FILL_COLORS[key]}
                 activeKey={
                   selectedNode?.fillColor ??
@@ -1775,11 +1809,6 @@ export function DiagramEditor() {
                   applySelectionStyle({ fillColor: key });
                   close();
                 }}
-                onClear={() => {
-                  applySelectionStyle({ fillColor: null });
-                  close();
-                }}
-                clearName="No fill"
               />
             )}
           </BarMenu>
@@ -1798,7 +1827,7 @@ export function DiagramEditor() {
               <ColorChoices
                 row
                 itemName="cell fill"
-                keys={QUICK_FILL_KEYS}
+                keys={FILL_KEYS_WITH_TRANSPARENT}
                 colorFor={(key) => DIAGRAM_FILL_COLORS[key]}
                 activeKey={null}
                 disabled={showSubmitting}
@@ -1808,13 +1837,6 @@ export function DiagramEditor() {
                   }
                   close();
                 }}
-                onClear={() => {
-                  if (selectedTable && cellRange) {
-                    replaceTable(fillCellRange(selectedTable, cellRange, null), selectedTable.id);
-                  }
-                  close();
-                }}
-                clearName="No cell fill"
               />
             )}
           </BarMenu>
@@ -1846,7 +1868,14 @@ export function DiagramEditor() {
               <ColorChoices
                 row
                 itemName="line"
-                keys={QUICK_STROKE_KEYS}
+                // A shape or a table keeps its body without an outline, so it
+                // may drop one. A pen or line path *is* its stroke, so it may
+                // not — that would leave an invisible element behind.
+                keys={
+                  selectedPath || selectedInkIds.length > 0
+                    ? QUICK_STROKE_KEYS
+                    : OUTLINE_KEYS_WITH_TRANSPARENT
+                }
                 colorFor={(key) => DIAGRAM_STROKE_COLORS[key]}
                 activeKey={selectedNode?.strokeColor ?? selectedPath?.strokeColor ?? null}
                 disabled={showSubmitting}
@@ -2595,8 +2624,11 @@ export function DiagramEditor() {
     setSelectedIds(selection);
     setSelectedEdgeKey(null);
     // Picking up a shape ends any studio element's selection, so what is
-    // highlighted is always what a Delete or a drag would act on.
+    // highlighted is always what a Delete or a drag would act on. Arrows are
+    // part of "any": leaving them out is what kept one lit up after a shape was
+    // picked up, with the bar still offering arrow controls for it.
     setSelectedInkIds([]);
+    setSelectedArrowIds([]);
     clearPathSelection();
     clearTableSelection();
     clearError();
@@ -2771,7 +2803,11 @@ export function DiagramEditor() {
    * Land the path in hand. A finished path goes on top, so when the diagram
    * already carries an explicit order the new id has to join it.
    */
-  function commitPathDraft(anchors: readonly PathAnchor[], closed: boolean) {
+  function commitPathDraft(
+    anchors: readonly PathAnchor[],
+    closed: boolean,
+    returnToSelect = false,
+  ) {
     const path = finishPathDraft(anchors, closed, {
       strokeColor: pathColor,
       strokeWidthPreset: pathWidth,
@@ -2779,7 +2815,12 @@ export function DiagramEditor() {
       ...(pathFillColor ? { fillColor: pathFillColor } : {}),
     });
     clearPathDraft();
-    if (!path) return;
+    if (!path) {
+      // A single anchor is not a path, so there is nothing to commit — but
+      // Escape still meant "I am finished with this tool".
+      if (returnToSelect) setCanvasTool('select');
+      return;
+    }
 
     const graph = history.snapshotRef.current;
     commitPaths([...(graph.paths ?? []), path], paintOrderWithNewestOnTop(graph, path.id));
@@ -2788,7 +2829,10 @@ export function DiagramEditor() {
     // draw several of in a row, and going back to Select after each one makes
     // the second line cost two clicks more than the first. The pen finishes a
     // whole shape in one go, so it hands that shape back ready to move.
-    if (canvasTool === 'line') {
+    //
+    // Escape is the exception for both: it means "I am done here", not "give me
+    // another one", so it always lands in Select whichever tool drew the path.
+    if (canvasTool === 'line' && !returnToSelect) {
       clearAllSelection();
       return;
     }
@@ -2796,13 +2840,21 @@ export function DiagramEditor() {
     applySelection({ ...EMPTY_STUDIO_SELECTION, pathIds: [path.id] });
   }
 
-  function finishPenDraft() {
+  /**
+   * Put down whatever the pen or line tool is holding.
+   *
+   * `returnToSelect` is what Escape passes: an abandoned path still commits what
+   * was drawn, but hands the canvas back in Select rather than re-arming a tool
+   * the user has just said they are finished with.
+   */
+  function finishPenDraft(returnToSelect = false) {
     const anchors = pathAnchorsRef.current;
     if (anchors.length === 0) {
       clearPathDraft();
+      if (returnToSelect) setCanvasTool('select');
       return;
     }
-    commitPathDraft(anchors, false);
+    commitPathDraft(anchors, false, returnToSelect);
   }
 
   function replacePath(next: PathElement | null, id: string) {
@@ -2826,6 +2878,7 @@ export function DiagramEditor() {
     setSelectedAnchor(null);
     setSelectedIds([]);
     setSelectedEdgeKey(null);
+    setSelectedArrowIds([]);
   }
 
   function clearPathSelection() {
@@ -2858,6 +2911,7 @@ export function DiagramEditor() {
     setSelectedIds([]);
     setSelectedEdgeKey(null);
     setSelectedInkIds([]);
+    setSelectedArrowIds([]);
     clearPathSelection();
     setCellRange(null);
     setTableEditing(false);
@@ -2874,6 +2928,13 @@ export function DiagramEditor() {
     };
   }
 
+  /**
+   * Replace the selection wholesale, and step out of every editing sub-mode.
+   *
+   * Use this for a sweep, a paste or a clear. `selectOnly`, `selectPath` and
+   * `selectTable` stay separate because they are often called on the way *into*
+   * a sub-mode, which this would immediately undo.
+   */
   function applySelection(next: StudioSelection) {
     setSelectedIds(next.nodeIds);
     setSelectedInkIds(next.inkIds);
@@ -3291,9 +3352,15 @@ export function DiagramEditor() {
     const rawTotal = { x: point.x - session.start.x, y: point.y - session.start.y };
     // Snapped by the group's outer box, so a multi-element drag keeps its
     // internal spacing rather than each member rounding independently.
-    const total = session.startBounds
+    const snapped = session.startBounds
       ? snapDragToGrid(offsetRect(session.startBounds, rawTotal), rawTotal, snapEnabled)
       : rawTotal;
+    // Snap first, then hold the result on the sheet: clamping a snapped delta
+    // can only move it back onto the grid's edge, whereas snapping a clamped one
+    // could push it straight back off.
+    const total = session.startBounds
+      ? clampDragToCanvas(offsetRect(session.startBounds, snapped), snapped)
+      : snapped;
 
     if (total.x === 0 && total.y === 0 && !session.moved) return true;
     session.moved = true;
@@ -4579,6 +4646,15 @@ export function DiagramEditor() {
     const tableGoing = new Set(selectedTableIds);
     const arrowGoing = new Set(selectedArrowIds);
 
+    // Held to the sheet by the selection's outer box, exactly as a pointer drag
+    // is. Without this a drawing could be nudged off the canvas a step at a time
+    // and left somewhere it could never be selected again.
+    const startBounds = unionBounds(boundsOfSelection(graph, currentSelection()));
+    const delta = startBounds
+      ? clampDragToCanvas(offsetRect(startBounds, offset), offset)
+      : offset;
+    if (delta.x === 0 && delta.y === 0) return;
+
     history.commit({
       // Nodes keep their own mover: it understands snapping and containers.
       nodes:
@@ -4586,7 +4662,7 @@ export function DiagramEditor() {
           ? moveNodesBy(
               graph.nodes,
               nodeOrigins(graph.nodes, selectedIds),
-              offset,
+              delta,
               selectedIds[0]!,
               snapEnabled,
             )
@@ -4596,18 +4672,18 @@ export function DiagramEditor() {
         inkGoing.has(stroke.id)
           ? {
               ...stroke,
-              points: stroke.points.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })),
+              points: stroke.points.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y })),
             }
           : stroke,
       ),
       paths: (graph.paths ?? []).map((path) =>
-        pathGoing.has(path.id) ? movePathBy(path, offset.x, offset.y) : path,
+        pathGoing.has(path.id) ? movePathBy(path, delta.x, delta.y) : path,
       ),
       tables: (graph.tables ?? []).map((table) =>
-        tableGoing.has(table.id) ? moveTableBy(table, offset.x, offset.y) : table,
+        tableGoing.has(table.id) ? moveTableBy(table, delta.x, delta.y) : table,
       ),
       arrows: (graph.arrows ?? []).map((arrow) =>
-        arrowGoing.has(arrow.id) ? offsetArrow(arrow, offset.x, offset.y) : arrow,
+        arrowGoing.has(arrow.id) ? offsetArrow(arrow, delta.x, delta.y) : arrow,
       ),
     });
   }
@@ -4787,8 +4863,36 @@ export function DiagramEditor() {
     if ((event.key === 'Escape' || event.key === 'Enter') && pathAnchorsRef.current.length > 0) {
       event.preventDefault();
       event.stopPropagation();
-      finishPenDraft();
+      // Escape ends the session; Enter finishes this path and leaves the tool
+      // armed for the next one.
+      finishPenDraft(event.key === 'Escape');
       return;
+    }
+
+    // Backspace takes back the last point while a path is still being drawn.
+    // The committed-path editor already binds these keys to `removeAnchor`, but
+    // a draft is not a path yet, so it needs its own step back — without one the
+    // only way to fix a mis-placed point was to finish and start over.
+    if (
+      (event.key === 'Backspace' || event.key === 'Delete') &&
+      pathAnchorsRef.current.length > 0
+    ) {
+      const target = event.target as HTMLElement | null;
+      // Not while something is being typed into: there the key means "delete a
+      // character", as it does everywhere else.
+      if (target?.tagName !== 'INPUT' && target?.tagName !== 'TEXTAREA') {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = pathAnchorsRef.current.slice(0, -1);
+        pathAnchorsRef.current = next;
+        setPathAnchors(next);
+        // The rubber band trails the last point that is left, so taking the only
+        // point back puts the pen down entirely rather than leaving it anchored
+        // to somewhere the user has just removed.
+        if (next.length === 0) clearPathDraft();
+        else setPathCursor(next[next.length - 1]!);
+        return;
+      }
     }
 
     if (event.key === 'Escape' && pendingContainerDelete) {
@@ -6117,20 +6221,33 @@ export function DiagramEditor() {
       onSubmit={(event) => void onSubmit(event)}
     >
       <section ref={canvasFrameRef} className="relative min-h-0">
-        <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1 sm:top-4 sm:right-4">
-          {extensionSource ? (
-            <div className="mb-4 border-l-2 border-rt-secondary bg-rt-secondary-wash px-3 py-2 text-[12px] text-rt-secondary-deep">
+        {/* Top centre, not top right: the navigation cluster owns that corner,
+            and this banner used to sit underneath it at the same offset and z,
+            which put the zoom controls on top of the only thing telling you
+            whose diagram you were about to extend. */}
+        {extensionSource ? (
+          <div
+            role="status"
+            className="rt-studio-rise pointer-events-none absolute top-3 left-1/2 z-20 flex max-w-[min(88%,28rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-rt-secondary bg-rt-surface px-3.5 py-1.5 text-[12px] text-rt-secondary-deep shadow-[0_4px_18px_rgba(8,12,21,0.12)] sm:top-4"
+          >
+            <GitBranch aria-hidden="true" size={13} className="shrink-0 text-rt-secondary" />
+            <span className="min-w-0">
               {isReusing
                 ? 'Reusing your diagram'
                 : isExtendingOwn
                   ? 'Extending your diagram'
                   : `Extending ${extensionSource.authorName}'s diagram`}
-              {unchangedExtension ? (
-                <span className="block text-rt-secondary-deep/80">{EXTEND_UNCHANGED_HINT}</span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+            </span>
+            {unchangedExtension ? (
+              <>
+                <span aria-hidden="true" className="text-rt-secondary-deep/50">
+                  ·
+                </span>
+                <span className="min-w-0 text-rt-secondary-deep/80">{EXTEND_UNCHANGED_HINT}</span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {containerAwaitingDelete ? renderContainerDeletePrompt() : null}
 

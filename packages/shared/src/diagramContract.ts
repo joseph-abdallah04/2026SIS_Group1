@@ -162,9 +162,38 @@ export function diagramLabelWidthRatio(shape?: DiagramNodeShape): number {
 // representable: the artifact is shared, persisted, and re-rendered by other
 // people's clients.
 
-export type DiagramFillKey = 'neutral' | 'surface' | 'blue' | 'green' | 'amber' | 'rose' | 'violet';
+/**
+ * `transparent` is a colour the user picks, not the absence of a choice.
+ *
+ * The difference matters. An absent `fillColor` means "this was never styled",
+ * and every resolver below answers that with the surface's original hard-coded
+ * fill — which is what keeps pre-v2 diagrams rendering as they always did. So
+ * clearing the key could never mean "see-through": it meant "go back to grey",
+ * and the picker's clear button read as broken because of it.
+ *
+ * An explicit `transparent` says what it means, and says it in the same closed
+ * set as every other colour, so it survives the round trip through the write
+ * boundary and the board card like any other.
+ */
+export type DiagramFillKey =
+  | 'neutral'
+  | 'surface'
+  | 'blue'
+  | 'green'
+  | 'amber'
+  | 'rose'
+  | 'violet'
+  | 'transparent';
 export type DiagramStrokeKey =
-  'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink';
+  | 'slate'
+  | 'grey'
+  | 'blue'
+  | 'green'
+  | 'amber'
+  | 'rose'
+  | 'violet'
+  | 'ink'
+  | 'transparent';
 export type DiagramStrokeWidthPreset = 'thin' | 'regular' | 'thick';
 export type DiagramFontSizePreset = 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -184,6 +213,9 @@ export const DIAGRAM_FILL_KEYS = [
   'amber',
   'rose',
   'violet',
+  // Appended, like `ink` below: the order drives the inspector's swatch row and
+  // existing diagrams' swatches should not shuffle because a key was added.
+  'transparent',
 ] as const satisfies readonly DiagramFillKey[];
 
 // `ink` is appended rather than inserted: the order drives the inspector's
@@ -198,6 +230,7 @@ export const DIAGRAM_STROKE_KEYS = [
   'rose',
   'violet',
   'ink',
+  'transparent',
 ] as const satisfies readonly DiagramStrokeKey[];
 
 export const DIAGRAM_STROKE_WIDTH_PRESETS = [
@@ -240,6 +273,9 @@ export const DIAGRAM_FILL_COLORS: Record<DiagramFillKey, string> = {
   amber: '#F8ECD4',
   rose: '#FAE0E0',
   violet: '#E8E1F5',
+  // No contrast to assert for this one, so `diagramStyle.test.ts` skips it: a
+  // label on a transparent fill is read against whatever sits behind it.
+  transparent: 'transparent',
 };
 
 // Borders and arrows are graphical objects, so they clear the 3:1 WCAG 1.4.11
@@ -255,6 +291,7 @@ export const DIAGRAM_STROKE_COLORS: Record<DiagramStrokeKey, string> = {
   // The drawing tool's default pen, brought into the shared palette so ink and
   // shapes on one canvas draw from one set of colours instead of two.
   ink: '#080C15',
+  transparent: 'transparent',
 };
 
 // `regular` reproduces the editor's original widths, so choosing it explicitly

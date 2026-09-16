@@ -11,7 +11,13 @@
 // than landing a few units out. If it ever returns it should be a separate,
 // explicitly enabled mode rather than something layered onto this.
 
-import { snapToGrid, type DiagramPoint, type DiagramRect } from '../diagram/diagramModel';
+import {
+  DIAGRAM_CANVAS_HEIGHT,
+  DIAGRAM_CANVAS_WIDTH,
+  snapToGrid,
+  type DiagramPoint,
+  type DiagramRect,
+} from '../diagram/diagramModel';
 
 /**
  * Adjust a proposed drag so the moving artwork lands on the grid.
@@ -51,4 +57,32 @@ export function unionBounds(rects: readonly DiagramRect[]): DiagramRect | null {
 
 export function offsetRect(rect: DiagramRect, delta: DiagramPoint): DiagramRect {
   return { ...rect, x: rect.x + delta.x, y: rect.y + delta.y };
+}
+
+/**
+ * Hold a dragged group inside the sheet.
+ *
+ * `moving` is where the dragged bounds would land. The *delta* is shrunk rather
+ * than each element's position, for the same reason `snapDragToGrid` works on
+ * the group's outer box: a group keeps its internal spacing exactly, instead of
+ * collapsing as members hit the edge at different moments.
+ *
+ * Nodes were already held in by `moveNodesBy`; ink, paths, tables and arrows
+ * were not, so a nudged drawing could be walked straight off the canvas and out
+ * of reach. Clamping the shared delta covers every kind at once.
+ */
+export function clampDragToCanvas(moving: DiagramRect, delta: DiagramPoint): DiagramPoint {
+  const axis = (start: number, extent: number, limit: number, value: number): number => {
+    // Far edge first, then near: a group bigger than the sheet has no offset
+    // that fits, so it pins to the near edge rather than jittering between two
+    // constraints it cannot satisfy at once.
+    const withinFar = Math.min(start, limit - extent);
+    const withinNear = Math.max(withinFar, 0);
+    return value + (withinNear - start);
+  };
+
+  return {
+    x: axis(moving.x, moving.width, DIAGRAM_CANVAS_WIDTH, delta.x),
+    y: axis(moving.y, moving.height, DIAGRAM_CANVAS_HEIGHT, delta.y),
+  };
 }

@@ -1246,6 +1246,73 @@ describe('diagram viewport and productivity', () => {
     expect(after).not.toEqual(before);
   });
 
+  it('drops a selected arrow when any other kind is picked up', async () => {
+    // Arrows were added to the selection but missed by the three "select just
+    // this" helpers, so only picking a *different arrow* ever cleared one. A
+    // shape, a line or a table left it selected alongside, and the properties
+    // bar went on offering arrow controls for it.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    // A shape to pick up afterwards, placed rather than merely armed.
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 659, clientX: 500, clientY: 150 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 659, clientX: 500, clientY: 150 });
+
+    // The move is what takes the arrow past the travel threshold; without one
+    // it stays a draft and is never committed.
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 660, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 660, clientX: 200, clientY: 340 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 660, clientX: 200, clientY: 340 });
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+
+    const arrow = screen.getByTestId('studio-arrow-hit');
+    fireEvent.pointerDown(arrow, { button: 0, pointerId: 661 });
+    fireEvent.pointerUp(canvas, { pointerId: 661 });
+    // Endpoint handles only appear on a selected arrow, so they stand in for
+    // "this arrow is selected" throughout.
+    expect(screen.getByRole('button', { name: 'Move the start of this arrow' })).toBeInTheDocument();
+
+    const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    fireEvent.pointerDown(shape, { button: 0, pointerId: 662 });
+    fireEvent.pointerUp(canvas, { pointerId: 662 });
+
+    expect(
+      screen.queryByRole('button', { name: 'Move the start of this arrow' }),
+    ).not.toBeInTheDocument();
+
+    // And the same again for a path, which clears the selection through its own
+    // helper rather than through the node one.
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 663, clientX: 100, clientY: 480 });
+    fireEvent.pointerMove(canvas, { pointerId: 663, clientX: 400, clientY: 480 });
+    fireEvent.pointerUp(canvas, { pointerId: 663, clientX: 400, clientY: 480 });
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+
+    // Well clear of the earlier press on this same arrow: two presses at one
+    // spot read as the double-press that opens the label for typing.
+    fireEvent.pointerDown(screen.getByTestId('studio-arrow-hit'), {
+      button: 0,
+      pointerId: 664,
+      clientX: 180,
+      clientY: 330,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 664, clientX: 180, clientY: 330 });
+    expect(screen.getByRole('button', { name: 'Move the start of this arrow' })).toBeInTheDocument();
+
+    const line = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(line, { button: 0, pointerId: 665, clientX: 250, clientY: 480 });
+    fireEvent.pointerUp(canvas, { pointerId: 665, clientX: 250, clientY: 480 });
+
+    expect(
+      screen.queryByRole('button', { name: 'Move the start of this arrow' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('toggles a node in and out of the selection with shift-click', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
@@ -1533,6 +1600,43 @@ describe('diagram resize and style', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Finish resizing the element before proposing.',
     );
+  });
+
+  it('actually makes a shape transparent, and survives the real contract', async () => {
+    // The old clear button deleted the key, and an absent fill means "never
+    // styled" — which resolves to the shape's legacy grey. So "No fill" painted
+    // a box grey and read as broken. Transparent is now a colour you pick.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+    await openMore(user);
+    await openBarPanel(user, 'Fill');
+    await user.click(screen.getByRole('button', { name: 'transparent fill' }));
+
+    const rect = nodeRect('Rounded rectangle: Unlabelled');
+    expect(rect).toHaveAttribute('fill', 'transparent');
+    // Still paintable, so it still catches a press: `none` would make the shape
+    // unselectable everywhere except its border.
+    expect(rect).not.toHaveAttribute('fill', 'none');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]!.fillColor).toBe('transparent');
+  });
+
+  it('leaves an unstyled shape on its legacy fill rather than making it clear', async () => {
+    // The other half of the same rule: absent still means "never styled", so
+    // every diagram authored before transparent existed renders as it always did.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    expect(nodeRect('Rounded rectangle: Unlabelled')).toHaveAttribute('fill', '#EEF2F4');
   });
 
   it('styles the whole selection at once and proposes the palette keys', async () => {
@@ -2504,6 +2608,76 @@ describe('studio pen and line', () => {
     expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
     // Escape ended the path, not the studio.
     expect(canvas).toBeInTheDocument();
+  });
+
+  it('takes back the last point with Backspace while the pen is mid-path', async () => {
+    // The committed-path editor binds Backspace to removing an anchor, but a
+    // draft is not a path yet and had no step back at all: a mis-placed point
+    // could only be fixed by finishing the path and starting over.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 820, 100, 100);
+    clickAt(canvas, 821, 300, 100);
+    clickAt(canvas, 822, 300, 300);
+
+    // The third point goes back, then the path is finished with the two left.
+    await user.keyboard('{Backspace}');
+    await user.keyboard('{Enter}');
+
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.paths![0]!.anchors).toHaveLength(2);
+  });
+
+  it('puts the pen down entirely when every point is taken back', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 830, 100, 100);
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.keyboard('{Backspace}');
+    // Nothing is left to rubber-band from, so the draft goes rather than
+    // trailing from a point that has just been removed.
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+  });
+
+  it('hands the canvas back in Select when Escape ends a line', async () => {
+    // A finished line leaves the tool armed, because lines are drawn several in
+    // a row. Escape means "I am done", so it is the one finish that does not.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 840, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 840, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 840, clientX: 300, clientY: 200 });
+
+    // A second line, left mid-draft, is what Escape then ends.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 841, clientX: 100, clientY: 400 });
+    fireEvent.pointerMove(canvas, { pointerId: 841, clientX: 300, clientY: 400 });
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('button', { name: /^Select$/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('closes the path when the pen returns to its first anchor', async () => {
@@ -3839,6 +4013,40 @@ describe('studio clipboard and snapping', () => {
 
     // The three-unit nudge is pulled on to the next 8-unit grid line.
     expect(drawnPath()).toBe('M 104 200 L 304 200');
+  });
+
+  it('will not let an arrow-key nudge walk a line off the sheet', async () => {
+    // Only nodes were held inside the canvas. Ink, paths, tables and arrows were
+    // offset raw, so holding an arrow key walked a drawing off the sheet a step
+    // at a time and left it somewhere it could never be selected again.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 770, 200);
+    expect(drawnPath()).toBe('M 100 200 L 300 200');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 780,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 780, clientX: 200, clientY: 200 });
+
+    // Far more presses than it takes to reach the edge: 100 units at 8 a step.
+    for (let press = 0; press < 25; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+    }
+    expect(drawnPath()).toBe('M 0 200 L 200 200');
+
+    // And the same going up, where the line starts only 200 units from the top.
+    for (let press = 0; press < 40; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowUp' });
+    }
+    expect(drawnPath()).toBe('M 0 0 L 200 0');
   });
 
   it('leaves a drag exactly where the pointer put it once snapping is off', async () => {

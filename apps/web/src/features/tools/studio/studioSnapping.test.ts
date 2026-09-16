@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { offsetRect, snapDragToGrid, unionBounds } from './studioSnapping';
+import { clampDragToCanvas, offsetRect, snapDragToGrid, unionBounds } from './studioSnapping';
 
 const rect = (x: number, y: number, width = 100, height = 50) => ({ x, y, width, height });
 
@@ -54,5 +54,35 @@ describe('group bounds', () => {
       width: 100,
       height: 50,
     });
+  });
+});
+
+describe('holding a drag inside the sheet', () => {
+  // The sheet is 960 x 600.
+  it('leaves a drag that stays on the sheet alone', () => {
+    expect(clampDragToCanvas(rect(100, 100), { x: 20, y: 20 })).toEqual({ x: 20, y: 20 });
+  });
+
+  it('pulls back a drag that would run off the right or bottom edge', () => {
+    // A 100-wide box landing at 900 overhangs by 40; 50-tall at 580 by 30.
+    expect(clampDragToCanvas(rect(900, 580), { x: 100, y: 100 })).toEqual({ x: 60, y: 70 });
+  });
+
+  it('pushes back a drag that would run off the left or top edge', () => {
+    expect(clampDragToCanvas(rect(-10, -25), { x: -100, y: -100 })).toEqual({ x: -90, y: -75 });
+  });
+
+  it('shrinks the delta rather than the artwork, so a group keeps its spacing', () => {
+    const group = unionBounds([rect(880, 0, 40, 40), rect(940, 0, 40, 40)])!;
+    // The group is 100 wide sitting at 880, so it may travel 960-980 = -20.
+    expect(clampDragToCanvas(offsetRect(group, { x: 60, y: 0 }), { x: 60, y: 0 })).toEqual({
+      x: -20,
+      y: 0,
+    });
+  });
+
+  it('pins a group wider than the sheet to the near edge instead of jittering', () => {
+    // No offset fits a 1000-wide box on a 960-wide sheet; it settles at x = 0.
+    expect(clampDragToCanvas(rect(-50, 0, 1000, 50), { x: 0, y: 0 })).toEqual({ x: 50, y: 0 });
   });
 });
