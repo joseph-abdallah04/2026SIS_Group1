@@ -12,6 +12,12 @@
     var(--rt-paper);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.rt-landing) {
+    scroll-behavior: smooth;
+  }
+}
+
 .rt-landing-grain {
   position: fixed;
   inset: 0;

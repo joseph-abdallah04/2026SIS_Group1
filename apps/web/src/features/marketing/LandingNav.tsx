@@ -1,4 +1,5 @@
 import { motion, useScroll, useSpring } from 'motion/react';
+import type { MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
@@ -9,8 +10,23 @@ const SECTIONS = [
   { href: '#how-it-runs', label: 'How it runs' },
   { href: '#pinboard', label: 'Pinboard' },
   { href: '#voting', label: 'Voting' },
+  { href: '#assistant', label: 'Assistant' },
   { href: '#recap', label: 'Recap' },
 ];
+
+function scrollToSection(event: MouseEvent<HTMLAnchorElement>) {
+  const href = event.currentTarget.getAttribute('href');
+  if (!href?.startsWith('#')) return;
+  const target = document.getElementById(href.slice(1));
+  if (!target) return;
+
+  event.preventDefault();
+  const reduce =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  window.history.pushState(null, '', href);
+}
 
 export function LandingNav() {
   const signedIn = isSignedIn();
@@ -35,6 +51,7 @@ export function LandingNav() {
             <a
               key={section.href}
               href={section.href}
+              onClick={scrollToSection}
               className="rounded-full px-3 py-2 text-[13px] font-medium text-rt-ink-muted transition-colors hover:bg-white/70 hover:text-rt-ink"
             >
               {section.label}

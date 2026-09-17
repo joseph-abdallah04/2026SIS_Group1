@@ -263,7 +263,7 @@ export function PinboardBeat() {
   const copy = (
     <div className="max-w-lg">
       <p className={eyebrow}>The pinboard</p>
-      <h2 className={sectionHeading}>Talk on voice. Put the ideas on the board.</h2>
+      <h2 className={sectionHeading}>Talk on a call. Put the ideas on the board.</h2>
       <p className={sectionBody}>
         While a question is open, everyone can hear each other and see the same canvas. A
         proposal is a sticky note, a drawing, or a diagram. The moment you propose it, it

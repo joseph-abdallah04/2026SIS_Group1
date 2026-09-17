@@ -13,7 +13,7 @@ export function RecapBeat() {
           <p className={eyebrow}>The recap</p>
           <h2 className={sectionHeading}>The recap is the list of answers.</h2>
           <p className={sectionBody}>
-            When the leader ends the session, voice disconnects and the board is frozen. What
+            When the leader ends the session, the call disconnects and the board is frozen. What
             remains is each agenda question paired with the proposal that won it — or marked
             skipped, if the leader moved on without a vote.
           </p>

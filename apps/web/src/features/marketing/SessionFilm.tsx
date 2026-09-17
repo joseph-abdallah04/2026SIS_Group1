@@ -90,7 +90,7 @@ function DiscussScene({ active: _active }: { active: boolean }) {
   ];
 
   return (
-    <ProductFrame title={DEMO.currentQuestion} meta="Voice is live" badge="Discussion">
+    <ProductFrame title={DEMO.currentQuestion} meta="The call is live" badge="Discussion">
       <div className="rt-landing-board relative h-[280px] overflow-hidden sm:h-[320px]">
         {notes.map((note, index) => (
           <motion.article
@@ -191,7 +191,7 @@ export const FILM_SCENES = [
   },
   {
     title: 'Fill the lobby',
-    body: 'Share the join code or link. People sit around the table as they arrive, voice is already on, and the session starts for everyone at the same moment.',
+    body: 'Share the join code or link. People sit around the table as they arrive, the call is already on, and the session starts for everyone at the same moment.',
     Visual: LobbyScene,
   },
   {
@@ -206,7 +206,7 @@ export const FILM_SCENES = [
   },
   {
     title: 'Leave with the recap',
-    body: 'End the session and voice disconnects. Every question is listed with the proposal that won it — or marked skipped — and it stays on the dashboard for the people who were there.',
+    body: 'End the session and the call disconnects. Every question is listed with the proposal that won it — or marked skipped — and it stays on the dashboard for the people who were there.',
     Visual: RecapScene,
   },
 ] as const;

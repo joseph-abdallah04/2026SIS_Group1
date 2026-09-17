@@ -64,8 +64,8 @@ export function Hero() {
 
           <Reveal when="mount" delay={0.12}>
             <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-rt-ink-muted">
-              RoundTable is a facilitated working session. A leader writes the agenda, the team
-              joins by code, and each question is discussed on a shared pinboard — then voted on.
+              RoundTable is a facilitated brainstorming session. A leader writes the agenda, the team
+              joins by code, and each question is discussed live on a shared pinboard — then voted on.
               The winning proposal is stored as the answer before you move to the next question.
             </p>
           </Reveal>
@@ -92,9 +92,9 @@ export function Hero() {
           <Reveal when="mount" delay={0.28}>
             <dl className="mt-12 grid max-w-lg grid-cols-3 gap-5 border-t border-rt-secondary/20 pt-6">
               <div>
-                <dt className="font-serif text-[15px] font-bold text-rt-ink">Live voice</dt>
+                <dt className="font-serif text-[15px] font-bold text-rt-ink">Live call</dt>
                 <dd className="mt-1 text-[12px] leading-snug text-rt-ink-faint">
-                  In the same room as the board
+                  For live collaboration
                 </dd>
               </div>
               <div>

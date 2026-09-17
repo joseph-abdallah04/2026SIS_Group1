@@ -60,7 +60,7 @@ describe('LandingPage', () => {
 
     for (const heading of [
       /a session is an agenda you work through live/i,
-      /talk on voice\. put the ideas on the board/i,
+      /talk on a call\. put the ideas on the board/i,
       /the leader shortlists\. everyone votes once/i,
       /it can draft ideas\. it cannot post them/i,
       /the recap is the list of answers/i,
@@ -75,7 +75,7 @@ describe('LandingPage', () => {
 
     const nav = screen.getByRole('navigation', { name: /page sections/i });
     const hrefs = Array.from(nav.querySelectorAll('a')).map((link) => link.getAttribute('href'));
-    expect(hrefs).toEqual(['#how-it-runs', '#pinboard', '#voting', '#recap']);
+    expect(hrefs).toEqual(['#how-it-runs', '#pinboard', '#voting', '#assistant', '#recap']);
   });
 
   it('shows Dashboard in the header when a live token is stored', () => {
