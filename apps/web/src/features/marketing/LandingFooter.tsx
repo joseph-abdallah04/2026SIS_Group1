@@ -15,7 +15,7 @@ export function LandingFooter() {
             <span className="text-[14px] font-semibold tracking-[-0.02em]">RoundTable</span>
           </Link>
           <p className="mt-2 text-[12.5px] text-rt-ink-faint">
-            Agenda, voice, pinboard and a vote. One seat each.
+            Live sessions for software teams. Agenda, pinboard, vote, recap.
           </p>
         </div>
         <nav className="flex items-center gap-5 text-[13px] font-semibold">

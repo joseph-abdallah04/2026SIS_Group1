@@ -1,57 +1,91 @@
 import { motion, useReducedMotion, useScroll, useTransform } from 'motion/react';
-import { useRef } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ctaGhost, ctaPrimary, eyebrow } from './cta';
 import { Reveal, RevealHeading } from './motion';
-import { RoundTableScene } from './RoundTableScene';
+import { LandingLobby, LobbyFooter } from './RoundTableScene';
 import { isSignedIn } from './signedIn';
+import { DEMO_SEATS } from './story';
 
-const SEATS = [
-  { name: 'Mira H.', leader: true },
-  { name: 'Joseph A.', speaking: true },
-  { name: 'Shafin R.' },
-  { name: 'Elena N.' },
-  { name: 'Tom W.' },
-  { name: 'Aisha B.' },
-];
+function useJoinedCount(active: boolean, total: number, reduce: boolean | null) {
+  const [count, setCount] = useState(reduce ? total : 0);
 
-const FACTS = [
-  { value: '1 vote', label: 'per person, per question' },
-  { value: '0 keys', label: 'to buy — bring your own model' },
-  { value: 'Every answer', label: 'recorded in the recap' },
-];
+  useEffect(() => {
+    if (reduce) {
+      setCount(total);
+      return;
+    }
+    if (!active) return;
+
+    setCount(0);
+    const timers = Array.from({ length: total }, (_, index) =>
+      window.setTimeout(() => setCount(index + 1), 280 + index * 220),
+    );
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [active, reduce, total]);
+
+  return count;
+}
 
 export function Hero() {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end start'] });
-  const sceneY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -60]);
+  const sceneY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -70]);
+  const sceneScale = useTransform(scrollYProgress, [0, 1], [1, reduce ? 1 : 0.96]);
   const signedIn = isSignedIn();
+  const [ready, setReady] = useState(Boolean(reduce));
+  const joined = useJoinedCount(ready, DEMO_SEATS.length, reduce);
+  const full = joined >= DEMO_SEATS.length;
+
+  const seats = DEMO_SEATS.slice(0, joined).map((seat) => ({
+    name: seat.name,
+    leader: seat.leader,
+    speaking: full && Boolean(seat.speaking),
+  }));
+
+  useEffect(() => {
+    setReady(true);
+  }, []);
+
+  const onMove = (event: MouseEvent<HTMLElement>) => {
+    if (reduce || !ref.current) return;
+    const box = ref.current.getBoundingClientRect();
+    ref.current.style.setProperty(
+      '--glow-x',
+      `${((event.clientX - box.left) / box.width) * 100}%`,
+    );
+    ref.current.style.setProperty(
+      '--glow-y',
+      `${((event.clientY - box.top) / box.height) * 100}%`,
+    );
+  };
 
   return (
-    <section ref={ref} className="relative overflow-hidden">
+    <section ref={ref} onMouseMove={onMove} className="relative overflow-hidden">
       <div className="rt-landing-glow" aria-hidden="true" />
+      <div className="rt-landing-grain" aria-hidden="true" />
 
-      <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-6 pt-16 pb-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pt-24 lg:pb-28">
+      <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-6 pt-16 pb-16 lg:grid-cols-[1.05fr_1fr] lg:gap-12 lg:pt-24 lg:pb-24">
         <div className="max-w-xl">
-          <Reveal>
-            <p className={eyebrow}>Structured group decision sessions</p>
+          <Reveal when="mount">
+            <p className={eyebrow}>Live brainstorming sessions for teams</p>
           </Reveal>
 
-          <h1 className="mt-5 font-serif text-[2.6rem] leading-[1.06] font-bold tracking-tight text-balance text-rt-ink sm:text-[3.4rem] lg:text-[3.75rem]">
-            <RevealHeading text="Sessions that end in a decision, not a doc." />
+          <h1 className="mt-5 font-serif text-[2.7rem] leading-[1.05] font-bold tracking-tight text-balance text-rt-ink sm:text-[3.55rem] lg:text-[3.85rem]">
+            <RevealHeading when="mount" text="Every question leaves with an answer." />
           </h1>
 
-          <Reveal delay={0.12}>
+          <Reveal when="mount" delay={0.12}>
             <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-rt-ink-muted">
-              A leader sets the agenda, the team joins by code, and every question is worked the
-              same way: talk it through on voice, put ideas on a shared pinboard, then vote. The
-              winning proposal is recorded as that question's answer before anyone moves on.
+              RoundTable is a facilitated working session. A leader writes the agenda, the team
+              joins by code, and each question is discussed on a shared pinboard — then voted on.
+              The winning proposal is stored as the answer before you move to the next question.
             </p>
           </Reveal>
 
-          <Reveal delay={0.2}>
+          <Reveal when="mount" delay={0.2}>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               {signedIn ? (
                 <Link to="/dashboard" className={`${ctaPrimary} px-6`}>
@@ -60,7 +94,7 @@ export function Hero() {
               ) : (
                 <>
                   <Link to="/signup" className={`${ctaPrimary} px-6`}>
-                    Start a session
+                    Create an account
                   </Link>
                   <Link to="/login" className={`${ctaGhost} px-6`}>
                     Log in
@@ -70,60 +104,49 @@ export function Hero() {
             </div>
           </Reveal>
 
-          <Reveal delay={0.28}>
-            <dl className="mt-12 grid max-w-md grid-cols-3 gap-5 border-t border-rt-secondary/20 pt-6">
-              {FACTS.map((fact) => (
-                <div key={fact.value}>
-                  <dt className="font-serif text-[15px] font-bold text-rt-ink">{fact.value}</dt>
-                  <dd className="mt-1 text-[12px] leading-snug text-rt-ink-faint">{fact.label}</dd>
-                </div>
-              ))}
+          <Reveal when="mount" delay={0.28}>
+            <dl className="mt-12 grid max-w-lg grid-cols-3 gap-5 border-t border-rt-secondary/20 pt-6">
+              <div>
+                <dt className="font-serif text-[15px] font-bold text-rt-ink">Live voice</dt>
+                <dd className="mt-1 text-[12px] leading-snug text-rt-ink-faint">
+                  In the same room as the board
+                </dd>
+              </div>
+              <div>
+                <dt className="font-serif text-[15px] font-bold text-rt-ink">One vote</dt>
+                <dd className="mt-1 text-[12px] leading-snug text-rt-ink-faint">
+                  Per person, per question
+                </dd>
+              </div>
+              <div>
+                <dt className="font-serif text-[15px] font-bold text-rt-ink">A recap</dt>
+                <dd className="mt-1 text-[12px] leading-snug text-rt-ink-faint">
+                  Every answer, written down
+                </dd>
+              </div>
             </dl>
           </Reveal>
         </div>
 
-        {/* A lobby, framed as the product renders it: the session has not been
-            started yet, so there is a join code and a waiting room, and no
-            question or voice state on screen. */}
-        <motion.div style={{ y: sceneY }} className="relative mx-auto w-full max-w-lg">
-          <div className="rt-landing-panel overflow-hidden rounded-2xl">
-            <div className="flex items-center justify-between gap-3 border-b border-rt-secondary/15 bg-white/60 px-5 py-3.5">
-              <div className="min-w-0">
-                <p className="truncate font-serif text-[15px] font-bold text-rt-ink">
-                  Q3 planning, product team
-                </p>
-                <p className="mt-0.5 text-[11px] text-rt-ink-faint">5 questions on the agenda</p>
-              </div>
-              <span className="shrink-0 rounded-full bg-rt-cool-tint px-2.5 py-1 text-[9px] font-semibold tracking-[0.12em] text-rt-ink-muted uppercase">
-                Lobby
-              </span>
-            </div>
-
-            <div className="rt-landing-scene mx-auto w-[70%] pt-9 pb-12">
-              <RoundTableScene seats={SEATS} showNames stagger joinCode="RT-4821" />
-            </div>
-
-            <div className="flex items-center justify-between gap-3 border-t border-rt-secondary/15 bg-white/60 px-5 py-3.5">
-              <p className="flex items-center gap-2 text-[12px] font-medium text-rt-ink-muted">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rt-secondary opacity-70" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-rt-secondary-deep" />
-                </span>
-                6 of 6 joined
-              </p>
-              <span className="rounded-full bg-rt-secondary px-3.5 py-1.5 text-[11.5px] font-semibold text-rt-ink shadow-sm">
-                Start session
-              </span>
-            </div>
-          </div>
+        <motion.div style={{ y: sceneY, scale: sceneScale }} className="relative mx-auto w-full max-w-lg">
+          <LandingLobby
+            seats={seats}
+            stagger={!reduce}
+            footer={
+              <LobbyFooter
+                status={`${joined} of ${DEMO_SEATS.length} joined`}
+                ready={full}
+              />
+            }
+          />
         </motion.div>
       </div>
 
-      <div className="rt-landing-cue mx-auto flex w-fit flex-col items-center gap-1.5 pb-10 text-rt-ink-faint">
-        <span className="text-[10px] font-semibold tracking-[0.18em] uppercase">Scroll</span>
-        <span aria-hidden="true" className="text-sm leading-none">
-          ↓
+      <div className="rt-landing-cue mx-auto flex w-fit flex-col items-center gap-2 pb-10 text-rt-ink-faint">
+        <span className="text-[10px] font-semibold tracking-[0.2em] uppercase">
+          Scroll through a session
         </span>
+        <span aria-hidden="true" className="rt-landing-cue-line" />
       </div>
     </section>
   );

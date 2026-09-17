@@ -9,7 +9,7 @@ const SECTIONS = [
   { href: '#how-it-runs', label: 'How it runs' },
   { href: '#pinboard', label: 'Pinboard' },
   { href: '#voting', label: 'Voting' },
-  { href: '#assistant', label: 'Assistant' },
+  { href: '#recap', label: 'Recap' },
 ];
 
 export function LandingNav() {

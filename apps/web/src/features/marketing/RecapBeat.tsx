@@ -1,80 +1,66 @@
-import { eyebrow, sectionBody, sectionHeading } from './cta';
-import { Reveal } from './motion';
+import { motion, useReducedMotion } from 'motion/react';
 
-const ROWS = [
-  {
-    question: 'What is the one metric for this quarter?',
-    answer: 'Time from signup to first completed session',
-  },
-  {
-    question: 'How do we cut onboarding to one day?',
-    answer: 'Seeded demo workspace on day one',
-  },
-  {
-    question: 'Who owns the migration runbook?',
-    answer: 'Platform, with a review from Elena before the freeze',
-  },
-  { question: 'Do we rebuild the billing screen now?', skipped: true },
-];
+import { eyebrow, sectionBody, sectionHeading } from './cta';
+import { DEMO, DEMO_QUESTIONS, DEMO_SEATS } from './story';
 
 export function RecapBeat() {
+  const reduce = useReducedMotion();
+
   return (
-    <section className="border-t border-rt-secondary/15 bg-white/40 py-24">
+    <section id="recap" className="scroll-mt-20 border-t border-rt-secondary/15 bg-white/40 py-24">
       <div className="mx-auto grid max-w-6xl items-center gap-14 px-6 lg:grid-cols-[0.9fr_1.1fr] lg:gap-20">
         <div className="max-w-lg">
-          <Reveal>
-            <p className={eyebrow}>The recap</p>
-            <h2 className={sectionHeading}>Nobody has to write the minutes.</h2>
-            <p className={sectionBody}>
-              The summary is built from what the session actually decided: each question on the
-              agenda paired with the proposal that won it, and anything the leader skipped marked
-              as skipped rather than quietly dropped.
-            </p>
-            <p className="mt-4 text-[15.5px] leading-relaxed text-rt-ink-muted">
-              It appears the moment the leader ends the session, voice disconnects cleanly, and it
-              stays on the dashboard for everyone who was in the room.
-            </p>
-          </Reveal>
+          <p className={eyebrow}>The recap</p>
+          <h2 className={sectionHeading}>The recap is the list of answers.</h2>
+          <p className={sectionBody}>
+            When the leader ends the session, voice disconnects and the board is frozen. What
+            remains is each agenda question paired with the proposal that won it — or marked
+            skipped, if the leader moved on without a vote.
+          </p>
+          <p className="mt-4 text-[15.5px] leading-relaxed text-rt-ink-muted">
+            Everyone who was in the room can open it from the dashboard afterwards. There is
+            nothing extra to write up.
+          </p>
         </div>
 
-        <Reveal delay={0.1}>
-          <div className="rt-landing-panel rounded-2xl p-6">
-            <div className="flex items-baseline justify-between gap-4 border-b border-rt-secondary/15 pb-4">
+        <div className="rt-landing-panel overflow-hidden rounded-2xl">
+            <div className="flex items-baseline justify-between gap-4 border-b border-rt-secondary/15 bg-white/70 px-6 py-4">
               <div>
                 <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-                  Session summary
+                  Session ended
                 </p>
-                <h3 className="mt-1 font-serif text-[19px] font-bold text-rt-ink">
-                  Q3 planning, product team
-                </h3>
+                <h3 className="mt-1 font-serif text-[19px] font-bold text-rt-ink">{DEMO.title}</h3>
               </div>
-              <span className="shrink-0 text-[11px] font-medium text-rt-ink-faint">6 people</span>
+              <span className="shrink-0 text-[11px] font-medium text-rt-ink-faint">
+                {DEMO_SEATS.length} people
+              </span>
             </div>
 
-            <ol className="mt-1 divide-y divide-rt-secondary/12">
-              {ROWS.map((row, index) => (
-                <Reveal as="li" key={row.question} delay={0.08 + index * 0.08} y={16}>
-                  <div className="py-4">
-                    <p className="text-[12.5px] leading-snug text-rt-ink-muted">{row.question}</p>
-                    {row.skipped ? (
-                      <p className="mt-1.5 text-[13.5px] font-semibold text-rt-ink-faint italic">
-                        Skipped
-                      </p>
-                    ) : (
-                      <p className="mt-1.5 flex items-start gap-2 text-[14px] font-semibold text-rt-ink">
-                        <span
-                          aria-hidden="true"
-                          className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rt-secondary-deep"
-                        />
-                        {row.answer}
-                      </p>
-                    )}
-                  </div>
-                </Reveal>
+            <ol className="divide-y divide-rt-secondary/12 px-6">
+              {DEMO_QUESTIONS.map((row, index) => (
+                <motion.li
+                  key={row.text}
+                  initial={reduce ? false : { y: 18 }}
+                  whileInView={{ y: 0 }}
+                  viewport={{ once: true, amount: 0.5 }}
+                  transition={{ delay: 0.1 + index * 0.12, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                  className="py-4"
+                >
+                  <p className="text-[11px] font-semibold tracking-[0.08em] text-rt-ink-faint uppercase">
+                    Question {index + 1}
+                  </p>
+                  <p className="mt-1 text-[12.5px] leading-snug text-rt-ink-muted">{row.text}</p>
+                  <p className="mt-2 flex items-start gap-2 text-[14px] font-semibold text-rt-ink">
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rt-secondary-deep"
+                    />
+                    {row.answer}
+                  </p>
+                </motion.li>
               ))}
             </ol>
           </div>
-        </Reveal>
       </div>
     </section>
   );

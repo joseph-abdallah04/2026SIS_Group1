@@ -6,9 +6,9 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 /**
  * Landing-page reveal.
  *
- * Only `y` and `filter` animate, never `opacity`: jsdom ships no
- * IntersectionObserver, so `whileInView` never fires under test and an
- * opacity-based reveal would leave every assertion reading invisible text.
+ * Only `y` animates, never `opacity`: jsdom ships no IntersectionObserver, so
+ * `whileInView` never fires under test and an opacity-based reveal would leave
+ * every assertion reading invisible text.
  * Moving the element instead means the copy is in the DOM and legible whether
  * or not the observer ever runs.
  */
@@ -18,21 +18,26 @@ export function Reveal({
   delay = 0,
   y = 26,
   as = 'div',
+  when = 'view',
 }: {
   children: ReactNode;
   className?: string;
   delay?: number;
   y?: number;
   as?: 'div' | 'li' | 'section';
+  /** Hero copy plays on mount so above-the-fold text is never left blurred. */
+  when?: 'view' | 'mount';
 }) {
   const reduce = useReducedMotion();
   const Component = motion[as];
+  const shown = { y: 0 };
 
   return (
     <Component
       className={className}
-      initial={reduce ? false : { y, filter: 'blur(6px)' }}
-      whileInView={{ y: 0, filter: 'blur(0px)' }}
+      initial={reduce ? false : { y }}
+      animate={when === 'mount' ? shown : undefined}
+      whileInView={when === 'view' ? shown : undefined}
       viewport={{ once: true, amount: 0.15 }}
       transition={{ duration: 0.7, delay, ease: EASE }}
     >
@@ -55,10 +60,12 @@ export function RevealHeading({
   text,
   className = '',
   delay = 0,
+  when = 'view',
 }: {
   text: string;
   className?: string;
   delay?: number;
+  when?: 'view' | 'mount';
 }) {
   const reduce = useReducedMotion();
   const words = text.split(' ');
@@ -69,7 +76,8 @@ export function RevealHeading({
     <motion.span
       className={className}
       initial="hidden"
-      whileInView="shown"
+      animate={when === 'mount' ? 'shown' : undefined}
+      whileInView={when === 'view' ? 'shown' : undefined}
       viewport={{ once: true, amount: 0.4 }}
       transition={{ staggerChildren: 0.055, delayChildren: delay }}
       aria-label={text}

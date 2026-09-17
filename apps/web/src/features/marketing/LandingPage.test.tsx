@@ -43,7 +43,7 @@ describe('LandingPage', () => {
     renderLanding();
 
     expect(
-      screen.getByRole('heading', { name: /sessions that end in a decision, not a doc/i }),
+      screen.getByRole('heading', { name: /every question leaves with an answer/i }),
     ).toBeInTheDocument();
 
     const login = screen.getAllByRole('link', { name: /log in/i });
@@ -59,12 +59,12 @@ describe('LandingPage', () => {
     renderLanding();
 
     for (const heading of [
-      /six steps, and the same six every time/i,
-      /everyone proposes at once/i,
-      /one vote each, and the question is closed/i,
-      /bring your own model into the room/i,
-      /nobody has to write the minutes/i,
-      /bring a question\. leave with an answer/i,
+      /a session is an agenda you work through live/i,
+      /talk on voice\. put the ideas on the board/i,
+      /the leader shortlists\. everyone votes once/i,
+      /it can draft ideas\. it cannot post them/i,
+      /the recap is the list of answers/i,
+      /create a session\. send the join code/i,
     ]) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument();
     }
@@ -75,7 +75,7 @@ describe('LandingPage', () => {
 
     const nav = screen.getByRole('navigation', { name: /page sections/i });
     const hrefs = Array.from(nav.querySelectorAll('a')).map((link) => link.getAttribute('href'));
-    expect(hrefs).toEqual(['#how-it-runs', '#pinboard', '#voting', '#assistant']);
+    expect(hrefs).toEqual(['#how-it-runs', '#pinboard', '#voting', '#recap']);
   });
 
   it('shows Dashboard in the header when a live token is stored', () => {

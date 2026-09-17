@@ -2,37 +2,31 @@ import { motion, useInView, useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 
 import { eyebrow, sectionBody, sectionHeading } from './cta';
-import { Reveal } from './motion';
 
 const REPLY =
-  'Three angles teams usually take on day-one onboarding: pre-provisioning, a seeded workspace, and a named buddy. Want these as stickies?';
+  'Three things teams usually fix first: accounts ready at offer, a workspace that is not empty on day one, and a named buddy. Want these as stickies?';
 
 const SUGGESTIONS = [
-  'Pre-provision accounts at offer stage',
+  'Provision accounts the day the offer is signed',
   'Seed the workspace with real sample data',
   'Name a buddy before the start date',
 ];
 
 const POINTS = [
   {
-    title: 'Your provider, your key',
-    body: 'Point it at any OpenAI-compatible base URL with your own key and model, then test the connection from settings. The key is stored server-side and never handed back to the browser.',
+    title: 'Your key, in your settings',
+    body: 'Connect any OpenAI-compatible base URL with your own API key and model, then test it from settings. RoundTable does not sell tokens. The key is stored on the server and is never sent back to the browser.',
   },
   {
-    title: 'It already knows where you are',
-    body: 'The assistant is given the session focus, the question on screen, the current phase, the recent proposals and whatever board item you have selected, so you are not re-explaining the meeting to it.',
+    title: 'It already knows the meeting',
+    body: 'The assistant is given the session focus, the question on screen, the current phase, recent proposals, and whichever board item you have selected. You do not re-explain the room to it.',
   },
   {
-    title: 'It drafts, you propose',
-    body: 'It can search the web, build a diagram or rough out a handful of stickies. Nothing reaches the board until you press Propose, and when you do the proposal is authored by you.',
+    title: 'It drafts. You still propose.',
+    body: 'It can search the web, sketch a diagram, or rough out stickies. Nothing reaches the shared pinboard until you press Propose — and when you do, the proposal is authored by you.',
   },
 ];
 
-/**
- * Types the assistant reply out when the panel scrolls into view. The full
- * string is always in the DOM for screen readers and tests; only the visible
- * copy is animated.
- */
 function StreamedReply() {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLParagraphElement>(null);
@@ -49,7 +43,7 @@ function StreamedReply() {
         }
         return count + 2;
       });
-    }, 18);
+    }, 16);
     return () => window.clearInterval(timer);
   }, [inView, reduce]);
 
@@ -97,10 +91,10 @@ function AssistantPanel() {
           {SUGGESTIONS.map((suggestion, index) => (
             <motion.div
               key={suggestion}
-              initial={reduce ? false : { y: 14, scale: 0.96 }}
+              initial={reduce ? false : { y: 16, scale: 0.96 }}
               whileInView={{ y: 0, scale: 1 }}
               viewport={{ once: true, amount: 0.5 }}
-              transition={{ delay: 1.5 + index * 0.14, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ delay: 1.55 + index * 0.14, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
               className="rt-landing-sticky flex items-center gap-2 bg-[#FDF1DC] px-3 py-2 text-[11.5px] font-medium text-rt-ink"
             >
               <span className="flex-1">{suggestion}</span>
@@ -112,10 +106,10 @@ function AssistantPanel() {
           initial={reduce ? false : { y: 10 }}
           whileInView={{ y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
-          transition={{ delay: 2, duration: 0.4 }}
+          transition={{ delay: 2.05, duration: 0.4 }}
           className="flex items-center justify-between pt-1"
         >
-          <p className="text-[10.5px] text-rt-ink-faint">Sticky ideation · 3 drafts</p>
+          <p className="text-[10.5px] text-rt-ink-faint">Drafts stay in this panel</p>
           <span className="rounded-full bg-rt-secondary px-3 py-1.5 text-[11px] font-semibold text-rt-ink shadow-sm">
             Propose to board
           </span>
@@ -130,31 +124,28 @@ export function AssistantBeat() {
     <section id="assistant" className="scroll-mt-20 border-t border-rt-secondary/15 py-24">
       <div className="mx-auto grid max-w-6xl items-start gap-14 px-6 lg:grid-cols-2 lg:gap-20">
         <div className="max-w-lg">
-          <Reveal>
-            <p className={eyebrow}>Personal assistant</p>
-            <h2 className={sectionHeading}>Bring your own model into the room.</h2>
-            <p className={sectionBody}>
-              Everyone in the session gets their own assistant, and nobody else sees it. RoundTable
-              does not resell anyone tokens, which is exactly why your provider details are yours
-              to set.
-            </p>
-          </Reveal>
+          <p className={eyebrow}>Optional assistant</p>
+          <h2 className={sectionHeading}>It can draft ideas. It cannot post them.</h2>
+          <p className={sectionBody}>
+            Each person can open a private assistant that nobody else in the room can see. It is
+            optional: if you never connect a key, the session still runs.
+          </p>
 
           <dl className="mt-9 space-y-7">
-            {POINTS.map((point, index) => (
-              <Reveal key={point.title} delay={index * 0.06}>
+            {POINTS.map((point) => (
+              <div key={point.title}>
                 <dt className="font-serif text-[17px] font-bold text-rt-ink">{point.title}</dt>
                 <dd className="mt-1.5 text-[14.5px] leading-relaxed text-rt-ink-muted">
                   {point.body}
                 </dd>
-              </Reveal>
+              </div>
             ))}
           </dl>
         </div>
 
-        <Reveal delay={0.1} className="lg:sticky lg:top-28">
+        <div className="lg:sticky lg:top-28">
           <AssistantPanel />
-        </Reveal>
+        </div>
       </div>
     </section>
   );

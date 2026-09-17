@@ -1,24 +1,47 @@
 /*
- * Landing page paint. The app's own palette (gold chrome, mustard CTA, paper
- * desk) rather than a second visual language: someone arriving here should
- * recognise the session they land in after signing up.
+ * Landing page paint. Same gold/paper language as the product, so the public
+ * page and the session feel like one place.
  */
 
 .rt-landing {
   --rt-paper: #f7f4ee;
-  background: var(--rt-paper);
+  --glow-x: 72%;
+  --glow-y: 28%;
+  background:
+    radial-gradient(72% 48% at 50% -8%, rgba(241, 200, 129, 0.22), transparent 58%),
+    var(--rt-paper);
 }
 
-/* Warm light sitting behind the hero, so the table looks lit rather than
-   pasted onto a flat fill. */
+.rt-landing-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: multiply;
+  background-image:
+    radial-gradient(rgba(122, 106, 76, 0.07) 0.6px, transparent 0.7px),
+    radial-gradient(rgba(8, 12, 21, 0.04) 0.5px, transparent 0.6px);
+  background-size:
+    3px 3px,
+    5px 5px;
+  background-position:
+    0 0,
+    1px 2px;
+}
+
 .rt-landing-glow {
   position: absolute;
-  inset: -20% -10% auto -10%;
-  height: 120%;
+  inset: -18% -12% auto -12%;
+  height: 125%;
   background:
-    radial-gradient(48% 42% at 72% 26%, rgba(241, 200, 129, 0.42) 0%, rgba(247, 244, 238, 0) 72%),
-    radial-gradient(38% 36% at 18% 12%, rgba(140, 164, 172, 0.18) 0%, rgba(247, 244, 238, 0) 70%);
+    radial-gradient(
+      46% 40% at var(--glow-x) var(--glow-y),
+      rgba(241, 200, 129, 0.5) 0%,
+      rgba(247, 244, 238, 0) 72%
+    ),
+    radial-gradient(36% 32% at 16% 18%, rgba(140, 164, 172, 0.2) 0%, rgba(247, 244, 238, 0) 70%);
   pointer-events: none;
+  transition: background 120ms linear;
 }
 
 .rt-landing-rule {
@@ -31,8 +54,6 @@
   );
 }
 
-/* Read progress. Sits under the header border so it reads as part of the
-   chrome rather than a floating bar. */
 .rt-landing-progress {
   transform-origin: 0 50%;
   background: linear-gradient(90deg, #f1c881 0%, #e0a33c 100%);
@@ -40,36 +61,92 @@
 
 .rt-landing-board {
   background-color: #fbf9f5;
-  background-image: radial-gradient(rgba(8, 12, 21, 0.09) 1px, transparent 1px);
-  background-size: 18px 18px;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 28%),
+    radial-gradient(rgba(8, 12, 21, 0.08) 1px, transparent 1px);
+  background-size:
+    auto,
+    18px 18px;
 }
 
-/* Paper, not a card: square corners, a hint of tooth, and a shadow that
-   implies the note is resting on the desk rather than floating above it. */
 .rt-landing-sticky {
   border-radius: 2px;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    0 1px 1px rgba(8, 12, 21, 0.06),
-    0 14px 30px rgba(122, 106, 76, 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 1px rgba(8, 12, 21, 0.05),
+    0 16px 34px rgba(122, 106, 76, 0.16);
 }
 
 .rt-landing-panel {
-  border: 1px solid rgba(224, 163, 60, 0.22);
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 24px 60px rgba(122, 106, 76, 0.13);
-  backdrop-filter: blur(6px);
+  border: 1px solid rgba(224, 163, 60, 0.24);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 28px 70px rgba(122, 106, 76, 0.14);
+  backdrop-filter: blur(8px);
 }
 
-/* The lobby scene shows names permanently — the real waiting room reveals them
-   on hover, which a non-interactive screenshot of a table cannot do. */
+.rt-landing-scene .rt-waiting-table {
+  inset: 28%;
+}
+
+.rt-landing-scene .rt-waiting-seat-bubble {
+  height: 3.15rem;
+  width: 3.15rem;
+  font-size: 13px;
+}
+
 .rt-landing-scene .rt-waiting-seat-name[data-always] {
   opacity: 1;
   background: transparent;
-  padding: 0.2rem 0 0;
   color: var(--color-rt-ink-muted);
   font-size: 11px;
   font-weight: 600;
+  line-height: 1;
+}
+
+.rt-landing-scene .rt-waiting-seat-name[data-always][data-placement='below'] {
+  top: calc(100% + 8px);
+  padding: 0;
+}
+
+.rt-landing-scene .rt-waiting-seat-name[data-always][data-placement='above'] {
+  bottom: calc(100% + 8px);
+  padding: 0;
+}
+
+.rt-landing-scene .rt-landing-seat-caption {
+  position: absolute;
+  left: 50%;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  width: max-content;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.rt-landing-scene .rt-landing-seat-caption[data-placement='above'] {
+  bottom: calc(100% + 10px);
+}
+
+.rt-landing-scene .rt-landing-leader-tag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: var(--color-rt-secondary-deep);
+  text-transform: uppercase;
+}
+
+.rt-landing-scene .rt-landing-seat-caption .rt-waiting-seat-name[data-always] {
+  position: static;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
 }
 
 .rt-landing-phase-line {
@@ -79,24 +156,26 @@
 @keyframes rt-landing-cue {
   0%,
   100% {
-    transform: translateY(0);
-    opacity: 0.55;
+    transform: scaleY(0.55);
+    opacity: 0.35;
   }
   50% {
-    transform: translateY(6px);
+    transform: scaleY(1);
     opacity: 1;
   }
 }
 
-.rt-landing-cue {
-  animation: rt-landing-cue 2.4s ease-in-out infinite;
+.rt-landing-cue-line {
+  display: block;
+  width: 1px;
+  height: 42px;
+  transform-origin: 50% 0;
+  background: linear-gradient(180deg, rgba(224, 163, 60, 0.05), #e0a33c);
+  animation: rt-landing-cue 2.2s ease-in-out infinite;
 }
 
-/* The pinned pinboard act needs the tall track to drive its scroll timeline.
-   With motion reduced there is no timeline, so the track collapses and the
-   scene renders in place, already assembled. */
 @media (prefers-reduced-motion: reduce) {
-  .rt-landing-cue {
+  .rt-landing-cue-line {
     animation: none;
   }
 }

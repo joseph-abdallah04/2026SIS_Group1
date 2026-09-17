@@ -5,28 +5,26 @@ import { initialsFromName, SEAT_PALETTE } from '../sessions/waitingRoomSeats';
 import { ctaGhost, ctaPrimary } from './cta';
 import { Reveal, RevealHeading } from './motion';
 import { isSignedIn } from './signedIn';
+import { DEMO_SEATS } from './story';
 
-const SEATS = ['Mira H.', 'Joseph A.', 'Elena N.', 'Tom W.', 'Aisha B.', 'Shafin R.'];
-
-/** The table reduced to its point: a fixed set of seats, all the same size. */
 function SeatRow() {
   const reduce = useReducedMotion();
 
   return (
     <div className="flex justify-center -space-x-2.5" aria-hidden="true">
-      {SEATS.map((name, index) => {
+      {DEMO_SEATS.map((seat, index) => {
         const swatch = SEAT_PALETTE[index % SEAT_PALETTE.length];
         return (
           <motion.span
-            key={name}
-            initial={reduce ? false : { scale: 0.5, y: 10 }}
+            key={seat.name}
+            initial={reduce ? false : { scale: 0.5, y: 12 }}
             whileInView={{ scale: 1, y: 0 }}
             viewport={{ once: true, amount: 0.8 }}
-            transition={{ delay: index * 0.07, type: 'spring', stiffness: 300, damping: 18 }}
+            transition={{ delay: index * 0.08, type: 'spring', stiffness: 300, damping: 18 }}
             style={{ background: swatch?.background, color: swatch?.color }}
-            className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#f7f4ee] text-[12px] font-semibold shadow-sm"
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-[#f7f4ee] text-[12px] font-semibold shadow-sm"
           >
-            {initialsFromName(name)}
+            {initialsFromName(seat.name)}
           </motion.span>
         );
       })}
@@ -42,18 +40,18 @@ export function FinalCta() {
       <div className="rt-landing-glow" aria-hidden="true" />
 
       <div className="relative mx-auto max-w-3xl px-6 py-28 text-center">
-        <div className="mb-9">
+        <div className="mb-10">
           <SeatRow />
         </div>
 
-        <h2 className="font-serif text-[2.2rem] leading-[1.1] font-bold tracking-tight text-balance text-rt-ink sm:text-[2.9rem]">
-          <RevealHeading text="Bring a question. Leave with an answer." />
+        <h2 className="font-serif text-[2.25rem] leading-[1.08] font-bold tracking-tight text-balance text-rt-ink sm:text-[3rem]">
+          <RevealHeading text="Create a session. Send the join code." />
         </h2>
 
         <Reveal delay={0.12}>
-          <p className="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-rt-ink-muted">
-            Create a session, send the code, and run your next decision at a table where everyone
-            gets a seat and the outcome is written down.
+          <p className="mx-auto mt-5 max-w-xl text-[16.5px] leading-relaxed text-rt-ink-muted">
+            Write the questions you need answered, share the code, and run the meeting at a table
+            where every seat votes and the outcome is already written down.
           </p>
         </Reveal>
 
@@ -66,7 +64,7 @@ export function FinalCta() {
             ) : (
               <>
                 <Link to="/signup" className={`${ctaPrimary} px-6`}>
-                  Create your account
+                  Create an account
                 </Link>
                 <Link to="/login" className={`${ctaGhost} px-6`}>
                   Log in

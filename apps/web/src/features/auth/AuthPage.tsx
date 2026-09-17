@@ -271,10 +271,11 @@ export function AuthPage({ activeTab }: AuthPageProps) {
           <span className="text-xl font-bold text-rt-ink">RoundTable</span>
         </div>
         <h1 className="max-w-md font-serif text-3xl font-bold text-rt-ink lg:text-4xl">
-          Sessions that end in a decision, not a doc.
+          Every question leaves with an answer.
         </h1>
         <p className="max-w-sm font-serif text-sm text-rt-secondary-deep">
-          Bring the team onto one board, vote once, and walk away with the answers written down.
+          Write the agenda, put ideas on a shared pinboard, vote once, and leave with the recap
+          already written down.
         </p>
       </div>
 

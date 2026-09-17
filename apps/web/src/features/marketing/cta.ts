@@ -9,6 +9,6 @@ export const eyebrow =
   'text-[11px] font-semibold tracking-[0.18em] text-rt-secondary-deep uppercase';
 
 export const sectionHeading =
-  'mt-4 font-serif text-[2rem] leading-[1.12] font-bold tracking-tight text-rt-ink sm:text-[2.6rem]';
+  'mt-4 font-serif text-[2.05rem] leading-[1.1] font-bold tracking-tight text-rt-ink sm:text-[2.75rem]';
 
 export const sectionBody = 'mt-5 text-[15.5px] leading-relaxed text-rt-ink-muted';

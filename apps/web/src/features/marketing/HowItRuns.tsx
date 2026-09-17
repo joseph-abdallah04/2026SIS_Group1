@@ -1,94 +1,188 @@
-import { motion, useReducedMotion, useScroll, useSpring, useTransform } from 'motion/react';
-import { useRef } from 'react';
+import { AnimatePresence, motion, useMotionValueEvent, useReducedMotion, useScroll } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
 
 import { eyebrow, sectionBody, sectionHeading } from './cta';
 import { Reveal } from './motion';
+import { FILM_SCENES } from './SessionFilm';
 
-const STEPS = [
-  {
-    title: 'Write the agenda',
-    body: 'A session is a focus plus an ordered list of questions. Whoever creates it leads it, and can edit or reorder anything right up until the room opens.',
-  },
-  {
-    title: 'Fill the room',
-    body: 'Share a join code or link. Everyone waits in a lobby where you can see exactly who has arrived, and the session starts for all of them at once.',
-  },
-  {
-    title: 'Talk it through',
-    body: 'Voice connects the moment the session begins, with a live speaking indicator so you always know who has the floor. No separate call to organise.',
-  },
-  {
-    title: 'Propose, out loud and on the board',
-    body: 'Sticky notes, freehand sketches and diagrams land on one shared pinboard in real time. React to what you like, or extend someone else\u2019s idea into your own.',
-  },
-  {
-    title: 'Vote, once',
-    body: 'The leader shortlists the strongest proposals. Everyone gets a single private vote, and when the last one lands the winner is recorded as the answer.',
-  },
-  {
-    title: 'Leave with the recap',
-    body: 'End the session and every question is paired with the proposal that won it. It stays on your dashboard for anyone who was in the room.',
-  },
-];
+const EASE = [0.22, 1, 0.36, 1] as const;
 
-export function HowItRuns() {
-  const reduce = useReducedMotion();
-  const ref = useRef<HTMLOListElement>(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ['start 65%', 'end 75%'] });
-  const smooth = useSpring(scrollYProgress, { stiffness: 90, damping: 24, mass: 0.4 });
-  const scaleY = useTransform(smooth, (value) => (reduce ? 1 : value));
+function useDesktopFilm() {
+  const [desktop, setDesktop] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : false,
+  );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(min-width: 1024px)');
+    const sync = () => setDesktop(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  return desktop;
+}
+
+function Intro() {
+  return (
+    <>
+      <p className={eyebrow}>How a session runs</p>
+      <h2 className={sectionHeading}>A session is an agenda you work through live.</h2>
+      <p className={sectionBody}>
+        The leader writes the questions before the room opens. After that, every question follows
+        the same path: discuss on the pinboard, shortlist, vote. The winning proposal is stored as
+        the answer. When the session ends, that list is the recap.
+      </p>
+    </>
+  );
+}
+
+function FilmStage({ scene }: { scene: number }) {
+  const entry = FILM_SCENES[scene];
+  if (!entry) return null;
+  const Visual = entry.Visual;
 
   return (
+    <div className="relative min-h-[34rem]">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={entry.title}
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -14, scale: 0.99 }}
+          transition={{ duration: 0.4, ease: EASE }}
+        >
+          <Visual active />
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function HowItRunsStacked({ animate }: { animate: boolean }) {
+  return (
     <section id="how-it-runs" className="scroll-mt-20 border-t border-rt-secondary/15 py-24">
-      <div className="mx-auto grid max-w-6xl gap-14 px-6 lg:grid-cols-[0.85fr_1.15fr] lg:gap-20">
-        <div className="lg:sticky lg:top-28 lg:self-start">
+      <div className="mx-auto max-w-6xl px-6">
+        {animate ? (
           <Reveal>
-            <p className={eyebrow}>How a session runs</p>
-            <h2 className={sectionHeading}>Six steps, and the same six every time.</h2>
-            <p className={sectionBody}>
-              The value of a round table is that nobody has to negotiate the process. RoundTable
-              fixes the shape of the meeting so the only thing up for debate is the question in
-              front of you.
-            </p>
+            <Intro />
           </Reveal>
-        </div>
+        ) : (
+          <Intro />
+        )}
 
-        <ol ref={ref} className="relative pl-12">
-          <div
-            aria-hidden="true"
-            className="absolute top-2 bottom-2 left-[15px] w-px bg-rt-secondary/15"
-          />
-          <motion.div
-            aria-hidden="true"
-            className="rt-landing-phase-line absolute top-2 bottom-2 left-[15px] w-px origin-top"
-            style={{ scaleY }}
-          />
-
-          {STEPS.map((step, index) => (
-            <Reveal
-              as="li"
-              key={step.title}
-              delay={index * 0.04}
-              className="relative pb-11 last:pb-0"
-            >
-              <motion.span
-                aria-hidden="true"
-                initial={reduce ? false : { scale: 0.4 }}
-                whileInView={{ scale: 1 }}
-                viewport={{ once: true, amount: 0.8 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                className="absolute top-0.5 -left-12 flex h-8 w-8 items-center justify-center rounded-full border border-rt-secondary/35 bg-white font-serif text-[13px] font-bold text-rt-secondary-deep shadow-sm"
+        <ol className="mt-16 space-y-16">
+          {FILM_SCENES.map((step, index) => {
+            const Visual = step.Visual;
+            return (
+              <li
+                key={step.title}
+                className="grid items-center gap-8 lg:grid-cols-2 lg:gap-14"
               >
-                {index + 1}
-              </motion.span>
-              <h3 className="font-serif text-[19px] font-bold text-rt-ink">{step.title}</h3>
-              <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-rt-ink-muted">
-                {step.body}
-              </p>
-            </Reveal>
-          ))}
+                <div>
+                  <p className="font-serif text-[13px] font-bold text-rt-secondary-deep">
+                    {String(index + 1).padStart(2, '0')}
+                  </p>
+                  <h3 className="mt-2 font-serif text-[1.45rem] font-bold text-rt-ink">
+                    {step.title}
+                  </h3>
+                  <p className="mt-3 max-w-md text-[15px] leading-relaxed text-rt-ink-muted">
+                    {step.body}
+                  </p>
+                </div>
+                {animate ? (
+                  <Reveal delay={0.08}>
+                    <Visual active />
+                  </Reveal>
+                ) : (
+                  <Visual active />
+                )}
+              </li>
+            );
+          })}
         </ol>
       </div>
     </section>
   );
+}
+
+function HowItRunsFilm() {
+  const ref = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] });
+  const [scene, setScene] = useState(0);
+
+  useMotionValueEvent(scrollYProgress, 'change', (value) => {
+    const next = Math.min(
+      FILM_SCENES.length - 1,
+      Math.max(0, Math.floor(value * FILM_SCENES.length)),
+    );
+    setScene((present) => (present === next ? present : next));
+  });
+
+  return (
+    <section id="how-it-runs" ref={ref} className="relative h-[360vh] scroll-mt-20">
+      <div className="sticky top-16 flex min-h-[calc(100svh-4rem)] items-center border-t border-rt-secondary/15 bg-[#f7f4ee]">
+        <div className="mx-auto grid w-full max-w-6xl items-center gap-12 px-6 py-10 lg:grid-cols-[0.88fr_1.12fr] lg:gap-16">
+          <div>
+            <p className={eyebrow}>How a session runs</p>
+            <h2 className={sectionHeading}>A session is an agenda you work through live.</h2>
+            <p className={sectionBody}>
+              Scroll through the meeting. The shape does not change: agenda, lobby, pinboard, vote,
+              recap.
+            </p>
+
+            <div className="relative mt-10 min-h-[13.5rem]">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={FILM_SCENES[scene]?.title ?? scene}
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.35, ease: EASE }}
+                >
+                  <p className="font-serif text-[13px] font-bold text-rt-secondary-deep">
+                    {String(scene + 1).padStart(2, '0')} /{' '}
+                    {String(FILM_SCENES.length).padStart(2, '0')}
+                  </p>
+                  <h3 className="mt-3 font-serif text-[1.65rem] leading-tight font-bold text-rt-ink">
+                    {FILM_SCENES[scene]?.title}
+                  </h3>
+                  <p className="mt-3 max-w-md text-[15.5px] leading-relaxed text-rt-ink-muted">
+                    {FILM_SCENES[scene]?.body}
+                  </p>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            <div className="mt-8 flex gap-1.5" aria-hidden="true">
+              {FILM_SCENES.map((step, index) => (
+                <span
+                  key={step.title}
+                  className={`h-1 rounded-full transition-[width,background-color] duration-300 ${
+                    index === scene ? 'w-9 bg-rt-secondary-deep' : 'w-3 bg-rt-secondary/25'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+
+          <FilmStage scene={scene} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function HowItRuns() {
+  const reduce = useReducedMotion();
+  const desktop = useDesktopFilm();
+
+  if (reduce || !desktop) {
+    return <HowItRunsStacked animate={!reduce} />;
+  }
+
+  return <HowItRunsFilm />;
 }
