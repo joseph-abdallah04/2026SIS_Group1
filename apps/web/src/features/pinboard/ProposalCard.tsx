@@ -49,6 +49,7 @@ import {
   STICKY_NOTE_PADDING,
 } from '../tools/sticky/stickyPresentation';
 import { StickyText } from '../tools/sticky/StickyText';
+import { ProposalPreview } from './ProposalPreview';
 import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
@@ -363,11 +364,14 @@ function CardMedia({ children }: { children: ReactNode }) {
 }
 
 /**
- * Full diagram preview (F21): every shape, arrow, label, size and style the
- * editor produced. Geometry, palettes, routing and outlines all come from
- * `@roundtable/shared`, so the board cannot drift from the editor.
+ * Everything a studio canvas holds (F21): every shape, arrow, label, size and
+ * style the editor produced. Geometry, palettes, routing and outlines all come
+ * from `@roundtable/shared`, so the board cannot drift from the editor.
+ *
+ * Drawn into whatever box it is given — the card's plate, or the preview's
+ * larger one — keeping its own shape within it, so both show the same canvas.
  */
-function DiagramBody({ item }: { item: BoardItem }) {
+function DiagramArtwork({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
   const { nodes, edges } = item.artifactJson;
   const ink = item.artifactJson.ink ?? [];
@@ -602,7 +606,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
   }
 
   return (
-    <CardMedia>
+    <>
       {/* A studio canvas is empty only when it holds nothing at all — a sketch,
           a line, a table or an arrow is as much a diagram as a shape is. */}
       {nodes.length === 0 &&
@@ -668,7 +672,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
           })}
         </svg>
       )}
-    </CardMedia>
+    </>
   );
 }
 
@@ -694,11 +698,38 @@ export function ProposalCard({
   const svg = artifact.type === 'drawing' ? artifact.svg.trim() : '';
   const drawingSrc = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : null;
 
+  // The card's drawing, and its byline, as pieces: the preview shows the same
+  // two, so a canvas opened from a card is that card, larger.
+  const artwork =
+    artifact.type === 'diagram' ? (
+      <DiagramArtwork item={item} />
+    ) : artifact.type === 'drawing' && drawingSrc ? (
+      <img
+        src={drawingSrc}
+        alt={`Drawing by ${item.authorName}`}
+        loading="lazy"
+        // Images are natively draggable, which would hijack a card drag.
+        draggable={false}
+        className="absolute inset-0 h-full w-full object-contain p-2.5"
+      />
+    ) : null;
+  // A drawing proposed before strokes were stored has nothing to draw, and so
+  // nothing to open: the plate stays, the way into the preview does not.
+  const hasPlate = artifact.type === 'diagram' || artifact.type === 'drawing';
+  const foot = (
+    <CardFoot
+      item={item}
+      viewerId={viewerId}
+      isOwnedByViewer={isOwnedByViewer}
+      isAuthorLeader={isAuthorLeader}
+    />
+  );
+
   return (
     // Always wrapped, highlighted or not: toggling the wrapper in and out would
     // remount the card and make drawings refetch their image mid-animation.
     <div
-      className={isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}
+      className={`group/card ${isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}`}
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
       {/* A sticky is bare paper: no outline, square corners, and a square
@@ -742,28 +773,18 @@ export function ProposalCard({
           </div>
         ) : null}
 
-        {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}
-
-        {artifact.type === 'drawing' ? (
+        {hasPlate ? (
           <CardMedia>
-            {drawingSrc ? (
-              <img
-                src={drawingSrc}
-                alt={`Drawing by ${item.authorName}`}
-                loading="lazy"
-                // Images are natively draggable, which would hijack a card drag.
-                draggable={false}
-                className="absolute inset-0 h-full w-full object-contain p-2.5"
-              />
+            {artwork}
+            {/* A canvas on a card is a glance at it; this opens it at a size it
+                can be read at. Left off where the card is itself a button, as
+                on a ballot, which has nothing to press inside it. */}
+            {interactive && artwork ? (
+              <ProposalPreview item={item} artwork={artwork} byline={foot} />
             ) : null}
           </CardMedia>
         ) : null}
-        <CardFoot
-          item={item}
-          viewerId={viewerId}
-          isOwnedByViewer={isOwnedByViewer}
-          isAuthorLeader={isAuthorLeader}
-        />
+        {foot}
       </article>
     </div>
   );
