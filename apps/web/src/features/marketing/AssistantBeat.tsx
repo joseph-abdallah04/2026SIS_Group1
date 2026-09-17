@@ -1,15 +1,17 @@
 import { motion, useInView, useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
+import type { StickyColor } from '@roundtable/shared';
 
+import { ArtifactCard } from '../assistant/ArtifactCard';
+import '../assistant/assistant.css';
 import { eyebrow, sectionBody, sectionHeading } from './cta';
 
 const REPLY =
   'Three things teams usually fix first: accounts ready at offer, a workspace that is not empty on day one, and a named buddy. Want these as stickies?';
 
-const SUGGESTIONS = [
-  'Provision accounts the day the offer is signed',
-  'Seed the workspace with real sample data',
-  'Name a buddy before the start date',
+const DRAFTS: { text: string; color: StickyColor }[] = [
+  { text: 'Provision accounts the day the offer is signed', color: 'yellow' },
+  { text: 'Seed the workspace with real sample data', color: 'blue' },
 ];
 
 const POINTS = [
@@ -51,69 +53,90 @@ function StreamedReply() {
   const done = visible.length >= REPLY.length;
 
   return (
-    <p ref={ref} className="text-[12.5px] leading-relaxed text-rt-ink">
-      <span className="sr-only">{REPLY}</span>
-      <span aria-hidden="true">
-        {visible}
-        {done ? null : (
-          <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-rt-secondary-deep" />
-        )}
-      </span>
+    <p ref={ref} className="rt-assistant-reply">
+      {visible}
+      {done ? null : <span className="rt-caret ml-0.5">▍</span>}
     </p>
   );
 }
 
-function AssistantPanel() {
+function AssistantMock() {
   const reduce = useReducedMotion();
 
   return (
-    <div className="rt-landing-panel overflow-hidden rounded-2xl">
-      <div className="flex items-center gap-2.5 border-b border-rt-secondary/15 bg-white/70 px-4 py-3">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-rt-secondary/25 text-[11px] font-bold text-rt-secondary-deep">
-          AI
-        </span>
-        <p className="text-[12px] font-semibold text-rt-ink">Your assistant</p>
-        <span className="ml-auto rounded-full bg-rt-cool-tint px-2 py-0.5 text-[9px] font-semibold tracking-[0.1em] text-rt-ink-muted uppercase">
-          Private to you
-        </span>
-      </div>
+    <div className="rt-landing-assistant-stage">
+      <div className="rt-landing-board rt-landing-assistant-board" aria-hidden="true" />
+      <div
+        className="rt-assistant rt-landing-assistant is-open is-revealed"
+        aria-hidden="true"
+        inert
+      >
+        <div className="rt-assistant-shell">
+          <div className="rt-assistant-rail">
+            <div className="rt-assistant-body">
+              <header className="rt-assistant-header">
+                <div className="min-w-0 flex-1">
+                  <p className="rt-assistant-kicker">Assistant</p>
+                  <p className="rt-assistant-meta">Private to you</p>
+                </div>
+                <span className="rt-assistant-icon-btn" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 20 20"
+                    className="size-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
+                  </svg>
+                </span>
+              </header>
 
-      <div className="space-y-3 p-4">
-        <div className="ml-auto w-fit max-w-[80%] rounded-2xl rounded-br-sm bg-rt-secondary/20 px-3.5 py-2 text-[12.5px] text-rt-ink">
-          What are we missing on this question?
+              <div className="rt-assistant-feed">
+                <div className="flex justify-end">
+                  <p className="rt-assistant-user">What are we missing on this question?</p>
+                </div>
+                <StreamedReply />
+                {DRAFTS.map((draft, index) => (
+                  <motion.div
+                    key={draft.text}
+                    initial={reduce ? false : { y: 16 }}
+                    whileInView={{ y: 0 }}
+                    viewport={{ once: true, amount: 0.4 }}
+                    transition={{
+                      delay: 1.55 + index * 0.14,
+                      duration: 0.45,
+                      ease: [0.22, 1, 0.36, 1],
+                    }}
+                  >
+                    <ArtifactCard
+                      artifact={{ type: 'sticky', text: draft.text, color: draft.color }}
+                      propose="idle"
+                      canPropose
+                      onPropose={() => {}}
+                    />
+                  </motion.div>
+                ))}
+              </div>
+
+              <div className="rt-assistant-composer">
+                <div className="flex items-end gap-2">
+                  <textarea
+                    rows={1}
+                    placeholder="Ask the assistant…"
+                    disabled
+                    readOnly
+                    className="rt-assistant-input"
+                    value=""
+                  />
+                  <button type="button" disabled className="rt-assistant-send">
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <div className="max-w-[92%] rounded-2xl rounded-bl-sm border border-rt-secondary/15 bg-white px-3.5 py-2.5">
-          <StreamedReply />
-        </div>
-
-        <div className="space-y-2 pt-1">
-          {SUGGESTIONS.map((suggestion, index) => (
-            <motion.div
-              key={suggestion}
-              initial={reduce ? false : { y: 16, scale: 0.96 }}
-              whileInView={{ y: 0, scale: 1 }}
-              viewport={{ once: true, amount: 0.5 }}
-              transition={{ delay: 1.55 + index * 0.14, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-              className="rt-landing-sticky flex items-center gap-2 bg-[#FDF1DC] px-3 py-2 text-[11.5px] font-medium text-rt-ink"
-            >
-              <span className="flex-1">{suggestion}</span>
-            </motion.div>
-          ))}
-        </div>
-
-        <motion.div
-          initial={reduce ? false : { y: 10 }}
-          whileInView={{ y: 0 }}
-          viewport={{ once: true, amount: 0.5 }}
-          transition={{ delay: 2.05, duration: 0.4 }}
-          className="flex items-center justify-between pt-1"
-        >
-          <p className="text-[10.5px] text-rt-ink-faint">Drafts stay in this panel</p>
-          <span className="rounded-full bg-rt-secondary px-3 py-1.5 text-[11px] font-semibold text-rt-ink shadow-sm">
-            Propose to board
-          </span>
-        </motion.div>
       </div>
     </div>
   );
@@ -144,7 +167,7 @@ export function AssistantBeat() {
         </div>
 
         <div className="lg:sticky lg:top-28">
-          <AssistantPanel />
+          <AssistantMock />
         </div>
       </div>
     </section>

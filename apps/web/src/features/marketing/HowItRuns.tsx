@@ -32,9 +32,9 @@ function Intro() {
       <p className={eyebrow}>How a session runs</p>
       <h2 className={sectionHeading}>A session is an agenda you work through live.</h2>
       <p className={sectionBody}>
-        The leader writes the questions before the room opens. After that, every question follows
-        the same path: discuss on the pinboard, shortlist, vote. The winning proposal is stored as
-        the answer. When the session ends, that list is the recap.
+        The leader writes the questions, and can extend the agenda at any point. Every question
+        follows the same path: discuss on the pinboard, shortlist, vote. The winning proposal is
+        stored as the answer. When the session ends, that list is the recap.
       </p>
     </>
   );
@@ -124,7 +124,7 @@ function HowItRunsFilm() {
 
   return (
     <section id="how-it-runs" ref={ref} className="relative h-[360vh] scroll-mt-20">
-      <div className="sticky top-16 flex min-h-[calc(100svh-4rem)] items-center border-t border-rt-secondary/15 bg-[#f7f4ee]">
+      <div className="sticky top-16 flex min-h-[calc(100svh-4rem)] items-center border-t border-rt-secondary/15">
         <div className="mx-auto grid w-full max-w-6xl items-center gap-12 px-6 py-10 lg:grid-cols-[0.88fr_1.12fr] lg:gap-16">
           <div>
             <p className={eyebrow}>How a session runs</p>

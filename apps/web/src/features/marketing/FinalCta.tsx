@@ -36,8 +36,7 @@ export function FinalCta() {
   const signedIn = isSignedIn();
 
   return (
-    <section className="relative overflow-hidden border-t border-rt-secondary/15">
-      <div className="rt-landing-glow" aria-hidden="true" />
+    <section className="relative border-t border-rt-secondary/15">
 
       <div className="relative mx-auto max-w-3xl px-6 py-28 text-center">
         <div className="mb-10">

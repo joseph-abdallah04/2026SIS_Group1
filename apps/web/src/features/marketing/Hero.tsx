@@ -1,5 +1,5 @@
 import { motion, useReducedMotion, useScroll, useTransform } from 'motion/react';
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ctaGhost, ctaPrimary, eyebrow } from './cta';
@@ -49,23 +49,8 @@ export function Hero() {
     setReady(true);
   }, []);
 
-  const onMove = (event: MouseEvent<HTMLElement>) => {
-    if (reduce || !ref.current) return;
-    const box = ref.current.getBoundingClientRect();
-    ref.current.style.setProperty(
-      '--glow-x',
-      `${((event.clientX - box.left) / box.width) * 100}%`,
-    );
-    ref.current.style.setProperty(
-      '--glow-y',
-      `${((event.clientY - box.top) / box.height) * 100}%`,
-    );
-  };
-
   return (
-    <section ref={ref} onMouseMove={onMove} className="relative overflow-hidden">
-      <div className="rt-landing-glow" aria-hidden="true" />
-      <div className="rt-landing-grain" aria-hidden="true" />
+    <section ref={ref} className="relative overflow-hidden">
 
       <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-6 pt-16 pb-16 lg:grid-cols-[1.05fr_1fr] lg:gap-12 lg:pt-24 lg:pb-24">
         <div className="max-w-xl">

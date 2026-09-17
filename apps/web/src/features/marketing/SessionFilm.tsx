@@ -186,7 +186,7 @@ function RecapScene({ active: _active }: { active: boolean }) {
 export const FILM_SCENES = [
   {
     title: 'Write the agenda',
-    body: 'Create a session with a focus and an ordered list of questions. You are the leader for that session, and you can still edit the agenda until you start the room.',
+    body: 'Create a session with a focus and an ordered list of questions. You are the leader for that session, and you can extend the agenda at any point.',
     Visual: AgendaScene,
   },
   {
