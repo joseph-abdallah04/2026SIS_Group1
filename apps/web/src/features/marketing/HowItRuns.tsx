@@ -55,7 +55,7 @@ function FilmStage({ scene }: { scene: number }) {
           exit={{ opacity: 0, y: -14, scale: 0.99 }}
           transition={{ duration: 0.4, ease: EASE }}
         >
-          <Visual active />
+          <Visual />
         </motion.div>
       </AnimatePresence>
     </div>
@@ -95,10 +95,10 @@ function HowItRunsStacked({ animate }: { animate: boolean }) {
                 </div>
                 {animate ? (
                   <Reveal delay={0.08}>
-                    <Visual active />
+                    <Visual />
                   </Reveal>
                 ) : (
-                  <Visual active />
+                  <Visual />
                 )}
               </li>
             );

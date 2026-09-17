@@ -7,9 +7,7 @@ import { DEMO, DEMO_QUESTIONS, DEMO_SEATS, DEMO_SHORTLIST } from './story';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type FilmSceneProps = { active: boolean };
-
-function AgendaScene({ active }: FilmSceneProps) {
+function AgendaScene() {
   const reduce = useReducedMotion();
   const last =
     DEMO_QUESTIONS[DEMO_QUESTIONS.length - 1]?.text ??
@@ -21,7 +19,6 @@ function AgendaScene({ active }: FilmSceneProps) {
       setTyped(last.length);
       return;
     }
-    if (!active) return;
 
     const timer = window.setInterval(() => {
       setTyped((count) => {
@@ -33,7 +30,7 @@ function AgendaScene({ active }: FilmSceneProps) {
       });
     }, 22);
     return () => window.clearInterval(timer);
-  }, [active, last.length, reduce]);
+  }, [last.length, reduce]);
 
   return (
     <ProductFrame title="New session" meta="Draft — only you can see this yet" badge="Agenda">
@@ -69,9 +66,7 @@ function AgendaScene({ active }: FilmSceneProps) {
   );
 }
 
-function LobbyScene({ active }: FilmSceneProps) {
-  if (!active) return null;
-
+function LobbyScene() {
   return (
     <LandingLobby
       seats={DEMO_SEATS}
@@ -81,7 +76,7 @@ function LobbyScene({ active }: FilmSceneProps) {
   );
 }
 
-function DiscussScene({ active }: FilmSceneProps) {
+function DiscussScene() {
   const reduce = useReducedMotion();
   const notes = [
     { text: 'Provision accounts at offer stage', author: 'Mira', color: '#FDF1DC', rotate: -4 },
@@ -92,8 +87,6 @@ function DiscussScene({ active }: FilmSceneProps) {
       rotate: 3,
     },
   ];
-
-  if (!active) return null;
 
   return (
     <ProductFrame title={DEMO.currentQuestion} meta="The call is live" badge="Discussion">
@@ -129,9 +122,8 @@ function DiscussScene({ active }: FilmSceneProps) {
   );
 }
 
-function VoteScene({ active }: FilmSceneProps) {
+function VoteScene() {
   const reduce = useReducedMotion();
-  if (!active) return null;
 
   return (
     <ProductFrame title={DEMO.currentQuestion} meta="Shortlist · 3 of 7 proposals" badge="Voting">
@@ -169,9 +161,7 @@ function VoteScene({ active }: FilmSceneProps) {
   );
 }
 
-function RecapScene({ active }: FilmSceneProps) {
-  if (!active) return null;
-
+function RecapScene() {
   return (
     <ProductFrame title={DEMO.title} meta={`${DEMO_SEATS.length} people · ended`} badge="Recap">
       <ol className="divide-y divide-rt-secondary/12 px-5">

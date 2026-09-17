@@ -69,7 +69,7 @@ function AssistantMock() {
       <div
         className="rt-assistant rt-landing-assistant is-open is-revealed"
         aria-hidden="true"
-        inert
+        {...{ inert: '' }}
       >
         <div className="rt-assistant-shell">
           <div className="rt-assistant-rail">
