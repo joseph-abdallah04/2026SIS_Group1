@@ -16,6 +16,7 @@ import { disconnectSocket } from '../lib/socket';
 // `App.tsx` keeps importing every page from one barrel.
 export { LoginPage } from '../features/auth/LoginPage';
 export { SignupPage } from '../features/auth/SignupPage';
+export { LandingPage } from '../features/marketing/LandingPage';
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   draft: 'Draft',

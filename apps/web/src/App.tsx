@@ -1,12 +1,19 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 
 import { CreateSessionPage } from './features/sessions/CreateSessionPage';
 import { EditSessionPage } from './features/sessions/EditSessionPage';
 import { JoinSessionPage } from './features/sessions/JoinSessionPage';
 import { SessionRouter } from './features/sessions/SessionRouter';
 import { RequireAuth } from './lib/auth';
-import { DashboardPage, LoginPage, NotFoundPage, SettingsPage, SignupPage } from './pages';
+import {
+  DashboardPage,
+  LandingPage,
+  LoginPage,
+  NotFoundPage,
+  SettingsPage,
+  SignupPage,
+} from './pages';
 
 const CreativeToolsWorkbench = import.meta.env.DEV
   ? lazy(() =>
@@ -42,7 +49,7 @@ export default function App() {
           <Route path="/join/:code" element={<JoinSessionPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
