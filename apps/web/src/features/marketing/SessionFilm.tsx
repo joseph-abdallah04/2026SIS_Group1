@@ -7,7 +7,9 @@ import { DEMO, DEMO_QUESTIONS, DEMO_SEATS, DEMO_SHORTLIST } from './story';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-function AgendaScene({ active }: { active: boolean }) {
+type FilmSceneProps = { active: boolean };
+
+function AgendaScene({ active }: FilmSceneProps) {
   const reduce = useReducedMotion();
   const last =
     DEMO_QUESTIONS[DEMO_QUESTIONS.length - 1]?.text ??
@@ -67,7 +69,9 @@ function AgendaScene({ active }: { active: boolean }) {
   );
 }
 
-function LobbyScene({ active: _active }: { active: boolean }) {
+function LobbyScene({ active }: FilmSceneProps) {
+  if (!active) return null;
+
   return (
     <LandingLobby
       seats={DEMO_SEATS}
@@ -77,7 +81,7 @@ function LobbyScene({ active: _active }: { active: boolean }) {
   );
 }
 
-function DiscussScene({ active: _active }: { active: boolean }) {
+function DiscussScene({ active }: FilmSceneProps) {
   const reduce = useReducedMotion();
   const notes = [
     { text: 'Provision accounts at offer stage', author: 'Mira', color: '#FDF1DC', rotate: -4 },
@@ -88,6 +92,8 @@ function DiscussScene({ active: _active }: { active: boolean }) {
       rotate: 3,
     },
   ];
+
+  if (!active) return null;
 
   return (
     <ProductFrame title={DEMO.currentQuestion} meta="The call is live" badge="Discussion">
@@ -123,8 +129,9 @@ function DiscussScene({ active: _active }: { active: boolean }) {
   );
 }
 
-function VoteScene({ active: _active }: { active: boolean }) {
+function VoteScene({ active }: FilmSceneProps) {
   const reduce = useReducedMotion();
+  if (!active) return null;
 
   return (
     <ProductFrame title={DEMO.currentQuestion} meta="Shortlist · 3 of 7 proposals" badge="Voting">
@@ -162,7 +169,9 @@ function VoteScene({ active: _active }: { active: boolean }) {
   );
 }
 
-function RecapScene({ active: _active }: { active: boolean }) {
+function RecapScene({ active }: FilmSceneProps) {
+  if (!active) return null;
+
   return (
     <ProductFrame title={DEMO.title} meta={`${DEMO_SEATS.length} people · ended`} badge="Recap">
       <ol className="divide-y divide-rt-secondary/12 px-5">
