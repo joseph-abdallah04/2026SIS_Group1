@@ -1,4 +1,4 @@
-import { motion, useInView, useReducedMotion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import type { StickyColor } from '@roundtable/shared';
 
@@ -29,14 +29,12 @@ const POINTS = [
   },
 ];
 
-function StreamedReply() {
+function AssistantMock({ play }: { play: boolean }) {
   const reduce = useReducedMotion();
-  const ref = useRef<HTMLParagraphElement>(null);
-  const inView = useInView(ref, { once: true, amount: 0.6 });
   const [shown, setShown] = useState(0);
 
   useEffect(() => {
-    if (!inView || reduce) return;
+    if (!play || reduce) return;
     const timer = window.setInterval(() => {
       setShown((count) => {
         if (count >= REPLY.length) {
@@ -47,21 +45,10 @@ function StreamedReply() {
       });
     }, 16);
     return () => window.clearInterval(timer);
-  }, [inView, reduce]);
+  }, [play, reduce]);
 
   const visible = reduce ? REPLY : REPLY.slice(0, shown);
-  const done = visible.length >= REPLY.length;
-
-  return (
-    <p ref={ref} className="rt-assistant-reply">
-      {visible}
-      {done ? null : <span className="rt-caret ml-0.5">▍</span>}
-    </p>
-  );
-}
-
-function AssistantMock() {
-  const reduce = useReducedMotion();
+  const replyDone = reduce || visible.length >= REPLY.length;
 
   return (
     <div className="rt-landing-assistant-stage">
@@ -96,27 +83,31 @@ function AssistantMock() {
                 <div className="flex justify-end">
                   <p className="rt-assistant-user">What are we missing on this question?</p>
                 </div>
-                <StreamedReply />
-                {DRAFTS.map((draft, index) => (
-                  <motion.div
-                    key={draft.text}
-                    initial={reduce ? false : { y: 16 }}
-                    whileInView={{ y: 0 }}
-                    viewport={{ once: true, amount: 0.4 }}
-                    transition={{
-                      delay: 1.55 + index * 0.14,
-                      duration: 0.45,
-                      ease: [0.22, 1, 0.36, 1],
-                    }}
-                  >
-                    <ArtifactCard
-                      artifact={{ type: 'sticky', text: draft.text, color: draft.color }}
-                      propose="idle"
-                      canPropose
-                      onPropose={() => {}}
-                    />
-                  </motion.div>
-                ))}
+                <p className="rt-assistant-reply">
+                  {visible}
+                  {replyDone ? null : <span className="rt-caret ml-0.5">▍</span>}
+                </p>
+                {replyDone
+                  ? DRAFTS.map((draft, index) => (
+                      <motion.div
+                        key={draft.text}
+                        initial={reduce ? false : { y: 14, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{
+                          delay: reduce ? 0 : 0.12 + index * 0.16,
+                          duration: 0.42,
+                          ease: [0.22, 1, 0.36, 1],
+                        }}
+                      >
+                        <ArtifactCard
+                          artifact={{ type: 'sticky', text: draft.text, color: draft.color }}
+                          propose="idle"
+                          canPropose
+                          onPropose={() => {}}
+                        />
+                      </motion.div>
+                    ))
+                  : null}
               </div>
 
               <div className="rt-assistant-composer">
@@ -143,8 +134,33 @@ function AssistantMock() {
 }
 
 export function AssistantBeat() {
+  const reduce = useReducedMotion();
+  const section = useRef<HTMLElement>(null);
+  const [play, setPlay] = useState(false);
+
+  useEffect(() => {
+    if (reduce) return;
+    const node = section.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setPlay(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.2 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [reduce]);
+
   return (
-    <section id="assistant" className="scroll-mt-20 border-t border-rt-secondary/15 py-24">
+    <section
+      id="assistant"
+      ref={section}
+      className="scroll-mt-20 border-t border-rt-secondary/15 py-24"
+    >
       <div className="mx-auto grid max-w-6xl items-start gap-14 px-6 lg:grid-cols-2 lg:gap-20">
         <div className="max-w-lg">
           <p className={eyebrow}>Optional assistant</p>
@@ -167,7 +183,7 @@ export function AssistantBeat() {
         </div>
 
         <div className="lg:sticky lg:top-28">
-          <AssistantMock />
+          <AssistantMock play={reduce || play} />
         </div>
       </div>
     </section>

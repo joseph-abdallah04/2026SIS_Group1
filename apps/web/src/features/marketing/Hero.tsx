@@ -59,7 +59,7 @@ export function Hero() {
           </Reveal>
 
           <h1 className="mt-5 font-serif text-[2.7rem] leading-[1.05] font-bold tracking-tight text-balance text-rt-ink sm:text-[3.55rem] lg:text-[3.85rem]">
-            <RevealHeading when="mount" text="Every question leaves with an answer." />
+            <RevealHeading when="mount" text="Every question ends in an answer." />
           </h1>
 
           <Reveal when="mount" delay={0.12}>

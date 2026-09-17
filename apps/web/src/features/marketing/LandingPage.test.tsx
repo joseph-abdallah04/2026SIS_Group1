@@ -52,7 +52,7 @@ describe('LandingPage', () => {
     renderLanding();
 
     expect(
-      screen.getByRole('heading', { name: /every question leaves with an answer/i }),
+      screen.getByRole('heading', { name: /every question ends in an answer/i }),
     ).toBeInTheDocument();
 
     const login = screen.getAllByRole('link', { name: /log in/i });
