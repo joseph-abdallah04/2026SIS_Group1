@@ -31,7 +31,7 @@ interface RoundTableSceneProps {
  */
 export function RoundTableScene({
   seats,
-  joinCode = 'RT-4821',
+  joinCode = DEMO.joinCode,
   showNames = false,
   stagger = false,
   className = '',

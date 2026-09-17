@@ -271,7 +271,7 @@ export function PinboardBeat() {
       </p>
       <ul className="mt-7 space-y-3.5 text-[14.5px] leading-relaxed text-rt-ink-muted">
         {[
-          'Only the author can edit or delete what they posted.',
+          'Only the author can edit what they posted. The leader can take a card off the board.',
           'React on a card when you agree, instead of saying the same thing out loud.',
           'Extend someone else’s idea to copy it into your editor, change it, and propose your own version. The original stays put.',
         ].map((item) => (

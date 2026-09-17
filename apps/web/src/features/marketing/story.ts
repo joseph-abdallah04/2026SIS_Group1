@@ -6,7 +6,7 @@
 export const DEMO = {
   title: 'Cut onboarding to one day',
   team: 'Product & platform',
-  joinCode: 'RT-4821',
+  joinCode: 'K7NP-3WQZ',
   currentQuestion: 'How do we get a new engineer productive on day one?',
 };
 

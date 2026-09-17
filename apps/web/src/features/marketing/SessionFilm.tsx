@@ -200,7 +200,7 @@ export const FILM_SCENES = [
   },
   {
     title: 'Shortlist, then vote once',
-    body: 'The leader picks the proposals worth deciding between. Everyone casts one private vote. When the last ballot is in, the winner is stored as that question’s answer.',
+    body: 'The leader picks the proposals worth deciding between. Everyone casts one private vote and can change it until the leader ends the round — or the timer does. Then the winner is stored as that question’s answer.',
     Visual: VoteScene,
   },
   {

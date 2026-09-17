@@ -1,5 +1,5 @@
 import { useReducedMotion } from 'motion/react';
-import { useRef, type MouseEvent } from 'react';
+import { useEffect, useRef, type MouseEvent } from 'react';
 
 import { AssistantBeat } from './AssistantBeat';
 import { FinalCta } from './FinalCta';
@@ -7,6 +7,7 @@ import { Hero } from './Hero';
 import { HowItRuns } from './HowItRuns';
 import { LandingFooter } from './LandingFooter';
 import { LandingNav } from './LandingNav';
+import { scrollToLandingHash } from './landingScroll';
 import { PinboardBeat } from './PinboardBeat';
 import { RecapBeat } from './RecapBeat';
 import { VotingBeat } from './VotingBeat';
@@ -15,6 +16,21 @@ import './landing.css';
 export function LandingPage() {
   const reduce = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Load/refresh with `/#voting` (the click path already scrolled; this is
+    // the case the browser cannot do itself because the ids are not in the
+    // first HTML). Auto, not smooth: a 360vh film jump from the top would
+    // otherwise animate the whole page.
+    scrollToLandingHash(window.location.hash, 'auto');
+    const onHash = () => scrollToLandingHash(window.location.hash, 'auto');
+    window.addEventListener('hashchange', onHash);
+    window.addEventListener('popstate', onHash);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('popstate', onHash);
+    };
+  }, []);
 
   const onMove = (event: MouseEvent<HTMLDivElement>) => {
     if (reduce || !rootRef.current) return;

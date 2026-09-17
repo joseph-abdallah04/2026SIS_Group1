@@ -140,7 +140,7 @@ function BallotCard() {
           transition={{ delay: 1.3, duration: 0.35 }}
           className="absolute inset-x-0 top-3 text-[11.5px] font-semibold text-rt-secondary-deep"
         >
-          All six votes are in. The winner is the answer.
+          The leader ended the vote. This is the answer.
         </motion.p>
       </div>
     </div>
@@ -167,9 +167,10 @@ export function VotingBeat() {
             leader.
           </p>
           <p className="mt-4 text-[15.5px] leading-relaxed text-rt-ink-muted">
-            You can see who still needs to vote, never what they picked. The tally stays hidden
-            until the last ballot lands, so nobody is voting with the room. Then the winning
-            proposal is written down as that question’s answer, and the session moves on.
+            The leader can see who still needs to vote, never what they picked. You can change
+            your mind until they end the round — or until the timer does. The running tally is
+            on the cards while voting is open. When they close, the winning proposal is written
+            down as that question’s answer, and they continue.
           </p>
         </div>
       </div>
