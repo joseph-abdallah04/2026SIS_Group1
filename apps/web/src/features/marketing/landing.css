@@ -1,0 +1,36 @@
+.rt-landing {
+  background: #f7f4ee;
+}
+
+.rt-landing-board {
+  background-color: #f7f4ee;
+  background-image: radial-gradient(rgba(8, 12, 21, 0.1) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.rt-landing-sticky {
+  border-radius: 2px;
+  box-shadow:
+    0 1px 0 rgba(8, 12, 21, 0.04),
+    0 12px 28px rgba(122, 106, 76, 0.14);
+}
+
+.rt-landing-scene .rt-waiting-seat-name[data-always] {
+  opacity: 1;
+  background: transparent;
+  color: var(--color-rt-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0.15rem 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-landing-pin {
+    height: auto;
+  }
+
+  .rt-landing-pin-inner {
+    position: relative;
+    min-height: 0;
+  }
+}
