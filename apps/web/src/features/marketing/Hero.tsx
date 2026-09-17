@@ -64,8 +64,8 @@ export function Hero() {
 
           <Reveal when="mount" delay={0.12}>
             <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-rt-ink-muted">
-              RoundTable is a facilitated brainstorming session. A leader writes the agenda, the team
-              joins by code, and each question is discussed live on a shared pinboard — then voted on.
+              RoundTable is a facilitated brainstorming tool. A leader writes the agenda, the team
+              joins the session, and each question is discussed live on a shared pinboard — then voted on.
               The winning proposal is stored as the answer before you move to the next question.
             </p>
           </Reveal>
