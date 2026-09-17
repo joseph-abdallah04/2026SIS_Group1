@@ -1,8 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sessionCodeSchema } from '@roundtable/shared/schemas';
 
 import { LandingPage } from './LandingPage';
+import { FILM_SCENES } from './SessionFilm';
+import { DEMO } from './story';
 
 beforeAll(() => {
   class FakeObserver {
@@ -37,6 +40,12 @@ function renderLanding() {
 describe('LandingPage', () => {
   beforeEach(() => {
     localStorage.clear();
+    window.history.replaceState(null, '', '/');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState(null, '', '/');
   });
 
   it('renders the headline and public auth links without requiring a token', () => {
@@ -86,5 +95,45 @@ describe('LandingPage', () => {
     expect(dashboard[0]).toHaveAttribute('href', '/dashboard');
     expect(screen.queryByRole('link', { name: /^log in$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /^sign up$/i })).not.toBeInTheDocument();
+  });
+
+  it('describes voting the way the ballot works, not as last-ballot-wins', () => {
+    renderLanding();
+
+    expect(
+      screen.getByText(/you can change your mind until they end the round/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/the running tally is on the cards while voting is open/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/last ballot/i)).not.toBeInTheDocument();
+    expect(FILM_SCENES[3]?.body).toMatch(/until the leader ends the round/);
+    expect(FILM_SCENES[3]?.body).not.toMatch(/last ballot/);
+  });
+
+  it('says the leader can remove a card, not that only the author can delete', () => {
+    renderLanding();
+
+    expect(
+      screen.getByText(
+        /only the author can edit what they posted\. the leader can take a card off the board/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('uses a demo join code that matches the real format', () => {
+    expect(sessionCodeSchema.safeParse(DEMO.joinCode).success).toBe(true);
+  });
+
+  it('scrolls to the section named in the URL hash', () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    window.history.replaceState(null, '', '/#voting');
+    renderLanding();
+
+    const voting = document.getElementById('voting');
+    expect(voting).not.toBeNull();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView.mock.instances).toContain(voting);
   });
 });

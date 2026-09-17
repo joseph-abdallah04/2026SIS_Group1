@@ -9,164 +9,83 @@ import {
   type MotionValue,
 } from 'motion/react';
 import { useRef, useState } from 'react';
+import type { BoardItem } from '@roundtable/shared';
 
 import { eyebrow, sectionBody, sectionHeading } from './cta';
-import { DEMO } from './story';
+import { LandingSticky } from './LandingSticky';
+import { DEMO, DEMO_FLOW_DIAGRAM, DEMO_PAIR_STICKY, DEMO_PINBOARD_STICKIES } from './story';
 
-interface Note {
-  text: string;
-  author: string;
-  color: string;
+const PREVIEW = 0.62;
+
+interface Piece {
+  item: BoardItem;
   rotate: number;
   className: string;
   at: number;
-  reactions?: string;
+  z: number;
 }
 
-const NOTES: Note[] = [
+const PIECES: Piece[] = [
   {
-    text: 'Provision accounts the day the offer is signed',
-    author: 'Mira',
-    color: '#FDF1DC',
+    item: DEMO_PINBOARD_STICKIES[0]!,
     rotate: -5,
-    className: 'left-[4%] top-[14%] w-[46%] sm:left-[6%] sm:top-[16%] sm:w-[34%]',
+    className: 'left-[4%] top-[14%] sm:left-[6%] sm:top-[16%]',
     at: -0.15,
-    reactions: '3',
+    z: 10,
   },
   {
-    text: 'One setup script, not a twelve-page wiki',
-    author: 'Alex',
-    color: '#F3EEF6',
+    item: DEMO_PINBOARD_STICKIES[2]!,
     rotate: 4,
-    className: 'right-[4%] top-[16%] w-[46%] sm:right-[7%] sm:top-[18%] sm:w-[33%]',
+    className: 'right-[4%] top-[16%] sm:right-[7%] sm:top-[18%]',
     at: 0.08,
+    z: 11,
   },
   {
-    text: 'Seed the workspace so day one is never empty',
-    author: 'Elena',
-    color: '#E9F1F3',
+    item: DEMO_PINBOARD_STICKIES[1]!,
     rotate: -3,
-    className: 'left-[5%] top-[44%] w-[46%] sm:left-[8%] sm:top-[46%] sm:w-[34%]',
+    className: 'left-[5%] top-[44%] sm:left-[8%] sm:top-[46%]',
     at: 0.24,
-    reactions: '5',
+    z: 12,
   },
   {
-    text: 'Pair on the first pull request before lunch',
-    author: 'Aisha',
-    color: '#EAF3EC',
+    item: DEMO_PAIR_STICKY,
     rotate: 6,
-    className: 'right-[5%] top-[46%] w-[44%] sm:right-[9%] sm:top-[48%] sm:w-[30%]',
+    className: 'right-[5%] top-[46%] sm:right-[9%] sm:top-[48%]',
     at: 0.4,
+    z: 13,
+  },
+  {
+    item: DEMO_FLOW_DIAGRAM,
+    rotate: 2,
+    className: 'left-[12%] top-[48%] sm:left-[16%] sm:top-[50%]',
+    at: 0.54,
+    z: 14,
   },
 ];
 
-const FLOW = ['Offer signed', 'Accounts', 'Workspace', 'Day one'];
-
-function NoteCard({ note }: { note: Note }) {
-  return (
-    <>
-      <p className="text-[12px] leading-snug font-medium text-rt-ink sm:text-[13px]">{note.text}</p>
-      <p className="mt-2.5 text-[10px] font-semibold tracking-[0.08em] text-rt-ink-faint uppercase">
-        {note.author}
-      </p>
-      {note.reactions ? (
-        <span className="absolute -right-2 -bottom-2.5 flex items-center gap-1 rounded-full border border-rt-secondary/25 bg-white px-2 py-0.5 text-[10px] font-semibold text-rt-ink shadow-sm">
-          <span aria-hidden="true">👍</span>
-          {note.reactions}
-        </span>
-      ) : null}
-    </>
+function BoardCard({ progress, piece }: { progress: MotionValue<number>; piece: Piece }) {
+  const start = Math.max(piece.at, 0);
+  const fromRest = piece.at <= 0;
+  const y = useTransform(progress, [start, start + 0.12, 1], [fromRest ? 0 : 86, 0, 0]);
+  const scale = useTransform(
+    progress,
+    [start, start + 0.12, 1],
+    [fromRest ? PREVIEW : 0.86 * PREVIEW, PREVIEW, PREVIEW],
   );
-}
-
-function BoardNote({ progress, note }: { progress: MotionValue<number>; note: Note }) {
-  const start = Math.max(note.at, 0.02);
-  const y = useTransform(progress, [start, start + 0.12, 1], [86, 0, 0]);
-  const scale = useTransform(progress, [start, start + 0.12, 1], [0.86, 1, 1]);
-  const tilt = useTransform(progress, [start, start + 0.12, 1], [note.rotate - 14, note.rotate, note.rotate]);
-  const opacity = useTransform(progress, [start, start + 0.08, 1], [0, 1, 1]);
-  const reactionScale = useTransform(progress, [start + 0.14, start + 0.22, 1], [0, 1, 1]);
-
-  if (note.at <= 0) {
-    return (
-      <article
-        style={{ rotate: `${note.rotate}deg`, background: note.color }}
-        className={`rt-landing-sticky absolute z-10 p-3.5 sm:p-4 ${note.className}`}
-      >
-        <NoteCard note={note} />
-      </article>
-    );
-  }
-
-  return (
-    <motion.article
-      style={{ y, scale, rotate: tilt, opacity, background: note.color }}
-      className={`rt-landing-sticky absolute z-10 p-3.5 sm:p-4 ${note.className}`}
-    >
-      <p className="text-[12px] leading-snug font-medium text-rt-ink sm:text-[13px]">{note.text}</p>
-      <p className="mt-2.5 text-[10px] font-semibold tracking-[0.08em] text-rt-ink-faint uppercase">
-        {note.author}
-      </p>
-      {note.reactions ? (
-        <motion.span
-          style={{ scale: reactionScale }}
-          className="absolute -right-2 -bottom-2.5 flex items-center gap-1 rounded-full border border-rt-secondary/25 bg-white px-2 py-0.5 text-[10px] font-semibold text-rt-ink shadow-sm"
-        >
-          <span aria-hidden="true">👍</span>
-          {note.reactions}
-        </motion.span>
-      ) : null}
-    </motion.article>
+  const tilt = useTransform(
+    progress,
+    [start, start + 0.12, 1],
+    [piece.rotate - (fromRest ? 0 : 14), piece.rotate, piece.rotate],
   );
-}
-
-function FlowNode({
-  progress,
-  label,
-  index,
-}: {
-  progress: MotionValue<number>;
-  label: string;
-  index: number;
-}) {
-  const start = 0.68 + index * 0.05;
-  const fill = useTransform(progress, [start, start + 0.06, 1], [0.25, 1, 1]);
+  const opacity = useTransform(progress, [start, start + 0.08, 1], [fromRest ? 1 : 0, 1, 1]);
 
   return (
-    <motion.span
-      style={{ opacity: fill }}
-      className="flex-1 rounded-md border border-rt-secondary/25 bg-rt-primary-tint px-1.5 py-1.5 text-center text-[10px] font-semibold text-rt-ink"
+    <motion.div
+      style={{ y, scale, rotate: tilt, opacity, zIndex: piece.z }}
+      className={`absolute origin-top-left ${piece.className}`}
     >
-      {label}
-    </motion.span>
-  );
-}
-
-function DiagramCard({ progress }: { progress: MotionValue<number> }) {
-  const y = useTransform(progress, [0.54, 0.72, 1], [72, 0, 0]);
-  const opacity = useTransform(progress, [0.54, 0.66, 1], [0, 1, 1]);
-
-  return (
-    <motion.article
-      style={{ y, opacity }}
-      className="rt-landing-sticky absolute bottom-[6%] left-1/2 w-[82%] -translate-x-1/2 bg-white p-3.5 sm:w-[64%]"
-    >
-      <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-        Diagram · Alex
-      </p>
-      <div className="mt-3 flex items-center gap-1.5">
-        {FLOW.map((node, index) => (
-          <div key={node} className="flex flex-1 items-center gap-1.5">
-            <FlowNode progress={progress} label={node} index={index} />
-            {index < FLOW.length - 1 ? (
-              <span aria-hidden="true" className="text-[11px] text-rt-ink-faint">
-                →
-              </span>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </motion.article>
+      <LandingSticky item={piece.item} isAuthorLeader={piece.item.authorId === 'mira'} />
+    </motion.div>
   );
 }
 
@@ -217,7 +136,11 @@ function PinboardFrame({
   count: number;
 }) {
   return (
-    <div className="rt-landing-board relative aspect-square w-full overflow-hidden rounded-2xl border border-rt-secondary/20 shadow-[0_32px_80px_rgba(122,106,76,0.18)] sm:aspect-[5/4]">
+    <div
+      className="rt-landing-board relative aspect-square w-full overflow-hidden rounded-2xl border border-rt-secondary/20 shadow-[0_32px_80px_rgba(122,106,76,0.18)] sm:aspect-[5/4]"
+      aria-hidden="true"
+      {...{ inert: '' }}
+    >
       <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 border-b border-rt-secondary/15 bg-white/85 px-4 py-2.5 backdrop-blur-sm">
         <p className="truncate text-[11px] font-semibold text-rt-ink">{DEMO.currentQuestion}</p>
         <span className="shrink-0 rounded-full bg-rt-primary-tint px-2 py-0.5 text-[9px] font-semibold tracking-[0.1em] text-rt-ink-muted uppercase">
@@ -225,10 +148,9 @@ function PinboardFrame({
         </span>
       </div>
 
-      {NOTES.map((note) => (
-        <BoardNote key={note.text} progress={progress} note={note} />
+      {PIECES.map((piece) => (
+        <BoardCard key={piece.item.id} progress={progress} piece={piece} />
       ))}
-      <DiagramCard progress={progress} />
       {live ? (
         <>
           <PeerCursor progress={progress} />
@@ -265,13 +187,13 @@ export function PinboardBeat() {
       <p className={eyebrow}>The pinboard</p>
       <h2 className={sectionHeading}>Talk on a call. Put the ideas on the board.</h2>
       <p className={sectionBody}>
-        While a question is open, everyone can hear each other and see the same canvas. A
-        proposal is a sticky note, a drawing, or a diagram. The moment you propose it, it
-        appears for the whole room.
+        While a question is open, everyone can hear each other and see the same canvas. A proposal
+        is a sticky note, a drawing, or a diagram. The moment you propose it, it appears for the
+        whole room.
       </p>
       <ul className="mt-7 space-y-3.5 text-[14.5px] leading-relaxed text-rt-ink-muted">
         {[
-          'Only the author can edit or delete what they posted.',
+          'Only the author can edit what they posted. The leader can take a card off the board.',
           'React on a card when you agree, instead of saying the same thing out loud.',
           'Extend someone else’s idea to copy it into your editor, change it, and propose your own version. The original stays put.',
         ].map((item) => (

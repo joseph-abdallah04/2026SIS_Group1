@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { ctaGhost, ctaPrimary } from './cta';
+import { prefersReducedLandingMotion, scrollToLandingHash } from './landingScroll';
 import { isSignedIn } from './signedIn';
 
 const SECTIONS = [
@@ -17,14 +18,10 @@ const SECTIONS = [
 function scrollToSection(event: MouseEvent<HTMLAnchorElement>) {
   const href = event.currentTarget.getAttribute('href');
   if (!href?.startsWith('#')) return;
-  const target = document.getElementById(href.slice(1));
-  if (!target) return;
+  if (!document.getElementById(href.slice(1))) return;
 
   event.preventDefault();
-  const reduce =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  scrollToLandingHash(href, prefersReducedLandingMotion() ? 'auto' : 'smooth');
   window.history.pushState(null, '', href);
 }
 

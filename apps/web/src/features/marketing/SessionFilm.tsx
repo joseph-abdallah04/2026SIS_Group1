@@ -1,17 +1,19 @@
 import { motion, useReducedMotion } from 'motion/react';
 import { useEffect, useState } from 'react';
 
+import { LandingBallot } from './LandingBallot';
+import { LandingRecap } from './LandingRecap';
+import { LandingSticky } from './LandingSticky';
 import { ProductFrame } from './ProductFrame';
 import { LandingLobby, LobbyFooter } from './RoundTableScene';
-import { DEMO, DEMO_QUESTIONS, DEMO_SEATS, DEMO_SHORTLIST } from './story';
+import { DEMO, DEMO_PINBOARD_STICKIES, DEMO_QUESTIONS, DEMO_SEATS } from './story';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 function AgendaScene() {
   const reduce = useReducedMotion();
   const last =
-    DEMO_QUESTIONS[DEMO_QUESTIONS.length - 1]?.text ??
-    'Who owns the laptop image and welcome kit?';
+    DEMO_QUESTIONS[DEMO_QUESTIONS.length - 1]?.text ?? 'Who owns the laptop image and welcome kit?';
   const [typed, setTyped] = useState(reduce ? last.length : 0);
 
   useEffect(() => {
@@ -34,33 +36,50 @@ function AgendaScene() {
 
   return (
     <ProductFrame title="New session" meta="Draft — only you can see this yet" badge="Agenda">
-      <div className="space-y-4 p-5">
-        <div>
-          <p className="text-[10px] font-semibold tracking-[0.12em] text-rt-ink-faint uppercase">
-            Focus
+      <div className="flex flex-col gap-5 p-5">
+        <div className="flex flex-col gap-2">
+          <p className="text-[13px] font-semibold text-rt-ink">Focus / title</p>
+          <p className="flex min-h-10 items-center rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink">
+            {DEMO.title}
           </p>
-          <p className="mt-1.5 font-serif text-[16px] font-bold text-rt-ink">{DEMO.title}</p>
         </div>
-        <ol className="space-y-2">
-          {DEMO_QUESTIONS.map((question, index) => {
-            const isLast = index === DEMO_QUESTIONS.length - 1;
-            const text = isLast ? last.slice(0, typed) : question.text;
-            return (
-              <li
-                key={question.text}
-                className="flex gap-2.5 rounded-xl border border-rt-primary/40 bg-rt-primary/15 px-3 py-2.5 text-[12.5px] text-rt-ink"
-              >
-                <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
-                <span className="flex-1">
-                  {text}
-                  {isLast && typed < last.length ? (
-                    <span className="ml-0.5 inline-block h-3 w-[1.5px] translate-y-0.5 animate-pulse bg-rt-secondary-deep" />
-                  ) : null}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
+        <div className="flex flex-col gap-2">
+          <p className="text-[13px] font-semibold text-rt-ink">Questions (in order)</p>
+          <ol className="flex flex-col gap-2">
+            {DEMO_QUESTIONS.map((question, index) => {
+              const isLast = index === DEMO_QUESTIONS.length - 1;
+              const text = isLast ? last.slice(0, typed) : question.text;
+              return (
+                <li key={question.text} className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-[12px] font-semibold text-rt-ink-faint">
+                    {index + 1}.
+                  </span>
+                  <span className="flex min-h-10 flex-1 items-center rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink">
+                    {text}
+                    {isLast && typed < last.length ? (
+                      <span className="ml-0.5 inline-block h-3 w-[1.5px] animate-pulse bg-rt-secondary-deep" />
+                    ) : null}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted"
+                  >
+                    ↑
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted"
+                  >
+                    ↓
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+          <span className="inline-flex min-h-10 w-fit items-center rounded-full border border-rt-tertiary bg-rt-surface px-4 text-[13px] font-semibold text-rt-ink">
+            + Add question
+          </span>
+        </div>
       </div>
     </ProductFrame>
   );
@@ -78,35 +97,27 @@ function LobbyScene() {
 
 function DiscussScene() {
   const reduce = useReducedMotion();
-  const notes = [
-    { text: 'Provision accounts at offer stage', author: 'Mira', color: '#FDF1DC', rotate: -4 },
-    {
-      text: 'Seed the workspace so day one is never empty',
-      author: 'Elena',
-      color: '#E9F1F3',
-      rotate: 3,
-    },
-  ];
+  const notes = DEMO_PINBOARD_STICKIES.slice(0, 2);
 
   return (
     <ProductFrame title={DEMO.currentQuestion} meta="The call is live" badge="Discussion">
-      <div className="rt-landing-board relative h-[280px] overflow-hidden sm:h-[320px]">
-        {notes.map((note, index) => (
-          <motion.article
-            key={note.text}
-            initial={reduce ? false : { y: 28, rotate: note.rotate - 8 }}
-            animate={{ y: 0, rotate: note.rotate }}
+      <div
+        className="rt-landing-board relative h-[280px] overflow-hidden sm:h-[320px]"
+        aria-hidden="true"
+        {...{ inert: '' }}
+      >
+        {notes.map((item, index) => (
+          <motion.div
+            key={item.id}
+            initial={reduce ? false : { y: 28, rotate: index === 0 ? -12 : 11 }}
+            animate={{ y: 0, rotate: index === 0 ? -4 : 3 }}
             transition={{ delay: 0.12 + index * 0.16, duration: 0.55, ease: EASE }}
-            style={{ background: note.color }}
-            className={`rt-landing-sticky absolute w-[44%] p-3 ${
-              index === 0 ? 'top-[18%] left-[8%]' : 'top-[42%] right-[8%]'
+            className={`absolute origin-top-left scale-[0.55] ${
+              index === 0 ? 'top-[14%] left-[6%]' : 'top-[34%] left-[42%]'
             }`}
           >
-            <p className="text-[12px] leading-snug font-medium text-rt-ink">{note.text}</p>
-            <p className="mt-2 text-[10px] font-semibold tracking-[0.08em] text-rt-ink-faint uppercase">
-              {note.author}
-            </p>
-          </motion.article>
+            <LandingSticky item={item} isAuthorLeader={item.authorId === 'mira'} />
+          </motion.div>
         ))}
         <motion.p
           initial={reduce ? false : { y: 8 }}
@@ -123,63 +134,11 @@ function DiscussScene() {
 }
 
 function VoteScene() {
-  const reduce = useReducedMotion();
-
-  return (
-    <ProductFrame title={DEMO.currentQuestion} meta="Shortlist · 3 of 7 proposals" badge="Voting">
-      <ul className="space-y-2 p-4">
-        {DEMO_SHORTLIST.map((option, index) => (
-          <li
-            key={option.text}
-            className={`rounded-lg border p-3 ${
-              option.winner
-                ? 'border-rt-secondary/55 bg-rt-secondary/10'
-                : 'border-rt-secondary/15 bg-white/70'
-            }`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-[12px] leading-snug font-medium text-rt-ink">{option.text}</p>
-              {option.winner ? (
-                <span className="shrink-0 rounded-full bg-rt-secondary-deep px-2 py-0.5 text-[9px] font-bold tracking-[0.1em] text-white uppercase">
-                  Answer
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-rt-secondary/15">
-              <motion.div
-                initial={reduce ? false : { scaleX: 0 }}
-                animate={{ scaleX: 1 }}
-                transition={{ delay: 0.15 + index * 0.12, duration: 0.6, ease: EASE }}
-                style={{ width: `${option.share}%`, transformOrigin: '0 50%' }}
-                className={`h-full rounded-full ${option.winner ? 'bg-rt-secondary-deep' : 'bg-rt-secondary/50'}`}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </ProductFrame>
-  );
+  return <LandingBallot compact />;
 }
 
 function RecapScene() {
-  return (
-    <ProductFrame title={DEMO.title} meta={`${DEMO_SEATS.length} people · ended`} badge="Recap">
-      <ol className="divide-y divide-rt-secondary/12 px-5">
-        {DEMO_QUESTIONS.map((row) => (
-          <li key={row.text} className="py-3.5">
-            <p className="text-[11.5px] leading-snug text-rt-ink-muted">{row.text}</p>
-            <p className="mt-1.5 flex items-start gap-2 text-[13px] font-semibold text-rt-ink">
-              <span
-                aria-hidden="true"
-                className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rt-secondary-deep"
-              />
-              {row.answer}
-            </p>
-          </li>
-        ))}
-      </ol>
-    </ProductFrame>
-  );
+  return <LandingRecap compact />;
 }
 
 export const FILM_SCENES = [
@@ -200,7 +159,7 @@ export const FILM_SCENES = [
   },
   {
     title: 'Shortlist, then vote once',
-    body: 'The leader picks the proposals worth deciding between. Everyone casts one private vote. When the last ballot is in, the winner is stored as that question’s answer.',
+    body: 'The leader picks the proposals worth deciding between. Everyone casts one private vote and can change it until the leader ends the round — or the timer does. Then the winner is stored as that question’s answer.',
     Visual: VoteScene,
   },
   {

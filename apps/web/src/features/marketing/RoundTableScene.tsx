@@ -31,7 +31,7 @@ interface RoundTableSceneProps {
  */
 export function RoundTableScene({
   seats,
-  joinCode = 'RT-4821',
+  joinCode = DEMO.joinCode,
   showNames = false,
   stagger = false,
   className = '',
@@ -145,13 +145,7 @@ export function LandingLobby({
   );
 }
 
-export function LobbyFooter({
-  status,
-  ready,
-}: {
-  status: string;
-  ready: boolean;
-}) {
+export function LobbyFooter({ status, ready }: { status: string; ready: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <p className="flex items-center gap-2 text-[12px] font-medium text-rt-ink-muted">
