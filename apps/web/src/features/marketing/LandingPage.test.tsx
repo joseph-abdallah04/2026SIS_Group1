@@ -55,6 +55,29 @@ describe('LandingPage', () => {
     expect(screen.queryByRole('link', { name: /dashboard/i })).not.toBeInTheDocument();
   });
 
+  it('walks through the whole session, from agenda to recap', () => {
+    renderLanding();
+
+    for (const heading of [
+      /six steps, and the same six every time/i,
+      /everyone proposes at once/i,
+      /one vote each, and the question is closed/i,
+      /bring your own model into the room/i,
+      /nobody has to write the minutes/i,
+      /bring a question\. leave with an answer/i,
+    ]) {
+      expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument();
+    }
+  });
+
+  it('links the header nav to each section anchor', () => {
+    renderLanding();
+
+    const nav = screen.getByRole('navigation', { name: /page sections/i });
+    const hrefs = Array.from(nav.querySelectorAll('a')).map((link) => link.getAttribute('href'));
+    expect(hrefs).toEqual(['#how-it-runs', '#pinboard', '#voting', '#assistant']);
+  });
+
   it('shows Dashboard in the header when a live token is stored', () => {
     localStorage.setItem('rt_token', liveToken());
     renderLanding();

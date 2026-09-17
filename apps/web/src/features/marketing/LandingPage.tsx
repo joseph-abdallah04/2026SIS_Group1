@@ -1,10 +1,12 @@
-import { DecideBeat } from './DecideBeat';
+import { AssistantBeat } from './AssistantBeat';
+import { FinalCta } from './FinalCta';
 import { Hero } from './Hero';
+import { HowItRuns } from './HowItRuns';
 import { LandingFooter } from './LandingFooter';
 import { LandingNav } from './LandingNav';
 import { PinboardBeat } from './PinboardBeat';
-import { SitDown } from './SitDown';
-import { WalkAway } from './WalkAway';
+import { RecapBeat } from './RecapBeat';
+import { VotingBeat } from './VotingBeat';
 import './landing.css';
 
 export function LandingPage() {
@@ -13,10 +15,12 @@ export function LandingPage() {
       <LandingNav />
       <main>
         <Hero />
-        <SitDown />
+        <HowItRuns />
         <PinboardBeat />
-        <DecideBeat />
-        <WalkAway />
+        <VotingBeat />
+        <AssistantBeat />
+        <RecapBeat />
+        <FinalCta />
       </main>
       <LandingFooter />
     </div>

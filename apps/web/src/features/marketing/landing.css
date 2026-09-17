@@ -1,36 +1,102 @@
+/*
+ * Landing page paint. The app's own palette (gold chrome, mustard CTA, paper
+ * desk) rather than a second visual language: someone arriving here should
+ * recognise the session they land in after signing up.
+ */
+
 .rt-landing {
-  background: #f7f4ee;
+  --rt-paper: #f7f4ee;
+  background: var(--rt-paper);
+}
+
+/* Warm light sitting behind the hero, so the table looks lit rather than
+   pasted onto a flat fill. */
+.rt-landing-glow {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 120%;
+  background:
+    radial-gradient(48% 42% at 72% 26%, rgba(241, 200, 129, 0.42) 0%, rgba(247, 244, 238, 0) 72%),
+    radial-gradient(38% 36% at 18% 12%, rgba(140, 164, 172, 0.18) 0%, rgba(247, 244, 238, 0) 70%);
+  pointer-events: none;
+}
+
+.rt-landing-rule {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(224, 163, 60, 0) 0%,
+    rgba(224, 163, 60, 0.32) 50%,
+    rgba(224, 163, 60, 0) 100%
+  );
+}
+
+/* Read progress. Sits under the header border so it reads as part of the
+   chrome rather than a floating bar. */
+.rt-landing-progress {
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, #f1c881 0%, #e0a33c 100%);
 }
 
 .rt-landing-board {
-  background-color: #f7f4ee;
-  background-image: radial-gradient(rgba(8, 12, 21, 0.1) 1px, transparent 1px);
-  background-size: 16px 16px;
+  background-color: #fbf9f5;
+  background-image: radial-gradient(rgba(8, 12, 21, 0.09) 1px, transparent 1px);
+  background-size: 18px 18px;
 }
 
+/* Paper, not a card: square corners, a hint of tooth, and a shadow that
+   implies the note is resting on the desk rather than floating above it. */
 .rt-landing-sticky {
   border-radius: 2px;
   box-shadow:
-    0 1px 0 rgba(8, 12, 21, 0.04),
-    0 12px 28px rgba(122, 106, 76, 0.14);
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 1px 1px rgba(8, 12, 21, 0.06),
+    0 14px 30px rgba(122, 106, 76, 0.16);
 }
 
+.rt-landing-panel {
+  border: 1px solid rgba(224, 163, 60, 0.22);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 24px 60px rgba(122, 106, 76, 0.13);
+  backdrop-filter: blur(6px);
+}
+
+/* The lobby scene shows names permanently — the real waiting room reveals them
+   on hover, which a non-interactive screenshot of a table cannot do. */
 .rt-landing-scene .rt-waiting-seat-name[data-always] {
   opacity: 1;
   background: transparent;
+  padding: 0.2rem 0 0;
   color: var(--color-rt-ink-muted);
   font-size: 11px;
   font-weight: 600;
-  padding: 0.15rem 0 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .rt-landing-pin {
-    height: auto;
-  }
+.rt-landing-phase-line {
+  background: linear-gradient(180deg, rgba(224, 163, 60, 0.35) 0%, rgba(224, 163, 60, 0.08) 100%);
+}
 
-  .rt-landing-pin-inner {
-    position: relative;
-    min-height: 0;
+@keyframes rt-landing-cue {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateY(6px);
+    opacity: 1;
+  }
+}
+
+.rt-landing-cue {
+  animation: rt-landing-cue 2.4s ease-in-out infinite;
+}
+
+/* The pinned pinboard act needs the tall track to drive its scroll timeline.
+   With motion reduced there is no timeline, so the track collapses and the
+   scene renders in place, already assembled. */
+@media (prefers-reduced-motion: reduce) {
+  .rt-landing-cue {
+    animation: none;
   }
 }
