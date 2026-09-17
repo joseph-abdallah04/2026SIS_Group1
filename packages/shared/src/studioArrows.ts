@@ -153,6 +153,26 @@ export const ARROW_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
 export const ARROW_DEFAULT_STROKE_WIDTH: DiagramStrokeWidthPreset = 'regular';
 export const ARROW_DEFAULT_ROUTE: ArrowRoute = 'straight';
 
+/**
+ * An arrow label's lines.
+ *
+ * Split on newlines and nothing else. An arrow has no box to wrap inside — it
+ * is a line, and the label sits beside it — so the only sensible break is one
+ * the author asked for. It used to be rendered as a single unwrapped `<text>`,
+ * which ran a long label off the end of its own arrow.
+ *
+ * Bounded, because the label cap allows far more lines than could ever be read
+ * against one arrow and a crafted payload should not be able to paint a column
+ * of text down the sheet.
+ */
+export const ARROW_LABEL_MAX_LINES = 6;
+
+export function arrowLabelLines(label: string): string[] {
+  const lines = label.split('\n');
+  if (lines.length <= ARROW_LABEL_MAX_LINES) return lines;
+  return lines.slice(0, ARROW_LABEL_MAX_LINES);
+}
+
 export const DIAGRAM_ARROW_LIMIT = 100;
 export const ARROW_LABEL_LIMIT = 200;
 

@@ -1317,6 +1317,169 @@ describe('diagram viewport and productivity', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('edits a label in the element’s own formatting, with no box around it', async () => {
+    // The editor used to be a bordered white field at a fixed 11px, so editing
+    // formatted text showed it unformatted and the original was still visible
+    // around a field too small to cover it.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 910, 'Idea');
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    await user.click(screen.getByRole('button', { name: 'large text' }));
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Idea' });
+    doublePress(node, canvas, 911, 84, 52);
+
+    const field = screen.getByRole('textbox', { name: 'Edit box label' });
+    // The element's own size and weight, not a form field's.
+    expect(field).toHaveStyle({ fontSize: '22px' });
+    expect(field.className).toContain('bg-transparent');
+    expect(field.className).toContain('border-0');
+    // Nothing of the old label is left showing behind the field.
+    expect(node.querySelector('text')).toBeNull();
+  });
+
+  it('breaks an arrow label only where it was asked to, and hides it while editing', async () => {
+    // An arrow has no box to wrap inside, so it only breaks on a newline. It
+    // used to render as one unwrapped line, which ran a long label off the end
+    // of its own arrow.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 920, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 920, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 920, clientX: 300, clientY: 300 });
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    fireEvent.pointerDown(screen.getByTestId('studio-arrow-hit'), {
+      button: 0,
+      pointerId: 921,
+      clientX: 180,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 921, clientX: 180, clientY: 300 });
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    // Nothing of the label is painted underneath the field being typed into.
+    expect(screen.queryByTestId('studio-arrow')?.parentElement?.querySelector('text')).toBeNull();
+
+    await user.type(field, 'first{Shift>}{Enter}{/Shift}second');
+    fireEvent.blur(field);
+
+    // Two lines, because two were asked for — one tspan each.
+    const label = document.querySelector('[data-testid="studio-arrow"]')?.parentElement;
+    expect(label?.querySelectorAll('tspan')).toHaveLength(2);
+  });
+
+  it('wraps a textbox onto a new line and grows to hold it', async () => {
+    // Textboxes wrap and grow; a shape still truncates, because a shape has a
+    // form of its own to keep.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 912, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 912, clientX: 300, clientY: 300 });
+
+    const field = screen.getByRole('textbox', { name: 'Edit text label' });
+    await user.type(field, 'The quick brown fox jumps over the lazy dog and keeps on running');
+    fireEvent.blur(field);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const textbox = artifact.nodes[0]!;
+    // Taller than the 40 a textbox is placed at, because the words needed it.
+    expect(textbox.height).toBeGreaterThan(40);
+    // And nothing was thrown away to make it fit.
+    expect(textbox.label).toContain('running');
+  });
+
+  it('offers a shape at the loose end of an arrow, and undoes both together', async () => {
+    // Dropping an arrow on nothing is a finished arrow, not a half-made one.
+    // The picker is an offer on top of that, not a question that has to be
+    // answered before the arrow counts.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 900, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 900, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 900, clientX: 300, clientY: 300 });
+
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'End with ellipse' }));
+
+    // One entry for both, so Undo does not leave an arrow bound to a shape that
+    // is no longer there.
+    expect(screen.getByRole('button', { name: 'Ellipse: Unlabelled' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.queryByRole('button', { name: 'Ellipse: Unlabelled' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('studio-arrow')).toBeInTheDocument();
+  });
+
+  it('runs an arrow from a connection handle into empty space', async () => {
+    // A connection used to need a second shape to already exist: pressing bare
+    // canvas did nothing at all, so there was no way to point at nothing.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    fireEvent.pointerDown(screen.getAllByTestId('connection-handle')[0]!, {
+      button: 0,
+      pointerId: 904,
+    });
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 905, clientX: 400, clientY: 400 });
+
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'End with decision' }));
+
+    expect(screen.getByRole('button', { name: 'Decision: Unlabelled' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows).toHaveLength(1);
+    // Bound at both ends: the source shape, and the one the picker just made.
+    expect(artifact.arrows![0]!.from.elementId).toBeTruthy();
+    expect(artifact.arrows![0]!.to.elementId).toBeTruthy();
+    expect(proposalCreateSchema.safeParse(send.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('leaves an arrow pointing at nothing when the picker is dismissed', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 902, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 902, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 902, clientX: 300, clientY: 300 });
+
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    expect(screen.queryByTestId('arrow-shape-picker')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows).toHaveLength(1);
+    // Free at the far end: no shape had to exist for the arrow to be valid.
+    expect(artifact.arrows![0]!.to.elementId).toBeUndefined();
+    expect(artifact.nodes).toHaveLength(0);
+  });
+
   it('toggles a node in and out of the selection with shift-click', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
@@ -1541,19 +1704,19 @@ describe('diagram resize and style', () => {
 
   /**
    * The default-placed shape is 120x56 at (24, 24), so it turns about (84, 52)
-   * and its rotate grip sits 26 above the top edge at (84, -2) — clamped to the
-   * top of the sheet, which leaves the bearing from the centre unchanged at -90.
+   * and the zone outside its top-left corner covers the quadrant up and left of
+   * (24, 24). Pressing that corner is a bearing of about -155 degrees from the
+   * centre; (50, 3) is about -125, so the pointer sweeps roughly 30.
    */
   function rotateDefaultShape(canvas: Element, pointerId: number, shiftKey = false) {
-    fireEvent.pointerDown(screen.getByTestId('rotate-handle'), {
+    fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
       button: 0,
       pointerId,
-      clientX: 84,
-      clientY: 0,
+      clientX: 24,
+      clientY: 24,
     });
-    // (110, 7) is 60 degrees round from the centre, so the pointer has swept 30.
-    fireEvent.pointerMove(canvas, { pointerId, clientX: 110, clientY: 7, shiftKey });
-    fireEvent.pointerUp(canvas, { pointerId, clientX: 110, clientY: 7, shiftKey });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 50, clientY: 3, shiftKey });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 50, clientY: 3, shiftKey });
   }
 
   it('turns a shape in five-degree steps and undoes the whole turn at once', async () => {
@@ -1569,6 +1732,24 @@ describe('diagram resize and style', () => {
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+  });
+
+  it('offers a rotate zone outside every corner, behind the resize handles', async () => {
+    // Turning is grabbed from outside a corner rather than from a grip on a
+    // stem. The zones sit under the resize handles in paint order, so the
+    // corner itself still resizes and only the ring beyond it turns.
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    for (const corner of ['nw', 'ne', 'se', 'sw']) {
+      expect(screen.getByTestId(`rotate-zone-${corner}`)).toBeInTheDocument();
+      const zone = screen.getByTestId(`rotate-zone-${corner}`);
+      const handle = screen.getByTestId(`resize-handle-${corner}`);
+      // `compareDocumentPosition` says the handle comes after the zone, which
+      // is what puts it on top in SVG.
+      expect(zone.compareDocumentPosition(handle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
   });
 
   it('snaps the turn to 45 degrees while shift is held', async () => {
@@ -1609,15 +1790,15 @@ describe('diagram resize and style', () => {
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
 
     rotateDefaultShape(canvas, 93);
-    // Straight back to where it started: -90 is the bearing the grip began at.
-    fireEvent.pointerDown(screen.getByTestId('rotate-handle'), {
+    // Straight back: the same sweep in reverse, from -125 round to -155.
+    fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
       button: 0,
       pointerId: 94,
-      clientX: 110,
-      clientY: 7,
+      clientX: 50,
+      clientY: 3,
     });
-    fireEvent.pointerMove(canvas, { pointerId: 94, clientX: 84, clientY: 0 });
-    fireEvent.pointerUp(canvas, { pointerId: 94, clientX: 84, clientY: 0 });
+    fireEvent.pointerMove(canvas, { pointerId: 94, clientX: 24, clientY: 24 });
+    fireEvent.pointerUp(canvas, { pointerId: 94, clientX: 24, clientY: 24 });
 
     expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
       'transform',
@@ -1717,7 +1898,7 @@ describe('diagram resize and style', () => {
     fireEvent.pointerUp(canvas, { pointerId: 95, clientX: 60, clientY: 60 });
 
     expect(screen.getByTestId('selection-frame')).toBeInTheDocument();
-    expect(screen.queryByTestId('rotate-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rotate-zone-nw')).not.toBeInTheDocument();
   });
 
   it('proposes the resized geometry through the real contract', async () => {
@@ -4218,18 +4399,19 @@ describe('studio clipboard and snapping', () => {
     });
     fireEvent.pointerUp(canvas, { pointerId: 800, clientX: 200, clientY: 200 });
 
-    // The grip sits 26 above the middle of the top edge, at (200, 174).
-    fireEvent.pointerDown(screen.getByTestId('rotate-handle'), {
+    // Grabbed outside the line's left end, which is due west of its centre.
+    fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
       button: 0,
       pointerId: 801,
-      clientX: 200,
-      clientY: 174,
+      clientX: 100,
+      clientY: 200,
     });
-    fireEvent.pointerMove(canvas, { pointerId: 801, clientX: 240, clientY: 200 });
-    fireEvent.pointerUp(canvas, { pointerId: 801, clientX: 240, clientY: 200 });
+    // Due south of the centre: a quarter turn anticlockwise, stored as 270.
+    fireEvent.pointerMove(canvas, { pointerId: 801, clientX: 200, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 801, clientX: 200, clientY: 300 });
 
     const group = screen.getAllByTestId('studio-path')[0]!.closest('g');
-    expect(group).toHaveAttribute('transform', 'rotate(90 200 200)');
+    expect(group).toHaveAttribute('transform', 'rotate(270 200 200)');
     // The anchors themselves are untouched: the turn is drawn, not baked in.
     expect(drawnPath()).toBe('M 100 200 L 300 200');
   });

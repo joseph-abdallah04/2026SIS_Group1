@@ -76,8 +76,19 @@ export const DIAGRAM_CANVAS_HEIGHT = 600;
 // Eight units keeps hand-placed nodes tidy without feeling magnetic.
 export const DIAGRAM_GRID = 8;
 
-// Twenty-four characters remain editable while SVG text fitting keeps every fixed shape readable.
-export const DIAGRAM_LABEL_LIMIT = 24;
+/**
+ * The same 200 the write path has always allowed, and the same cap an arrow
+ * label and a table cell already carry.
+ *
+ * It was 24 here, which is about four words: long enough for a box on a
+ * flowchart and far too short for a textbox, and it made wrapping almost
+ * unreachable. The server never enforced 24 — this was a client-side limit
+ * alone, so raising it needs no contract change.
+ */
+export const DIAGRAM_LABEL_LIMIT = 200;
+
+/** A label may break where it is asked to, but not become a column of text. */
+export const DIAGRAM_LABEL_LINE_LIMIT = 12;
 
 // Edge labels use the same compact preview typography as node labels.
 export const DIAGRAM_EDGE_LABEL_LIMIT = 24;
@@ -307,8 +318,25 @@ export function createNodeId(existing: readonly DiagramNode[]): string {
   return `n${index}`;
 }
 
+/**
+ * Tidy a typed label without destroying the lines in it.
+ *
+ * Runs of spaces and tabs collapse, as they always did, but a newline is now
+ * content: it is the only way to say where a line should break, and collapsing
+ * every whitespace character to one space threw that away before it could be
+ * stored.
+ */
 export function prepareNodeLabel(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, DIAGRAM_LABEL_LIMIT);
+  return (
+    value
+      .split('\n')
+      .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+      .slice(0, DIAGRAM_LABEL_LINE_LIMIT)
+      .join('\n')
+      // Blank lines at either end are almost always a stray Enter, not intent.
+      .replace(/^\n+|\n+$/g, '')
+      .slice(0, DIAGRAM_LABEL_LIMIT)
+  );
 }
 
 export function prepareEdgeLabel(value: string): string {
@@ -841,7 +869,13 @@ export function renameNode(
   id: string,
   label: string,
 ): DiagramNode[] {
-  const nextLabel = label.slice(0, DIAGRAM_LABEL_LIMIT);
+  // Mid-edit, so the text is left exactly as typed apart from the cap: tidying
+  // it here would fight the caret on every keystroke.
+  const nextLabel = label
+    .split('\n')
+    .slice(0, DIAGRAM_LABEL_LINE_LIMIT)
+    .join('\n')
+    .slice(0, DIAGRAM_LABEL_LIMIT);
   return nodes.map((node) => (node.id === id ? { ...node, label: nextLabel } : node));
 }
 

@@ -7,6 +7,7 @@ import {
   DIAGRAM_CANVAS_HEIGHT,
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_LABEL_LIMIT,
+  DIAGRAM_LABEL_LINE_LIMIT,
   DIAGRAM_NODE_HEIGHT,
   DIAGRAM_NODE_WIDTH,
   DIAGRAM_GRID,
@@ -146,9 +147,22 @@ describe('diagram node model', () => {
 
   it('collapses whitespace and caps labels at the readable limit', () => {
     expect(prepareNodeLabel('  Auth    service  ')).toBe('Auth service');
-    expect(prepareNodeLabel('a'.repeat(80))).toHaveLength(DIAGRAM_LABEL_LIMIT);
+    expect(prepareNodeLabel('a'.repeat(300))).toHaveLength(DIAGRAM_LABEL_LIMIT);
 
     expect(renameNode(buildNodes(1), 'n1', 'Gateway')[0]?.label).toBe('Gateway');
+  });
+
+  it('keeps the lines a label was typed with, and tidies the spaces inside them', () => {
+    // A newline is the only way to say where a line should break, so it is
+    // content. Runs of spaces and tabs still collapse, as they always did.
+    expect(prepareNodeLabel('Auth   service\nand   gateway')).toBe('Auth service\nand gateway');
+    // A stray Enter at either end is almost never intended.
+    expect(prepareNodeLabel('\n\nAuth\n\n')).toBe('Auth');
+    // Still bounded: a label may break where it is asked to, but not become a
+    // column of text running down the sheet.
+    expect(prepareNodeLabel('x\n'.repeat(40)).split('\n').length).toBeLessThanOrEqual(
+      DIAGRAM_LABEL_LINE_LIMIT,
+    );
   });
 
   it('preserves spaces while editing and normalizes them at submission', () => {

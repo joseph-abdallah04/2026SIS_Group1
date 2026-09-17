@@ -550,6 +550,33 @@ const DIAGRAM_GLYPH_ADVANCE_RATIO = 0.55;
 const DIAGRAM_LABEL_PADDING = 12;
 export const DIAGRAM_LABEL_MAX_LINES = 3;
 
+/**
+ * A textbox wraps and grows instead of truncating, so its cap is the point at
+ * which a "text element" has become a document — not the point at which it
+ * stops fitting the box it was drawn as.
+ */
+export const DIAGRAM_TEXT_MAX_LINES = 24;
+
+/**
+ * The height a textbox needs to show every line of its label.
+ *
+ * Kept here beside the layout it has to agree with: the editor grows the stored
+ * height with this, and the board card lays the same label out inside it.
+ */
+export function diagramTextBoxHeight(
+  node: Pick<DiagramNode, 'label' | 'shape' | 'width' | 'height' | 'fontSizePreset'>,
+): number {
+  const layout = diagramNodeLabelLayout(node);
+  const padding = Math.max(8, layout.fontSize);
+  return Math.max(
+    DIAGRAM_MIN_NODE_HEIGHT,
+    Math.min(
+      DIAGRAM_MAX_NODE_HEIGHT,
+      Math.round(Math.max(1, layout.lines.length) * layout.lineHeight + padding),
+    ),
+  );
+}
+
 export function wrapDiagramLabel(
   label: string,
   width: number,
@@ -558,27 +585,37 @@ export function wrapDiagramLabel(
 ): string[] {
   const usable = Math.max(1, width - DIAGRAM_LABEL_PADDING);
   const perLine = Math.max(1, Math.floor(usable / (fontSize * DIAGRAM_GLYPH_ADVANCE_RATIO)));
-  const words = label.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [];
+  if (label.trim().length === 0) return [];
 
   const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= perLine) {
-      current = candidate;
+  // Wrapped a paragraph at a time, so a break the author typed is kept and the
+  // text either side of it wraps independently. Before this every whitespace
+  // character was the same thing, and a deliberate line break read as a space.
+  for (const paragraph of label.split('\n')) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      lines.push('');
       continue;
     }
-    if (current) lines.push(current);
-    // A single word longer than the line is hard-broken rather than overflowing.
-    let rest = word;
-    while (rest.length > perLine) {
-      lines.push(rest.slice(0, perLine));
-      rest = rest.slice(perLine);
+
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= perLine) {
+        current = candidate;
+        continue;
+      }
+      if (current) lines.push(current);
+      // A single word longer than the line is hard-broken rather than overflowing.
+      let rest = word;
+      while (rest.length > perLine) {
+        lines.push(rest.slice(0, perLine));
+        rest = rest.slice(perLine);
+      }
+      current = rest;
     }
-    current = rest;
+    if (current) lines.push(current);
   }
-  if (current) lines.push(current);
 
   if (lines.length <= maxLines) return lines;
   const kept = lines.slice(0, maxLines);
@@ -605,10 +642,14 @@ export function diagramNodeLabelLayout(
   const size = effectiveDiagramNodeSize(node);
   const fontSize = diagramNodeFontSize(node);
   const lineHeight = fontSize * 1.25;
-  const maxLines = Math.max(
-    1,
-    Math.min(DIAGRAM_LABEL_MAX_LINES, Math.floor(size.height / lineHeight)),
-  );
+  // A textbox is text and nothing else, so it shows all of it: its height is
+  // grown to fit rather than its words being cut off. Every other shape has a
+  // form of its own to keep, so a label too long for it still ends in an
+  // ellipsis — which is the distinction the studio's users asked for.
+  const maxLines =
+    node.shape === 'text'
+      ? DIAGRAM_TEXT_MAX_LINES
+      : Math.max(1, Math.min(DIAGRAM_LABEL_MAX_LINES, Math.floor(size.height / lineHeight)));
   // Tapered shapes are narrower than their box where the label sits.
   const usableWidth = size.width * diagramLabelWidthRatio(node.shape);
   const lines = wrapDiagramLabel(node.label, usableWidth, fontSize, maxLines);
