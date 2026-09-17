@@ -1,0 +1,245 @@
+/*
+ * Landing page paint. Same gold/paper language as the product, so the public
+ * page and the session feel like one place.
+ */
+
+.rt-landing {
+  --rt-paper: #f7f4ee;
+  --glow-x: 72%;
+  --glow-y: 28%;
+  background:
+    radial-gradient(72% 48% at 50% -8%, rgba(241, 200, 129, 0.22), transparent 58%),
+    var(--rt-paper);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.rt-landing) {
+    scroll-behavior: smooth;
+  }
+}
+
+.rt-landing-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: multiply;
+  background-image:
+    radial-gradient(rgba(122, 106, 76, 0.07) 0.6px, transparent 0.7px),
+    radial-gradient(rgba(8, 12, 21, 0.04) 0.5px, transparent 0.6px);
+  background-size:
+    3px 3px,
+    5px 5px;
+  background-position:
+    0 0,
+    1px 2px;
+}
+
+.rt-landing-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(
+      46% 40% at var(--glow-x) var(--glow-y),
+      rgba(241, 200, 129, 0.5) 0%,
+      rgba(247, 244, 238, 0) 72%
+    ),
+    radial-gradient(36% 32% at 16% 18%, rgba(140, 164, 172, 0.2) 0%, rgba(247, 244, 238, 0) 70%);
+  pointer-events: none;
+  transition: background 120ms linear;
+}
+
+.rt-landing-rule {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(224, 163, 60, 0) 0%,
+    rgba(224, 163, 60, 0.32) 50%,
+    rgba(224, 163, 60, 0) 100%
+  );
+}
+
+.rt-landing-progress {
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, #f1c881 0%, #e0a33c 100%);
+}
+
+.rt-landing-board {
+  background-color: #fbf9f5;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 28%),
+    radial-gradient(rgba(8, 12, 21, 0.08) 1px, transparent 1px);
+  background-size:
+    auto,
+    18px 18px;
+}
+
+.rt-landing-sticky {
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 1px rgba(8, 12, 21, 0.05),
+    0 16px 34px rgba(122, 106, 76, 0.16);
+}
+
+.rt-landing-panel {
+  border: 1px solid rgba(224, 163, 60, 0.24);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 28px 70px rgba(122, 106, 76, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+.rt-landing-scene .rt-waiting-table {
+  inset: 28%;
+}
+
+.rt-landing-scene .rt-waiting-seat-bubble {
+  height: 3.15rem;
+  width: 3.15rem;
+  font-size: 13px;
+}
+
+.rt-landing-scene .rt-waiting-seat-name[data-always] {
+  opacity: 1;
+  background: transparent;
+  color: var(--color-rt-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.rt-landing-scene .rt-waiting-seat-name[data-always][data-placement='below'] {
+  top: calc(100% + 8px);
+  padding: 0;
+}
+
+.rt-landing-scene .rt-waiting-seat-name[data-always][data-placement='above'] {
+  bottom: calc(100% + 8px);
+  padding: 0;
+}
+
+.rt-landing-scene .rt-landing-seat-caption {
+  position: absolute;
+  left: 50%;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  width: max-content;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.rt-landing-scene .rt-landing-seat-caption[data-placement='above'] {
+  bottom: calc(100% + 10px);
+}
+
+.rt-landing-scene .rt-landing-leader-tag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: var(--color-rt-secondary-deep);
+  text-transform: uppercase;
+}
+
+.rt-landing-scene .rt-landing-seat-caption .rt-waiting-seat-name[data-always] {
+  position: static;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+}
+
+.rt-landing-phase-line {
+  background: linear-gradient(180deg, rgba(224, 163, 60, 0.35) 0%, rgba(224, 163, 60, 0.08) 100%);
+}
+
+@keyframes rt-landing-cue {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.rt-landing-cue-line {
+  display: block;
+  width: 1px;
+  height: 42px;
+  transform-origin: 50% 0;
+  background: linear-gradient(180deg, rgba(224, 163, 60, 0.05), #e0a33c);
+  animation: rt-landing-cue 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-landing-cue-line {
+    animation: none;
+  }
+}
+
+.rt-landing-assistant-stage {
+  position: relative;
+  width: 100%;
+  max-width: 24rem;
+  height: 48rem;
+  margin-inline: auto;
+}
+
+.rt-landing-assistant-board {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 1.85rem;
+}
+
+.rt-landing-assistant-board::before,
+.rt-landing-assistant-board::after {
+  position: absolute;
+  border-radius: 0.7rem;
+  content: '';
+}
+
+.rt-landing-assistant-board::before {
+  top: 18%;
+  left: 8%;
+  width: 46%;
+  height: 28%;
+  background: #fdf1dc;
+  transform: rotate(-6deg);
+}
+
+.rt-landing-assistant-board::after {
+  right: 10%;
+  bottom: 22%;
+  width: 42%;
+  height: 24%;
+  background: #e9f1f3;
+  transform: rotate(5deg);
+}
+
+.rt-landing-assistant.rt-assistant {
+  position: relative;
+  inset: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.rt-landing-assistant .rt-assistant-shell {
+  clip-path: inset(0 round 1.75rem);
+  pointer-events: none;
+}

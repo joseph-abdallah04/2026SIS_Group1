@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 type TooltipPlacement = 'top' | 'right' | 'bottom';
 
@@ -34,15 +34,23 @@ export function Tooltip({ label, shortcut, placement = 'right', children }: Tool
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const id = useId();
 
+  function clearTimer() {
+    if (!timer.current) return;
+    clearTimeout(timer.current);
+    timer.current = null;
+  }
+
+  useEffect(() => clearTimer, []);
+
   function show() {
-    if (timer.current) clearTimeout(timer.current);
+    clearTimer();
     // Short enough to feel immediate, long enough not to flash while the
     // pointer crosses the rail on its way somewhere else.
     timer.current = setTimeout(() => setOpen(true), 250);
   }
 
   function hide() {
-    if (timer.current) clearTimeout(timer.current);
+    clearTimer();
     setOpen(false);
   }
 
