@@ -103,7 +103,9 @@ describe('LandingPage', () => {
     expect(
       screen.getByText(/you can change your mind until they end the round/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/the running tally is on the cards while voting is open/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the running tally is on the cards while voting is open/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/last ballot/i)).not.toBeInTheDocument();
     expect(FILM_SCENES[3]?.body).toMatch(/until the leader ends the round/);
     expect(FILM_SCENES[3]?.body).not.toMatch(/last ballot/);
@@ -113,7 +115,9 @@ describe('LandingPage', () => {
     renderLanding();
 
     expect(
-      screen.getByText(/only the author can edit what they posted\. the leader can take a card off the board/i),
+      screen.getByText(
+        /only the author can edit what they posted\. the leader can take a card off the board/i,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -122,13 +126,14 @@ describe('LandingPage', () => {
   });
 
   it('scrolls to the section named in the URL hash', () => {
-    const spy = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
     window.history.replaceState(null, '', '/#voting');
     renderLanding();
 
     const voting = document.getElementById('voting');
     expect(voting).not.toBeNull();
-    expect(spy).toHaveBeenCalled();
-    expect(spy.mock.instances).toContain(voting);
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView.mock.instances).toContain(voting);
   });
 });

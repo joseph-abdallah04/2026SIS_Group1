@@ -83,7 +83,11 @@ function BoardNote({ progress, note }: { progress: MotionValue<number>; note: No
   const start = Math.max(note.at, 0.02);
   const y = useTransform(progress, [start, start + 0.12, 1], [86, 0, 0]);
   const scale = useTransform(progress, [start, start + 0.12, 1], [0.86, 1, 1]);
-  const tilt = useTransform(progress, [start, start + 0.12, 1], [note.rotate - 14, note.rotate, note.rotate]);
+  const tilt = useTransform(
+    progress,
+    [start, start + 0.12, 1],
+    [note.rotate - 14, note.rotate, note.rotate],
+  );
   const opacity = useTransform(progress, [start, start + 0.08, 1], [0, 1, 1]);
   const reactionScale = useTransform(progress, [start + 0.14, start + 0.22, 1], [0, 1, 1]);
 
@@ -265,9 +269,9 @@ export function PinboardBeat() {
       <p className={eyebrow}>The pinboard</p>
       <h2 className={sectionHeading}>Talk on a call. Put the ideas on the board.</h2>
       <p className={sectionBody}>
-        While a question is open, everyone can hear each other and see the same canvas. A
-        proposal is a sticky note, a drawing, or a diagram. The moment you propose it, it
-        appears for the whole room.
+        While a question is open, everyone can hear each other and see the same canvas. A proposal
+        is a sticky note, a drawing, or a diagram. The moment you propose it, it appears for the
+        whole room.
       </p>
       <ul className="mt-7 space-y-3.5 text-[14.5px] leading-relaxed text-rt-ink-muted">
         {[

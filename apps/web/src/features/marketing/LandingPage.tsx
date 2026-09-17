@@ -42,11 +42,7 @@ export function LandingPage() {
   };
 
   return (
-    <div
-      ref={rootRef}
-      onMouseMove={onMove}
-      className="rt-landing min-h-screen text-rt-ink"
-    >
+    <div ref={rootRef} onMouseMove={onMove} className="rt-landing min-h-screen text-rt-ink">
       <div className="rt-landing-glow" aria-hidden="true" />
       <div className="rt-landing-grain" aria-hidden="true" />
       <div className="relative z-10">

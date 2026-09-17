@@ -9,13 +9,14 @@ describe('scrollToLandingHash', () => {
   });
 
   it('scrolls the matching section into view', () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
     const section = document.createElement('section');
     section.id = 'voting';
     document.body.append(section);
-    const spy = vi.spyOn(section, 'scrollIntoView').mockImplementation(() => {});
 
     expect(scrollToLandingHash('#voting', 'auto')).toBe(true);
-    expect(spy).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
   });
 
   it('does nothing when the hash is empty or unknown', () => {

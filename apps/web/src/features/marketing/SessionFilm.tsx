@@ -10,8 +10,7 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 function AgendaScene() {
   const reduce = useReducedMotion();
   const last =
-    DEMO_QUESTIONS[DEMO_QUESTIONS.length - 1]?.text ??
-    'Who owns the laptop image and welcome kit?';
+    DEMO_QUESTIONS[DEMO_QUESTIONS.length - 1]?.text ?? 'Who owns the laptop image and welcome kit?';
   const [typed, setTyped] = useState(reduce ? last.length : 0);
 
   useEffect(() => {
