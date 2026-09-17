@@ -3,7 +3,8 @@ import type { BoardItem, VotingPhase, VotingTally, VotingVoterStatus } from '@ro
 
 import { cardWidth } from '../pinboard/cardMetrics';
 import { CARD_RADIUS, STICKY_RADIUS } from '../pinboard/pinboardTokens';
-import { ProposalCard } from '../pinboard/ProposalCard';
+import { CardFoot, ProposalArtwork, ProposalCard } from '../pinboard/ProposalCard';
+import { ProposalPreview } from '../pinboard/ProposalPreview';
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import { VoteResultBadge, voteResultRing } from './VoteResultBadge';
 
@@ -41,6 +42,12 @@ function cardFrameStyle(item: BoardItem): { width: number; borderRadius: string 
     width: cardWidth(item),
     borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
   };
+}
+
+/** Whether there is a canvas to open: a studio proposal, or a drawing with strokes. */
+function hasArtwork(item: BoardItem): boolean {
+  const artifact = item.artifactJson;
+  return artifact.type === 'diagram' || (artifact.type === 'drawing' && !!artifact.svg.trim());
 }
 
 function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally {
@@ -248,6 +255,26 @@ export function VotingBallot({
                           {card}
                         </button>
                       )}
+                      {/* The card is the vote button, so the way into a
+                          canvas sits beside it: looking closely before voting
+                          must never be a vote. */}
+                      {hasArtwork(item) ? (
+                        <div className="mt-2">
+                          <ProposalPreview
+                            item={item}
+                            artwork={<ProposalArtwork item={item} />}
+                            byline={
+                              <CardFoot
+                                item={item}
+                                viewerId={viewerId}
+                                isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
+                                isAuthorLeader={item.authorId != null && item.authorId === leaderId}
+                              />
+                            }
+                            placement="beside"
+                          />
+                        </div>
+                      ) : null}
                       <div className="mt-2 px-0.5">
                         <div className="h-1.5 overflow-hidden rounded-full bg-rt-tertiary/60">
                           <div

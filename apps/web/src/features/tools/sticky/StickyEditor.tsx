@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
@@ -13,6 +12,7 @@ import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
 import { closingFades } from '../../../lib/motion';
+import { CENTRED_ON_WINDOW, placeAboveBoardToolbar } from '../../pinboard/boardPopup';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
@@ -42,10 +42,6 @@ const STICKY_COLORS: StickyColor[] = ['yellow', 'pink', 'blue', 'green'];
 
 const POPUP_WIDTH = 'min(92vw, 520px)';
 const POPUP_MAX_WIDTH_PX = 520;
-/** Between the popup and the board's footer it rests on. */
-const FOOTER_GAP_PX = 12;
-/** Kept clear of the window's edge when the toolbar sits near it. */
-const EDGE_PX = 16;
 /** How long the popup takes to fade out; the same as `.rt-sticky-popup-fade`. */
 const EXIT_MS = 150;
 /** The toolbar button for the tool that is already open. */
@@ -57,40 +53,9 @@ const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
  */
 const NOTE_MAX_HEIGHT_PX = 360;
 
-/** With no toolbar to rest on, as in the tools workbench: the middle of the window. */
-const CENTRED: CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
-
-/**
- * Where the popup goes: resting just above the board's floating toolbar,
- * centred on the board.
- *
- * Centred on the board's own toolbar row rather than on the window, because the
- * panels either side of the board are not the same width, and the middle of
- * the window is not the middle of the thing being written onto. Measured
- * rather than offset by a fixed amount for the same reason.
- *
- * Anchored by the bottom, so a note that grows grows upward, away from the
- * toolbar, instead of down over it. Null when there is no toolbar on screen, as
- * in the tools workbench, and the popup sits in the middle of the window.
- */
-function placeAboveFooter(): CSSProperties | null {
-  const toolbar = document.querySelector<HTMLElement>('[data-creative-toolbar]');
-  if (!toolbar) return null;
-
-  const board = (
-    toolbar.closest<HTMLElement>('[data-board-toolbar]') ?? toolbar
-  ).getBoundingClientRect();
-  const width = Math.min(window.innerWidth * 0.92, POPUP_MAX_WIDTH_PX);
-  const centred = board.left + board.width / 2 - width / 2;
-  return {
-    top: 'auto',
-    right: 'auto',
-    // The row spans the board but is only as tall as the toolbar, so its top
-    // edge is the toolbar's and the note rests just clear of it.
-    bottom: window.innerHeight - board.top + FOOTER_GAP_PX,
-    left: Math.max(EDGE_PX, Math.min(centred, window.innerWidth - width - EDGE_PX)),
-  };
-}
+/** Where the popup rests over the board; see `placeAboveBoardToolbar`. */
+const placeAboveFooter = () =>
+  placeAboveBoardToolbar(Math.min(window.innerWidth * 0.92, POPUP_MAX_WIDTH_PX));
 
 /**
  * Writing a sticky, as a note you write on rather than a room you enter.
@@ -362,7 +327,7 @@ export function StickyEditor() {
       role="dialog"
       aria-labelledby="sticky-composer-label"
       className={`fixed z-40 text-rt-ink ${closing ? 'pointer-events-none' : ''}`}
-      style={placement ?? CENTRED}
+      style={placement ?? CENTRED_ON_WINDOW}
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
         event.preventDefault();

@@ -41,6 +41,12 @@ const drawing = item(
 const sticky = item({ type: 'sticky', text: 'Ship the API', color: 'yellow' }, 'sticky');
 
 const previewButton = () => screen.getByRole('button', { name: 'Preview diagram by Alice' });
+/** The shape the artwork is drawn in, as width over height. */
+function artworkShape(): number {
+  const frame = screen.getByRole('dialog').firstElementChild as HTMLElement;
+  const [width, height] = frame.style.aspectRatio.split('/').map((part) => Number(part.trim()));
+  return height ? width! / height : width!;
+}
 
 describe('proposal preview', () => {
   // The card shows a whole canvas at the width of a card. This opens the same
@@ -89,15 +95,25 @@ describe('proposal preview', () => {
     expect(previewButton()).toHaveFocus();
   });
 
-  it('closes on a press beside the artwork', async () => {
+  // The board is not dimmed or locked behind it, so a press out there puts the
+  // preview away and still does whatever it was a press on.
+  it('closes on a press anywhere else, which still lands where it was aimed', async () => {
     const user = userEvent.setup();
-    render(<ProposalCard item={diagram} />);
+    const onBoard = vi.fn();
+    render(
+      <>
+        <ProposalCard item={diagram} />
+        <button type="button" onClick={onBoard}>
+          Something on the board
+        </button>
+      </>,
+    );
 
     await user.click(previewButton());
-    const scrim = screen.getByRole('dialog').parentElement!;
-    fireEvent.pointerDown(scrim);
+    await user.click(screen.getByRole('button', { name: 'Something on the board' }));
 
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onBoard).toHaveBeenCalledTimes(1);
   });
 
   // A card is dragged from anywhere on it, and pressed to shortlist it.
@@ -117,22 +133,35 @@ describe('proposal preview', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  // The board behind it is covered, so nothing back there can be tabbed to.
-  it('keeps the keyboard inside the preview while it is open', async () => {
+  // One frame for every proposal. The artwork is scaled to fit whatever frame
+  // it is given, so a frame that took each canvas's own shape changed size with
+  // every proposal opened and bought little for it.
+  it('opens in the same frame whatever shape the canvas is', async () => {
     const user = userEvent.setup();
-    render(
-      <>
-        <ProposalCard item={diagram} />
-        <button type="button">Behind the preview</button>
-      </>,
-    );
+    const canvas = (far: { x: number; y: number }) =>
+      item(
+        {
+          type: 'diagram',
+          nodes: [
+            { id: 'a', label: 'One', x: 0, y: 0, shape: 'box' },
+            { id: 'b', label: 'Two', x: far.x, y: far.y, shape: 'box' },
+          ],
+          edges: [],
+        },
+        'diagram',
+      );
 
+    const wideView = render(<ProposalCard item={canvas({ x: 900, y: 0 })} />);
     await user.click(previewButton());
-    await user.tab();
-    expect(screen.getByRole('button', { name: 'Close preview' })).toHaveFocus();
+    const wide = { shape: artworkShape(), width: screen.getByRole('dialog').style.width };
+    wideView.unmount();
 
-    await user.tab();
-    expect(screen.getByRole('button', { name: 'Close preview' })).toHaveFocus();
+    render(<ProposalCard item={canvas({ x: 0, y: 900 })} />);
+    await user.click(previewButton());
+
+    expect(wide.shape).toBeCloseTo(4 / 3, 5);
+    expect(artworkShape()).toBeCloseTo(4 / 3, 5);
+    expect(screen.getByRole('dialog').style.width).toBe(wide.width);
   });
 
   it('leaves a sticky alone, since its card already shows every word', () => {

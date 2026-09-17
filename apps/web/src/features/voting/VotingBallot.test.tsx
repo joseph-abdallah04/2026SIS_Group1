@@ -341,6 +341,46 @@ describe('VotingBallot', () => {
     });
   });
 
+  // Voting on a canvas means reading it first, and a card is only a glance at
+  // one. The way into the preview sits beside the card, never inside the vote
+  // button, so looking closely can never cast a vote.
+  it('offers a canvas preview beside the card, outside the vote button', async () => {
+    const onVote = vi.fn();
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[diagram('p1'), sticky('p2', 'Ship the UI')]}
+        tallies={[]}
+        myVote={null}
+        votedCount={0}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
+        busy={false}
+        error={null}
+        onVote={onVote}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    const preview = screen.getByRole('button', { name: 'Preview diagram by Alice' });
+    expect(preview).toHaveTextContent('Preview');
+    expect(preview.closest('button[aria-pressed]')).toBeNull();
+
+    await userEvent.click(preview);
+
+    expect(screen.getByRole('dialog', { name: 'diagram by Alice' })).toBeInTheDocument();
+    expect(onVote).not.toHaveBeenCalled();
+    // A sticky has nothing to open, so it is offered nothing.
+    expect(screen.queryByRole('button', { name: /^Preview sticky/ })).toBeNull();
+  });
+
   // A sticky grows with its note. A slot sized for the smallest sticky left a
   // long note spilling out of it, past the ring that marks the winner.
   // The card is the vote button, so a long sticky is all there on it to read,

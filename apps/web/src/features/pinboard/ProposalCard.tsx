@@ -36,6 +36,7 @@ import {
   inkStrokeWidth,
   studioPaintOrder,
   type BoardItem,
+  type DiagramArtifact,
 } from '@roundtable/shared';
 
 import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
@@ -82,6 +83,9 @@ interface ProposalCardProps {
    */
   interactive?: boolean;
 }
+
+/** The plate every card gives artwork, so a row of cards lines up. */
+const PLATE_ASPECT = 4 / 3;
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
 function formatTime(iso: string): string {
@@ -216,7 +220,7 @@ const FOOT_MIN_GAP_PX = 20;
  * resized as chips came and went drew the eye to its own edges instead of to
  * what somebody had written on it.
  */
-function CardFoot({
+export function CardFoot({
   item,
   viewerId,
   isOwnedByViewer,
@@ -356,10 +360,85 @@ function CardMedia({ children }: { children: ReactNode }) {
   return (
     <div
       className="relative w-full overflow-hidden border-b"
-      style={{ aspectRatio: '4 / 3', background: THUMB_BACKGROUND, borderColor: CARD_BORDER }}
+      style={{ aspectRatio: PLATE_ASPECT, background: THUMB_BACKGROUND, borderColor: CARD_BORDER }}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * How much room a studio canvas takes: the far edge of everything on it, plus
+ * the margin the card leaves around it.
+ *
+ * Everything counts towards it — a shape, a sketch, a path, a table, and an
+ * arrow's whole route, which can reach past what it points at. Worked out here
+ * rather than in the drawing itself, because the card's plate and the preview's
+ * frame both need the shape of it before either draws anything.
+ */
+export function diagramExtent(artifact: DiagramArtifact): { width: number; height: number } {
+  const { nodes } = artifact;
+  const paths = artifact.paths ?? [];
+  const tables = artifact.tables ?? [];
+  const arrows = artifact.arrows ?? [];
+  const points = (artifact.ink ?? []).flatMap((stroke) => inkPoints(stroke));
+  const anchors = paths.flatMap((path) => path.anchors);
+  const corners = tables.map((table) => ({ table, size: tableSize(table) }));
+  const arrowTargets = arrowTargetLookup({
+    nodes,
+    ink: (artifact.ink ?? []).map((stroke) => ({ ...stroke, points: inkPoints(stroke) })),
+    paths,
+    tables,
+  });
+  const routes = arrows.flatMap((arrow) => arrowGeometry(arrow, arrowTargets).points);
+  return {
+    width:
+      Math.max(
+        ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
+        ...points.map((point) => point.x),
+        ...anchors.map((anchor) => anchor.x),
+        ...corners.map(({ table, size }) => table.x + size.width),
+        ...routes.map((point) => point.x),
+        72,
+      ) + 28,
+    height:
+      Math.max(
+        ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
+        ...points.map((point) => point.y),
+        ...anchors.map((anchor) => anchor.y),
+        ...corners.map(({ table, size }) => table.y + size.height),
+        ...routes.map((point) => point.y),
+        32,
+      ) + 24,
+  };
+}
+
+/**
+ * A proposal's drawing: a studio canvas, or a drawing's image.
+ *
+ * Drawn into whatever box it is given, so the card's plate and the preview's
+ * frame show the same artwork. Null for a sticky, whose words are not artwork,
+ * and for a drawing proposed before strokes were stored, which has none.
+ */
+export function ProposalArtwork({ item }: { item: BoardItem }) {
+  const artifact = item.artifactJson;
+  if (artifact.type === 'diagram') return <DiagramArtwork item={item} />;
+  if (artifact.type !== 'drawing') return null;
+  // Never inject a peer's SVG into this document: it is arbitrary user-authored
+  // markup, so an inline <svg> would run any <script>/onload it carries in every
+  // viewer's session. An <img> renders SVG with scripting and external fetches
+  // disabled, so a hostile drawing is inert.
+  const svg = artifact.svg.trim();
+  if (!svg) return null;
+  return (
+    <img
+      src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
+      alt={`Drawing by ${item.authorName}`}
+      loading="lazy"
+      // Images are natively draggable, which would hijack a card drag.
+      draggable={false}
+      className="absolute inset-0 h-full w-full object-contain p-2.5"
+    />
   );
 }
 
@@ -393,32 +472,7 @@ function DiagramArtwork({ item }: { item: BoardItem }) {
   );
   const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
-  // The card frames whatever the artifact contains, so ink counts towards the
-  // extent exactly as a node does — otherwise a sketch would be cropped.
-  const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
-  const allAnchors = paths.flatMap((path) => path.anchors);
-  const tableCorners = tables.map((table) => ({ table, size: tableSize(table) }));
-  // An arrow can reach past everything it points at, so its route counts
-  // towards the extent too — otherwise a free end would be cropped off.
-  const allArrowPoints = [...arrowRoutes.values()].flatMap((geometry) => geometry.points);
-  const svgWidth =
-    Math.max(
-      ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
-      ...allInkPoints.map((point) => point.x),
-      ...allAnchors.map((anchor) => anchor.x),
-      ...tableCorners.map(({ table, size }) => table.x + size.width),
-      ...allArrowPoints.map((point) => point.x),
-      72,
-    ) + 28;
-  const svgHeight =
-    Math.max(
-      ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
-      ...allInkPoints.map((point) => point.y),
-      ...allAnchors.map((anchor) => anchor.y),
-      ...tableCorners.map(({ table, size }) => table.y + size.height),
-      ...allArrowPoints.map((point) => point.y),
-      32,
-    ) + 24;
+  const { width: svgWidth, height: svgHeight } = diagramExtent(item.artifactJson);
   // Proposal-scoped marker ids prevent arrows in separate diagram cards from
   // colliding; one per resolved colour keeps each arrowhead matching its line.
   const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
@@ -695,27 +749,12 @@ export function ProposalCard({
   // markup, so an inline <svg> would run any <script>/onload it carries in every
   // viewer's session. An <img> renders SVG with scripting and external fetches
   // disabled, so a hostile drawing is inert.
-  const svg = artifact.type === 'drawing' ? artifact.svg.trim() : '';
-  const drawingSrc = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : null;
-
-  // The card's drawing, and its byline, as pieces: the preview shows the same
-  // two, so a canvas opened from a card is that card, larger.
-  const artwork =
-    artifact.type === 'diagram' ? (
-      <DiagramArtwork item={item} />
-    ) : artifact.type === 'drawing' && drawingSrc ? (
-      <img
-        src={drawingSrc}
-        alt={`Drawing by ${item.authorName}`}
-        loading="lazy"
-        // Images are natively draggable, which would hijack a card drag.
-        draggable={false}
-        className="absolute inset-0 h-full w-full object-contain p-2.5"
-      />
-    ) : null;
+  const artwork = <ProposalArtwork item={item} />;
   // A drawing proposed before strokes were stored has nothing to draw, and so
   // nothing to open: the plate stays, the way into the preview does not.
   const hasPlate = artifact.type === 'diagram' || artifact.type === 'drawing';
+  const hasArtwork =
+    artifact.type === 'diagram' || (artifact.type === 'drawing' && !!artifact.svg.trim());
   const foot = (
     <CardFoot
       item={item}
@@ -779,7 +818,7 @@ export function ProposalCard({
             {/* A canvas on a card is a glance at it; this opens it at a size it
                 can be read at. Left off where the card is itself a button, as
                 on a ballot, which has nothing to press inside it. */}
-            {interactive && artwork ? (
+            {interactive && hasArtwork ? (
               <ProposalPreview item={item} artwork={artwork} byline={foot} />
             ) : null}
           </CardMedia>

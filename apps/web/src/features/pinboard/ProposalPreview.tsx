@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, X } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 
+import { boardPopupRoom, CENTRED_ON_WINDOW, EDGE_PX, type BoardPopupRoom } from './boardPopup';
 import {
   CARD_BORDER,
   CARD_INK,
@@ -11,6 +12,46 @@ import {
   REACTION_ON_BORDER,
   THUMB_BACKGROUND,
 } from './pinboardTokens';
+
+/** As wide as the preview opens, where the board has the room for it. */
+const MAX_WIDTH_PX = 780;
+/**
+ * The shape the preview always opens in, which is the card's own plate.
+ *
+ * One frame for every proposal, whatever shape its canvas is. The artwork is
+ * scaled to fit whatever frame it is given, so taking each canvas's own shape
+ * bought little more than trimmed margins, and cost a popup that changed size
+ * and shape with every proposal opened — worst of all while voting, where the
+ * point is to compare one against the next.
+ */
+const FRAME_ASPECT = 4 / 3;
+/** The narrowest it goes before it stops shrinking and lets the artwork letterbox. */
+const MIN_WIDTH_PX = 280;
+/** About what the byline under the artwork takes, which is not room for the artwork. */
+const BYLINE_PX = 30;
+
+/**
+ * How large the preview opens, and where: as large as the board has room for,
+ * in the one frame every proposal opens in.
+ */
+function panelStyle(room: BoardPopupRoom | null): CSSProperties {
+  const maxWidth = Math.min(MAX_WIDTH_PX, room?.maxWidth ?? window.innerWidth - EDGE_PX * 2);
+  const maxHeight = room?.maxHeight ?? window.innerHeight - EDGE_PX * 2;
+  const width = Math.max(MIN_WIDTH_PX, Math.min(maxWidth, (maxHeight - BYLINE_PX) * FRAME_ASPECT));
+  return {
+    ...(room
+      ? {
+          left: room.left,
+          top: room.top,
+          right: 'auto',
+          bottom: 'auto',
+          transform: 'translate(-50%, -50%)',
+        }
+      : CENTRED_ON_WINDOW),
+    width,
+    maxHeight,
+  };
+}
 
 /** What the preview calls the thing it is showing. */
 const KIND: Record<BoardItem['type'], string> = {
@@ -36,12 +77,19 @@ export function ProposalPreview({
   item,
   artwork,
   byline,
+  placement = 'corner',
 }: {
   item: BoardItem;
   /** The card's own drawing, drawn again in the preview's frame. */
   artwork: ReactNode;
   /** The card's byline, so the preview says whose proposal this is. */
   byline: ReactNode;
+  /**
+   * Where the way in sits: in the corner of the card's plate, or beside the
+   * card as its own row, for a ballot where the card is itself a button and
+   * can hold nothing that is pressed on its own.
+   */
+  placement?: 'corner' | 'beside';
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -60,7 +108,13 @@ export function ProposalPreview({
           event.stopPropagation();
           setOpen(true);
         }}
-        className="absolute right-2 bottom-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border border-rt-tertiary bg-white/90 text-rt-ink-muted opacity-0 shadow-sm transition-[opacity,background-color,border-color,color] group-focus-within/card:opacity-100 group-hover/card:opacity-100 hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary [@media(hover:none)]:opacity-100"
+        className={
+          placement === 'corner'
+            ? 'absolute right-2 bottom-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border border-rt-tertiary bg-white/90 text-rt-ink-muted opacity-0 shadow-sm transition-[opacity,background-color,border-color,color] group-focus-within/card:opacity-100 group-hover/card:opacity-100 hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary [@media(hover:none)]:opacity-100'
+            : // Beside the card, where it is a row of its own rather than a mark
+              // on the artwork, so it is there to be read as well as pressed.
+              'inline-flex items-center gap-1.5 rounded-full border border-rt-tertiary bg-white px-2.5 py-1 text-[11px] font-semibold text-rt-ink-muted shadow-sm transition-colors hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-primary'
+        }
         style={
           {
             // The slate the card's other controls hover to, so they read as one
@@ -72,7 +126,10 @@ export function ProposalPreview({
           } as React.CSSProperties
         }
       >
-        <Maximize2 aria-hidden="true" size={12} strokeWidth={2.2} />
+        {/* Mirrored, so the arrows open along the corner the button sits in
+            rather than across it. */}
+        <Maximize2 aria-hidden="true" size={12} strokeWidth={2.2} className="-scale-x-100" />
+        {placement === 'beside' ? 'Preview' : null}
       </button>
       {open ? (
         <PreviewDialog
@@ -106,62 +163,59 @@ function PreviewDialog({
     closeRef.current = onClose;
   });
 
+  // In the middle of the board, over the cards it was opened from, as large as
+  // the board has room for.
+  const [style, setStyle] = useState(() => panelStyle(boardPopupRoom()));
+  useEffect(() => {
+    const onResize = () => setStyle(panelStyle(boardPopupRoom()));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   useEffect(() => {
     panelRef.current?.focus();
+    // Escape closes it wherever the focus has gone.
     const onKeyDown = (event: KeyboardEvent) => {
-      // Escape closes it wherever the focus has gone, and a press anywhere off
-      // the artwork does too, as the board's other popovers do.
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        closeRef.current();
-        return;
-      }
-      // The board behind the preview is covered and cannot be pressed, so Tab
-      // does not wander off into it either: it stays on the way out of here.
-      if (event.key !== 'Tab') return;
-      const panel = panelRef.current;
-      const stops = panel?.querySelectorAll<HTMLElement>('button, [href], [tabindex="0"]');
-      if (!panel || !stops?.length) return;
-      const first = stops[0]!;
-      const last = stops[stops.length - 1]!;
-      const active = document.activeElement;
-      if (!event.shiftKey && (active === last || !panel.contains(active))) {
-        event.preventDefault();
-        first.focus();
-      } else if (event.shiftKey && (active === first || !panel.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      }
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRef.current();
+    };
+    /**
+     * A press anywhere else puts it away, and still does whatever it was a
+     * press on — another card, the toolbar, the board itself — the way the
+     * board's other popovers behave. Listened for on the way down, so the
+     * preview is gone before a drag that starts outside it gets going.
+     */
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return;
+      closeRef.current();
     };
     document.addEventListener('keydown', onKeyDown, true);
-    return () => document.removeEventListener('keydown', onKeyDown, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, []);
 
   return createPortal(
+    // Nothing behind it is dimmed or locked: the board is still there to look
+    // at and to press, so glancing at a canvas costs nothing.
     <div
-      className="rt-studio-fade fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: 'rgba(8, 12, 21, 0.28)' }}
-      // The board behind it is not the subject any more; a press out here puts
-      // the preview away rather than reaching the card underneath.
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+      ref={panelRef}
+      role="dialog"
+      aria-label={`${KIND[item.type]} by ${item.authorName}`}
+      tabIndex={-1}
+      className="rt-preview-open fixed z-50 flex flex-col overflow-hidden border bg-rt-surface shadow-[0_10px_28px_rgba(8,12,21,0.16)] outline-none"
+      style={{ ...style, borderColor: CARD_BORDER, borderRadius: CARD_RADIUS }}
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${KIND[item.type]} by ${item.authorName}`}
-        tabIndex={-1}
-        className="rt-sticky-popup-rise flex max-h-full w-[min(92vw,1100px)] flex-col overflow-hidden border bg-rt-surface shadow-[0_18px_48px_rgba(8,12,21,0.28)] outline-none"
-        style={{ borderColor: CARD_BORDER, borderRadius: CARD_RADIUS }}
-      >
+      <>
         {/* The artwork takes whatever the window leaves, keeping its own shape
             within it, so a wide canvas is wide and a tall one is tall. */}
         <div
           className="relative min-h-0 flex-1 overflow-hidden"
-          style={{ background: THUMB_BACKGROUND, aspectRatio: '4 / 3' }}
+          style={{ background: THUMB_BACKGROUND, aspectRatio: FRAME_ASPECT }}
         >
           {artwork}
           {/* In the corner the artwork leaves clear, where a window's close is:
@@ -179,7 +233,7 @@ function PreviewDialog({
         <div className="border-t" style={{ borderColor: CARD_BORDER }}>
           {byline}
         </div>
-      </div>
+      </>
     </div>,
     document.body,
   );
