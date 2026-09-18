@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QUICK_REACTIONS, reactionLabel, type ReactionGroup } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { EMOJI_GROUPS } from './emojiCatalog';
 import { ReactionRow } from './ReactionRow';
 
+/** One reactor, named the way the server names them. */
+const person = (userId: string) => ({ userId, displayName: userId.toUpperCase() });
 const [THUMB, HEART] = QUICK_REACTIONS;
 /** Only reachable through the picker, never one of the fixed chips. */
 const PARTY = '🎉';
@@ -19,12 +21,14 @@ function renderRow({
   return { onReact };
 }
 
-/** The chip for one emoji, found by the label a screen reader would read. */
+/**
+ * The chip for one emoji, found by the label a screen reader would read. A
+ * chip somebody is in goes on to name them, so the count is where this stops
+ * matching rather than the end of the label.
+ */
 function chip(emoji: string, count?: number) {
-  const label = reactionLabel(emoji);
-  return screen.getByRole('button', {
-    name: count === undefined ? label : `${label} (${count})`,
-  });
+  const label = count === undefined ? reactionLabel(emoji) : `${reactionLabel(emoji)} (${count})`;
+  return screen.getByRole('button', { name: (name: string) => name.startsWith(label) });
 }
 
 const moreButton = () => screen.getByRole('button', { name: 'More reactions' });
@@ -42,19 +46,61 @@ describe('reaction row', () => {
   });
 
   it('counts the people who reacted', () => {
-    renderRow({ reactions: [{ emoji: THUMB, userIds: ['a', 'b', 'c'] }] });
+    renderRow({ reactions: [{ emoji: THUMB, people: [person('a'), person('b'), person('c')] }] });
 
     expect(chip(THUMB, 3).textContent).toContain('3');
     // An emoji nobody used stays a bare chip rather than showing a zero.
     expect(chip(HEART).textContent).not.toContain('0');
   });
 
+  // A count says how many agreed; the question that follows is always who.
+  it('names who reacted when the chip is hovered', async () => {
+    vi.useFakeTimers();
+    try {
+      renderRow({
+        reactions: [{ emoji: THUMB, people: [person('ada'), person('bo')] }],
+        viewerId: 'ada',
+      });
+
+      fireEvent.pointerEnter(chip(THUMB, 2));
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+
+      // Themselves first, and as "you": that is what a person calls themselves.
+      expect(screen.getByText('You and BO')).toBeInTheDocument();
+
+      fireEvent.pointerLeave(chip(THUMB, 2));
+      expect(screen.queryByText('You and BO')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A tooltip is nothing to a screen reader, so the chip says it as well.
+  it('names them in the chip itself, for anyone who cannot hover', () => {
+    renderRow({
+      reactions: [{ emoji: THUMB, people: [person('ada'), person('bo'), person('cy')] }],
+      viewerId: 'bo',
+    });
+
+    expect(chip(THUMB, 3)).toHaveAccessibleName('Agree (3) — You, ADA and CY');
+  });
+
+  // One popular chip must not cover the board with a list of names.
+  it('counts the rest once a chip has more names than it shows', () => {
+    const crowd = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(person);
+    renderRow({ reactions: [{ emoji: THUMB, people: crowd }], viewerId: null });
+
+    expect(chip(THUMB, 7)).toHaveAccessibleName('Agree (7) — A, B, C, D, E and 2 more');
+  });
+
   it('presses the chips this viewer reacted with, and only those', () => {
     renderRow({
       viewerId: 'viewer',
       reactions: [
-        { emoji: THUMB, userIds: ['someone', 'viewer'] },
-        { emoji: HEART, userIds: ['someone'] },
+        { emoji: THUMB, people: [person('someone'), person('viewer')] },
+        { emoji: HEART, people: [person('someone')] },
       ],
     });
 
@@ -73,7 +119,7 @@ describe('reaction row', () => {
   // Pressing an existing reaction asks for the same toggle. Which direction it
   // goes is the server's decision, so the row sends one intent either way.
   it('sends the same intent when taking a reaction back', async () => {
-    const { onReact } = renderRow({ reactions: [{ emoji: THUMB, userIds: ['viewer'] }] });
+    const { onReact } = renderRow({ reactions: [{ emoji: THUMB, people: [person('viewer')] }] });
 
     await userEvent.click(chip(THUMB, 1));
 
@@ -117,7 +163,7 @@ describe('reaction row', () => {
   // Counts are shared, but "did I react" is not: the same board data must
   // press different chips for different people.
   it('reads the pressed state from the viewer, not from the reaction', () => {
-    const reactions = [{ emoji: THUMB, userIds: ['someone-else'] }];
+    const reactions = [{ emoji: THUMB, people: [person('someone-else')] }];
     const { unmount } = render(
       <ReactionRow reactions={reactions} viewerId="viewer" onReact={vi.fn()} width={210} />,
     );
@@ -132,7 +178,7 @@ describe('reaction row', () => {
 
   describe('ordering', () => {
     it('shows an emoji from the picker with its count', () => {
-      renderRow({ reactions: [{ emoji: PARTY, userIds: ['a', 'b'] }] });
+      renderRow({ reactions: [{ emoji: PARTY, people: [person('a'), person('b')] }] });
 
       expect(chip(PARTY, 2).textContent).toContain('2');
     });
@@ -143,8 +189,8 @@ describe('reaction row', () => {
     it('puts what people reacted with first, whether or not it is a quick one', () => {
       renderRow({
         reactions: [
-          { emoji: PARTY, userIds: ['a'] },
-          { emoji: HEART, userIds: ['b'] },
+          { emoji: PARTY, people: [person('a')] },
+          { emoji: HEART, people: [person('b')] },
         ],
       });
 
@@ -153,9 +199,10 @@ describe('reaction row', () => {
         .map((button) => button.getAttribute('aria-label'));
 
       expect(labels).toEqual([
-        // Used, in the server's order, which is the order they first appeared.
-        `${reactionLabel(PARTY)} (1)`,
-        `${reactionLabel(HEART)} (1)`,
+        // Used, in the server's order, which is the order they first appeared,
+        // each naming whoever is in it.
+        `${reactionLabel(PARTY)} (1) — A`,
+        `${reactionLabel(HEART)} (1) — B`,
         // Then the quick chips still untouched, in contract order.
         ...QUICK_REACTIONS.filter((emoji) => emoji !== HEART).map((emoji) => reactionLabel(emoji)),
         'More reactions',
@@ -165,14 +212,14 @@ describe('reaction row', () => {
     // A quick emoji that has been used is already in the first group, so
     // offering it again would give one reaction two chips and two counts.
     it('does not repeat a quick emoji among the untouched ones', () => {
-      renderRow({ reactions: [{ emoji: THUMB, userIds: ['a'] }] });
+      renderRow({ reactions: [{ emoji: THUMB, people: [person('a')] }] });
 
       const labels = screen
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label'));
 
       expect(labels.filter((label) => label?.startsWith(reactionLabel(THUMB)))).toEqual([
-        `${reactionLabel(THUMB)} (1)`,
+        `${reactionLabel(THUMB)} (1) — A`,
       ]);
     });
   });
@@ -226,7 +273,7 @@ describe('reaction row', () => {
     // The picker is where you go to change a reaction you left from the
     // picker, so it has to say which ones those are.
     it('marks the emoji this viewer already left', async () => {
-      renderRow({ viewerId: 'viewer', reactions: [{ emoji: PARTY, userIds: ['viewer'] }] });
+      renderRow({ viewerId: 'viewer', reactions: [{ emoji: PARTY, people: [person('viewer')] }] });
 
       await userEvent.click(moreButton());
       await userEvent.click(screen.getByRole('textbox', { name: 'Search emoji' }));

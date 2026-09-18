@@ -4,11 +4,13 @@ import {
   hasReacted,
   reactionCount,
   reactionLabel,
+  reactionPeople,
   QUICK_REACTIONS,
   type ReactionGroup,
 } from '@roundtable/shared';
 
 import { EmojiPicker } from './EmojiPicker';
+import { useCardTooltip } from './useCardTooltip';
 import { REACTION_HOVER_FILL, REACTION_ON_BORDER, REACTION_ON_FILL } from './pinboardTokens';
 
 interface ReactionRowProps {
@@ -25,10 +27,29 @@ interface ReactionRowProps {
 /**
  * One chip: the emoji, its count once it has one, and whether you are in it.
  */
+/**
+ * Who is in a chip, as a sentence: everyone where there are few, and the first
+ * few and a count where there are many, so one popular chip cannot cover the
+ * board with a list of names.
+ */
+function whoReacted(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  if (names.length <= NAMES_SHOWN) {
+    return names.length === 1
+      ? names[0]!
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  }
+  return `${names.slice(0, NAMES_SHOWN).join(', ')} and ${names.length - NAMES_SHOWN} more`;
+}
+
+/** How many names a chip lists before it starts counting the rest. */
+const NAMES_SHOWN = 5;
+
 function ReactionChip({
   emoji,
   count,
   mine,
+  who,
   busy,
   disabled,
   dim,
@@ -37,6 +58,8 @@ function ReactionChip({
   emoji: string;
   count: number;
   mine: boolean;
+  /** Who left this one, for the hover and for anyone who cannot hover. */
+  who: string;
   busy: boolean;
   disabled: boolean;
   /** Nothing has been said with this one yet, so it waits until hovered. */
@@ -44,6 +67,9 @@ function ReactionChip({
   onClick: () => void;
 }) {
   const label = reactionLabel(emoji);
+  // Who reacted, beside the chip: a count says how many agreed, and the
+  // question that follows is always who.
+  const names = useCardTooltip<HTMLButtonElement>(who);
 
   return (
     <button
@@ -51,10 +77,12 @@ function ReactionChip({
       // A toggle, so the button reports its state rather than pretending each
       // press is a fresh action.
       aria-pressed={mine}
-      aria-label={count === 0 ? label : `${label} (${count})`}
-      title={mine ? `${label} — click to take it back` : label}
+      // The names are part of what the chip says, not only what it shows on
+      // hover: a tooltip is nothing to a screen reader.
+      aria-label={count === 0 ? label : `${label} (${count}) — ${who}`}
       disabled={busy || disabled}
       onClick={onClick}
+      {...names.anchor}
       // Its own edge and shadow, like the controls on the opposite corner: the
       // chip straddles the card's border, so half of it is over the board and
       // it cannot borrow a background from either side.
@@ -97,6 +125,7 @@ function ReactionChip({
           {count}
         </span>
       ) : null}
+      {names.tooltip}
     </button>
   );
 }
@@ -141,11 +170,11 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
   // Used first, in the server's order, then whichever quick chips are still
   // untouched. A quick emoji that somebody reacted with is already in the
   // first list, so it must not be offered again in the second.
-  const used = reactions.filter((group) => group.userIds.length > 0);
+  const used = reactions.filter((group) => group.people.length > 0);
   const usedEmoji = new Set(used.map((group) => group.emoji));
   const untouched = QUICK_REACTIONS.filter((emoji) => !usedEmoji.has(emoji));
   const mine = reactions
-    .filter((group) => (viewerId ? group.userIds.includes(viewerId) : false))
+    .filter((group) => hasReacted(reactions, group.emoji, viewerId))
     .map((group) => group.emoji);
 
   const toggle = (emoji: string) => {
@@ -157,6 +186,7 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
     <ReactionChip
       key={emoji}
       emoji={emoji}
+      who={whoReacted(reactionPeople(reactions, emoji, viewerId))}
       count={reactionCount(reactions, emoji)}
       mine={hasReacted(reactions, emoji, viewerId)}
       busy={pending === emoji}

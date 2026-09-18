@@ -118,7 +118,7 @@ export const DEMO_PINBOARD_STICKIES: BoardItem[] = [
     text: 'Provision accounts the day the offer is signed',
     color: 'yellow',
     createdAt: '2026-09-17T04:08:00.000Z',
-    reactions: [{ emoji: '👍', userIds: ['alex', 'elena', 'tom'] }],
+    reactions: [{ emoji: '👍', people: [PEOPLE.alex, PEOPLE.elena, PEOPLE.tom] }],
   }),
   demoSticky({
     id: 'p-workspace',
@@ -127,7 +127,9 @@ export const DEMO_PINBOARD_STICKIES: BoardItem[] = [
     text: 'Seeded demo workspace, ready before they sit down',
     color: 'blue',
     createdAt: '2026-09-17T04:11:00.000Z',
-    reactions: [{ emoji: '👍', userIds: ['mira', 'alex', 'tom', 'aisha', 'priya'] }],
+    reactions: [
+      { emoji: '👍', people: [PEOPLE.mira, PEOPLE.alex, PEOPLE.tom, PEOPLE.aisha, PEOPLE.priya] },
+    ],
   }),
   demoSticky({
     id: 'p-script',

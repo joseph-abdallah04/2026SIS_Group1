@@ -6,6 +6,7 @@ import {
   type BoardItem,
   type BoardResponse,
   type ReactionGroup,
+  type ReactionPerson,
 } from '@roundtable/shared';
 import {
   artifactJsonSchema,
@@ -47,7 +48,12 @@ import {
 const BOARD_ITEM_INCLUDE = {
   author: { select: { displayName: true } },
   // Oldest first, so the order people reacted in is the order they are listed.
-  reactions: { select: { emoji: true, userId: true }, orderBy: { createdAt: 'asc' } },
+  // The name comes with the reaction: a card says who reacted to it, and the
+  // board has no roster of its own to look one up in.
+  reactions: {
+    select: { emoji: true, userId: true, user: { select: { displayName: true } } },
+    orderBy: { createdAt: 'asc' },
+  },
   // Just enough of the original to say whose idea a card builds on, and to
   // tell an extension (same question) from a reuse (an earlier one).
   extendsProposal: {
@@ -68,20 +74,23 @@ type ProposalRow = Prisma.ProposalGetPayload<{ include: typeof BOARD_ITEM_INCLUD
  * the server so that every client arranges an unfamiliar reaction the same
  * way rather than each inventing an order of its own.
  */
-function toReactionGroups(rows: readonly { emoji: string; userId: string }[]): ReactionGroup[] {
-  const byEmoji = new Map<string, string[]>();
+function toReactionGroups(
+  rows: readonly { emoji: string; userId: string; user: { displayName: string } }[],
+): ReactionGroup[] {
+  const byEmoji = new Map<string, ReactionPerson[]>();
 
   for (const row of rows) {
     // Defensive: the write path admits nothing but a single emoji. A row that
     // slipped past it would render as loose text among the chips, which is
     // somewhere nobody agreed could be written to.
     if (!isEmoji(row.emoji)) continue;
-    const users = byEmoji.get(row.emoji);
-    if (users) users.push(row.userId);
-    else byEmoji.set(row.emoji, [row.userId]);
+    const person = { userId: row.userId, displayName: row.user.displayName };
+    const people = byEmoji.get(row.emoji);
+    if (people) people.push(person);
+    else byEmoji.set(row.emoji, [person]);
   }
 
-  return [...byEmoji].map(([emoji, userIds]) => ({ emoji, userIds }));
+  return [...byEmoji].map(([emoji, people]) => ({ emoji, people }));
 }
 
 export function toBoardItem(row: ProposalRow): BoardItem {
@@ -481,7 +490,7 @@ export async function deleteProposal({
 async function listReactions(proposalId: string): Promise<ReactionGroup[]> {
   const rows = await prisma.proposalReaction.findMany({
     where: { proposalId },
-    select: { emoji: true, userId: true },
+    select: { emoji: true, userId: true, user: { select: { displayName: true } } },
     orderBy: { createdAt: 'asc' },
   });
 

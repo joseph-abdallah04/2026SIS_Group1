@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   arrowGeometry,
   diagramEdgeDash,
@@ -50,6 +49,7 @@ import {
   STICKY_NOTE_PADDING,
 } from '../tools/sticky/stickyPresentation';
 import { StickyText } from '../tools/sticky/StickyText';
+import { useCardTooltip } from './useCardTooltip';
 import { ProposalEnlarge } from './ProposalEnlarge';
 import { cardWidth } from './cardMetrics';
 import {
@@ -130,90 +130,21 @@ function formatTime(iso: string): string {
   });
 }
 
-/** How long the pointer rests on a mark before its explanation appears. */
-const MARK_TOOLTIP_DELAY_MS = 250;
-/** Room a tooltip needs above its mark: its height and the gap, with a little over. */
-const MARK_TOOLTIP_ROOM_PX = 32;
-
 /**
  * A small word in the byline that explains itself on hover.
  *
- * The native `title` waits about a second and is styled by the browser, and the
- * studio's `Tooltip` is positioned inside its parent — which here is a card that
- * clips what spills out of it and is scaled with the board's zoom, so the
- * explanation would be cut off or unreadably small. This one is portalled to the
- * page and placed against the mark on screen, so it reads the same at any zoom.
- *
  * The explanation also goes to screen readers as ordinary text, since a mark is
- * not something anyone tabs to.
+ * not something anyone tabs to, and a tooltip is not something a screen reader
+ * hovers.
  */
 function FootMark({ tooltip, children }: { tooltip: string; children: ReactNode }) {
-  const markRef = useRef<HTMLSpanElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [anchor, setAnchor] = useState<{ x: number; y: number; below: boolean } | null>(null);
-
-  const hide = () => {
-    if (timer.current) clearTimeout(timer.current);
-    setAnchor(null);
-  };
-
-  const show = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const rect = markRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      // Above the mark, unless that would put it off the top of the window —
-      // a card near the top edge of the board — in which case below it.
-      const below = rect.top < MARK_TOOLTIP_ROOM_PX;
-      setAnchor({ x: rect.left + rect.width / 2, y: below ? rect.bottom : rect.top, below });
-    }, MARK_TOOLTIP_DELAY_MS);
-  };
-
-  useEffect(() => {
-    if (!anchor) return;
-    // The board pans under a wheel, which moves the mark out from under an
-    // explanation placed once.
-    window.addEventListener('wheel', hide, { passive: true });
-    return () => window.removeEventListener('wheel', hide);
-  }, [anchor]);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  const explanation = useCardTooltip<HTMLSpanElement>(tooltip);
 
   return (
-    <span
-      ref={markRef}
-      data-foot-mark
-      className="shrink-0 text-[10px]"
-      onPointerEnter={show}
-      onPointerLeave={hide}
-      // Picking the card up is not reading its byline.
-      onPointerDown={hide}
-    >
+    <span data-foot-mark className="shrink-0 text-[10px]" {...explanation.anchor}>
       <span aria-hidden="true">{children}</span>
       <span className="sr-only">{tooltip}</span>
-      {anchor
-        ? createPortal(
-            <span
-              role="presentation"
-              aria-hidden="true"
-              className="rt-studio-fade pointer-events-none fixed z-50 rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-white shadow-lg"
-              data-placement={anchor.below ? 'below' : 'above'}
-              style={{
-                left: anchor.x,
-                top: anchor.below ? anchor.y + 6 : anchor.y - 6,
-                transform: anchor.below ? 'translateX(-50%)' : 'translate(-50%, -100%)',
-              }}
-            >
-              {tooltip}
-            </span>,
-            document.body,
-          )
-        : null}
+      {explanation.tooltip}
     </span>
   );
 }

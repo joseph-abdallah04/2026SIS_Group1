@@ -110,10 +110,24 @@ export function reactionLabel(emoji: string): string {
 }
 
 /**
+ * One person who left a reaction: who they are, and what to call them.
+ *
+ * The name travels with the reaction because a board has no roster of its own
+ * to look one up in — voice knows only who is talking, and a membership list is
+ * a request away and stale the moment somebody joins. A reaction cannot outlive
+ * its author either: reactions go when an account does, so a name is always
+ * there to show.
+ */
+export interface ReactionPerson {
+  userId: string;
+  displayName: string;
+}
+
+/**
  * Everyone who reacted to one proposal with one emoji, oldest first.
  *
  * The people are carried rather than a bare number for two reasons. The count
- * is `userIds.length`, so a count and its membership can never disagree. And
+ * is `people.length`, so a count and its membership can never disagree. And
  * whether *you* reacted is a question only the viewer can answer, so a row
  * broadcast to the whole room cannot hold a `mine` flag that would be true for
  * one client and false for every other. A session is a roomful of people, so
@@ -121,12 +135,12 @@ export function reactionLabel(emoji: string): string {
  */
 export interface ReactionGroup {
   emoji: string;
-  userIds: string[];
+  people: ReactionPerson[];
 }
 
 /** How many people left this reaction. No group means nobody has. */
 export function reactionCount(groups: readonly ReactionGroup[], emoji: string): number {
-  return groups.find((group) => group.emoji === emoji)?.userIds.length ?? 0;
+  return groups.find((group) => group.emoji === emoji)?.people.length ?? 0;
 }
 
 /** Whether this person is one of them, which is what presses the chip. */
@@ -136,10 +150,28 @@ export function hasReacted(
   userId: string | null,
 ): boolean {
   if (!userId) return false;
-  return groups.find((group) => group.emoji === emoji)?.userIds.includes(userId) ?? false;
+  const people = groups.find((group) => group.emoji === emoji)?.people;
+  return people?.some((person) => person.userId === userId) ?? false;
+}
+
+/**
+ * Who left this reaction, as the viewer would say it: themselves first and as
+ * "you", since that is what a person calls themselves, then everyone else in
+ * the order they reacted.
+ */
+export function reactionPeople(
+  groups: readonly ReactionGroup[],
+  emoji: string,
+  viewerId: string | null,
+): string[] {
+  const people = groups.find((group) => group.emoji === emoji)?.people ?? [];
+  return [
+    ...people.filter((person) => person.userId === viewerId).map(() => 'You'),
+    ...people.filter((person) => person.userId !== viewerId).map((person) => person.displayName),
+  ];
 }
 
 /** Total reactions across every emoji, for a summary label. */
 export function totalReactions(groups: readonly ReactionGroup[]): number {
-  return groups.reduce((sum, group) => sum + group.userIds.length, 0);
+  return groups.reduce((sum, group) => sum + group.people.length, 0);
 }
