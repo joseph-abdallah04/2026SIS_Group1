@@ -11,6 +11,7 @@ import {
   type ReactionPerson,
 } from '@roundtable/shared';
 
+import { emojiName } from './emojiCatalog';
 import { EmojiPicker } from './EmojiPicker';
 import { useCardTooltip } from './useCardTooltip';
 import { REACTION_HOVER_FILL, REACTION_ON_BORDER, REACTION_ON_FILL } from './pinboardTokens';
@@ -75,7 +76,10 @@ function ReactionChip({
   onClick: () => void;
 }) {
   const label = reactionLabel(emoji);
-  const name = reactionName(emoji);
+  // The board's own name for the quick three — they are offered as things to
+  // say rather than as pictures, and "Agree" is what pressing one means. Every
+  // other emoji goes by the name Unicode gives it.
+  const name = reactionName(emoji) ?? emojiName(emoji);
   const named = people.map((person) => (person.userId === viewerId ? 'You' : person.displayName));
   const who = whoReacted(named);
   const rest = people.length - NAMES_SHOWN;
@@ -90,7 +94,12 @@ function ReactionChip({
   const names = useCardTooltip<HTMLButtonElement>(
     people.length === 0 ? null : (
       <>
-        {name ? <p className="text-[11px] leading-none text-rt-ink-muted">{name}</p> : null}
+        {name ? (
+          // Unicode writes its names in lower case; a heading starts a line.
+          <p className="text-[11px] leading-none text-rt-ink-muted first-letter:uppercase">
+            {name}
+          </p>
+        ) : null}
         <ul className={`flex flex-col gap-1 ${name ? 'mt-1.5' : ''}`}>
           {people.slice(0, NAMES_SHOWN).map((person) => (
             <li key={person.userId} className="truncate text-[12px] leading-tight">

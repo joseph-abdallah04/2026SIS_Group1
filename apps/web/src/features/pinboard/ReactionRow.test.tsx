@@ -104,6 +104,25 @@ describe('reaction row', () => {
     expect(chip(THUMB, 7)).toHaveAccessibleName('Agree (7) — A, B, C, D, E and 2 more');
   });
 
+  // The three quick chips are named by what pressing them means; everything
+  // the picker offers goes by the name Unicode gives it.
+  it('heads the list with the name of any emoji, not just the quick three', async () => {
+    vi.useFakeTimers();
+    try {
+      renderRow({ reactions: [{ emoji: PARTY, people: [person('ada')] }], viewerId: null });
+
+      fireEvent.pointerEnter(chip(PARTY, 1));
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+
+      const tip = screen.getByRole('presentation', { hidden: true });
+      expect(within(tip).getByText('party popper')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('counts the rest under the faces it shows', async () => {
     vi.useFakeTimers();
     try {
