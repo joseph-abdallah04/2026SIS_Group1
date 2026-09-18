@@ -16,8 +16,9 @@ function renderRow({
   reactions = [] as ReactionGroup[],
   viewerId = 'viewer' as string | null,
   onReact = vi.fn(async () => {}),
+  width = 210,
 } = {}) {
-  render(<ReactionRow reactions={reactions} viewerId={viewerId} onReact={onReact} width={210} />);
+  render(<ReactionRow reactions={reactions} viewerId={viewerId} onReact={onReact} width={width} />);
   return { onReact };
 }
 
@@ -118,6 +119,31 @@ describe('reaction row', () => {
 
       const tip = screen.getByRole('presentation', { hidden: true });
       expect(within(tip).getByText('party popper')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A name that runs past the card's byline runs past this too, and the two
+  // stopping in different places reads as two different people.
+  it('gives a name the room the card gives it', async () => {
+    vi.useFakeTimers();
+    try {
+      renderRow({
+        reactions: [{ emoji: THUMB, people: [person('ada')] }],
+        viewerId: null,
+        width: 300,
+      });
+
+      fireEvent.pointerEnter(chip(THUMB, 1));
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+
+      const row = within(screen.getByRole('presentation', { hidden: true })).getByText('ADA');
+      // The card's width, less what its byline spends on padding, the gap and
+      // the clock.
+      expect(row.style.maxWidth).toBe('238px');
     } finally {
       vi.useRealTimers();
     }

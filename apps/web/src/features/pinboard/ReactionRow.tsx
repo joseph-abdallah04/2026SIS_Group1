@@ -14,7 +14,12 @@ import {
 import { emojiName } from './emojiCatalog';
 import { EmojiPicker } from './EmojiPicker';
 import { useCardTooltip } from './useCardTooltip';
-import { REACTION_HOVER_FILL, REACTION_ON_BORDER, REACTION_ON_FILL } from './pinboardTokens';
+import {
+  FOOT_NAME_ROOM_PX,
+  REACTION_HOVER_FILL,
+  REACTION_ON_BORDER,
+  REACTION_ON_FILL,
+} from './pinboardTokens';
 
 interface ReactionRowProps {
   /** Every emoji anyone used here, in the order they first appeared. */
@@ -50,6 +55,13 @@ function whoReacted(names: readonly string[]): string {
 const NAMES_SHOWN = 5;
 
 /**
+ * Least room a name gets, however narrow the card is. A drawing is the
+ * smallest card on the board and its byline is cramped; the list is not held
+ * to that, or a room of people would be a column of ellipses.
+ */
+const MIN_NAME_ROOM_PX = 120;
+
+/**
  * One chip: the emoji, its count once it has one, and whether you are in it.
  */
 function ReactionChip({
@@ -58,6 +70,7 @@ function ReactionChip({
   mine,
   people,
   viewerId,
+  nameRoom,
   busy,
   disabled,
   dim,
@@ -69,6 +82,8 @@ function ReactionChip({
   /** Who left this one, the viewer first. */
   people: readonly ReactionPerson[];
   viewerId: string | null;
+  /** Room for a name here, as the card's own byline gives it. */
+  nameRoom: number;
   busy: boolean;
   disabled: boolean;
   /** Nothing has been said with this one yet, so it waits until hovered. */
@@ -102,7 +117,14 @@ function ReactionChip({
         ) : null}
         <ul className={`flex flex-col gap-1 ${name ? 'mt-1.5' : ''}`}>
           {people.slice(0, NAMES_SHOWN).map((person) => (
-            <li key={person.userId} className="truncate text-[12px] leading-tight">
+            // Cut off where the byline cuts it off. A name long enough to run
+            // past a card is long enough to run past this, and the two
+            // disagreeing about where it ends reads as a different name.
+            <li
+              key={person.userId}
+              className="truncate text-[12px] leading-tight"
+              style={{ maxWidth: nameRoom }}
+            >
               {person.userId === viewerId ? 'You' : person.displayName}
             </li>
           ))}
@@ -232,6 +254,7 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
       emoji={emoji}
       people={reactionPeople(reactions, emoji, viewerId)}
       viewerId={viewerId}
+      nameRoom={Math.max(width - FOOT_NAME_ROOM_PX, MIN_NAME_ROOM_PX)}
       count={reactionCount(reactions, emoji)}
       mine={hasReacted(reactions, emoji, viewerId)}
       busy={pending === emoji}
