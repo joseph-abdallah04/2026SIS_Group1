@@ -1,8 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 /** How long the pointer rests on something before its explanation appears. */
 const DELAY_MS = 250;
+/**
+ * How long a finger holds instead, which is longer on purpose: a hover costs
+ * nothing to leave, while a hold that answers too eagerly eats taps.
+ */
+const HOLD_MS = 500;
+/** Movement that makes a hold a scroll or a drag of the board instead. */
+const HOLD_SLOP_PX = 8;
 /** Between the explanation and the thing it explains. */
 const GAP_PX = 6;
 /** How close to the edge of the window an explanation may sit. */
@@ -72,6 +87,10 @@ export function useCardTooltip<T extends HTMLElement>(
   const ref = useRef<T>(null);
   const tip = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Where a finger went down, and whether holding it there has shown this. */
+  const held = useRef<{ x: number; y: number; shown: boolean } | null>(null);
+  /** A hold has been answered, so the tap it was part of is not also a press. */
+  const swallowClick = useRef(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   const hide = () => {
@@ -79,8 +98,10 @@ export function useCardTooltip<T extends HTMLElement>(
     setAnchor(null);
   };
 
-  const show = () => {
+  const show = (delay = DELAY_MS) => {
     if (timer.current) clearTimeout(timer.current);
+    // Nothing to say — a chip nobody has used — so a hold on it is still a tap.
+    if (!content) return;
     timer.current = setTimeout(() => {
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
@@ -94,7 +115,11 @@ export function useCardTooltip<T extends HTMLElement>(
         below: prefersBelow ? window.innerHeight - rect.bottom > ROOM_PX : rect.top < ROOM_PX,
         settled: false,
       });
-    }, DELAY_MS);
+      if (held.current) {
+        held.current.shown = true;
+        swallowClick.current = true;
+      }
+    }, delay);
   };
 
   // Fitted to the window once it is on screen, before the browser paints it.
@@ -125,6 +150,18 @@ export function useCardTooltip<T extends HTMLElement>(
     // under an explanation placed once.
     window.addEventListener('wheel', hide, { passive: true });
     return () => window.removeEventListener('wheel', hide);
+  }, [anchor]);
+
+  // A held one stays up after the finger lifts — there is no pointer resting on
+  // anything to keep it there — so the next press anywhere puts it away.
+  useEffect(() => {
+    if (!anchor || !held.current?.shown) return;
+    const away = () => {
+      held.current = null;
+      hide();
+    };
+    document.addEventListener('pointerdown', away, true);
+    return () => document.removeEventListener('pointerdown', away, true);
   }, [anchor]);
 
   useEffect(
@@ -161,11 +198,51 @@ export function useCardTooltip<T extends HTMLElement>(
     /** Spread onto whatever the explanation is about. */
     anchor: {
       ref,
-      onPointerEnter: show,
+      onPointerEnter: (event: PointerEvent<T>) => {
+        // A touch sends one of these on the way down; hovering is a mouse.
+        if (event.pointerType !== 'touch') show();
+      },
       onPointerLeave: hide,
-      // Picking the card up, or pressing the chip, is not reading about it.
-      onPointerDown: hide,
-      onFocus: show,
+      /**
+       * A finger has no hover, so a chip a phone can only tap would never say
+       * who is in it. Holding one asks: press and wait and the names appear,
+       * tap and the reaction toggles as before.
+       */
+      onPointerDown: (event: PointerEvent<T>) => {
+        if (event.pointerType !== 'touch') {
+          // Picking the card up, or pressing the chip, is not reading about it.
+          hide();
+          return;
+        }
+        held.current = { x: event.clientX, y: event.clientY, shown: false };
+        show(HOLD_MS);
+      },
+      // A finger that travels is scrolling or panning the board past this, not
+      // asking about it.
+      onPointerMove: (event: PointerEvent<T>) => {
+        const start = held.current;
+        if (!start || start.shown) return;
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > HOLD_SLOP_PX) {
+          held.current = null;
+          hide();
+        }
+      },
+      onPointerUp: () => {
+        if (held.current && !held.current.shown) held.current = null;
+        if (timer.current) clearTimeout(timer.current);
+      },
+      onPointerCancel: () => {
+        held.current = null;
+        hide();
+      },
+      // The hold has been answered, so the tap it was is not also a reaction.
+      onClickCapture: (event: MouseEvent<T>) => {
+        if (!swallowClick.current) return;
+        swallowClick.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      },
+      onFocus: () => show(),
       onBlur: hide,
     },
     tooltip,

@@ -3,7 +3,6 @@ import { SmilePlus } from 'lucide-react';
 import {
   hasReacted,
   reactionCount,
-  reactionLabel,
   reactionName,
   reactionPeople,
   QUICK_REACTIONS,
@@ -11,7 +10,7 @@ import {
   type ReactionPerson,
 } from '@roundtable/shared';
 
-import { emojiName } from './emojiCatalog';
+import { emojiName, reactionButtonLabel } from './emojiCatalog';
 import { EmojiPicker } from './EmojiPicker';
 import { useCardTooltip } from './useCardTooltip';
 import {
@@ -90,7 +89,7 @@ function ReactionChip({
   dim: boolean;
   onClick: () => void;
 }) {
-  const label = reactionLabel(emoji);
+  const label = reactionButtonLabel(emoji);
   // The board's own name for the quick three — they are offered as things to
   // say rather than as pictures, and "Agree" is what pressing one means. Every
   // other emoji goes by the name Unicode gives it.

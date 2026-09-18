@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QUICK_REACTIONS, reactionLabel, type ReactionGroup } from '@roundtable/shared';
+import { QUICK_REACTIONS, type ReactionGroup } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { EMOJI_GROUPS } from './emojiCatalog';
+import { EMOJI_GROUPS, reactionButtonLabel } from './emojiCatalog';
 import { ReactionRow } from './ReactionRow';
 
 /** One reactor, named the way the server names them. */
@@ -28,7 +28,7 @@ function renderRow({
  * matching rather than the end of the label.
  */
 function chip(emoji: string, count?: number) {
-  const label = count === undefined ? reactionLabel(emoji) : `${reactionLabel(emoji)} (${count})`;
+  const label = count === undefined ? reactionButtonLabel(emoji) : `${reactionButtonLabel(emoji)} (${count})`;
   return screen.getByRole('button', { name: (name: string) => name.startsWith(label) });
 }
 
@@ -277,10 +277,10 @@ describe('reaction row', () => {
       expect(labels).toEqual([
         // Used, in the server's order, which is the order they first appeared,
         // each naming whoever is in it.
-        `${reactionLabel(PARTY)} (1) — A`,
-        `${reactionLabel(HEART)} (1) — B`,
+        `${reactionButtonLabel(PARTY)} (1) — A`,
+        `${reactionButtonLabel(HEART)} (1) — B`,
         // Then the quick chips still untouched, in contract order.
-        ...QUICK_REACTIONS.filter((emoji) => emoji !== HEART).map((emoji) => reactionLabel(emoji)),
+        ...QUICK_REACTIONS.filter((emoji) => emoji !== HEART).map((emoji) => reactionButtonLabel(emoji)),
         'More reactions',
       ]);
     });
@@ -294,8 +294,8 @@ describe('reaction row', () => {
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label'));
 
-      expect(labels.filter((label) => label?.startsWith(reactionLabel(THUMB)))).toEqual([
-        `${reactionLabel(THUMB)} (1) — A`,
+      expect(labels.filter((label) => label?.startsWith(reactionButtonLabel(THUMB)))).toEqual([
+        `${reactionButtonLabel(THUMB)} (1) — A`,
       ]);
     });
   });
@@ -312,7 +312,7 @@ describe('reaction row', () => {
       const first = EMOJI_GROUPS[0];
       expect(first).toBeTruthy();
       for (const [emoji] of first!.emojis.slice(0, 5)) {
-        expect(screen.getByRole('button', { name: reactionLabel(emoji) })).toBeTruthy();
+        expect(screen.getByRole('button', { name: reactionButtonLabel(emoji) })).toBeTruthy();
       }
     });
 
@@ -321,7 +321,7 @@ describe('reaction row', () => {
 
       await userEvent.click(moreButton());
       await userEvent.click(screen.getByRole('tab', { name: 'Gestures' }));
-      await userEvent.click(screen.getByRole('button', { name: reactionLabel('🙏') }));
+      await userEvent.click(screen.getByRole('button', { name: reactionButtonLabel('🙏') }));
 
       expect(onReact).toHaveBeenCalledWith('🙏');
       expect(screen.queryByRole('dialog')).toBeNull();
@@ -357,7 +357,7 @@ describe('reaction row', () => {
 
       expect(
         within(screen.getByRole('dialog', { name: 'Pick a reaction' }))
-          .getByRole('button', { name: reactionLabel(PARTY) })
+          .getByRole('button', { name: reactionButtonLabel(PARTY) })
           .getAttribute('aria-pressed'),
       ).toBe('true');
     });
@@ -388,8 +388,8 @@ describe('reaction row', () => {
 
         // The rocket lives in Activity, and the search reached it from
         // Smileys, which is the category that was open.
-        expect(inPicker().getByRole('button', { name: reactionLabel('🚀') })).toBeTruthy();
-        expect(inPicker().queryByRole('button', { name: reactionLabel('😀') })).toBeNull();
+        expect(inPicker().getByRole('button', { name: reactionButtonLabel('🚀') })).toBeTruthy();
+        expect(inPicker().queryByRole('button', { name: reactionButtonLabel('😀') })).toBeNull();
       });
 
       it('reacts with a searched emoji and closes', async () => {
@@ -397,7 +397,7 @@ describe('reaction row', () => {
         await userEvent.click(moreButton());
 
         await search('party popper');
-        await userEvent.click(inPicker().getByRole('button', { name: reactionLabel(PARTY) }));
+        await userEvent.click(inPicker().getByRole('button', { name: reactionButtonLabel(PARTY) }));
 
         expect(onReact).toHaveBeenCalledWith(PARTY);
         expect(screen.queryByRole('dialog')).toBeNull();
@@ -411,8 +411,8 @@ describe('reaction row', () => {
 
         await search('red heart');
 
-        expect(inPicker().getByRole('button', { name: reactionLabel('❤️') })).toBeTruthy();
-        expect(inPicker().queryByRole('button', { name: reactionLabel('💙') })).toBeNull();
+        expect(inPicker().getByRole('button', { name: reactionButtonLabel('❤️') })).toBeTruthy();
+        expect(inPicker().queryByRole('button', { name: reactionButtonLabel('💙') })).toBeNull();
       });
 
       it('says so when nothing matches', async () => {
@@ -434,7 +434,7 @@ describe('reaction row', () => {
         await userEvent.click(screen.getByRole('tab', { name: 'Smileys' }));
 
         expect(searchBox()).toHaveValue('');
-        expect(inPicker().getByRole('button', { name: reactionLabel('😀') })).toBeTruthy();
+        expect(inPicker().getByRole('button', { name: reactionButtonLabel('😀') })).toBeTruthy();
       });
     });
   });

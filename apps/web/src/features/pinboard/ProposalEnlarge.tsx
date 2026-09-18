@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Maximize2, X, type LucideIcon } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 
-import { boardPopupRoom, CENTRED_ON_WINDOW, EDGE_PX, type BoardPopupRoom } from './boardPopup';
+import { popupRoomFrom, CENTRED_ON_WINDOW, EDGE_PX, type BoardPopupRoom } from './boardPopup';
 import {
   CARD_BORDER,
   CARD_INK,
@@ -60,6 +60,13 @@ function panelStyle(room: BoardPopupRoom | null): CSSProperties {
 const ZOOM = 2.2;
 /** Movement past which a press is a drag rather than a press. */
 const DRAG_SLOP_PX = 4;
+/**
+ * How long a swallowed press waits for the click it is going to become.
+ *
+ * Long enough for a slow press, short enough that a press which never becomes
+ * a click cannot take the next one with it.
+ */
+const CLICK_GRACE_MS = 400;
 
 /**
  * Keeps the artwork from being dragged out of its own frame, on whole pixels:
@@ -112,6 +119,7 @@ export function ProposalEnlarge({
   artwork,
   byline,
   placement = 'corner',
+  pressOutside = 'acts',
   open: openFromOutside,
   onOpenChange,
 }: {
@@ -132,6 +140,18 @@ export function ProposalEnlarge({
    * can hold nothing that is pressed on its own.
    */
   placement?: 'corner' | 'beside';
+  /**
+   * What a press outside the view does, once it has put the view away.
+   *
+   * On the board it `acts`: a press on another card picks that card up, the way
+   * the board's other popovers behave, and dismissing costs nothing.
+   *
+   * Where what is underneath commits something, it `is absorbed`. On the ballot
+   * the card *is* the vote button, so a press that lands on one while this is
+   * open would put the view away and cast a vote in the same gesture — and a
+   * vote is the one thing on that screen you cannot take back by pressing again.
+   */
+  pressOutside?: 'acts' | 'is absorbed';
 }) {
   const [openHere, setOpenHere] = useState(false);
   const open = openFromOutside ?? openHere;
@@ -192,6 +212,9 @@ export function ProposalEnlarge({
           item={item}
           artwork={artwork}
           byline={byline}
+          pressOutside={pressOutside}
+          // What it opens over is whatever surface the way in belongs to.
+          openedFrom={buttonRef.current}
           onClose={() => setOpen(false)}
         />
       ) : null}
@@ -203,11 +226,16 @@ function EnlargedView({
   item,
   artwork,
   byline,
+  pressOutside,
+  openedFrom,
   onClose,
 }: {
   item: BoardItem;
   artwork: ReactNode;
   byline: ReactNode;
+  pressOutside: 'acts' | 'is absorbed';
+  /** The way in that was pressed, which says which surface this is over. */
+  openedFrom: HTMLElement | null;
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -218,12 +246,12 @@ function EnlargedView({
 
   // In the middle of the board, over the cards it was opened from, as large as
   // the board has room for.
-  const [style, setStyle] = useState(() => panelStyle(boardPopupRoom()));
+  const [style, setStyle] = useState(() => panelStyle(popupRoomFrom(openedFrom)));
   useEffect(() => {
-    const onResize = () => setStyle(panelStyle(boardPopupRoom()));
+    const onResize = () => setStyle(panelStyle(popupRoomFrom(openedFrom)));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+  }, [openedFrom]);
 
   /**
    * How close the artwork is, and where it has been dragged to.
@@ -269,6 +297,9 @@ function EnlargedView({
 
   useEffect(() => {
     panelRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     // Escape closes it wherever the focus has gone.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -277,14 +308,34 @@ function EnlargedView({
       closeRef.current();
     };
     /**
-     * A press anywhere else puts it away, and still does whatever it was a
-     * press on — another card, the toolbar, the board itself — the way the
-     * board's other popovers behave. Listened for on the way down, so the
-     * canvas is gone before a drag that starts outside it gets going.
+     * A press anywhere else puts it away, and where the view `acts` it still
+     * does whatever it was a press on — another card, the toolbar, the board
+     * itself — the way the board's other popovers behave. Listened for on the
+     * way down, so the canvas is gone before a drag that starts outside it gets
+     * going.
+     *
+     * Where it `is absorbed`, the press stops here. What is under the view on
+     * the ballot is a vote, and one gesture must not both put a picture away
+     * and commit the thing that picture was there to help you decide.
      */
     const onPointerDown = (event: PointerEvent) => {
       if (event.target instanceof Node && panelRef.current?.contains(event.target)) return;
       closeRef.current();
+      if (pressOutside === 'acts') return;
+      event.stopPropagation();
+      // The press is stopped, but the click the browser makes of it afterwards
+      // is a separate event and would arrive on its own; it is swallowed once.
+      const swallowClick = (click: MouseEvent) => {
+        click.stopPropagation();
+        click.preventDefault();
+      };
+      document.addEventListener('click', swallowClick, { capture: true, once: true });
+      // A press that never becomes a click — a drag, a second finger, a press
+      // that ends off the button — must not leave that waiting for the next one.
+      window.setTimeout(
+        () => document.removeEventListener('click', swallowClick, true),
+        CLICK_GRACE_MS,
+      );
     };
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown, true);
@@ -292,7 +343,7 @@ function EnlargedView({
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
     };
-  }, []);
+  }, [pressOutside]);
 
   return createPortal(
     // Nothing behind it is dimmed or locked: the board is still there to look
@@ -302,6 +353,8 @@ function EnlargedView({
       role="dialog"
       aria-label={`${KIND[item.type]} by ${item.authorName}`}
       tabIndex={-1}
+      // Being fixed, this is also what the close in its corner is placed
+      // against — it has to sit over the frame without being inside it.
       className="rt-enlarge-open fixed z-50 flex flex-col overflow-hidden border bg-rt-surface shadow-[0_10px_28px_rgba(8,12,21,0.16)] outline-none"
       style={{ ...style, borderColor: CARD_BORDER, borderRadius: CARD_RADIUS }}
       /**
@@ -400,18 +453,25 @@ function EnlargedView({
           >
             {artwork}
           </div>
-          {/* In the corner the artwork leaves clear, where a window's close is:
-              on the plate rather than beside the byline, which is about the
-              proposal rather than about this view. */}
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="absolute top-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-rt-tertiary bg-white/90 text-rt-ink-muted shadow-sm transition-colors hover:bg-rt-surface-alt hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
-          >
-            <X aria-hidden="true" size={15} strokeWidth={2.2} />
-          </button>
         </div>
+        {/* In the corner the artwork leaves clear, where a window's close is:
+            on the plate rather than beside the byline, which is about the
+            proposal rather than about this view.
+
+            Beside the frame rather than inside it, though it sits over it. The
+            frame is itself a button, and it captures the pointer on the way
+            down so a drag that wanders off it still comes back — which retargets
+            the press to the frame, so a close drawn inside it was pressed and
+            zoomed instead of closing. Enter on it went the same way, through
+            the frame's own key handler. Out here there is nothing to capture it. */}
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="absolute top-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-rt-tertiary bg-white/90 text-rt-ink-muted shadow-sm transition-colors hover:bg-rt-surface-alt hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
+        >
+          <X aria-hidden="true" size={15} strokeWidth={2.2} />
+        </button>
         <div className="border-t" style={{ borderColor: CARD_BORDER }}>
           {byline}
         </div>

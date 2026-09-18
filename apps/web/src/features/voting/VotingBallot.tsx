@@ -158,6 +158,10 @@ export function VotingBallot({
         role="dialog"
         aria-modal="true"
         aria-labelledby="voting-ballot-title"
+        // A popup opened from a card in here belongs over the ballot, which
+        // covers the board: centred on the board behind it, it would sit off
+        // the middle of the only thing anyone can see.
+        data-popup-room=""
         className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-lg"
       >
         <header className="shrink-0 border-b border-rt-tertiary px-5 py-4">
@@ -266,6 +270,10 @@ export function VotingBallot({
                               />
                             }
                             placement="beside"
+                            // Under this view is the ballot, where a card is a
+                            // vote: the press that puts the view away stops
+                            // there rather than carrying on into one.
+                            pressOutside="is absorbed"
                           />
                         </div>
                       ) : null}

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   arrowGeometry,
   diagramEdgeDash,
@@ -455,9 +455,13 @@ function DiagramArtwork({ item }: { item: BoardItem }) {
   const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
   const { width: svgWidth, height: svgHeight } = diagramExtent(item.artifactJson);
-  // Proposal-scoped marker ids prevent arrows in separate diagram cards from
-  // colliding; one per resolved colour keeps each arrowhead matching its line.
-  const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
+  // Marker ids are scoped to this drawing of this diagram, not to the proposal:
+  // the same diagram is on the page twice while its canvas is open — the card
+  // and the enlarged view — and two identical ids leave both `url(#…)` arrowheads
+  // resolving to whichever was written first, which is the thumbnail's. One id
+  // per resolved colour keeps each arrowhead matching its line.
+  const instance = useId().replace(/:/g, '');
+  const arrowId = (color: string) => `rt-arrow-${instance}-${color.replace('#', '')}`;
   const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
   // Reciprocal pairs bow apart here exactly as they do in the editor.
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);

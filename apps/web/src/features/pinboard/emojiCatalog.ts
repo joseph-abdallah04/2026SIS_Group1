@@ -12,15 +12,19 @@
  * the ones people do want. These are the emoji in ordinary use, grouped the
  * way every picker groups them.
  *
- * Each entry is the glyph and the words someone might type to find it. The
- * terms are what makes the search box work at all: an emoji carries no name of
- * its own that a browser can be asked for, so anything not written here is
- * findable only by scrolling to it.
+ * Each entry is the glyph, what Unicode calls it, and the words someone might
+ * type to find it. The terms are what makes the search box work at all: an
+ * emoji carries no name of its own that a browser can be asked for, so anything
+ * not written here is findable only by scrolling to it. The name is there for
+ * the same reason: a reaction has to be sayable — in a heading, and to a screen
+ * reader — and a list of search terms is not a name.
  *
  * The grids are laid out one entry per line and held that way with
  * `prettier-ignore`, so a category reads as a list you can scan for a
  * duplicate rather than as a reflowed paragraph of punctuation.
  */
+
+import { reactionLabel, reactionName } from '@roundtable/shared';
 
 /**
  * A glyph, what Unicode calls it, and the space-separated words that find it.
@@ -995,6 +999,23 @@ const NAMES = new Map<string, string>(ALL_ENTRIES.map(([emoji, name]) => [emoji,
  */
 export function emojiName(emoji: string): string | null {
   return NAMES.get(emoji) ?? null;
+}
+
+/**
+ * What a button that leaves this reaction is called, for anyone who cannot see
+ * the glyph on it.
+ *
+ * The shared contract can only manage "React with 🎉": it knows the quick
+ * three by name and nothing else, and a screen reader handed the bare glyph
+ * falls back to whatever its own table calls it — which is why the heading
+ * over a list of names and the name announced for the same chip used to
+ * disagree. The catalogue is here, so the button can say what it is.
+ */
+export function reactionButtonLabel(emoji: string): string {
+  const named = reactionName(emoji);
+  if (named) return named;
+  const known = emojiName(emoji);
+  return known ? `React with ${known}` : reactionLabel(emoji);
 }
 
 /**

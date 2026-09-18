@@ -41,17 +41,37 @@ export interface BoardPopupRoom {
  * screen, as in the tools workbench, and the caller falls back to the window.
  */
 export function boardPopupRoom(): BoardPopupRoom | null {
-  const frame = document.querySelector<HTMLElement>('[data-board-frame]');
-  if (!frame) return null;
+  return roomWithin(document.querySelector<HTMLElement>('[data-board-frame]'));
+}
 
-  const board = frame.getBoundingClientRect();
+/**
+ * The middle of whatever a popup is actually over.
+ *
+ * The board is not always the surface underneath. While the room is voting, the
+ * ballot covers it, and a popup opened from a ballot card that centred on the
+ * board behind would sit off the ballot's own middle by half the agenda rail —
+ * measuring something nobody can see. So a surface says it is one with
+ * `data-popup-room`, and a popup opened inside it is centred there instead.
+ *
+ * Null where neither is on screen, as in the tools workbench, and the caller
+ * falls back to the window.
+ */
+export function popupRoomFrom(opener: Element | null): BoardPopupRoom | null {
+  const surface = opener?.closest<HTMLElement>('[data-popup-room]');
+  return surface ? roomWithin(surface) : boardPopupRoom();
+}
+
+function roomWithin(surface: HTMLElement | null): BoardPopupRoom | null {
+  if (!surface) return null;
+
+  const room = surface.getBoundingClientRect();
   return {
-    left: board.left + board.width / 2,
-    top: board.top + board.height / 2 - RAISE_PX,
-    maxWidth: Math.max(0, board.width - EDGE_PX * 2),
+    left: room.left + room.width / 2,
+    top: room.top + room.height / 2 - RAISE_PX,
+    maxWidth: Math.max(0, room.width - EDGE_PX * 2),
     // The lift is taken off both ends, so being raised cannot push a tall one
     // off the top of the board.
-    maxHeight: Math.max(0, board.height - (EDGE_PX + RAISE_PX) * 2),
+    maxHeight: Math.max(0, room.height - (EDGE_PX + RAISE_PX) * 2),
   };
 }
 
