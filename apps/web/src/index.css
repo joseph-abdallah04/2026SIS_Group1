@@ -128,7 +128,7 @@ a.rt-sticky-link:focus-visible {
  * sticky popup comes up out of the toolbar. Scaled through `scale` rather than
  * `transform`, which the panel is already using to centre itself on a point.
  */
-@keyframes rt-preview-open {
+@keyframes rt-enlarge-open {
   from {
     opacity: 0;
     scale: 0.97;
@@ -139,8 +139,8 @@ a.rt-sticky-link:focus-visible {
   }
 }
 
-.rt-preview-open {
-  animation: rt-preview-open 160ms cubic-bezier(0.22, 1, 0.36, 1);
+.rt-enlarge-open {
+  animation: rt-enlarge-open 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /*
@@ -226,7 +226,7 @@ a.rt-sticky-link:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .rt-proposal-arrive,
-  .rt-preview-open,
+  .rt-enlarge-open,
   .rt-sticky-popup-rise,
   .rt-sticky-popup-fade,
   .rt-hint-rise,

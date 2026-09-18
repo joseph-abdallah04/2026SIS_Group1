@@ -369,8 +369,8 @@ describe('VotingBallot', () => {
       />,
     );
 
-    const preview = screen.getByRole('button', { name: 'Preview diagram by Alice' });
-    expect(preview).toHaveTextContent('Preview');
+    const preview = screen.getByRole('button', { name: 'Enlarge diagram by Alice' });
+    expect(preview).toHaveTextContent('Enlarge');
     expect(preview.closest('button[aria-pressed]')).toBeNull();
 
     await userEvent.click(preview);
@@ -378,7 +378,7 @@ describe('VotingBallot', () => {
     expect(screen.getByRole('dialog', { name: 'diagram by Alice' })).toBeInTheDocument();
     expect(onVote).not.toHaveBeenCalled();
     // A sticky has nothing to open, so it is offered nothing.
-    expect(screen.queryByRole('button', { name: /^Preview sticky/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Enlarge sticky/ })).toBeNull();
   });
 
   // A sticky grows with its note. A slot sized for the smallest sticky left a

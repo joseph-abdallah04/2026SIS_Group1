@@ -102,10 +102,10 @@ const ITEM: BoardItem = {
 };
 
 const dragHandlers = {
-  onPointerDown: () => undefined,
-  onPointerMove: () => undefined,
-  onPointerUp: () => undefined,
-  onPointerCancel: () => undefined,
+  onPointerDown: vi.fn(),
+  onPointerMove: vi.fn(),
+  onPointerUp: vi.fn(),
+  onPointerCancel: vi.fn(),
 };
 
 function renderCard({
@@ -176,6 +176,17 @@ const DIAGRAM: BoardItem = {
   id: 'd1',
   type: 'diagram',
   artifactJson: { type: 'diagram', nodes: [], edges: [] },
+};
+
+/** A studio canvas with something on it, so there is a canvas to open. */
+const DRAWN_ON: BoardItem = {
+  ...DIAGRAM,
+  id: 'd2',
+  artifactJson: {
+    type: 'diagram',
+    nodes: [{ id: 'n1', label: 'Ledger', x: 24, y: 24, shape: 'box' }],
+    edges: [],
+  },
 };
 
 type MenuCardProps = Partial<Parameters<typeof PositionedProposal>[0]>;
@@ -257,6 +268,67 @@ describe('PositionedProposal actions menu', () => {
     await openFromButton();
 
     expect(menuLabels()).toEqual(['Extend']);
+  });
+
+  // The corner of a card is a small target to find. The menu is where every
+  // other thing you can do to a card already lives.
+  it('opens the preview from the menu, and stops offering it while it is open', async () => {
+    renderMenuCard({ item: DRAWN_ON });
+    await openFromButton();
+    expect(menuLabels()).toContain('Enlarge');
+
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Enlarge' }));
+
+    expect(screen.getByRole('dialog', { name: /diagram by/ })).toBeInTheDocument();
+    // The card's own way in is behind the preview it opened, so it is gone
+    // rather than sitting there doing nothing.
+    expect(screen.queryByRole('button', { name: /^Enlarge diagram/ })).toBeNull();
+
+    // Opened from the keyboard, which presses nothing outside the preview and
+    // so leaves it open: there is nothing left to offer.
+    screen.getByRole('button', { name: 'Proposal actions' }).focus();
+    await userEvent.keyboard('{Enter}');
+    expect(menuLabels()).not.toContain('Enlarge');
+  });
+
+  // A press anywhere outside puts the preview away, the menu's own button
+  // included, so the menu that opens after it offers the preview again.
+  it('offers the preview again once a press outside has put it away', async () => {
+    renderMenuCard({ item: DRAWN_ON });
+    await openFromButton();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Enlarge' }));
+    expect(screen.getByRole('dialog', { name: /diagram by/ })).toBeInTheDocument();
+
+    await openFromButton();
+
+    expect(screen.queryByRole('dialog', { name: /diagram by/ })).toBeNull();
+    expect(menuLabels()).toContain('Enlarge');
+  });
+
+  // Drawn on the page, the enlarged view still belongs to this card in React's
+  // tree, so its presses travelled up to the card's own drag. The card was
+  // picked up behind it, and took the pointer with it: the press that was
+  // meant to zoom never finished.
+  it('keeps a press inside the enlarged canvas away from the card behind it', async () => {
+    renderMenuCard({ item: DRAWN_ON, canMove: true });
+    await openFromButton();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Enlarge' }));
+    dragHandlers.onPointerDown.mockClear();
+
+    const frame = screen.getByRole('button', { name: /^Zoom/ });
+    fireEvent.pointerDown(frame, { pointerId: 1, clientX: 300, clientY: 200, isPrimary: true });
+    fireEvent.pointerUp(frame, { pointerId: 1, clientX: 300, clientY: 200, isPrimary: true });
+
+    expect(dragHandlers.onPointerDown).not.toHaveBeenCalled();
+    expect(frame).toHaveAccessibleName('Zoom out');
+  });
+
+  // An empty canvas draws the same empty plate however large it is shown.
+  it('offers no preview of a canvas with nothing on it', async () => {
+    renderMenuCard({ item: DIAGRAM });
+    await openFromButton();
+
+    expect(menuLabels()).not.toContain('Enlarge');
   });
 
   it('extends the card and closes the menu', async () => {

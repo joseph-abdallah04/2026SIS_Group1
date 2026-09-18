@@ -3,8 +3,8 @@ import type { BoardItem, VotingPhase, VotingTally, VotingVoterStatus } from '@ro
 
 import { cardWidth } from '../pinboard/cardMetrics';
 import { CARD_RADIUS, STICKY_RADIUS } from '../pinboard/pinboardTokens';
-import { CardFoot, ProposalArtwork, ProposalCard } from '../pinboard/ProposalCard';
-import { ProposalPreview } from '../pinboard/ProposalPreview';
+import { CardFoot, hasArtwork, ProposalArtwork, ProposalCard } from '../pinboard/ProposalCard';
+import { ProposalEnlarge } from '../pinboard/ProposalEnlarge';
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import { VoteResultBadge, voteResultRing } from './VoteResultBadge';
 
@@ -42,12 +42,6 @@ function cardFrameStyle(item: BoardItem): { width: number; borderRadius: string 
     width: cardWidth(item),
     borderRadius: item.type === 'sticky' ? STICKY_RADIUS : CARD_RADIUS,
   };
-}
-
-/** Whether there is a canvas to open: a studio proposal, or a drawing with strokes. */
-function hasArtwork(item: BoardItem): boolean {
-  const artifact = item.artifactJson;
-  return artifact.type === 'diagram' || (artifact.type === 'drawing' && !!artifact.svg.trim());
 }
 
 function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally {
@@ -260,7 +254,7 @@ export function VotingBallot({
                           must never be a vote. */}
                       {hasArtwork(item) ? (
                         <div className="mt-2">
-                          <ProposalPreview
+                          <ProposalEnlarge
                             item={item}
                             artwork={<ProposalArtwork item={item} />}
                             byline={

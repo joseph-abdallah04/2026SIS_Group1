@@ -18,7 +18,8 @@ import {
   type ProposalMenuAnchor,
   type ProposalMenuItem,
 } from './ProposalActionsMenu';
-import { ProposalCard } from './ProposalCard';
+import { EnlargeIcon } from './ProposalEnlarge';
+import { hasArtwork, ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
 import {
   CARD_INK,
@@ -218,6 +219,10 @@ export function PositionedProposal({
   // Where the actions menu is open from, or null while it is shut. Opening it
   // from either the ⋯ or a right-click is the same menu.
   const [menu, setMenu] = useState<ProposalMenuAnchor | null>(null);
+  // The preview is opened from the card's own corner and from this menu, so the
+  // card cannot keep that to itself: the menu has to know it is open, to stop
+  // offering to open it again.
+  const [enlargedOpen, setEnlargedOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -248,6 +253,16 @@ export function PositionedProposal({
    */
   const sections: ProposalMenuItem[][] = [
     [
+      ...(hasArtwork(item) && !enlargedOpen
+        ? [
+            {
+              id: 'enlarge',
+              label: 'Enlarge',
+              icon: EnlargeIcon,
+              onSelect: () => setEnlargedOpen(true),
+            },
+          ]
+        : []),
       ...(isSticky
         ? [{ id: 'copy', label: 'Copy text', icon: Copy, onSelect: () => onCopyText(item) }]
         : []),
@@ -452,6 +467,8 @@ export function PositionedProposal({
           isOwnedByViewer={isOwn}
           isAuthorLeader={isAuthorLeader}
           isShortlisted={isShortlisted}
+          enlargedOpen={enlargedOpen}
+          onEnlargedOpenChange={setEnlargedOpen}
         />
 
         {onReact ? (

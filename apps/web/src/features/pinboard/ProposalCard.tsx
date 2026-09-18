@@ -50,7 +50,7 @@ import {
   STICKY_NOTE_PADDING,
 } from '../tools/sticky/stickyPresentation';
 import { StickyText } from '../tools/sticky/StickyText';
-import { ProposalPreview } from './ProposalPreview';
+import { ProposalEnlarge } from './ProposalEnlarge';
 import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
@@ -82,10 +82,39 @@ interface ProposalCardProps {
    * being links.
    */
   interactive?: boolean;
+  /**
+   * Whether the preview is open, where something outside the card opens it too
+   * — the board's actions menu. Left out, the card's own button is the only way
+   * in and keeps the state itself.
+   */
+  enlargedOpen?: boolean;
+  onEnlargedOpenChange?: (open: boolean) => void;
 }
 
 /** The plate every card gives artwork, so a row of cards lines up. */
 const PLATE_ASPECT = 4 / 3;
+
+/**
+ * Whether a proposal has a canvas worth opening.
+ *
+ * A sticky never has one: its card already shows every word. A drawing has one
+ * once it has strokes, and a studio canvas once anything at all has been put on
+ * it — a shape, a sketch, a path, a table or an arrow. An empty canvas shows
+ * the same empty plate however large it is drawn.
+ */
+export function hasArtwork(item: BoardItem): boolean {
+  const artifact = item.artifactJson;
+  if (artifact.type === 'drawing') return artifact.svg.trim().length > 0;
+  if (artifact.type !== 'diagram') return false;
+  return (
+    artifact.nodes.length > 0 ||
+    artifact.edges.length > 0 ||
+    (artifact.ink?.length ?? 0) > 0 ||
+    (artifact.paths?.length ?? 0) > 0 ||
+    (artifact.tables?.length ?? 0) > 0 ||
+    (artifact.arrows?.length ?? 0) > 0
+  );
+}
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
 function formatTime(iso: string): string {
@@ -738,6 +767,8 @@ export function ProposalCard({
   isNew = false,
   isShortlisted = false,
   interactive = true,
+  enlargedOpen,
+  onEnlargedOpenChange,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
@@ -753,8 +784,7 @@ export function ProposalCard({
   // A drawing proposed before strokes were stored has nothing to draw, and so
   // nothing to open: the plate stays, the way into the preview does not.
   const hasPlate = artifact.type === 'diagram' || artifact.type === 'drawing';
-  const hasArtwork =
-    artifact.type === 'diagram' || (artifact.type === 'drawing' && !!artifact.svg.trim());
+  const openable = hasArtwork(item);
   const foot = (
     <CardFoot
       item={item}
@@ -818,8 +848,14 @@ export function ProposalCard({
             {/* A canvas on a card is a glance at it; this opens it at a size it
                 can be read at. Left off where the card is itself a button, as
                 on a ballot, which has nothing to press inside it. */}
-            {interactive && hasArtwork ? (
-              <ProposalPreview item={item} artwork={artwork} byline={foot} />
+            {interactive && openable ? (
+              <ProposalEnlarge
+                item={item}
+                artwork={artwork}
+                byline={foot}
+                open={enlargedOpen}
+                onOpenChange={onEnlargedOpenChange}
+              />
             ) : null}
           </CardMedia>
         ) : null}

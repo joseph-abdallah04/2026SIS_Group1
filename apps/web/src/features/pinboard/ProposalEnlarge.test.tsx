@@ -40,7 +40,7 @@ const drawing = item(
 
 const sticky = item({ type: 'sticky', text: 'Ship the API', color: 'yellow' }, 'sticky');
 
-const previewButton = () => screen.getByRole('button', { name: 'Preview diagram by Alice' });
+const enlargeButton = () => screen.getByRole('button', { name: 'Enlarge diagram by Alice' });
 /** The shape the artwork is drawn in, as width over height. */
 function artworkShape(): number {
   const frame = screen.getByRole('dialog').firstElementChild as HTMLElement;
@@ -48,7 +48,16 @@ function artworkShape(): number {
   return height ? width! / height : width!;
 }
 
-describe('proposal preview', () => {
+/** The frame a press zooms, and the artwork that moves inside it. */
+const zoomFrame = () => screen.getByRole('button', { name: /^Zoom/ });
+const artworkLayer = () => zoomFrame().firstElementChild as HTMLElement;
+
+/** jsdom lays nothing out, so the frame is given a size to zoom about. */
+function frameOf(width = 600, height = 450) {
+  vi.spyOn(zoomFrame(), 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, width, height));
+}
+
+describe('proposal enlarge', () => {
   // The card shows a whole canvas at the width of a card. This opens the same
   // canvas at a size its labels can be read at.
   it('opens the canvas over the board, with the card and its byline intact', async () => {
@@ -56,7 +65,7 @@ describe('proposal preview', () => {
     const { container } = render(<ProposalCard item={diagram} />);
     const onCard = container.querySelectorAll('svg').length;
 
-    await user.click(previewButton());
+    await user.click(enlargeButton());
 
     const preview = screen.getByRole('dialog', { name: 'diagram by Alice' });
     expect(preview).toHaveTextContent('Alice');
@@ -71,7 +80,7 @@ describe('proposal preview', () => {
     const user = userEvent.setup();
     render(<ProposalCard item={drawing} />);
 
-    await user.click(screen.getByRole('button', { name: 'Preview drawing by Alice' }));
+    await user.click(screen.getByRole('button', { name: 'Enlarge drawing by Alice' }));
 
     const preview = screen.getByRole('dialog', { name: 'drawing by Alice' });
     expect(preview.querySelector('img')).toHaveAttribute('alt', 'Drawing by Alice');
@@ -82,17 +91,17 @@ describe('proposal preview', () => {
     [
       'the close button',
       async (user: ReturnType<typeof userEvent.setup>) =>
-        user.click(screen.getByRole('button', { name: 'Close preview' })),
+        user.click(screen.getByRole('button', { name: 'Close' })),
     ],
   ])('closes on %s, handing focus back to the card', async (_, close) => {
     const user = userEvent.setup();
     render(<ProposalCard item={diagram} />);
 
-    await user.click(previewButton());
+    await user.click(enlargeButton());
     await close(user);
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(previewButton()).toHaveFocus();
+    expect(enlargeButton()).toHaveFocus();
   });
 
   // The board is not dimmed or locked behind it, so a press out there puts the
@@ -109,7 +118,7 @@ describe('proposal preview', () => {
       </>,
     );
 
-    await user.click(previewButton());
+    await user.click(enlargeButton());
     await user.click(screen.getByRole('button', { name: 'Something on the board' }));
 
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -126,8 +135,8 @@ describe('proposal preview', () => {
       </div>,
     );
 
-    fireEvent.pointerDown(previewButton());
-    fireEvent.click(previewButton());
+    fireEvent.pointerDown(enlargeButton());
+    fireEvent.click(enlargeButton());
 
     expect(onPointerDown).not.toHaveBeenCalled();
     expect(onClick).not.toHaveBeenCalled();
@@ -152,22 +161,144 @@ describe('proposal preview', () => {
       );
 
     const wideView = render(<ProposalCard item={canvas({ x: 900, y: 0 })} />);
-    await user.click(previewButton());
+    await user.click(enlargeButton());
     const wide = { shape: artworkShape(), width: screen.getByRole('dialog').style.width };
     wideView.unmount();
 
     render(<ProposalCard item={canvas({ x: 0, y: 900 })} />);
-    await user.click(previewButton());
+    await user.click(enlargeButton());
 
     expect(wide.shape).toBeCloseTo(4 / 3, 5);
     expect(artworkShape()).toBeCloseTo(4 / 3, 5);
     expect(screen.getByRole('dialog').style.width).toBe(wide.width);
   });
 
+  // A canvas is drawn for a canvas, so its labels are small on any card. A
+  // press takes you in at the spot you pressed, the way an image viewer does.
+  it('zooms in where it was pressed, and back out on the next press', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+    await user.click(enlargeButton());
+    frameOf();
+
+    expect(zoomFrame()).toHaveAccessibleName('Zoom in');
+    fireEvent.pointerDown(zoomFrame(), {
+      pointerId: 1,
+      clientX: 450,
+      clientY: 100,
+      isPrimary: true,
+    });
+    fireEvent.pointerUp(zoomFrame(), { pointerId: 1, clientX: 450, clientY: 100, isPrimary: true });
+
+    // Taken in about that point: the half of the canvas it is on moves under it.
+    expect(artworkLayer().style.transform).toBe('translate(-180px, 150px) scale(2.2)');
+    expect(zoomFrame()).toHaveAccessibleName('Zoom out');
+
+    fireEvent.pointerDown(zoomFrame(), {
+      pointerId: 2,
+      clientX: 300,
+      clientY: 200,
+      isPrimary: true,
+    });
+    fireEvent.pointerUp(zoomFrame(), { pointerId: 2, clientX: 300, clientY: 200, isPrimary: true });
+
+    expect(artworkLayer().style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(zoomFrame()).toHaveAccessibleName('Zoom in');
+  });
+
+  // A right press belongs to the menu it opens, not to the canvas.
+  it('is not zoomed by a press of any other button', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+    await user.click(enlargeButton());
+    frameOf();
+
+    fireEvent.pointerDown(zoomFrame(), { pointerId: 1, button: 2, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(zoomFrame(), { pointerId: 1, button: 2, clientX: 300, clientY: 200 });
+
+    expect(artworkLayer().style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(zoomFrame()).toHaveAccessibleName('Zoom in');
+  });
+
+  it('moves the canvas under a drag while it is in close, and stays in', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+    await user.click(enlargeButton());
+    frameOf();
+    fireEvent.pointerDown(zoomFrame(), {
+      pointerId: 1,
+      clientX: 300,
+      clientY: 225,
+      isPrimary: true,
+    });
+    fireEvent.pointerUp(zoomFrame(), { pointerId: 1, clientX: 300, clientY: 225, isPrimary: true });
+
+    fireEvent.pointerDown(zoomFrame(), {
+      pointerId: 2,
+      clientX: 300,
+      clientY: 225,
+      isPrimary: true,
+    });
+    fireEvent.pointerMove(zoomFrame(), {
+      pointerId: 2,
+      clientX: 250,
+      clientY: 195,
+      isPrimary: true,
+    });
+    fireEvent.pointerUp(zoomFrame(), { pointerId: 2, clientX: 250, clientY: 195, isPrimary: true });
+
+    expect(artworkLayer().style.transform).toBe('translate(-50px, -30px) scale(2.2)');
+    // A drag is not a press, so it did not take the canvas back out.
+    expect(zoomFrame()).toHaveAccessibleName('Zoom out');
+  });
+
+  // However far it is dragged, the artwork keeps an edge in the frame.
+  it('holds the canvas within its frame however far it is dragged', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+    await user.click(enlargeButton());
+    frameOf();
+    fireEvent.pointerDown(zoomFrame(), {
+      pointerId: 1,
+      clientX: 300,
+      clientY: 225,
+      isPrimary: true,
+    });
+    fireEvent.pointerUp(zoomFrame(), { pointerId: 1, clientX: 300, clientY: 225, isPrimary: true });
+
+    fireEvent.pointerDown(zoomFrame(), {
+      pointerId: 2,
+      clientX: 300,
+      clientY: 225,
+      isPrimary: true,
+    });
+    fireEvent.pointerMove(zoomFrame(), {
+      pointerId: 2,
+      clientX: 9000,
+      clientY: 9000,
+      isPrimary: true,
+    });
+
+    // Half of what the zoom added, each way: 600 * 1.2 / 2 and 450 * 1.2 / 2.
+    expect(artworkLayer().style.transform).toBe('translate(360px, 270px) scale(2.2)');
+  });
+
+  it('zooms from the keyboard too, about the middle of the frame', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+    await user.click(enlargeButton());
+    frameOf();
+
+    zoomFrame().focus();
+    await user.keyboard('{Enter}');
+
+    expect(artworkLayer().style.transform).toBe('translate(0px, 0px) scale(2.2)');
+  });
+
   it('leaves a sticky alone, since its card already shows every word', () => {
     render(<ProposalCard item={sticky} />);
 
-    expect(screen.queryByRole('button', { name: /^Preview/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Enlarge/ })).toBeNull();
   });
 
   // On a ballot the card is itself the vote button, and a button inside a
@@ -175,13 +306,13 @@ describe('proposal preview', () => {
   it('offers nothing to press where the card is itself a press', () => {
     render(<ProposalCard item={diagram} interactive={false} />);
 
-    expect(screen.queryByRole('button', { name: /^Preview/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Enlarge/ })).toBeNull();
   });
 
   // Proposed before strokes were stored: there is nothing to open.
   it('leaves a drawing with nothing drawn in it alone', () => {
     render(<ProposalCard item={item({ type: 'drawing', svg: '' }, 'drawing')} />);
 
-    expect(screen.queryByRole('button', { name: /^Preview/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Enlarge/ })).toBeNull();
   });
 });
