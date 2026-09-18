@@ -160,6 +160,9 @@ function CardMenuButton({
   );
 }
 
+/** Movement past which a press on a card was a drag of it. */
+const PRESS_SLOP_PX = 4;
+
 /** What the confirmation calls the thing being removed. */
 const PROPOSAL_KIND: Record<BoardItem['type'], string> = {
   sticky: 'sticky note',
@@ -223,6 +226,14 @@ export function PositionedProposal({
   // card cannot keep that to itself: the menu has to know it is open, to stop
   // offering to open it again.
   const [enlargedOpen, setEnlargedOpen] = useState(false);
+  /**
+   * Where a press began, and whether it began on the card's artwork.
+   *
+   * The card takes the pointer as soon as it is pressed, so it can be dragged;
+   * that makes this wrapper, not the artwork, what the press ends up on. So the
+   * press is judged here: on the artwork, and gone nowhere, opens the canvas.
+   */
+  const pressed = useRef<{ x: number; y: number; onPlate: boolean } | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -376,16 +387,15 @@ export function PositionedProposal({
         // toward it reads as lag. Other people's moves do animate.
         transition: isDragging ? undefined : 'left 120ms ease-out, top 120ms ease-out',
       }}
-      onPointerDown={
-        draggable
-          ? (e) => {
-              onSelectProposal?.(item.id);
-              dragHandlers.onPointerDown(item, e);
-            }
-          : onSelectProposal
-            ? () => onSelectProposal(item.id)
-            : undefined
-      }
+      onPointerDown={(event) => {
+        pressed.current = {
+          x: event.clientX,
+          y: event.clientY,
+          onPlate: !!(event.target as HTMLElement).closest('[data-card-plate]'),
+        };
+        onSelectProposal?.(item.id);
+        if (draggable) dragHandlers.onPointerDown(item, event);
+      }}
       onPointerMove={draggable ? dragHandlers.onPointerMove : undefined}
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
@@ -409,15 +419,21 @@ export function PositionedProposal({
             : { kind: 'point', x: event.clientX, y: event.clientY },
         );
       }}
-      onClick={
-        canToggleShortlist
-          ? (event) => {
-              // The corner tick is its own button and already toggles.
-              if ((event.target as HTMLElement).closest('button')) return;
-              onToggleShortlist(item.id);
-            }
-          : undefined
-      }
+      onClick={(event) => {
+        // The corner tick and the ⋯ are their own presses.
+        if ((event.target as HTMLElement).closest('button')) return;
+        if (canToggleShortlist) {
+          onToggleShortlist(item.id);
+          return;
+        }
+        const from = pressed.current;
+        pressed.current = null;
+        if (!from?.onPlate || !hasArtwork(item)) return;
+        // A press that travelled was a drag across the board, not a press on
+        // the artwork.
+        if (Math.hypot(event.clientX - from.x, event.clientY - from.y) > PRESS_SLOP_PX) return;
+        setEnlargedOpen(true);
+      }}
     >
       {canToggleShortlist ? (
         <button
@@ -468,6 +484,8 @@ export function PositionedProposal({
           isAuthorLeader={isAuthorLeader}
           isShortlisted={isShortlisted}
           enlargedOpen={enlargedOpen}
+          // While the leader is shortlisting, a press on a card picks it.
+          openOnArtworkPress={!canToggleShortlist}
           onEnlargedOpenChange={setEnlargedOpen}
         />
 

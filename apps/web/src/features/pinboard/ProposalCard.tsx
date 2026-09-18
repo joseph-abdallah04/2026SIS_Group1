@@ -89,6 +89,11 @@ interface ProposalCardProps {
    */
   enlargedOpen?: boolean;
   onEnlargedOpenChange?: (open: boolean) => void;
+  /**
+   * Whether a press on the artwork opens it. Off while the board is being
+   * shortlisted, where a press on a card is how a card is picked.
+   */
+  openOnArtworkPress?: boolean;
 }
 
 /** The plate every card gives artwork, so a row of cards lines up. */
@@ -385,11 +390,28 @@ export function CardFoot({
  * row of cards lines up and a sparse diagram does not sit in a box a third the
  * height of its neighbour's.
  */
-function CardMedia({ children }: { children: ReactNode }) {
+function CardMedia({
+  children,
+  onOpen,
+}: {
+  children: ReactNode;
+  /**
+   * Opens the artwork at a size it can be read at. The whole plate is the way
+   * in, not only the small mark in its corner: the drawing is what somebody
+   * wants a closer look at, so the drawing is what they press.
+   */
+  onOpen?: (event: React.MouseEvent) => void;
+}) {
   return (
     <div
-      className="relative w-full overflow-hidden border-b"
+      // Named, so the board can tell a press that began on the artwork from one
+      // that began anywhere else on the card.
+      data-card-plate
+      // A hand, not a magnifier: on the board this is a card to be opened. The
+      // magnifier belongs inside, where a press really does zoom.
+      className={`relative w-full overflow-hidden border-b ${onOpen ? 'cursor-pointer' : ''}`}
       style={{ aspectRatio: PLATE_ASPECT, background: THUMB_BACKGROUND, borderColor: CARD_BORDER }}
+      onClick={onOpen}
     >
       {children}
     </div>
@@ -769,6 +791,7 @@ export function ProposalCard({
   interactive = true,
   enlargedOpen,
   onEnlargedOpenChange,
+  openOnArtworkPress = true,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
@@ -785,6 +808,20 @@ export function ProposalCard({
   // nothing to open: the plate stays, the way into the preview does not.
   const hasPlate = artifact.type === 'diagram' || artifact.type === 'drawing';
   const openable = hasArtwork(item);
+  // Kept here, not in the button, because the plate opens it as well.
+  const [openedHere, setOpenedHere] = useState(false);
+  const enlarged = enlargedOpen ?? openedHere;
+  const setEnlarged = (next: boolean) => {
+    setOpenedHere(next);
+    onEnlargedOpenChange?.(next);
+  };
+  /**
+   * Where a press on the artwork began, so a drag across the board is not
+   * taken for a press on the card: a card is dragged from anywhere on it, and
+   * the plate is most of it.
+   */
+  const pressedAt = useRef<{ x: number; y: number } | null>(null);
+  const opensOnPress = interactive && openable && openOnArtworkPress;
   const foot = (
     <CardFoot
       item={item}
@@ -805,6 +842,13 @@ export function ProposalCard({
           footprint that grows a step at a time with its note. Everything else
           is a panel, so it keeps its border and its rounded edge. */}
       <article
+        onPointerDown={
+          opensOnPress
+            ? (event) => {
+                pressedAt.current = { x: event.clientX, y: event.clientY };
+              }
+            : undefined
+        }
         className={`flex shrink-0 flex-col overflow-hidden ${
           isSticky
             ? 'transition-[width,min-height] duration-150 ease-out motion-reduce:transition-none'
@@ -843,7 +887,24 @@ export function ProposalCard({
         ) : null}
 
         {hasPlate ? (
-          <CardMedia>
+          <CardMedia
+            onOpen={
+              opensOnPress
+                ? (event) => {
+                    // The corner mark is its own press, and already opens it.
+                    if ((event.target as HTMLElement).closest('button')) return;
+                    const from = pressedAt.current;
+                    pressedAt.current = null;
+                    // A card is dragged from anywhere on it, the plate included:
+                    // a press that travelled was a drag, not a press on the card.
+                    if (from && Math.hypot(event.clientX - from.x, event.clientY - from.y) > 4) {
+                      return;
+                    }
+                    setEnlarged(true);
+                  }
+                : undefined
+            }
+          >
             {artwork}
             {/* A canvas on a card is a glance at it; this opens it at a size it
                 can be read at. Left off where the card is itself a button, as
@@ -853,8 +914,8 @@ export function ProposalCard({
                 item={item}
                 artwork={artwork}
                 byline={foot}
-                open={enlargedOpen}
-                onOpenChange={onEnlargedOpenChange}
+                open={enlarged}
+                onOpenChange={setEnlarged}
               />
             ) : null}
           </CardMedia>

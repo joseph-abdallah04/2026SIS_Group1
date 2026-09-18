@@ -76,6 +76,39 @@ describe('proposal enlarge', () => {
     expect(container.querySelectorAll('svg')).toHaveLength(onCard);
   });
 
+  // The drawing is what somebody wants a closer look at, so the drawing is
+  // what they press: the mark in the corner is for finding it, not the only way.
+  it('opens on a press of the artwork itself', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ProposalCard item={diagram} />);
+
+    await user.click(container.querySelector('[data-card-plate]')!);
+
+    expect(screen.getByRole('dialog', { name: 'diagram by Alice' })).toBeInTheDocument();
+  });
+
+  // A card is dragged from anywhere on it, and the plate is most of it.
+  it('is not opened by a drag that crossed the artwork', () => {
+    const { container } = render(<ProposalCard item={diagram} />);
+    const plate = container.querySelector('[data-card-plate]')!;
+    const card = container.querySelector('article')!;
+
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100, clientY: 100, isPrimary: true });
+    fireEvent.click(plate, { clientX: 240, clientY: 180 });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('leaves the artwork alone where a press on the card means something else', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ProposalCard item={diagram} openOnArtworkPress={false} />);
+
+    expect(container.querySelector('[data-card-plate]')).not.toHaveClass('cursor-pointer');
+    await user.click(container.querySelector('[data-sticky-note], article')!);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('shows a drawing too', async () => {
     const user = userEvent.setup();
     render(<ProposalCard item={drawing} />);

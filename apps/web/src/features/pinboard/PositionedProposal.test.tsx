@@ -323,6 +323,45 @@ describe('PositionedProposal actions menu', () => {
     expect(frame).toHaveAccessibleName('Zoom out');
   });
 
+  // The card takes the pointer as soon as it is pressed, so it can be dragged,
+  // and the press lands on the card rather than on the artwork inside it. The
+  // board judges it: on the artwork, and gone nowhere, opens the canvas.
+  it('opens the canvas when the artwork is pressed on the board', async () => {
+    const { container } = renderMenuCard({ item: DRAWN_ON, canMove: true });
+    const plate = container.querySelector('[data-card-plate]')!;
+
+    fireEvent.pointerDown(plate, { pointerId: 1, clientX: 120, clientY: 90, isPrimary: true });
+    fireEvent.click(plate, { clientX: 120, clientY: 90 });
+
+    expect(await screen.findByRole('dialog', { name: /diagram by/ })).toBeInTheDocument();
+  });
+
+  it('opens nothing when the press was a drag of the card', () => {
+    const { container } = renderMenuCard({ item: DRAWN_ON, canMove: true });
+    const plate = container.querySelector('[data-card-plate]')!;
+
+    fireEvent.pointerDown(plate, { pointerId: 1, clientX: 120, clientY: 90, isPrimary: true });
+    fireEvent.click(plate, { clientX: 260, clientY: 180 });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  // While the leader is picking cards for the vote, a press on a card is how
+  // one is picked, so the artwork must not open under it.
+  it('shortlists a card pressed while shortlisting, rather than opening it', async () => {
+    const onToggleShortlist = vi.fn();
+    const { container } = renderMenuCard({
+      item: DRAWN_ON,
+      canToggleShortlist: true,
+      onToggleShortlist,
+    });
+
+    await userEvent.click(container.querySelector('article svg')!);
+
+    expect(onToggleShortlist).toHaveBeenCalledWith(DRAWN_ON.id);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   // An empty canvas draws the same empty plate however large it is shown.
   it('offers no preview of a canvas with nothing on it', async () => {
     renderMenuCard({ item: DIAGRAM });
