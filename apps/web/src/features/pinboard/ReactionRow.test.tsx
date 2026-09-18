@@ -67,11 +67,20 @@ describe('reaction row', () => {
         vi.advanceTimersByTime(400);
       });
 
-      // Themselves first, and as "you": that is what a person calls themselves.
-      expect(screen.getByText('You and BO')).toBeInTheDocument();
+      // A heading naming the reaction, then a row per person: themselves
+      // first, and as "you", since that is what a person calls themselves.
+      const tip = screen.getByRole('presentation', { hidden: true });
+      expect(within(tip).getByText('Agree')).toBeInTheDocument();
+      expect(
+        within(tip)
+          .getAllByRole('listitem', { hidden: true })
+          .map((row) => row.textContent),
+      ).toEqual(['You', 'BO']);
+      // Under the chip: above it is the card the chip is reacting to.
+      expect(tip.getAttribute('data-placement')).toBe('below');
 
       fireEvent.pointerLeave(chip(THUMB, 2));
-      expect(screen.queryByText('You and BO')).toBeNull();
+      expect(screen.queryByRole('presentation', { hidden: true })).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -93,6 +102,28 @@ describe('reaction row', () => {
     renderRow({ reactions: [{ emoji: THUMB, people: crowd }], viewerId: null });
 
     expect(chip(THUMB, 7)).toHaveAccessibleName('Agree (7) — A, B, C, D, E and 2 more');
+  });
+
+  it('counts the rest under the faces it shows', async () => {
+    vi.useFakeTimers();
+    try {
+      const crowd = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(person);
+      renderRow({ reactions: [{ emoji: THUMB, people: crowd }], viewerId: null });
+
+      fireEvent.pointerEnter(chip(THUMB, 7));
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+
+      const rows = within(screen.getByRole('presentation', { hidden: true })).getAllByRole(
+        'listitem',
+        { hidden: true },
+      );
+      expect(rows).toHaveLength(6);
+      expect(rows[5]).toHaveTextContent('and 2 more');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('presses the chips this viewer reacted with, and only those', () => {

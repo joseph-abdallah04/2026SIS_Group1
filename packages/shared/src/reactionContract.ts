@@ -106,7 +106,19 @@ export function isQuickReaction(value: string): value is QuickReaction {
  * rather than as a stray character in the page.
  */
 export function reactionLabel(emoji: string): string {
-  return isQuickReaction(emoji) ? QUICK_REACTION_LABELS[emoji] : `React with ${emoji}`;
+  return reactionName(emoji) ?? `React with ${emoji}`;
+}
+
+/**
+ * What this reaction is called, where it has a name of its own.
+ *
+ * Only the quick three do. Everything the picker offers is a glyph and the
+ * words that find it, which is a search index rather than a name — "red heart
+ * love like" cannot be shown to anyone as a title. So a heading over a list of
+ * people either names the reaction or leaves the emoji to speak for itself.
+ */
+export function reactionName(emoji: string): string | null {
+  return isQuickReaction(emoji) ? QUICK_REACTION_LABELS[emoji] : null;
 }
 
 /**
@@ -155,19 +167,23 @@ export function hasReacted(
 }
 
 /**
- * Who left this reaction, as the viewer would say it: themselves first and as
- * "you", since that is what a person calls themselves, then everyone else in
- * the order they reacted.
+ * Who left this reaction, the viewer first: a person looks for themselves in a
+ * list before they read anybody else. Everyone after them keeps the order they
+ * reacted in.
+ *
+ * People rather than names, because what a client does with them differs: a
+ * row of them wants a face and a name each, and a label wants one sentence
+ * with the viewer written as "you".
  */
 export function reactionPeople(
   groups: readonly ReactionGroup[],
   emoji: string,
   viewerId: string | null,
-): string[] {
+): ReactionPerson[] {
   const people = groups.find((group) => group.emoji === emoji)?.people ?? [];
   return [
-    ...people.filter((person) => person.userId === viewerId).map(() => 'You'),
-    ...people.filter((person) => person.userId !== viewerId).map((person) => person.displayName),
+    ...people.filter((person) => person.userId === viewerId),
+    ...people.filter((person) => person.userId !== viewerId),
   ];
 }
 

@@ -4,9 +4,11 @@ import {
   hasReacted,
   reactionCount,
   reactionLabel,
+  reactionName,
   reactionPeople,
   QUICK_REACTIONS,
   type ReactionGroup,
+  type ReactionPerson,
 } from '@roundtable/shared';
 
 import { EmojiPicker } from './EmojiPicker';
@@ -25,12 +27,13 @@ interface ReactionRowProps {
 }
 
 /**
- * One chip: the emoji, its count once it has one, and whether you are in it.
- */
-/**
- * Who is in a chip, as a sentence: everyone where there are few, and the first
- * few and a count where there are many, so one popular chip cannot cover the
- * board with a list of names.
+ * Who is in a chip, as one sentence: everyone where there are few, and the
+ * first few and a count where there are many, so one popular chip cannot read
+ * out a whole room.
+ *
+ * This is the chip's accessible name. What is shown on hover is a list, which
+ * a screen reader has no way to reach — a tooltip is nothing to it — so the
+ * same people have to be sayable in a line.
  */
 function whoReacted(names: readonly string[]): string {
   if (names.length === 0) return '';
@@ -45,11 +48,15 @@ function whoReacted(names: readonly string[]): string {
 /** How many names a chip lists before it starts counting the rest. */
 const NAMES_SHOWN = 5;
 
+/**
+ * One chip: the emoji, its count once it has one, and whether you are in it.
+ */
 function ReactionChip({
   emoji,
   count,
   mine,
-  who,
+  people,
+  viewerId,
   busy,
   disabled,
   dim,
@@ -58,8 +65,9 @@ function ReactionChip({
   emoji: string;
   count: number;
   mine: boolean;
-  /** Who left this one, for the hover and for anyone who cannot hover. */
-  who: string;
+  /** Who left this one, the viewer first. */
+  people: readonly ReactionPerson[];
+  viewerId: string | null;
   busy: boolean;
   disabled: boolean;
   /** Nothing has been said with this one yet, so it waits until hovered. */
@@ -67,9 +75,36 @@ function ReactionChip({
   onClick: () => void;
 }) {
   const label = reactionLabel(emoji);
-  // Who reacted, beside the chip: a count says how many agreed, and the
+  const name = reactionName(emoji);
+  const named = people.map((person) => (person.userId === viewerId ? 'You' : person.displayName));
+  const who = whoReacted(named);
+  const rest = people.length - NAMES_SHOWN;
+
+  // Who reacted, under the chip: a count says how many agreed, and the
   // question that follows is always who.
-  const names = useCardTooltip<HTMLButtonElement>(who);
+  //
+  // A name per line rather than a sentence of them, read by scanning down a
+  // column. The reaction is named above the list where it has a name — the
+  // glyph itself is already under the pointer, so repeating it in the heading
+  // says nothing the chip has not just said.
+  const names = useCardTooltip<HTMLButtonElement>(
+    people.length === 0 ? null : (
+      <>
+        {name ? <p className="text-[11px] leading-none text-rt-ink-muted">{name}</p> : null}
+        <ul className={`flex flex-col gap-1 ${name ? 'mt-1.5' : ''}`}>
+          {people.slice(0, NAMES_SHOWN).map((person) => (
+            <li key={person.userId} className="truncate text-[12px] leading-tight">
+              {person.userId === viewerId ? 'You' : person.displayName}
+            </li>
+          ))}
+          {rest > 0 ? (
+            <li className="text-[11px] leading-tight text-rt-ink-muted">and {rest} more</li>
+          ) : null}
+        </ul>
+      </>
+    ),
+    'panel',
+  );
 
   return (
     <button
@@ -186,7 +221,8 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
     <ReactionChip
       key={emoji}
       emoji={emoji}
-      who={whoReacted(reactionPeople(reactions, emoji, viewerId))}
+      people={reactionPeople(reactions, emoji, viewerId)}
+      viewerId={viewerId}
       count={reactionCount(reactions, emoji)}
       mine={hasReacted(reactions, emoji, viewerId)}
       busy={pending === emoji}

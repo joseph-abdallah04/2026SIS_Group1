@@ -1,10 +1,53 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 /** How long the pointer rests on something before its explanation appears. */
 const DELAY_MS = 250;
-/** Room a tooltip needs above what it explains: its height and the gap, with a little over. */
+/** Between the explanation and the thing it explains. */
+const GAP_PX = 6;
+/** How close to the edge of the window an explanation may sit. */
+const EDGE_PX = 8;
+/**
+ * Room a one-line explanation needs above what it explains, used for the first
+ * placement — before the thing has been rendered there is nothing to measure.
+ */
 const ROOM_PX = 32;
+
+/**
+ * What an explanation is made of, and so how it is dressed.
+ *
+ * A `note` is the dark pill a few words belong on. A `panel` is a light card
+ * with a heading and rows in it — reaction names, where the content is a small
+ * piece of the interface rather than a phrase, and a dark ground would fight
+ * the faces on it.
+ */
+export type CardTooltipTone = 'note' | 'panel';
+
+const TONE_CLASS: Record<CardTooltipTone, string> = {
+  note: 'max-w-[240px] rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium text-white shadow-lg',
+  panel:
+    'max-w-[260px] rounded-xl border border-rt-tertiary bg-white px-3 py-2 text-left text-rt-ink shadow-xl',
+};
+
+/**
+ * Which side each tone opens on, where there is room for either.
+ *
+ * A note goes above its mark, clear of the byline it sits in. A panel hangs
+ * below its chip: the chips already straddle the card's bottom edge, so above
+ * is the card itself — the panel would cover the proposal you are reading
+ * about — while below is board.
+ */
+const PREFERS_BELOW: Record<CardTooltipTone, boolean> = { note: false, panel: true };
+
+interface Anchor {
+  /** Centre of what is being explained, and its top and bottom edges. */
+  x: number;
+  top: number;
+  bottom: number;
+  below: boolean;
+  /** Whether the explanation has been measured and fitted to the window. */
+  settled: boolean;
+}
 
 /**
  * An explanation that appears beside something small on a card.
@@ -22,10 +65,14 @@ const ROOM_PX = 32;
  * Shared by the marks in a card's byline and the reaction chips along its
  * bottom edge, so both explain themselves the same way.
  */
-export function useCardTooltip<T extends HTMLElement>(text: string) {
+export function useCardTooltip<T extends HTMLElement>(
+  content: ReactNode,
+  tone: CardTooltipTone = 'note',
+) {
   const ref = useRef<T>(null);
+  const tip = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [anchor, setAnchor] = useState<{ x: number; y: number; below: boolean } | null>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   const hide = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -37,12 +84,40 @@ export function useCardTooltip<T extends HTMLElement>(text: string) {
     timer.current = setTimeout(() => {
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
-      // Above it, unless that would put the tooltip off the top of the window —
-      // a card near the top edge of the board — in which case below it.
-      const below = rect.top < ROOM_PX;
-      setAnchor({ x: rect.left + rect.width / 2, y: below ? rect.bottom : rect.top, below });
+      // Its own side, unless the window edge is right there — a card near the
+      // top of the board, or a chip near the bottom — in which case the other.
+      const prefersBelow = PREFERS_BELOW[tone];
+      setAnchor({
+        x: rect.left + rect.width / 2,
+        top: rect.top,
+        bottom: rect.bottom,
+        below: prefersBelow ? window.innerHeight - rect.bottom > ROOM_PX : rect.top < ROOM_PX,
+        settled: false,
+      });
     }, DELAY_MS);
   };
+
+  // Fitted to the window once it is on screen, before the browser paints it.
+  //
+  // Measured rather than guessed, because these are no longer all one size: a
+  // panel naming everyone in a chip is many times the height of the pill this
+  // started as, and a chip with room above it for one line can have none for
+  // six.
+  useLayoutEffect(() => {
+    if (!anchor || anchor.settled) return;
+    const box = tip.current?.getBoundingClientRect();
+    if (!box) return;
+    const roomAbove = anchor.top - GAP_PX - EDGE_PX;
+    const roomBelow = window.innerHeight - anchor.bottom - GAP_PX - EDGE_PX;
+    // Its own side while it fits there, then whichever side has more room.
+    const below = PREFERS_BELOW[tone]
+      ? box.height <= roomBelow || roomBelow >= roomAbove
+      : box.height > roomAbove && roomBelow > roomAbove;
+    // Centred on what it explains, until that would hang it off the side.
+    const half = box.width / 2;
+    const x = Math.min(Math.max(anchor.x, EDGE_PX + half), window.innerWidth - EDGE_PX - half);
+    setAnchor({ ...anchor, x, below, settled: true });
+  }, [anchor, tone]);
 
   useEffect(() => {
     if (!anchor) return;
@@ -60,21 +135,24 @@ export function useCardTooltip<T extends HTMLElement>(text: string) {
   );
 
   const tooltip: ReactNode =
-    anchor && text
+    anchor && content
       ? createPortal(
-          <span
+          // A div rather than a span: a panel holds a heading and a list, and
+          // neither may sit inside phrasing content.
+          <div
+            ref={tip}
             role="presentation"
             aria-hidden="true"
-            className="rt-studio-fade pointer-events-none fixed z-50 max-w-[240px] rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium text-white shadow-lg"
+            className={`rt-studio-fade pointer-events-none fixed z-50 ${TONE_CLASS[tone]}`}
             data-placement={anchor.below ? 'below' : 'above'}
             style={{
               left: anchor.x,
-              top: anchor.below ? anchor.y + 6 : anchor.y - 6,
+              top: anchor.below ? anchor.bottom + GAP_PX : anchor.top - GAP_PX,
               transform: anchor.below ? 'translateX(-50%)' : 'translate(-50%, -100%)',
             }}
           >
-            {text}
-          </span>,
+            {content}
+          </div>,
           document.body,
         )
       : null;
