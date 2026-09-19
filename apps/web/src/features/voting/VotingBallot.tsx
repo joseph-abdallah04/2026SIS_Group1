@@ -3,7 +3,8 @@ import type { BoardItem, VotingPhase, VotingTally, VotingVoterStatus } from '@ro
 
 import { cardWidth } from '../pinboard/cardMetrics';
 import { CARD_RADIUS, STICKY_RADIUS } from '../pinboard/pinboardTokens';
-import { ProposalCard } from '../pinboard/ProposalCard';
+import { CardFoot, hasArtwork, ProposalArtwork, ProposalCard } from '../pinboard/ProposalCard';
+import { ProposalEnlarge } from '../pinboard/ProposalEnlarge';
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import { VoteResultBadge, voteResultRing } from './VoteResultBadge';
 
@@ -157,6 +158,10 @@ export function VotingBallot({
         role="dialog"
         aria-modal="true"
         aria-labelledby="voting-ballot-title"
+        // A popup opened from a card in here belongs over the ballot, which
+        // covers the board: centred on the board behind it, it would sit off
+        // the middle of the only thing anyone can see.
+        data-popup-room=""
         className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-lg"
       >
         <header className="shrink-0 border-b border-rt-tertiary px-5 py-4">
@@ -248,6 +253,30 @@ export function VotingBallot({
                           {card}
                         </button>
                       )}
+                      {/* The card is the vote button, so the way into a
+                          canvas sits beside it: looking closely before voting
+                          must never be a vote. */}
+                      {hasArtwork(item) ? (
+                        <div className="mt-2">
+                          <ProposalEnlarge
+                            item={item}
+                            artwork={<ProposalArtwork item={item} />}
+                            byline={
+                              <CardFoot
+                                item={item}
+                                viewerId={viewerId}
+                                isOwnedByViewer={viewerId !== null && item.authorId === viewerId}
+                                isAuthorLeader={item.authorId != null && item.authorId === leaderId}
+                              />
+                            }
+                            placement="beside"
+                            // Under this view is the ballot, where a card is a
+                            // vote: the press that puts the view away stops
+                            // there rather than carrying on into one.
+                            pressOutside="is absorbed"
+                          />
+                        </div>
+                      ) : null}
                       <div className="mt-2 px-0.5">
                         <div className="h-1.5 overflow-hidden rounded-full bg-rt-tertiary/60">
                           <div

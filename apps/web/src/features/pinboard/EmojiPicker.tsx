@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
-import { reactionLabel } from '@roundtable/shared';
 
-import { EMOJI_GROUPS, searchEmojis, type EmojiEntry } from './emojiCatalog';
+import { EMOJI_GROUPS, reactionButtonLabel, searchEmojis, type EmojiEntry } from './emojiCatalog';
 import { REACTION_ON_FILL } from './pinboardTokens';
 
 /** Panel geometry, fixed so the placement can be decided before it renders. */
@@ -196,7 +195,7 @@ export function EmojiPicker({ anchor, selected, onPick, onClose }: EmojiPickerPr
                   key={emoji}
                   type="button"
                   aria-pressed={mine}
-                  aria-label={reactionLabel(emoji)}
+                  aria-label={reactionButtonLabel(emoji)}
                   onClick={() => onPick(emoji)}
                   // Marked in the same slate the chips use, so what is pressed
                   // here and what is pressed on a card read as one state.

@@ -49,6 +49,16 @@ export const CARD_RADIUS_PX = 16;
 // baseline they read as one straight line of text.
 export const CARD_FOOT_CLASS =
   'flex items-baseline justify-between gap-2 px-3 pt-1.5 pb-3 text-[11px] text-rt-ink-faint';
+/**
+ * What the byline spends on everything that is not the name: its own padding
+ * either side, the gap before the clock, and the clock itself.
+ *
+ * Subtract it from a card's width for the room a name has there. The reaction
+ * list borrows the figure so a long name breaks off in the same place in both,
+ * rather than the same person reading two different ways on one card.
+ */
+export const FOOT_NAME_ROOM_PX = 12 + 12 + 8 + 30;
+
 export const CARD_RADIUS = `${CARD_RADIUS_PX}px`;
 export const CARD_SHADOW = '0 2px 8px rgba(8,12,21,0.08), 0 1px 2px rgba(8,12,21,0.04)';
 

@@ -244,8 +244,10 @@ press adds or removes, so a client that has fallen behind cannot ask for the
 wrong direction. `proposalReactionsUpdated` carries that proposal's whole
 reaction state rather than a delta, so a missed event is corrected by the next
 one instead of leaving a count adrift. Each `ReactionGroup` is
-`{ emoji, userIds }` — the count is the list's length, and whether _you_
-reacted is a question only the viewer can answer from its own id. Groups arrive
+`{ emoji, people }`, and each person is `{ userId, displayName }` — the count is
+the list's length, whether _you_ reacted is a question only the viewer can
+answer from its own id, and the name travels with the reaction because a board
+has no roster of its own to look one up in. Groups arrive
 in the order each emoji first appeared on that proposal, so an unfamiliar
 reaction lands in the same place on every board.
 

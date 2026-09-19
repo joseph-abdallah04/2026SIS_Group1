@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   arrowGeometry,
   diagramEdgeDash,
@@ -36,6 +35,7 @@ import {
   inkStrokeWidth,
   studioPaintOrder,
   type BoardItem,
+  type DiagramArtifact,
 } from '@roundtable/shared';
 
 import { DiagramShapeOutline } from '../../components/ui/DiagramShapeOutline';
@@ -49,6 +49,8 @@ import {
   STICKY_NOTE_PADDING,
 } from '../tools/sticky/stickyPresentation';
 import { StickyText } from '../tools/sticky/StickyText';
+import { useCardTooltip } from './useCardTooltip';
+import { ProposalEnlarge } from './ProposalEnlarge';
 import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
@@ -80,6 +82,43 @@ interface ProposalCardProps {
    * being links.
    */
   interactive?: boolean;
+  /**
+   * Whether the preview is open, where something outside the card opens it too
+   * — the board's actions menu. Left out, the card's own button is the only way
+   * in and keeps the state itself.
+   */
+  enlargedOpen?: boolean;
+  onEnlargedOpenChange?: (open: boolean) => void;
+  /**
+   * Whether a press on the artwork opens it. Off while the board is being
+   * shortlisted, where a press on a card is how a card is picked.
+   */
+  openOnArtworkPress?: boolean;
+}
+
+/** The plate every card gives artwork, so a row of cards lines up. */
+const PLATE_ASPECT = 4 / 3;
+
+/**
+ * Whether a proposal has a canvas worth opening.
+ *
+ * A sticky never has one: its card already shows every word. A drawing has one
+ * once it has strokes, and a studio canvas once anything at all has been put on
+ * it — a shape, a sketch, a path, a table or an arrow. An empty canvas shows
+ * the same empty plate however large it is drawn.
+ */
+export function hasArtwork(item: BoardItem): boolean {
+  const artifact = item.artifactJson;
+  if (artifact.type === 'drawing') return artifact.svg.trim().length > 0;
+  if (artifact.type !== 'diagram') return false;
+  return (
+    artifact.nodes.length > 0 ||
+    artifact.edges.length > 0 ||
+    (artifact.ink?.length ?? 0) > 0 ||
+    (artifact.paths?.length ?? 0) > 0 ||
+    (artifact.tables?.length ?? 0) > 0 ||
+    (artifact.arrows?.length ?? 0) > 0
+  );
 }
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
@@ -91,90 +130,21 @@ function formatTime(iso: string): string {
   });
 }
 
-/** How long the pointer rests on a mark before its explanation appears. */
-const MARK_TOOLTIP_DELAY_MS = 250;
-/** Room a tooltip needs above its mark: its height and the gap, with a little over. */
-const MARK_TOOLTIP_ROOM_PX = 32;
-
 /**
  * A small word in the byline that explains itself on hover.
  *
- * The native `title` waits about a second and is styled by the browser, and the
- * studio's `Tooltip` is positioned inside its parent — which here is a card that
- * clips what spills out of it and is scaled with the board's zoom, so the
- * explanation would be cut off or unreadably small. This one is portalled to the
- * page and placed against the mark on screen, so it reads the same at any zoom.
- *
  * The explanation also goes to screen readers as ordinary text, since a mark is
- * not something anyone tabs to.
+ * not something anyone tabs to, and a tooltip is not something a screen reader
+ * hovers.
  */
 function FootMark({ tooltip, children }: { tooltip: string; children: ReactNode }) {
-  const markRef = useRef<HTMLSpanElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [anchor, setAnchor] = useState<{ x: number; y: number; below: boolean } | null>(null);
-
-  const hide = () => {
-    if (timer.current) clearTimeout(timer.current);
-    setAnchor(null);
-  };
-
-  const show = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const rect = markRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      // Above the mark, unless that would put it off the top of the window —
-      // a card near the top edge of the board — in which case below it.
-      const below = rect.top < MARK_TOOLTIP_ROOM_PX;
-      setAnchor({ x: rect.left + rect.width / 2, y: below ? rect.bottom : rect.top, below });
-    }, MARK_TOOLTIP_DELAY_MS);
-  };
-
-  useEffect(() => {
-    if (!anchor) return;
-    // The board pans under a wheel, which moves the mark out from under an
-    // explanation placed once.
-    window.addEventListener('wheel', hide, { passive: true });
-    return () => window.removeEventListener('wheel', hide);
-  }, [anchor]);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  const explanation = useCardTooltip<HTMLSpanElement>(tooltip);
 
   return (
-    <span
-      ref={markRef}
-      data-foot-mark
-      className="shrink-0 text-[10px]"
-      onPointerEnter={show}
-      onPointerLeave={hide}
-      // Picking the card up is not reading its byline.
-      onPointerDown={hide}
-    >
+    <span data-foot-mark className="shrink-0 text-[10px]" {...explanation.anchor}>
       <span aria-hidden="true">{children}</span>
       <span className="sr-only">{tooltip}</span>
-      {anchor
-        ? createPortal(
-            <span
-              role="presentation"
-              aria-hidden="true"
-              className="rt-studio-fade pointer-events-none fixed z-50 rounded-md bg-rt-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-white shadow-lg"
-              data-placement={anchor.below ? 'below' : 'above'}
-              style={{
-                left: anchor.x,
-                top: anchor.below ? anchor.y + 6 : anchor.y - 6,
-                transform: anchor.below ? 'translateX(-50%)' : 'translate(-50%, -100%)',
-              }}
-            >
-              {tooltip}
-            </span>,
-            document.body,
-          )
-        : null}
+      {explanation.tooltip}
     </span>
   );
 }
@@ -215,7 +185,7 @@ const FOOT_MIN_GAP_PX = 20;
  * resized as chips came and went drew the eye to its own edges instead of to
  * what somebody had written on it.
  */
-function CardFoot({
+export function CardFoot({
   item,
   viewerId,
   isOwnedByViewer,
@@ -351,11 +321,28 @@ function CardFoot({
  * row of cards lines up and a sparse diagram does not sit in a box a third the
  * height of its neighbour's.
  */
-function CardMedia({ children }: { children: ReactNode }) {
+function CardMedia({
+  children,
+  onOpen,
+}: {
+  children: ReactNode;
+  /**
+   * Opens the artwork at a size it can be read at. The whole plate is the way
+   * in, not only the small mark in its corner: the drawing is what somebody
+   * wants a closer look at, so the drawing is what they press.
+   */
+  onOpen?: (event: React.MouseEvent) => void;
+}) {
   return (
     <div
-      className="relative w-full overflow-hidden border-b"
-      style={{ aspectRatio: '4 / 3', background: THUMB_BACKGROUND, borderColor: CARD_BORDER }}
+      // Named, so the board can tell a press that began on the artwork from one
+      // that began anywhere else on the card.
+      data-card-plate
+      // A hand, not a magnifier: on the board this is a card to be opened. The
+      // magnifier belongs inside, where a press really does zoom.
+      className={`relative w-full overflow-hidden border-b ${onOpen ? 'cursor-pointer' : ''}`}
+      style={{ aspectRatio: PLATE_ASPECT, background: THUMB_BACKGROUND, borderColor: CARD_BORDER }}
+      onClick={onOpen}
     >
       {children}
     </div>
@@ -363,11 +350,89 @@ function CardMedia({ children }: { children: ReactNode }) {
 }
 
 /**
- * Full diagram preview (F21): every shape, arrow, label, size and style the
- * editor produced. Geometry, palettes, routing and outlines all come from
- * `@roundtable/shared`, so the board cannot drift from the editor.
+ * How much room a studio canvas takes: the far edge of everything on it, plus
+ * the margin the card leaves around it.
+ *
+ * Everything counts towards it — a shape, a sketch, a path, a table, and an
+ * arrow's whole route, which can reach past what it points at. Worked out here
+ * rather than in the drawing itself, because the card's plate and the preview's
+ * frame both need the shape of it before either draws anything.
  */
-function DiagramBody({ item }: { item: BoardItem }) {
+export function diagramExtent(artifact: DiagramArtifact): { width: number; height: number } {
+  const { nodes } = artifact;
+  const paths = artifact.paths ?? [];
+  const tables = artifact.tables ?? [];
+  const arrows = artifact.arrows ?? [];
+  const points = (artifact.ink ?? []).flatMap((stroke) => inkPoints(stroke));
+  const anchors = paths.flatMap((path) => path.anchors);
+  const corners = tables.map((table) => ({ table, size: tableSize(table) }));
+  const arrowTargets = arrowTargetLookup({
+    nodes,
+    ink: (artifact.ink ?? []).map((stroke) => ({ ...stroke, points: inkPoints(stroke) })),
+    paths,
+    tables,
+  });
+  const routes = arrows.flatMap((arrow) => arrowGeometry(arrow, arrowTargets).points);
+  return {
+    width:
+      Math.max(
+        ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
+        ...points.map((point) => point.x),
+        ...anchors.map((anchor) => anchor.x),
+        ...corners.map(({ table, size }) => table.x + size.width),
+        ...routes.map((point) => point.x),
+        72,
+      ) + 28,
+    height:
+      Math.max(
+        ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
+        ...points.map((point) => point.y),
+        ...anchors.map((anchor) => anchor.y),
+        ...corners.map(({ table, size }) => table.y + size.height),
+        ...routes.map((point) => point.y),
+        32,
+      ) + 24,
+  };
+}
+
+/**
+ * A proposal's drawing: a studio canvas, or a drawing's image.
+ *
+ * Drawn into whatever box it is given, so the card's plate and the preview's
+ * frame show the same artwork. Null for a sticky, whose words are not artwork,
+ * and for a drawing proposed before strokes were stored, which has none.
+ */
+export function ProposalArtwork({ item }: { item: BoardItem }) {
+  const artifact = item.artifactJson;
+  if (artifact.type === 'diagram') return <DiagramArtwork item={item} />;
+  if (artifact.type !== 'drawing') return null;
+  // Never inject a peer's SVG into this document: it is arbitrary user-authored
+  // markup, so an inline <svg> would run any <script>/onload it carries in every
+  // viewer's session. An <img> renders SVG with scripting and external fetches
+  // disabled, so a hostile drawing is inert.
+  const svg = artifact.svg.trim();
+  if (!svg) return null;
+  return (
+    <img
+      src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
+      alt={`Drawing by ${item.authorName}`}
+      loading="lazy"
+      // Images are natively draggable, which would hijack a card drag.
+      draggable={false}
+      className="absolute inset-0 h-full w-full object-contain p-2.5"
+    />
+  );
+}
+
+/**
+ * Everything a studio canvas holds (F21): every shape, arrow, label, size and
+ * style the editor produced. Geometry, palettes, routing and outlines all come
+ * from `@roundtable/shared`, so the board cannot drift from the editor.
+ *
+ * Drawn into whatever box it is given — the card's plate, or the preview's
+ * larger one — keeping its own shape within it, so both show the same canvas.
+ */
+function DiagramArtwork({ item }: { item: BoardItem }) {
   if (item.artifactJson.type !== 'diagram') return null;
   const { nodes, edges } = item.artifactJson;
   const ink = item.artifactJson.ink ?? [];
@@ -389,35 +454,14 @@ function DiagramBody({ item }: { item: BoardItem }) {
   );
   const arrowById = new Map(arrows.map((arrow) => [arrow.id, arrow]));
   const edgeIndexByKey = new Map(edges.map((edge, index) => [diagramEdgeKey(edge), index]));
-  // The card frames whatever the artifact contains, so ink counts towards the
-  // extent exactly as a node does — otherwise a sketch would be cropped.
-  const allInkPoints = unpackedInk.flatMap((stroke) => stroke.points);
-  const allAnchors = paths.flatMap((path) => path.anchors);
-  const tableCorners = tables.map((table) => ({ table, size: tableSize(table) }));
-  // An arrow can reach past everything it points at, so its route counts
-  // towards the extent too — otherwise a free end would be cropped off.
-  const allArrowPoints = [...arrowRoutes.values()].flatMap((geometry) => geometry.points);
-  const svgWidth =
-    Math.max(
-      ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
-      ...allInkPoints.map((point) => point.x),
-      ...allAnchors.map((anchor) => anchor.x),
-      ...tableCorners.map(({ table, size }) => table.x + size.width),
-      ...allArrowPoints.map((point) => point.x),
-      72,
-    ) + 28;
-  const svgHeight =
-    Math.max(
-      ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
-      ...allInkPoints.map((point) => point.y),
-      ...allAnchors.map((anchor) => anchor.y),
-      ...tableCorners.map(({ table, size }) => table.y + size.height),
-      ...allArrowPoints.map((point) => point.y),
-      32,
-    ) + 24;
-  // Proposal-scoped marker ids prevent arrows in separate diagram cards from
-  // colliding; one per resolved colour keeps each arrowhead matching its line.
-  const arrowId = (color: string) => `rt-arrow-${item.id}-${color.replace('#', '')}`;
+  const { width: svgWidth, height: svgHeight } = diagramExtent(item.artifactJson);
+  // Marker ids are scoped to this drawing of this diagram, not to the proposal:
+  // the same diagram is on the page twice while its canvas is open — the card
+  // and the enlarged view — and two identical ids leave both `url(#…)` arrowheads
+  // resolving to whichever was written first, which is the thumbnail's. One id
+  // per resolved colour keeps each arrowhead matching its line.
+  const instance = useId().replace(/:/g, '');
+  const arrowId = (color: string) => `rt-arrow-${instance}-${color.replace('#', '')}`;
   const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
   // Reciprocal pairs bow apart here exactly as they do in the editor.
   const edgeRoutes = diagramEdgeRoutes(nodes, edges);
@@ -602,7 +646,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
   }
 
   return (
-    <CardMedia>
+    <>
       {/* A studio canvas is empty only when it holds nothing at all — a sketch,
           a line, a table or an arrow is as much a diagram as a shape is. */}
       {nodes.length === 0 &&
@@ -668,7 +712,7 @@ function DiagramBody({ item }: { item: BoardItem }) {
           })}
         </svg>
       )}
-    </CardMedia>
+    </>
   );
 }
 
@@ -680,6 +724,9 @@ export function ProposalCard({
   isNew = false,
   isShortlisted = false,
   interactive = true,
+  enlargedOpen,
+  onEnlargedOpenChange,
+  openOnArtworkPress = true,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
@@ -691,20 +738,52 @@ export function ProposalCard({
   // markup, so an inline <svg> would run any <script>/onload it carries in every
   // viewer's session. An <img> renders SVG with scripting and external fetches
   // disabled, so a hostile drawing is inert.
-  const svg = artifact.type === 'drawing' ? artifact.svg.trim() : '';
-  const drawingSrc = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : null;
+  const artwork = <ProposalArtwork item={item} />;
+  // A drawing proposed before strokes were stored has nothing to draw, and so
+  // nothing to open: the plate stays, the way into the preview does not.
+  const hasPlate = artifact.type === 'diagram' || artifact.type === 'drawing';
+  const openable = hasArtwork(item);
+  // Kept here, not in the button, because the plate opens it as well.
+  const [openedHere, setOpenedHere] = useState(false);
+  const enlarged = enlargedOpen ?? openedHere;
+  const setEnlarged = (next: boolean) => {
+    setOpenedHere(next);
+    onEnlargedOpenChange?.(next);
+  };
+  /**
+   * Where a press on the artwork began, so a drag across the board is not
+   * taken for a press on the card: a card is dragged from anywhere on it, and
+   * the plate is most of it.
+   */
+  const pressedAt = useRef<{ x: number; y: number } | null>(null);
+  const opensOnPress = interactive && openable && openOnArtworkPress;
+  const foot = (
+    <CardFoot
+      item={item}
+      viewerId={viewerId}
+      isOwnedByViewer={isOwnedByViewer}
+      isAuthorLeader={isAuthorLeader}
+    />
+  );
 
   return (
     // Always wrapped, highlighted or not: toggling the wrapper in and out would
     // remount the card and make drawings refetch their image mid-animation.
     <div
-      className={isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}
+      className={`group/card ${isNew ? 'shrink-0 rt-proposal-arrive' : 'shrink-0'}`}
       style={{ borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS }}
     >
       {/* A sticky is bare paper: no outline, square corners, and a square
           footprint that grows a step at a time with its note. Everything else
           is a panel, so it keeps its border and its rounded edge. */}
       <article
+        onPointerDown={
+          opensOnPress
+            ? (event) => {
+                pressedAt.current = { x: event.clientX, y: event.clientY };
+              }
+            : undefined
+        }
         className={`flex shrink-0 flex-col overflow-hidden ${
           isSticky
             ? 'transition-[width,min-height] duration-150 ease-out motion-reduce:transition-none'
@@ -742,28 +821,41 @@ export function ProposalCard({
           </div>
         ) : null}
 
-        {artifact.type === 'diagram' ? <DiagramBody item={item} /> : null}
-
-        {artifact.type === 'drawing' ? (
-          <CardMedia>
-            {drawingSrc ? (
-              <img
-                src={drawingSrc}
-                alt={`Drawing by ${item.authorName}`}
-                loading="lazy"
-                // Images are natively draggable, which would hijack a card drag.
-                draggable={false}
-                className="absolute inset-0 h-full w-full object-contain p-2.5"
+        {hasPlate ? (
+          <CardMedia
+            onOpen={
+              opensOnPress
+                ? (event) => {
+                    // The corner mark is its own press, and already opens it.
+                    if ((event.target as HTMLElement).closest('button')) return;
+                    const from = pressedAt.current;
+                    pressedAt.current = null;
+                    // A card is dragged from anywhere on it, the plate included:
+                    // a press that travelled was a drag, not a press on the card.
+                    if (from && Math.hypot(event.clientX - from.x, event.clientY - from.y) > 4) {
+                      return;
+                    }
+                    setEnlarged(true);
+                  }
+                : undefined
+            }
+          >
+            {artwork}
+            {/* A canvas on a card is a glance at it; this opens it at a size it
+                can be read at. Left off where the card is itself a button, as
+                on a ballot, which has nothing to press inside it. */}
+            {interactive && openable ? (
+              <ProposalEnlarge
+                item={item}
+                artwork={artwork}
+                byline={foot}
+                open={enlarged}
+                onOpenChange={setEnlarged}
               />
             ) : null}
           </CardMedia>
         ) : null}
-        <CardFoot
-          item={item}
-          viewerId={viewerId}
-          isOwnedByViewer={isOwnedByViewer}
-          isAuthorLeader={isAuthorLeader}
-        />
+        {foot}
       </article>
     </div>
   );
