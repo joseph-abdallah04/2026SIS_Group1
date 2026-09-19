@@ -169,7 +169,10 @@ function ReactionChip({
               '--rt-chip-edge': REACTION_ON_BORDER,
             } as React.CSSProperties)
       }
-      className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+      // Holding one asks who is in it, and a held glyph is not a word being
+      // picked out or a picture being saved: both are what a phone otherwise
+      // offers for a long press on something like this.
+      className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] select-none [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
         mine
           ? 'text-rt-ink'
           : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'

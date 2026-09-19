@@ -28,7 +28,8 @@ function renderRow({
  * matching rather than the end of the label.
  */
 function chip(emoji: string, count?: number) {
-  const label = count === undefined ? reactionButtonLabel(emoji) : `${reactionButtonLabel(emoji)} (${count})`;
+  const label =
+    count === undefined ? reactionButtonLabel(emoji) : `${reactionButtonLabel(emoji)} (${count})`;
   return screen.getByRole('button', { name: (name: string) => name.startsWith(label) });
 }
 
@@ -122,6 +123,71 @@ describe('reaction row', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A finger has no hover, so on a phone the names were unreachable: the chip
+  // could only be tapped, and a tap is a reaction.
+  describe('on a phone, where there is nothing to hover with', () => {
+    const touch = { pointerType: 'touch', clientX: 10, clientY: 10 };
+
+    function hold(chipButton: HTMLElement, ms: number) {
+      fireEvent.pointerDown(chipButton, touch);
+      act(() => {
+        vi.advanceTimersByTime(ms);
+      });
+    }
+
+    /** The finger comes off, which also leaves the chip. */
+    function lift(chipButton: HTMLElement) {
+      fireEvent.pointerUp(chipButton, touch);
+      fireEvent.pointerLeave(chipButton, touch);
+    }
+
+    it('names them on a hold, and keeps them there once the finger is off', () => {
+      vi.useFakeTimers();
+      try {
+        const { onReact } = renderRow({
+          reactions: [{ emoji: THUMB, people: [person('ada'), person('bo')] }],
+          viewerId: 'ada',
+        });
+
+        hold(chip(THUMB, 2), 600);
+        expect(screen.getByRole('presentation', { hidden: true })).toHaveTextContent('BO');
+
+        // The point of a hold is reading what it asked for afterwards.
+        lift(chip(THUMB, 2));
+        expect(screen.getByRole('presentation', { hidden: true })).toBeInTheDocument();
+
+        // And the hold was the whole gesture: it did not also react.
+        fireEvent.click(chip(THUMB, 2));
+        expect(onReact).not.toHaveBeenCalled();
+
+        // The next press anywhere puts it away, since nothing is resting on it.
+        fireEvent.pointerDown(document.body, touch);
+        expect(screen.queryByRole('presentation', { hidden: true })).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('still reacts to a tap', () => {
+      vi.useFakeTimers();
+      try {
+        const { onReact } = renderRow({
+          reactions: [{ emoji: THUMB, people: [person('ada')] }],
+          viewerId: 'bo',
+        });
+
+        hold(chip(THUMB, 1), 120);
+        lift(chip(THUMB, 1));
+        fireEvent.click(chip(THUMB, 1));
+
+        expect(onReact).toHaveBeenCalledWith(THUMB);
+        expect(screen.queryByRole('presentation', { hidden: true })).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // A name that runs past the card's byline runs past this too, and the two
@@ -280,7 +346,9 @@ describe('reaction row', () => {
         `${reactionButtonLabel(PARTY)} (1) — A`,
         `${reactionButtonLabel(HEART)} (1) — B`,
         // Then the quick chips still untouched, in contract order.
-        ...QUICK_REACTIONS.filter((emoji) => emoji !== HEART).map((emoji) => reactionButtonLabel(emoji)),
+        ...QUICK_REACTIONS.filter((emoji) => emoji !== HEART).map((emoji) =>
+          reactionButtonLabel(emoji),
+        ),
         'More reactions',
       ]);
     });

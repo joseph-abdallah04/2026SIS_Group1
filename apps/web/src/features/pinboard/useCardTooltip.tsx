@@ -202,7 +202,12 @@ export function useCardTooltip<T extends HTMLElement>(
         // A touch sends one of these on the way down; hovering is a mouse.
         if (event.pointerType !== 'touch') show();
       },
-      onPointerLeave: hide,
+      // A lifted finger leaves too, and the whole point of a hold is that what
+      // it asked for is still there to read once the finger is out of the way.
+      // A held one is put away by the next press instead.
+      onPointerLeave: (event: PointerEvent<T>) => {
+        if (event.pointerType !== 'touch') hide();
+      },
       /**
        * A finger has no hover, so a chip a phone can only tap would never say
        * who is in it. Holding one asks: press and wait and the names appear,
@@ -234,6 +239,12 @@ export function useCardTooltip<T extends HTMLElement>(
       onPointerCancel: () => {
         held.current = null;
         hide();
+      },
+      // A hold on a phone is also how the browser is asked for its own menu,
+      // and on Android it asks during the press rather than after it. This
+      // hold has been answered already.
+      onContextMenu: (event: MouseEvent<T>) => {
+        if (held.current) event.preventDefault();
       },
       // The hold has been answered, so the tap it was is not also a reaction.
       onClickCapture: (event: MouseEvent<T>) => {

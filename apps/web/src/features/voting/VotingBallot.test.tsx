@@ -381,6 +381,46 @@ describe('VotingBallot', () => {
     expect(screen.queryByRole('button', { name: /^Enlarge sticky/ })).toBeNull();
   });
 
+  // Opening it is not a vote, and neither is putting it away. On the board a
+  // press elsewhere still lands where it was aimed, which is right there; here
+  // every card it could land on casts a vote, and a vote cannot be taken back
+  // by pressing again.
+  it('does not vote when a press on a card puts the preview away', async () => {
+    const onVote = vi.fn();
+    render(
+      <VotingBallot
+        questionText="What ships first?"
+        items={[diagram('p1'), sticky('p2', 'Ship the UI')]}
+        tallies={[]}
+        myVote={null}
+        votedCount={0}
+        voterCount={2}
+        isLeader={false}
+        viewerId="u2"
+        leaderId="u1"
+        voterStatuses={null}
+        winnerProposalId={null}
+        tiedProposalIds={[]}
+        phase="open"
+        busy={false}
+        error={null}
+        onVote={onVote}
+        onClose={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Enlarge diagram by Alice' }));
+    await userEvent.click(screen.getByRole('button', { name: /Ship the UI/i }));
+
+    expect(screen.queryByRole('dialog', { name: 'diagram by Alice' })).toBeNull();
+    expect(onVote).not.toHaveBeenCalled();
+
+    // The next press is a vote again: only the one that dismissed it is spent.
+    await userEvent.click(screen.getByRole('button', { name: /Ship the UI/i }));
+    expect(onVote).toHaveBeenCalledWith('p2');
+  });
+
   // A sticky grows with its note. A slot sized for the smallest sticky left a
   // long note spilling out of it, past the ring that marks the winner.
   // The card is the vote button, so a long sticky is all there on it to read,

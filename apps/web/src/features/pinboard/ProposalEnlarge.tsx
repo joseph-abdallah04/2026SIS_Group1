@@ -60,13 +60,6 @@ function panelStyle(room: BoardPopupRoom | null): CSSProperties {
 const ZOOM = 2.2;
 /** Movement past which a press is a drag rather than a press. */
 const DRAG_SLOP_PX = 4;
-/**
- * How long a swallowed press waits for the click it is going to become.
- *
- * Long enough for a slow press, short enough that a press which never becomes
- * a click cannot take the next one with it.
- */
-const CLICK_GRACE_MS = 400;
 
 /**
  * Keeps the artwork from being dragged out of its own frame, on whole pixels:
@@ -300,6 +293,8 @@ function EnlargedView({
   }, []);
 
   useEffect(() => {
+    /** Drops a swallowed press's hold on the click it is waiting for. */
+    let forget: (() => void) | null = null;
     // Escape closes it wherever the focus has gone.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -324,24 +319,36 @@ function EnlargedView({
       if (pressOutside === 'acts') return;
       event.stopPropagation();
       // The press is stopped, but the click the browser makes of it afterwards
-      // is a separate event and would arrive on its own; it is swallowed once.
+      // is a separate event and arrives on its own; it is swallowed once.
+      //
+      // What ends the wait is the next press, not a timer: a press that never
+      // becomes a click — a drag, a second finger, one that ends off the button
+      // — would otherwise leave this waiting for somebody else's click, and how
+      // long to wait is not something a clock can be asked.
+      forget?.();
       const swallowClick = (click: MouseEvent) => {
         click.stopPropagation();
         click.preventDefault();
+        forget?.();
       };
-      document.addEventListener('click', swallowClick, { capture: true, once: true });
-      // A press that never becomes a click — a drag, a second finger, a press
-      // that ends off the button — must not leave that waiting for the next one.
-      window.setTimeout(
-        () => document.removeEventListener('click', swallowClick, true),
-        CLICK_GRACE_MS,
-      );
+      const untilNextPress = () => forget?.();
+      forget = () => {
+        document.removeEventListener('click', swallowClick, true);
+        document.removeEventListener('pointerdown', untilNextPress, true);
+        forget = null;
+      };
+      document.addEventListener('click', swallowClick, true);
+      document.addEventListener('pointerdown', untilNextPress, true);
     };
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
+      // A swallowed press is deliberately not cleared here. Putting the view
+      // away is what unmounts this, and the click being swallowed arrives
+      // after that: cleaning up here would hand the press straight back to
+      // whatever it was aimed at, which is the vote this exists to prevent.
     };
   }, [pressOutside]);
 

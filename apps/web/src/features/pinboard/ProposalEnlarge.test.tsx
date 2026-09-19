@@ -137,6 +137,25 @@ describe('proposal enlarge', () => {
     expect(enlargeButton()).toHaveFocus();
   });
 
+  // The close is drawn over the frame, and the frame is itself a button that
+  // captures the pointer and zooms. Inside it, a press on the close was
+  // retargeted to the frame and zoomed instead of closing, and Enter went the
+  // same way through the frame's key handler.
+  it('keeps the close out of the zoom control, so pressing it cannot zoom', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+    await user.click(enlargeButton());
+
+    const zoom = screen.getByRole('button', { name: 'Zoom in' });
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(zoom.contains(close)).toBe(false);
+
+    close.focus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   // The board is not dimmed or locked behind it, so a press out there puts the
   // preview away and still does whatever it was a press on.
   it('closes on a press anywhere else, which still lands where it was aimed', async () => {
