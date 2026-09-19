@@ -28,6 +28,7 @@ import {
   type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
   rotatePoint,
+  rotatedBounds,
 } from './diagramContract.js';
 import { DIAGRAM_PATH_STROKE_WIDTHS } from './studioElements.js';
 
@@ -369,6 +370,32 @@ function dedupe(points: readonly ArrowPoint[]): ArrowPoint[] {
  * axis-aligned — so the arrow leaves through the face it is actually heading
  * for rather than through whichever face happens to face the far end.
  */
+/**
+ * A scene point in the target's own unturned frame, and the way back out.
+ *
+ * Every piece of outline maths here — the polygons behind
+ * `diagramBoundaryScale`, the face normals, the ring a self-loop walks — is
+ * written for an axis-aligned box. Rather than teach each of them about an
+ * angle, the question is asked in the frame where they are already right and
+ * the answer is turned back. That keeps an ellipse's curve and a diamond's
+ * slope exact, instead of settling for the box that contains them.
+ */
+export function intoTargetFrame(point: ArrowPoint, target: ArrowTarget): ArrowPoint {
+  if (!target.rotation) return point;
+  return rotatePoint(point, centreOf(target.box), -target.rotation);
+}
+
+export function outOfTargetFrame(point: ArrowPoint, target: ArrowTarget): ArrowPoint {
+  if (!target.rotation) return point;
+  return rotatePoint(point, centreOf(target.box), target.rotation);
+}
+
+/** A direction, turned with the element rather than about its centre. */
+function turnVector(vector: ArrowPoint, rotation: number | undefined): ArrowPoint {
+  if (!rotation) return vector;
+  return rotatePoint(vector, { x: 0, y: 0 }, rotation);
+}
+
 function clipToTarget(
   target: ArrowTarget | undefined,
   towards: ArrowPoint,
@@ -376,11 +403,13 @@ function clipToTarget(
 ): ArrowPoint {
   if (!target) return fallback;
   const centre = centreOf(target.box);
-  const delta = { x: towards.x - centre.x, y: towards.y - centre.y };
+  // Asked in the element's own frame, answered back in the canvas's.
+  const local = intoTargetFrame(towards, target);
+  const delta = { x: local.x - centre.x, y: local.y - centre.y };
   if (delta.x === 0 && delta.y === 0) return fallback;
   const size = { width: target.box.width, height: target.box.height };
   const scale = diagramBoundaryScale(target.shape, size, delta);
-  return { x: centre.x + delta.x * scale, y: centre.y + delta.y * scale };
+  return outOfTargetFrame({ x: centre.x + delta.x * scale, y: centre.y + delta.y * scale }, target);
 }
 
 /**
@@ -404,12 +433,23 @@ export function attachPointOn(
   const length = Math.hypot(delta.x, delta.y);
   // Dead centre has no "out"; up is as good an answer as any and never happens
   // for an edge attachment, which is what this is for.
-  const outward = length === 0 ? { x: 0, y: -1 } : { x: delta.x / length, y: delta.y / length };
-  if (target.freeform) return { point: raw, outward };
+  const local = length === 0 ? { x: 0, y: -1 } : { x: delta.x / length, y: delta.y / length };
+  // `at` is a fraction of the element's own unturned frame, so the point is
+  // found there and carried out to the canvas last. Answering in scene space
+  // means no caller has to remember to turn it, which is how the pinned case
+  // came to be right at render time and wrong at author time.
+  const outward = turnVector(local, target.rotation);
+  if (target.freeform) return { point: outOfTargetFrame(raw, target), outward };
 
   const size = { width: target.box.width, height: target.box.height };
   const scale = diagramBoundaryScale(target.shape, size, delta);
-  return { point: { x: centre.x + delta.x * scale, y: centre.y + delta.y * scale }, outward };
+  return {
+    point: outOfTargetFrame(
+      { x: centre.x + delta.x * scale, y: centre.y + delta.y * scale },
+      target,
+    ),
+    outward,
+  };
 }
 
 interface ResolvedEnd {
@@ -418,7 +458,6 @@ interface ResolvedEnd {
   target: ArrowTarget | undefined;
   /** True when the anchor is already the final point and must not be clipped. */
   pinned: boolean;
-  outward: ArrowPoint | null;
 }
 
 function resolveEnd(endpoint: ArrowEndpoint, lookup: ArrowTargetLookup | undefined): ResolvedEnd {
@@ -428,29 +467,19 @@ function resolveEnd(endpoint: ArrowEndpoint, lookup: ArrowTargetLookup | undefin
   // Copied rather than passed through, so the binding cannot leak into the
   // route's points and from there into a caller's bounds or hit test.
   if (!target) {
-    return {
-      anchor: { x: endpoint.x, y: endpoint.y },
-      target: undefined,
-      pinned: true,
-      outward: null,
-    };
+    return { anchor: { x: endpoint.x, y: endpoint.y }, target: undefined, pinned: true };
   }
   if (endpoint.at) {
-    const attached = attachPointOn(target, endpoint.at);
-    // Turned into place last: `at` is a fraction of the element's own unturned
-    // frame, so the point is found there and then carried round with it.
-    const anchor = target.rotation
-      ? rotatePoint(attached.point, centreOf(target.box), target.rotation)
-      : attached.point;
-    const outward = target.rotation
-      ? rotatePoint(attached.outward, { x: 0, y: 0 }, target.rotation)
-      : attached.outward;
-    return { anchor, target, pinned: true, outward };
+    // Already in scene space: `attachPointOn` carries the turn for every caller
+    // rather than each one remembering to. A second place that worked the angle
+    // out is what let the normals below drift out of step with the anchors.
+    return { anchor: attachPointOn(target, endpoint.at).point, target, pinned: true };
   }
   // No attachment named: aim at the centre and let the clip decide the face,
   // which is how an edge behaves and what a drop into the middle of a shape
-  // should keep doing.
-  return { anchor: centreOf(target.box), target, pinned: false, outward: null };
+  // should keep doing. The centre is the point a turn pivots on, so it is the
+  // same in either frame.
+  return { anchor: centreOf(target.box), target, pinned: false };
 }
 
 /**
@@ -482,6 +511,21 @@ function faceNormal(box: ArrowBox, point: ArrowPoint): ArrowPoint {
     { n: { x: 0, y: 1 }, gap: Math.abs(point.y - (box.y + box.height)) },
   ];
   return gaps.reduce((best, current) => (current.gap < best.gap ? current : best)).n;
+}
+
+/**
+ * The same two questions, asked about an element that may be turned.
+ *
+ * A face is a property of the element, so "which face is it heading for" has to
+ * be asked in the element's own frame; the normal that comes back out of it
+ * then has to be turned to point the right way on the canvas.
+ */
+function faceTowardsOn(target: ArrowTarget, delta: ArrowPoint): ArrowAttach {
+  return faceTowards(target.rotation ? turnVector(delta, -target.rotation) : delta);
+}
+
+function normalOn(target: ArrowTarget, scenePoint: ArrowPoint): ArrowPoint {
+  return turnVector(faceNormal(target.box, intoTargetFrame(scenePoint, target)), target.rotation);
 }
 
 /**
@@ -544,17 +588,24 @@ function perimeterPosition(box: ArrowBox, point: ArrowPoint): number {
  */
 function selfLoopPoints(target: ArrowTarget, from: ArrowEndpoint, to: ArrowEndpoint): ArrowPoint[] {
   const [defaultFrom, defaultTo] = defaultLoopAttachments();
-  const start = attachPointOn(target, from.at ?? defaultFrom);
-  const end = attachPointOn(target, to.at ?? defaultTo);
+  // Built in the element's own frame and carried out to the canvas as one. The
+  // ring, the step out to it and the walk around it are all axis-aligned
+  // constructions, so turning the finished loop is both simpler and more exact
+  // than teaching each of them about an angle. Drawn any other way, a loop on a
+  // turned element detached from it and could sit across the top of it.
+  const start = intoTargetFrame(attachPointOn(target, from.at ?? defaultFrom).point, target);
+  const end = intoTargetFrame(attachPointOn(target, to.at ?? defaultTo).point, target);
 
   const ring = inflate(target.box, ARROW_LOOP_EXTENT);
-  const startNormal = faceNormal(target.box, start.point);
-  const endNormal = faceNormal(target.box, end.point);
+  const startNormal = faceNormal(target.box, start);
+  const endNormal = faceNormal(target.box, end);
   // Step straight out from each face, so both ends meet the element square on.
-  const outFrom = pushToRing(ring, start.point, startNormal);
-  const outTo = pushToRing(ring, end.point, endNormal);
+  const outFrom = pushToRing(ring, start, startNormal);
+  const outTo = pushToRing(ring, end, endNormal);
 
-  return [start.point, outFrom, ...ringWalk(ring, outFrom, outTo), outTo, end.point];
+  return [start, outFrom, ...ringWalk(ring, outFrom, outTo), outTo, end].map((point) =>
+    outOfTargetFrame(point, target),
+  );
 }
 
 /** Move a point out to the ring along one axis, leaving the other alone. */
@@ -1135,25 +1186,39 @@ export function arrowGeometry(arrow: ArrowElement, lookup?: ArrowTargetLookup): 
         ? from.anchor
         : attachPointOn(
             from.target,
-            faceTowards({ x: to.anchor.x - from.anchor.x, y: to.anchor.y - from.anchor.y }),
+            faceTowardsOn(from.target, {
+              x: to.anchor.x - from.anchor.x,
+              y: to.anchor.y - from.anchor.y,
+            }),
           ).point;
     const endClip =
       to.pinned || !to.target
         ? to.anchor
         : attachPointOn(
             to.target,
-            faceTowards({ x: from.anchor.x - to.anchor.x, y: from.anchor.y - to.anchor.y }),
+            faceTowardsOn(to.target, {
+              x: from.anchor.x - to.anchor.x,
+              y: from.anchor.y - to.anchor.y,
+            }),
           ).point;
-    const startNormal = from.target ? faceNormal(from.target.box, startClip) : null;
-    const endNormal = to.target ? faceNormal(to.target.box, endClip) : null;
+    // Worked out on the face the anchor actually sits on. Read straight off the
+    // unturned box these pointed away from a face the anchor had left, so an
+    // elbow on a turned shape set off in a direction its own end did not face.
+    const startNormal = from.target ? normalOn(from.target, startClip) : null;
+    const endNormal = to.target ? normalOn(to.target, endClip) : null;
     points = dedupe([
       startClip,
       ...elbowRoute(
         { point: startClip, normal: startNormal },
         { point: endClip, normal: endNormal },
         arrow.bend ?? 0,
-        // What the route must not cut through: the elements it joins.
-        [from.target?.box, to.target?.box].filter((box): box is ArrowBox => box !== undefined),
+        // What the route must not cut through: the elements it joins, measured
+        // as they are drawn. Avoidance is already an approximation — every box
+        // is inflated by a stub width first — so a turned element is given the
+        // rectangle that contains it rather than its exact silhouette.
+        [from.target, to.target]
+          .filter((target): target is ArrowTarget => target !== undefined)
+          .map((target) => rotatedBounds(target.box, target.rotation) as ArrowBox),
       ),
       endClip,
     ]);

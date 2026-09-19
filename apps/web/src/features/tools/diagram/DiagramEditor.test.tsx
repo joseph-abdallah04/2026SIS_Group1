@@ -6124,3 +6124,50 @@ describe('studio review fixes', () => {
     expect(screen.queryByRole('button', { name: 'transparent line' })).not.toBeInTheDocument();
   });
 });
+
+describe('turning without a pointer', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('turns the selection with the bracket keys, coarser with shift', () => {
+    // Rotation was reachable only by dragging a corner, so a keyboard user
+    // could not turn anything — or straighten something that arrived turned in
+    // someone else's proposal.
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+      fireEvent.keyDown(canvas, { key: ']' });
+      const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+      expect(node).toHaveAttribute('transform', 'translate(24, 24) rotate(5 60 28)');
+
+      fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+      expect(node).toHaveAttribute('transform', 'translate(24, 24) rotate(50 60 28)');
+
+      fireEvent.keyDown(canvas, { key: '[', shiftKey: true });
+      fireEvent.keyDown(canvas, { key: '[' });
+      // Back to square, which drops the key rather than storing a zero.
+      expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+    });
+  });
+
+  it('does not offer to turn a container, by either route', () => {
+    // A container is a group: turning the frame without the shapes inside it
+    // reads as broken, and its drop test and clamp both assume a square box.
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
+
+      expect(screen.queryByTestId('rotate-zone-nw')).not.toBeInTheDocument();
+
+      fireEvent.keyDown(canvas, { key: ']' });
+      expect(screen.getByRole('button', { name: 'Dotted rectangle: Unlabelled' })).toHaveAttribute(
+        'transform',
+        'translate(24, 24)',
+      );
+    });
+  });
+});

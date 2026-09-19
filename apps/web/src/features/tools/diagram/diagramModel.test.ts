@@ -29,6 +29,7 @@ import {
   deleteNodesWithEdges,
   distributeNodes,
   moveNode,
+  diagramContentBounds,
   moveNodesBy,
   nodeBounds,
   nodeIdsInRect,
@@ -943,5 +944,56 @@ describe('semantic containers', () => {
       expect(copy).not.toHaveProperty('parentId');
       expect(prepareDiagram(pasted.nodes, pasted.edges).ok).toBe(true);
     });
+  });
+});
+
+describe('measuring turned artwork', () => {
+  const turned: DiagramNode = {
+    id: 'a',
+    label: '',
+    x: 400,
+    y: 300,
+    shape: 'rectangle',
+    width: 200,
+    height: 100,
+    rotation: 45,
+  };
+
+  it('frames content by what it draws, not by what it stores', () => {
+    // This decides how a proposal is framed and where a reopened one is
+    // centred, so measuring the stored box cropped the corners a turned
+    // element actually shows off the board card.
+    const bounds = diagramContentBounds([turned], [])!;
+    const swept = nodeBounds(turned);
+
+    expect(bounds.left).toBeCloseTo(swept.x, 0);
+    expect(bounds.right).toBeCloseTo(swept.x + swept.width, 0);
+    // Wider than the 200 it stores, because the corners sweep past it.
+    expect(bounds.right - bounds.left).toBeGreaterThan(200);
+  });
+
+  it('pastes a turned shape without leaving its corners off the sheet', () => {
+    const fragment = copyDiagramFragment([turned], [], ['a']);
+    const pasted = pasteDiagramFragment([turned], [], fragment, { x: 5_000, y: 5_000 });
+
+    expect(pasted.ok).toBe(true);
+    if (!pasted.ok) return;
+    const copy = pasted.nodes[pasted.nodes.length - 1]!;
+    const bounds = nodeBounds(copy);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(DIAGRAM_CANVAS_HEIGHT);
+    // The copy is still turned; rotation travels with a paste.
+    expect(copy.rotation).toBe(45);
+  });
+
+  it('aligns a turned shape by the edge it actually shows', () => {
+    const plain: DiagramNode = { id: 'b', label: '', x: 40, y: 40, shape: 'rectangle' };
+    const aligned = alignNodes([turned, plain], ['a', 'b'], 'left');
+
+    const turnedLeft = nodeBounds(aligned.find((node) => node.id === 'a')!).x;
+    const plainLeft = nodeBounds(aligned.find((node) => node.id === 'b')!).x;
+    expect(turnedLeft).toBeCloseTo(plainLeft, 0);
   });
 });

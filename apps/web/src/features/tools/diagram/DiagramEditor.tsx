@@ -728,11 +728,15 @@ function templateSize(template: StudioTemplate): DiagramNodeSize {
 }
 
 function templateBounds(template: StudioTemplate) {
-  const nodes = template.build().nodes;
-  const left = Math.min(...nodes.map((node) => node.x));
-  const top = Math.min(...nodes.map((node) => node.y));
-  const right = Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width));
-  const bottom = Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height));
+  // Measured with `nodeBounds`, which is the turned extent. No template ships a
+  // rotated node today, so this changes nothing — but a footprint that ignored
+  // rotation would put the drop ghost and the frame itself out by the overhang
+  // the first time one did, and that is a trap worth closing while it is free.
+  const boxes = template.build().nodes.map(nodeBounds);
+  const left = Math.min(...boxes.map((box) => box.x));
+  const top = Math.min(...boxes.map((box) => box.y));
+  const right = Math.max(...boxes.map((box) => box.x + box.width));
+  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
@@ -2633,6 +2637,7 @@ export function DiagramEditor() {
             { x: node.x + offset.x, y: node.y + offset.y },
             effectiveDiagramNodeSize(node),
             false,
+            node.rotation,
           ),
         };
       }),
@@ -3629,6 +3634,20 @@ export function DiagramEditor() {
     };
   }
 
+  /**
+   * The pointer in a path's own frame.
+   *
+   * Anchors are stored unturned and drawn turned, so every question asked about
+   * them — which one is under the cursor, where this drag is putting one — has
+   * to be asked where they actually live. Shared by the grab and the drag so
+   * the two cannot answer differently.
+   */
+  function pathPointerSpace(path: PathElement, event: PointerEvent<SVGElement>): DiagramPoint {
+    const point = surfacePoint(event);
+    const local = pathLocalBounds(path);
+    return path.rotation && local ? toElementSpace(point, local, path.rotation) : point;
+  }
+
   function updatePathEdit(event: PointerEvent<SVGSVGElement>): boolean {
     const session = pathEditRef.current;
     if (!session || session.pointerId !== event.pointerId) return false;
@@ -3642,11 +3661,7 @@ export function DiagramEditor() {
     // pointer has to be brought back into the path's own frame before it is
     // compared with them. Without this, dragging a point on a turned path sends
     // it off at the angle of the turn.
-    const local = pathLocalBounds(path);
-    const point =
-      path.rotation && local
-        ? toElementSpace(surfacePoint(event), local, path.rotation)
-        : surfacePoint(event);
+    const point = pathPointerSpace(path, event);
     const next = session.side
       ? // Alt breaks the tangent, so the two sides bend independently.
         moveHandle(path, session.index, session.side, point, event.altKey)
@@ -5312,6 +5327,40 @@ export function DiagramEditor() {
     );
   }
 
+  /**
+   * Turn the selection by a step, from the keyboard.
+   *
+   * Rotation was reachable only by dragging a corner, so a keyboard user could
+   * not turn anything — and, worse, could not straighten something that arrived
+   * turned in someone else's proposal. This follows `nudgeSelection`: the same
+   * kinds, the same one-entry-per-press, the same Shift-for-coarser rule the
+   * drag already uses.
+   *
+   * Containers and tables are left out here exactly as they are left out of the
+   * corner zones, so the two routes offer the same thing.
+   */
+  function rotateSelection(step: number) {
+    const graph = history.snapshotRef.current;
+    const turnable = new Set(
+      graph.nodes.filter((node) => !diagramCanParent(node.shape)).map((node) => node.id),
+    );
+    const nodeIds = selectedIds.filter((id) => turnable.has(id));
+    const inkIds = new Set(selectedInkIds);
+    const pathIds = new Set(selectedPathIds);
+    if (nodeIds.length + inkIds.size + pathIds.size === 0) return;
+
+    const turn = <T extends { rotation?: number }>(element: T): T =>
+      withRotation(element, normalizeRotation((element.rotation ?? 0) + step));
+
+    const nodes = new Set(nodeIds);
+    history.commit({
+      nodes: graph.nodes.map((node) => (nodes.has(node.id) ? turn(node) : node)),
+      edges: graph.edges,
+      ink: (graph.ink ?? []).map((stroke) => (inkIds.has(stroke.id) ? turn(stroke) : stroke)),
+      paths: (graph.paths ?? []).map((path) => (pathIds.has(path.id) ? turn(path) : path)),
+    });
+  }
+
   function nudgeSelection(offset: DiagramPoint) {
     const graph = history.snapshotRef.current;
     const inkGoing = new Set(selectedInkIds);
@@ -5509,6 +5558,15 @@ export function DiagramEditor() {
     }
 
     if (isSelectionEmpty(currentSelection())) return;
+
+    // Brackets turn the selection, the way the arrow keys move it: the same
+    // 5-degree step the corner zones use, and 45 with Shift held.
+    if (event.key === '[' || event.key === ']') {
+      event.preventDefault();
+      const step = event.shiftKey ? DIAGRAM_ROTATION_COARSE_STEP : DIAGRAM_ROTATION_STEP;
+      rotateSelection(event.key === '[' ? -step : step);
+      return;
+    }
 
     const delta = event.shiftKey ? DIAGRAM_GRID * 2 : DIAGRAM_GRID;
     const offsetByKey: Partial<Record<string, DiagramPoint>> = {
@@ -6052,7 +6110,12 @@ export function DiagramEditor() {
 
               // Inside the path, an anchor under the pointer is what is grabbed.
               if (pathEditing && selectedPathId === path.id) {
-                const hit = anchorAtPoint(path, surfacePoint(event), closeTolerance());
+                // Anchors are stored unturned but drawn turned, so the pointer
+                // comes into the path's frame first — the same conversion
+                // `updatePathEdit` makes, and for the same reason. Without it,
+                // clicking a visible anchor on a turned path did nothing while
+                // clicking bare canvas at its unturned position grabbed it.
+                const hit = anchorAtPoint(path, pathPointerSpace(path, event), closeTolerance());
                 if (hit !== null) {
                   beginPathEdit(event, path, hit, null);
                   return;
@@ -6900,7 +6963,14 @@ export function DiagramEditor() {
             ))}
           </g>
         ) : null}
-        {isOnlySelection && !connectionMode && !isEditing
+        {/* A container does not turn, for the same reason a table does not: it
+            is a group, and turning the frame without the shapes inside it reads
+            as broken rather than as rotated. Turning them with it is a much
+            larger feature — nested transforms, child bounds, arrow re-routing —
+            and not one this offers. Leaving it out also means the drop test and
+            the inside-the-container clamp keep the axis-aligned box they both
+            assume. */}
+        {isOnlySelection && !connectionMode && !isEditing && !diagramCanParent(node.shape)
           ? renderRotateZones('node', node.id, {
               x: 0,
               y: 0,

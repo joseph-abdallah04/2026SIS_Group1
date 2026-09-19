@@ -763,3 +763,56 @@ describe('card layout', () => {
     expect(bareFooter).toContain('pb-3');
   });
 });
+
+describe('the board card draws what the editor drew', () => {
+  // The card is the surface that has to agree with the editor, and it had no
+  // coverage for either of the things the studio block added to a node.
+  it('turns a node about its own centre, exactly as the editor does', () => {
+    const { container } = render(
+      <ProposalCard
+        item={diagramItem([
+          {
+            id: 'turned',
+            label: 'Idea',
+            x: 100,
+            y: 100,
+            shape: 'rectangle',
+            width: 200,
+            height: 100,
+            rotation: 45,
+          },
+        ])}
+      />,
+    );
+
+    const group = container.querySelector('g[transform*="rotate"]');
+    expect(group?.getAttribute('transform')).toBe('translate(100, 100) rotate(45 100 50)');
+  });
+
+  it('leaves an unturned node with the plain translate it always had', () => {
+    const { container } = render(
+      <ProposalCard item={diagramItem([{ id: 'plain', label: 'Idea', x: 24, y: 24 }])} />,
+    );
+
+    expect(container.querySelector('g[transform*="rotate"]')).toBeNull();
+  });
+
+  it('paints a transparent fill as see-through, and an unstyled one as its legacy fill', () => {
+    const { container } = render(
+      <ProposalCard
+        item={diagramItem([
+          { id: 'clear', label: '', x: 0, y: 0, shape: 'rectangle', fillColor: 'transparent' },
+          { id: 'plain', label: '', x: 300, y: 0, shape: 'rectangle' },
+        ])}
+      />,
+    );
+
+    const fills = Array.from(container.querySelectorAll('rect'))
+      .map((rect) => rect.getAttribute('fill'))
+      .filter((fill): fill is string => fill !== null);
+    expect(fills).toContain('transparent');
+    // Absent still means "never styled", which is what keeps older diagrams
+    // rendering as they always did.
+    expect(fills).toContain('#EEF2F4');
+  });
+});

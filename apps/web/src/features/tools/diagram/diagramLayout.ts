@@ -7,6 +7,7 @@ import {
   snapToGrid,
   type DiagramPoint,
   type DiagramRect,
+  nodeBounds,
 } from './diagramModel';
 
 export type DiagramLayoutDirection = 'TB' | 'LR';
@@ -36,8 +37,28 @@ interface LayoutBlock {
   height: number;
 }
 
+/**
+ * The room a node needs in the arrangement: what it draws, turned.
+ *
+ * A 45-degree 200x100 box sweeps a 212x212 square. Packing it by its stored
+ * size gave it a 200x100 slot, so it overlapped its rank neighbours and spilled
+ * past its container's padding.
+ */
 function sizeOf(node: DiagramNode) {
-  return effectiveDiagramNodeSize(node);
+  const bounds = nodeBounds(node);
+  return { width: bounds.width, height: bounds.height };
+}
+
+/**
+ * How far a node's drawn box starts before the corner it stores.
+ *
+ * The layout works in drawn boxes, but `x`/`y` are stored ones, so the slot's
+ * position has to be shifted back by this to put the *visible* element where
+ * the slot is. Zero for anything unturned, which is nearly everything.
+ */
+function leadOf(node: DiagramNode): DiagramPoint {
+  const bounds = nodeBounds(node);
+  return { x: bounds.x - node.x, y: bounds.y - node.y };
 }
 
 /**
@@ -421,8 +442,9 @@ export function layoutDiagram(
     };
     for (const placed of block.nodes) {
       const node = result.get(placed.id)!;
-      node.x = clampIntoRect(bounds.x + placed.x, placed.width, bounds, 'x');
-      node.y = clampIntoRect(bounds.y + placed.y, placed.height, bounds, 'y');
+      const lead = leadOf(node);
+      node.x = Math.round(clampIntoRect(bounds.x + placed.x, placed.width, bounds, 'x') - lead.x);
+      node.y = Math.round(clampIntoRect(bounds.y + placed.y, placed.height, bounds, 'y') - lead.y);
     }
   }
 
@@ -443,8 +465,9 @@ export function layoutDiagram(
 
   for (const placed of topLevel.nodes) {
     const node = result.get(placed.id)!;
-    const nextX = clampIntoRect(originX + placed.x, placed.width, sheet, 'x');
-    const nextY = clampIntoRect(originY + placed.y, placed.height, sheet, 'y');
+    const lead = leadOf(node);
+    const nextX = Math.round(clampIntoRect(originX + placed.x, placed.width, sheet, 'x') - lead.x);
+    const nextY = Math.round(clampIntoRect(originY + placed.y, placed.height, sheet, 'y') - lead.y);
     // Containers carry their contents, so shift descendants by the same delta.
     const deltaX = nextX - node.x;
     const deltaY = nextY - node.y;

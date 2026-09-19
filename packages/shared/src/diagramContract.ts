@@ -406,7 +406,10 @@ export function normalizeRotation(degrees: number): number {
   const positive = wrapped < 0 ? wrapped + 360 : wrapped;
   // Rounded away from floating-point dust so a shape turned back to zero
   // stores 0 rather than 359.99999999999994 and keeps its `rotation` key.
-  return Math.round(positive * 100) / 100;
+  const rounded = Math.round(positive * 100) / 100;
+  // That rounding can reach 360, which is the one value the write path refuses:
+  // the range is half-open, and 360 is the same angle as 0 anyway.
+  return rounded >= 360 ? 0 : rounded;
 }
 
 /** The centre an element turns about: the middle of its unrotated box. */
