@@ -513,30 +513,39 @@ export function tableCellLines(
 }
 
 /** How tall a row needs to be for its tallest cell's wrapped text to fit. */
+/** Cell text is spaced exactly as a node label is, and a row keeps this much air. */
+const TABLE_LINE_HEIGHT = 1.25;
+const TABLE_ROW_PADDING = 10;
+
 export function tableAutoRowHeight(
   table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset'>,
   row: number,
 ): number {
-  let tallest = tableFontSize(table);
-  let needed = 1;
+  // Each cell is measured whole — its own line count at its own size — and the
+  // row takes the tallest of those. Taking the most lines and the largest font
+  // as separate maxima multiplied one cell's height by another's: five wrapped
+  // lines at 11px beside a single extra-large word made the row six times
+  // taller than anything in it needed.
+  let needed = tableFontSize(table) * TABLE_LINE_HEIGHT;
   for (let col = 0; col < tableColCount(table); col += 1) {
     const cell = tableCellAt(table, row, col);
     const text = cell?.text?.trim();
     if (!text) continue;
-    // Each cell is measured at its own size, so one large cell sets the row.
     const fontSize = tableCellFontSize(table, cell);
-    tallest = Math.max(tallest, fontSize);
     const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
-    // Wrapped against a tall row so the count is what the text needs, not what
-    // the row currently allows.
-    needed = Math.max(
-      needed,
-      wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, TABLE_MAX_ROWS).length,
+    // Capped by what the tallest a row may be can actually show at this size,
+    // rather than by `TABLE_MAX_ROWS`, which counts rows in a table and has
+    // nothing to say about lines in a cell.
+    const maxLines = Math.max(
+      1,
+      Math.floor((TABLE_MAX_ROW_HEIGHT - TABLE_ROW_PADDING) / (fontSize * TABLE_LINE_HEIGHT)),
     );
+    const lines = wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, maxLines).length;
+    needed = Math.max(needed, lines * fontSize * TABLE_LINE_HEIGHT);
   }
   return Math.min(
     TABLE_MAX_ROW_HEIGHT,
-    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(needed * tallest * 1.25 + 10)),
+    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(needed + TABLE_ROW_PADDING)),
   );
 }
 

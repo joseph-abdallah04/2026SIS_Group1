@@ -105,6 +105,7 @@ import {
   DIAGRAM_FONT_SIZE_PRESETS,
   DIAGRAM_TEXT_ALIGNS,
   DIAGRAM_LABEL_INK,
+  DIAGRAM_LABEL_PADDING,
   DIAGRAM_STROKE_COLORS,
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
@@ -908,8 +909,21 @@ const INLINE_EDITOR_CLASS =
 
 const INLINE_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 
-/** Matches `DIAGRAM_LABEL_PADDING` either side, so the editor wraps where the label does. */
-const DIAGRAM_LABEL_EDIT_INSET = 6;
+/**
+ * The padding that makes a label editor wrap exactly where its label will.
+ *
+ * `wrapDiagramLabel` measures against `width * diagramLabelWidthRatio(shape)`
+ * minus `DIAGRAM_LABEL_PADDING`, and a tapered shape's ratio is well under 1 —
+ * a triangle is 0.5. Padding the editor by a flat 6 each side let a triangle
+ * wrap at about 15 characters a line while the shape itself wrapped at 6, so a
+ * label that looked fine while it was typed collapsed to an ellipsis the
+ * moment it was committed.
+ */
+function labelEditorInset(node: DiagramNode): number {
+  const width = effectiveDiagramNodeSize(node).width;
+  const usable = width * diagramLabelWidthRatio(node.shape);
+  return Math.max(2, (width - usable + DIAGRAM_LABEL_PADDING) / 2);
+}
 
 /** Lines are spaced exactly as `diagramNodeLabelLayout` spaces the rendered ones. */
 const INLINE_LINE_HEIGHT = 1.25;
@@ -1321,7 +1335,14 @@ export function DiagramEditor() {
     null,
   );
   /** Whether shift was held on the last move, which constrains the drag to a square. */
-  const shapeDraftSquareRef = useRef(false);
+  /**
+   * Whether the drag-out is constrained to a square.
+   *
+   * State, not a ref: the preview has to redraw the moment Shift goes down, and
+   * a ref read during render never triggers that. Held down without moving the
+   * pointer, the rectangle simply stayed a rectangle until the next movement.
+   */
+  const [shapeDraftSquare, setShapeDraftSquare] = useState(false);
   // Which of the two arrow tiles is armed, and the arrow being drawn. The draft
   // is the whole of the placement state: a press sets `from`, the pointer sets
   // `to`, and the second press turns it into an element.
@@ -1464,6 +1485,14 @@ export function DiagramEditor() {
   // Opening it *by* typing must not: the first character is already in the box
   // and selecting it would make the second keystroke overwrite it.
   const cellEditSelectAllRef = useRef(true);
+  /**
+   * The cell's text as it is being typed.
+   *
+   * Controlled for the same reason the arrow label is: `rows` and the box round
+   * it are worked out from this, so the field grows with what is in it instead
+   * of staying the size the cell was when it opened.
+   */
+  const [cellDraft, setCellDraft] = useState('');
   const tableResizeRef = useRef<{
     pointerId: number;
     tableId: string;
@@ -1569,7 +1598,7 @@ export function DiagramEditor() {
     shapeDraft && shapeDraftRef.current?.moved
       ? normalizeRect(shapeDraft.origin, shapeDraft.current)
       : null;
-  const shapeDragSquare = shapeDraftSquareRef.current;
+  const shapeDragSquare = shapeDraftSquare;
   const ghost = ((): Ghost | null => {
     if (canvasTool === 'text')
       return { kind: 'node', shape: 'text', size: diagramNodeSize('text') };
@@ -1603,6 +1632,27 @@ export function DiagramEditor() {
         : { x: 0, y: 0 };
 
   /**
+   * Shift squares a drag-out the moment it is pressed, not on the next move.
+   *
+   * Pointer events are the only place the modifier was read, so holding Shift
+   * still showed a rectangle until the pointer happened to move again.
+   */
+  useEffect(() => {
+    if (!shapeDraft) return;
+
+    function onShift(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Shift') setShapeDraftSquare(event.type === 'keydown');
+    }
+
+    document.addEventListener('keydown', onShift);
+    document.addEventListener('keyup', onShift);
+    return () => {
+      document.removeEventListener('keydown', onShift);
+      document.removeEventListener('keyup', onShift);
+    };
+  }, [shapeDraft]);
+
+  /**
    * Escape puts down whatever is being carried, from wherever the key is
    * pressed.
    *
@@ -1614,8 +1664,10 @@ export function DiagramEditor() {
    */
   useEffect(() => {
     // An arrow has no ghost — its preview is the rubber band itself — but
-    // Escape has to put it down all the same.
-    if (!ghost && canvasTool !== 'arrow') return;
+    // Escape has to put it down all the same. So does the offer at an arrow's
+    // loose end, which can be raised from a connection handle while the tool is
+    // back on Select: that left it dismissable only with focus in the form.
+    if (!ghost && canvasTool !== 'arrow' && !shapePicker) return;
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape') return;
@@ -1687,6 +1739,14 @@ export function DiagramEditor() {
     else input.setSelectionRange(input.value.length, input.value.length);
   }, [editingCell]);
 
+  /** Open one cell for typing, with the draft seeded so the field starts right. */
+  function openCellEditor(cell: CellRef, text: string, selectAll: boolean) {
+    cellEditCancelledRef.current = false;
+    cellEditSelectAllRef.current = selectAll;
+    setCellDraft(text);
+    setEditingCell(cell);
+  }
+
   function clearError() {
     setValidationError(null);
     if (submissionError) resetSubmission();
@@ -1711,13 +1771,6 @@ export function DiagramEditor() {
     };
   }
 
-  /**
-   * Select one node and nothing else.
-   *
-   * The studio kinds are cleared too. Before this, picking up a shape left a
-   * previously selected stroke or table still highlighted, and the next Delete
-   * would take both — selection has to mean one thing across every kind.
-   */
   /**
    * Select one element and nothing else.
    *
@@ -1951,18 +2004,39 @@ export function DiagramEditor() {
     };
 
     history.commit({
-      nodes: graph.nodes.map((node) =>
-        nodeIds.has(node.id)
-          ? withFill({
-              ...node,
-              ...strokeKeys,
-              ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
-              ...(style.labelBold === undefined ? {} : { labelBold: style.labelBold }),
-              ...(style.labelColor ? { labelColor: style.labelColor } : {}),
-              ...(style.labelAlign ? { labelAlign: style.labelAlign } : {}),
-            })
-          : node,
-      ),
+      nodes: graph.nodes.map((node) => {
+        if (!nodeIds.has(node.id)) return node;
+        const styled = withFill({
+          ...node,
+          ...strokeKeys,
+          ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
+          ...(style.labelBold === undefined ? {} : { labelBold: style.labelBold }),
+          ...(style.labelColor ? { labelColor: style.labelColor } : {}),
+          ...(style.labelAlign ? { labelAlign: style.labelAlign } : {}),
+        });
+        // Nothing may be painted out of existence entirely. A shape with no
+        // fill *and* no outline is invisible while its hit area goes on
+        // catching presses, and the only way back is an undo the user has no
+        // reason to know they need. Whichever of the two was just chosen wins;
+        // the other goes back to its default rather than the choice being
+        // refused, so the click still does something.
+        const painted =
+          styled.fillColor === 'transparent' && styled.strokeColor === 'transparent'
+            ? (() => {
+                const next = { ...styled };
+                if (style.fillColor === 'transparent') delete next.strokeColor;
+                else delete next.fillColor;
+                return next;
+              })()
+            : styled;
+
+        // A textbox is sized by its words, so changing the size of those words
+        // has to resize it. Fitted only on a label edit, a box bumped to the
+        // largest text kept the height it had and the text spilled out of its
+        // own outline until someone happened to open the label again.
+        if (painted.shape !== 'text' || !style.fontSizePreset) return painted;
+        return { ...painted, height: diagramTextBoxHeight(painted) };
+      }),
       edges: selectedEdge
         ? styleEdge(graph.edges, selectedEdge, {
             ...strokeKeys,
@@ -2717,7 +2791,12 @@ export function DiagramEditor() {
   }
 
   function normalizeSelectedLabel() {
-    if (!selectedNode) return;
+    // Only after an edit that actually happened. `nodeLabelStartRef` is the undo
+    // baseline stashed when the editor opens, so it is exactly the signal for
+    // "a label was being typed". Without this the submit path ran it on a
+    // merely *selected* textbox and stamped an auto-fitted size onto it,
+    // throwing away a height the user had dragged for themselves.
+    if (!selectedNode || !nodeLabelStartRef.current) return;
     const graph = history.snapshotRef.current;
     const tidied = renameNode(graph.nodes, selectedNode.id, prepareNodeLabel(selectedNode.label));
     history.preview({
@@ -3140,7 +3219,7 @@ export function DiagramEditor() {
     ) {
       draft.moved = true;
     }
-    shapeDraftSquareRef.current = event.shiftKey;
+    setShapeDraftSquare(event.shiftKey);
     setShapeDraft({ origin: draft.origin, current });
     return true;
   }
@@ -3154,10 +3233,12 @@ export function DiagramEditor() {
     const dragged =
       draft.moved ||
       Math.hypot(current.x - draft.origin.x, current.y - draft.origin.y) > DRAG_THRESHOLD;
-    const square = event.shiftKey || shapeDraftSquareRef.current;
+    // What is held at the release, and nothing else. Falling back to the last
+    // move's flag squared a drag that had never previewed as square.
+    const square = event.shiftKey;
 
     shapeDraftRef.current = null;
-    shapeDraftSquareRef.current = false;
+    setShapeDraftSquare(false);
     setShapeDraft(null);
     setGhostCursor(null);
     releaseCapture(event);
@@ -3753,13 +3834,16 @@ export function DiagramEditor() {
 
   function commitCellText(table: TableElement, cell: CellRef, text: string) {
     const withText = setCell(table, cell.row, cell.col, { text });
-    // The row grows to hold what was typed rather than clipping it to an
-    // ellipsis. `tableAutoRowHeight` already knew how to work this out and had
-    // simply never been called outside its own tests.
-    const needed = tableAutoRowHeight(withText, cell.row);
+    // The row is fitted to what its cells now hold, in both directions. Growing
+    // only meant a row that had stretched for a long value stayed stretched
+    // after the value was deleted, with no way back but dragging the divider —
+    // and correcting a different cell in that row could never bring it down
+    // either. The default height is the floor, so a row never collapses below
+    // the size an empty table is drawn at.
+    const fitted = Math.max(TABLE_DEFAULT_ROW_HEIGHT, tableAutoRowHeight(withText, cell.row));
     const current = withText.rowHeights[cell.row] ?? TABLE_DEFAULT_ROW_HEIGHT;
-    const grown = needed > current ? resizeRow(withText, cell.row, needed - current) : withText;
-    replaceTable(grown, table.id);
+    const sized = fitted === current ? withText : resizeRow(withText, cell.row, fitted - current);
+    replaceTable(sized, table.id);
   }
 
   function beginTableResize(
@@ -4008,7 +4092,7 @@ export function DiagramEditor() {
     // the ghost disappears the moment the tool changes, and a release that
     // still placed a node would put down something nobody could see coming.
     shapeDraftRef.current = null;
-    shapeDraftSquareRef.current = false;
+    setShapeDraftSquare(false);
     setShapeDraft(null);
     if (next !== 'select') {
       clearAllSelection();
@@ -4594,7 +4678,7 @@ export function DiagramEditor() {
     // A half-dragged shape is being carried too, and Escape puts down whatever
     // is being carried — without placing it.
     shapeDraftRef.current = null;
-    shapeDraftSquareRef.current = false;
+    setShapeDraftSquare(false);
     setShapeDraft(null);
     setArrowDraft(null);
     setArrowSnap(null);
@@ -4896,7 +4980,7 @@ export function DiagramEditor() {
       clearAllSelection();
       const origin = surfacePoint(event);
       shapeDraftRef.current = { pointerId: event.pointerId, origin, moved: false };
-      shapeDraftSquareRef.current = false;
+      setShapeDraftSquare(false);
       setShapeDraft({ origin, current: origin });
       canvasRef.current?.setPointerCapture(event.pointerId);
       return;
@@ -5254,7 +5338,7 @@ export function DiagramEditor() {
     // decides the size, and there was none.
     if (shapeDraftRef.current?.pointerId === event.pointerId) {
       shapeDraftRef.current = null;
-      shapeDraftSquareRef.current = false;
+      setShapeDraftSquare(false);
       setShapeDraft(null);
     }
     if (rotateRef.current?.pointerId === event.pointerId) {
@@ -5435,7 +5519,9 @@ export function DiagramEditor() {
     // decides which of the two a plain letter means, and it declines whenever
     // the canvas is busy with something the letter belongs to.
     const shortcutTool = toolForShortcut(event.key, {
-      editingText: editingNodeId !== null || editingCell !== null,
+      // An arrow label counts as typing too. The field stops the key itself,
+      // so this rarely showed — but only while focus is actually inside it.
+      editingText: editingNodeId !== null || editingCell !== null || editingArrowId !== null,
       inCellMode: Boolean(selectedTable && cellRange),
       submitting: isSubmitting,
       drawing: pathAnchorsRef.current.length > 0,
@@ -5459,8 +5545,7 @@ export function DiagramEditor() {
         // Enter on a cell opens it for editing rather than moving on; Tab and
         // the arrows move, which is how a spreadsheet behaves.
         if (event.key === 'Enter') {
-          cellEditSelectAllRef.current = true;
-          setEditingCell(cell);
+          openCellEditor(cell, tableCellAt(selectedTable, cell.row, cell.col)?.text ?? '', true);
           return;
         }
         const next = moveTableSelection(
@@ -5490,8 +5575,7 @@ export function DiagramEditor() {
           setCell(selectedTable, cell.row, cell.col, { text: event.key }),
           selectedTable.id,
         );
-        cellEditSelectAllRef.current = false;
-        setEditingCell(cell);
+        openCellEditor(cell, event.key, false);
         return;
       }
     }
@@ -5701,24 +5785,41 @@ export function DiagramEditor() {
     }
   }
 
+  /**
+   * A gesture still in the user's hand, if there is one.
+   *
+   * Every session here either previews into `history.snapshotRef` or commits on
+   * release, and `onSubmit` reads that same snapshot — so proposing part-way
+   * through one either serialises a half-finished state or silently drops work
+   * that was never committed. Four of these were guarded and the rest were not,
+   * which is the sort of gap a list in one place is meant to close.
+   */
+  function gestureInHand(): string | null {
+    if (dragRef.current || elementMoveRef.current) {
+      return 'Finish moving the element before proposing.';
+    }
+    if (resizeRef.current) return 'Finish resizing the element before proposing.';
+    if (rotateRef.current) return 'Finish turning the element before proposing.';
+    if (arrowEditRef.current) return 'Finish moving the arrow before proposing.';
+    if (pathEditRef.current) return 'Finish moving the point before proposing.';
+    if (tableResizeRef.current) return 'Finish resizing the table before proposing.';
+    if (shapeDraftRef.current) return 'Finish drawing the shape before proposing.';
+    if (inkPointerRef.current !== null) return 'Finish the stroke before proposing.';
+    if (connectionMode) return 'Finish or cancel the arrow before proposing.';
+    // Uncommitted work, rather than a half-applied change: proposing over it
+    // would drop it without saying so, which a submit must never do.
+    if (arrowDraftRef.current) return 'Finish the arrow with Esc before proposing.';
+    if (pathAnchorsRef.current.length > 0) {
+      return 'Finish the path with Enter or Esc before proposing.';
+    }
+    return null;
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (dragRef.current) {
-      setValidationError('Finish moving the element before proposing.');
-      return;
-    }
-    if (resizeRef.current) {
-      setValidationError('Finish resizing the element before proposing.');
-      return;
-    }
-    if (connectionMode) {
-      setValidationError('Finish or cancel the arrow before proposing.');
-      return;
-    }
-    // A path in hand is uncommitted work. Proposing over it would drop it
-    // without saying so, which is the one thing a submit must never do.
-    if (pathAnchorsRef.current.length > 0) {
-      setValidationError('Finish the path with Enter or Esc before proposing.');
+    const inHand = gestureInHand();
+    if (inHand) {
+      setValidationError(inHand);
       return;
     }
     if (editingNodeId) finishInlineNodeEdit();
@@ -6305,19 +6406,34 @@ export function DiagramEditor() {
                   x={x + 1}
                   y={y + 1}
                   width={Math.max(10, width - 2)}
-                  height={Math.max(10, height - 2)}
+                  // As tall as the text in it. Sized to the cell, a value that
+                  // wrapped past one line was clipped away while it was being
+                  // typed and only appeared once the edit was committed.
+                  height={Math.max(
+                    height - 2,
+                    Math.ceil(
+                      Math.max(1, cellDraft.split('\n').length) * fontSize * INLINE_LINE_HEIGHT,
+                    ) + 6,
+                  )}
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <div
                     className="flex h-full w-full items-center"
-                    style={{ padding: `0 ${TABLE_CELL_PADDING / 2}px` }}
+                    // The renderer wraps a cell at `colWidth - TABLE_CELL_PADDING`
+                    // and `wrapDiagramLabel` takes another `DIAGRAM_LABEL_PADDING`
+                    // off that. Matching it here stops text re-wrapping, and the
+                    // row growing, the instant the edit is committed.
+                    style={{
+                      padding: `0 ${(TABLE_CELL_PADDING + DIAGRAM_LABEL_PADDING - 2) / 2}px`,
+                    }}
                   >
                     <textarea
                       ref={cellInputRef}
                       aria-label={`Cell row ${row + 1} column ${col + 1}`}
-                      defaultValue={cell?.text ?? ''}
-                      rows={Math.max(1, tableCellLines(table, cell, col, row).length)}
+                      value={cellDraft}
+                      rows={Math.max(1, cellDraft.split('\n').length)}
                       maxLength={TABLE_CELL_TEXT_LIMIT}
+                      onChange={(event) => setCellDraft(event.target.value)}
                       onBlur={(event) => {
                         if (cellEditCancelledRef.current) {
                           cellEditCancelledRef.current = false;
@@ -6328,6 +6444,14 @@ export function DiagramEditor() {
                       }}
                       onKeyDown={(event) => {
                         event.stopPropagation();
+                        // Enter mid-composition picks an IME candidate; taking
+                        // it as "done" committed the raw reading and jumped to
+                        // the next cell in the middle of a word.
+                        if (event.nativeEvent.isComposing) return;
+                        // Shift-Enter breaks the line, as it does in the shape
+                        // and arrow editors this one now looks identical to.
+                        // Shift-Tab is still how you go back through the grid.
+                        if (event.key === 'Enter' && event.shiftKey) return;
                         if (event.key === 'Escape') {
                           event.preventDefault();
                           // Escape abandons the edit and keeps what was there.
@@ -6430,8 +6554,7 @@ export function DiagramEditor() {
                           // First double-click goes inside the table; a second,
                           // already inside, opens the cell for typing.
                           if (tableEditing) {
-                            cellEditSelectAllRef.current = true;
-                            setEditingCell({ row, col });
+                            openCellEditor({ row, col }, cell?.text ?? '', true);
                           } else setTableEditing(true);
                           setCellRange({ anchor: { row, col }, focus: { row, col } });
                           return;
@@ -6866,7 +6989,7 @@ export function DiagramEditor() {
                 starting at the top of the shape. */}
             <div
               className="flex h-full w-full items-center"
-              style={{ padding: `0 ${DIAGRAM_LABEL_EDIT_INSET}px` }}
+              style={{ padding: `0 ${labelEditorInset(node)}px` }}
             >
               <textarea
                 ref={inlineLabelInputRef}
@@ -6885,6 +7008,10 @@ export function DiagramEditor() {
                 onBlur={finishInlineNodeEdit}
                 onKeyDown={(event) => {
                   event.stopPropagation();
+                  // Mid-composition, Enter belongs to the IME: it picks the
+                  // candidate. Committing here stored the raw reading instead
+                  // of the word the user was choosing.
+                  if (event.nativeEvent.isComposing) return;
                   if (event.key === 'Escape') {
                     event.preventDefault();
                     cancelInlineNodeEdit();
@@ -7305,6 +7432,12 @@ export function DiagramEditor() {
                         ref={arrowLabelInputRef}
                         aria-label="Arrow label"
                         autoFocus
+                        // Selects what is there, the way the shape editor does.
+                        // Without it, reopening a label left the caret where it
+                        // fell and typing appended to text the user meant to
+                        // replace — in a field that looks identical to one that
+                        // behaves the other way.
+                        onFocus={(event) => event.currentTarget.select()}
                         value={arrowLabelDraft}
                         rows={lines.length}
                         maxLength={ARROW_LABEL_LIMIT}

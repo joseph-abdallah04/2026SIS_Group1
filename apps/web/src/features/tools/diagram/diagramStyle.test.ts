@@ -19,6 +19,7 @@ import {
   diagramEdgeStrokeWidth,
   diagramNodeFill,
   diagramNodeFontSize,
+  tableAutoRowHeight,
   diagramNodeLabelLayout,
   diagramTextBoxHeight,
   diagramNodeSize,
@@ -448,5 +449,60 @@ describe('a textbox grows to hold its own text', () => {
     // A textbox wraps and grows; the ellipsis belongs to shapes, which have a
     // form of their own to keep.
     expect(layout.lines.join(' ')).not.toContain('\u2026');
+  });
+});
+
+describe('wrapping and truncating a label', () => {
+  const NEWLINE = String.fromCharCode(10);
+
+  it('marks the cut on a line that has something on it', () => {
+    // A break typed just before the cut left the final kept line empty, so a
+    // shape showed its text, a gap, and then a lone ellipsis.
+    const lines = wrapDiagramLabel(`A${NEWLINE}${NEWLINE}${NEWLINE}B`, 120, 11, 3);
+
+    expect(lines[lines.length - 1]).not.toBe('\u2026');
+    expect(lines.join('')).toContain('\u2026');
+    expect(lines[0]).toContain('A');
+  });
+
+  it('still truncates a plain overflowing label the way it always did', () => {
+    const lines = wrapDiagramLabel('word '.repeat(40).trim(), 120, 11, 3);
+    expect(lines).toHaveLength(3);
+    expect(lines[2]!.endsWith('\u2026')).toBe(true);
+  });
+});
+
+describe('fitting a table row to its cells', () => {
+  function tableWith(cells: { text: string; fontSizePreset?: 'small' | 'xlarge' }[]) {
+    return {
+      colWidths: cells.map(() => 96),
+      rowHeights: [32],
+      cells: cells.map((cell) => ({ ...cell })),
+    };
+  }
+
+  it('measures each cell whole rather than mixing one cell with another', () => {
+    // Taking the most lines and the largest font as separate maxima multiplied
+    // one cell's height by another's: five wrapped lines beside a single
+    // extra-large word made the row six times taller than anything needed.
+    const mixed = tableWith([
+      { text: 'a fairly long run of words that will certainly wrap over several lines' },
+      { text: 'Big', fontSizePreset: 'xlarge' },
+    ]);
+    const wrapped = tableWith([mixed.cells[0]!]);
+
+    const mixedHeight = tableAutoRowHeight(mixed, 0);
+    const wrappedHeight = tableAutoRowHeight(wrapped, 0);
+    const bigAlone = tableAutoRowHeight(tableWith([mixed.cells[1]!]), 0);
+
+    // The row is the taller of the two cells, not their product.
+    expect(mixedHeight).toBe(Math.max(wrappedHeight, bigAlone));
+  });
+
+  it('comes back down when the text that stretched it is gone', () => {
+    const full = tableAutoRowHeight(tableWith([{ text: 'x '.repeat(60).trim() }]), 0);
+    const empty = tableAutoRowHeight(tableWith([{ text: '' }]), 0);
+
+    expect(full).toBeGreaterThan(empty);
   });
 });

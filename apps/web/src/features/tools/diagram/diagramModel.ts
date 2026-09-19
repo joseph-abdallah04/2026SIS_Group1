@@ -363,16 +363,22 @@ export function createNodeId(existing: readonly DiagramNode[]): string {
  * stored.
  */
 export function prepareNodeLabel(value: string): string {
-  return (
-    value
-      .split('\n')
-      .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
-      .slice(0, DIAGRAM_LABEL_LINE_LIMIT)
-      .join('\n')
-      // Blank lines at either end are almost always a stray Enter, not intent.
-      .replace(/^\n+|\n+$/g, '')
-      .slice(0, DIAGRAM_LABEL_LIMIT)
-  );
+  const tidied = value
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    // Blank lines at either end are almost always a stray Enter, not intent.
+    // Dropped *before* the line cap, or leading blanks eat the budget and are
+    // then thrown away, leaving fewer real lines than the limit allows.
+    .join('\n')
+    .replace(/^\n+|\n+$/g, '')
+    .split('\n')
+    .slice(0, DIAGRAM_LABEL_LINE_LIMIT)
+    .join('\n');
+
+  // Cutting at the character limit can land straight after a newline, leaving a
+  // trailing blank line: `wrapDiagramLabel` then lays out an extra empty line
+  // and the whole block renders half a line off-centre in its shape.
+  return tidied.slice(0, DIAGRAM_LABEL_LIMIT).replace(/\n+$/, '');
 }
 
 export function prepareEdgeLabel(value: string): string {

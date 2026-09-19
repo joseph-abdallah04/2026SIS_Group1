@@ -16,6 +16,7 @@ import {
   DIAGRAM_STROKE_COLORS,
   diagramNodeSize,
   effectiveDiagramNodeSize,
+  diagramNodeLabelLayout,
 } from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6167,6 +6168,107 @@ describe('turning without a pointer', () => {
       expect(screen.getByRole('button', { name: 'Dotted rectangle: Unlabelled' })).toHaveAttribute(
         'transform',
         'translate(24, 24)',
+      );
+    });
+  });
+});
+
+describe('studio robustness fixes', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('refuses to propose over a turn that is still in hand', () => {
+    // Every gesture previews into the snapshot the submit reads, so proposing
+    // part-way through one serialises a half-finished state. Four were guarded
+    // and the rest were not.
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+      fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
+        button: 0,
+        pointerId: 960,
+        clientX: 24,
+        clientY: 24,
+      });
+      fireEvent.pointerMove(canvas, { pointerId: 960, clientX: 50, clientY: 3 });
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Finish turning the element before proposing.',
+      );
+    });
+  });
+
+  it('refuses to propose over a shape that is still being dragged out', () => {
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      const trigger = screen.getByRole('button', { name: 'Shapes' });
+      if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+      await user.click(screen.getByRole('button', { name: 'Add rounded rectangle' }));
+
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 961, clientX: 200, clientY: 200 });
+      fireEvent.pointerMove(canvas, { pointerId: 961, clientX: 400, clientY: 320 });
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Finish drawing the shape before proposing.',
+      );
+    });
+  });
+
+  it('will not paint a shape out of existence entirely', () => {
+    // Invisible but still clickable, with no way back but an undo the user has
+    // no reason to know they need.
+    const send = propose();
+    render(<Harness propose={send} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+      fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+      await openMore(user);
+      await openBarPanel(user, 'Line colour');
+      await user.click(screen.getByRole('button', { name: 'transparent line' }));
+      await openMore(user);
+      await openBarPanel(user, 'Fill');
+      await user.click(screen.getByRole('button', { name: 'transparent fill' }));
+
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+      const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+      if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+      const node = artifact.nodes[0]!;
+      // The fill was the later choice, so it wins and the outline comes back.
+      expect(node.fillColor).toBe('transparent');
+      expect(node.strokeColor).toBeUndefined();
+    });
+  });
+
+  it('resizes a textbox when its text size changes, not only when it is typed', () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await user.click(screen.getByRole('button', { name: 'Text' }));
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 962, clientX: 300, clientY: 300 });
+      fireEvent.pointerUp(canvas, { pointerId: 962, clientX: 300, clientY: 300 });
+
+      const field = screen.getByRole('textbox', { name: 'Edit text label' });
+      await user.type(field, 'a few words that will wrap onto more than one line');
+      fireEvent.blur(field);
+
+      await user.click(screen.getByRole('button', { name: /^Text: / }));
+      await user.click(screen.getByRole('button', { name: 'Format text' }));
+      await user.click(screen.getByRole('button', { name: 'xlarge text' }));
+
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+      const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+      if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+      const layout = diagramNodeLabelLayout(artifact.nodes[0]!);
+      // Every line it lays out fits inside the height it stored.
+      expect(layout.lines.length * layout.lineHeight).toBeLessThanOrEqual(
+        artifact.nodes[0]!.height!,
       );
     });
   });

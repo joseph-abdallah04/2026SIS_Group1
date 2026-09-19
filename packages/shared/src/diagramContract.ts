@@ -550,7 +550,8 @@ export function diagramEdgeDash(edge: DiagramStyledEdge, strokeWidth: number): D
 // the board card renders inside a scaled viewBox and the editor inside another,
 // and both must agree on the wrap without a DOM text-measuring pass.
 const DIAGRAM_GLYPH_ADVANCE_RATIO = 0.55;
-const DIAGRAM_LABEL_PADDING = 12;
+/** Exported so an inline editor can pad itself to wrap exactly where a label does. */
+export const DIAGRAM_LABEL_PADDING = 12;
 export const DIAGRAM_LABEL_MAX_LINES = 3;
 
 /**
@@ -630,9 +631,14 @@ export function wrapDiagramLabel(
 
   if (lines.length <= maxLines) return lines;
   const kept = lines.slice(0, maxLines);
-  const last = kept[maxLines - 1]!;
-  kept[maxLines - 1] = `${last.slice(0, Math.max(0, perLine - 1)).trimEnd()}\u2026`;
-  return kept;
+  // The mark goes on the last line that has something on it. A break typed just
+  // before the cut left the final kept line empty, so the shape showed its text,
+  // a gap, and then a line consisting of nothing but an ellipsis.
+  let mark = maxLines - 1;
+  while (mark > 0 && kept[mark]!.length === 0) mark -= 1;
+  const last = kept[mark]!;
+  kept[mark] = `${last.slice(0, Math.max(0, perLine - 1)).trimEnd()}\u2026`;
+  return kept.slice(0, mark + 1);
 }
 
 export interface DiagramLabelLayout {

@@ -997,3 +997,23 @@ describe('measuring turned artwork', () => {
     expect(turnedLeft).toBeCloseTo(plainLeft, 0);
   });
 });
+
+describe('text that is typed is the text that is kept', () => {
+  const NEWLINE = String.fromCharCode(10);
+
+  it('drops blank lines before spending the line budget on them', () => {
+    // Stripping the padding after the cap meant leading blanks ate the budget
+    // and were then thrown away, leaving fewer real lines than the limit allows.
+    const padded = NEWLINE + NEWLINE + Array.from({ length: 12 }, (_, i) => `l${i}`).join(NEWLINE);
+    expect(prepareNodeLabel(padded).split(NEWLINE)).toHaveLength(DIAGRAM_LABEL_LINE_LIMIT);
+  });
+
+  it('never leaves a label ending in a line break', () => {
+    // Cutting at the character limit can land straight after a newline, and the
+    // empty line that leaves shifts the whole block half a line off-centre.
+    const long = ('word' + NEWLINE).repeat(60);
+    const prepared = prepareNodeLabel(long);
+    expect(prepared.endsWith(NEWLINE)).toBe(false);
+    expect(prepared.length).toBeLessThanOrEqual(DIAGRAM_LABEL_LIMIT);
+  });
+});
