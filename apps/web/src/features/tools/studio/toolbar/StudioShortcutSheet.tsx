@@ -19,6 +19,7 @@ const CANVAS_KEYS: { keys: string; description: string }[] = [
   { keys: 'Ctrl+D', description: 'Duplicate' },
   { keys: 'Delete', description: 'Delete the selection' },
   { keys: 'Arrows', description: 'Nudge the selection' },
+  { keys: '[ ]', description: 'Turn the selection' },
   { keys: 'Enter', description: 'Edit the selected element' },
   { keys: 'Escape', description: 'Step out, then clear the selection' },
   { keys: 'Space (held)', description: 'Pan the canvas' },

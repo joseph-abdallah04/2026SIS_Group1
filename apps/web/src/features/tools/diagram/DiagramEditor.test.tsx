@@ -16,6 +16,7 @@ import {
   DIAGRAM_STROKE_COLORS,
   diagramNodeSize,
   effectiveDiagramNodeSize,
+  diagramNodeLabelLayout,
 } from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1246,6 +1247,240 @@ describe('diagram viewport and productivity', () => {
     expect(after).not.toEqual(before);
   });
 
+  it('drops a selected arrow when any other kind is picked up', async () => {
+    // Arrows were added to the selection but missed by the three "select just
+    // this" helpers, so only picking a *different arrow* ever cleared one. A
+    // shape, a line or a table left it selected alongside, and the properties
+    // bar went on offering arrow controls for it.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    // A shape to pick up afterwards, placed rather than merely armed.
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 659, clientX: 500, clientY: 150 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 659, clientX: 500, clientY: 150 });
+
+    // The move is what takes the arrow past the travel threshold; without one
+    // it stays a draft and is never committed.
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 660, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 660, clientX: 200, clientY: 340 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 660, clientX: 200, clientY: 340 });
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+
+    const arrow = screen.getByTestId('studio-arrow-hit');
+    fireEvent.pointerDown(arrow, { button: 0, pointerId: 661 });
+    fireEvent.pointerUp(canvas, { pointerId: 661 });
+    // Endpoint handles only appear on a selected arrow, so they stand in for
+    // "this arrow is selected" throughout.
+    expect(
+      screen.getByRole('button', { name: 'Move the start of this arrow' }),
+    ).toBeInTheDocument();
+
+    const shape = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    fireEvent.pointerDown(shape, { button: 0, pointerId: 662 });
+    fireEvent.pointerUp(canvas, { pointerId: 662 });
+
+    expect(
+      screen.queryByRole('button', { name: 'Move the start of this arrow' }),
+    ).not.toBeInTheDocument();
+
+    // And the same again for a path, which clears the selection through its own
+    // helper rather than through the node one.
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 663, clientX: 100, clientY: 480 });
+    fireEvent.pointerMove(canvas, { pointerId: 663, clientX: 400, clientY: 480 });
+    fireEvent.pointerUp(canvas, { pointerId: 663, clientX: 400, clientY: 480 });
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+
+    // Well clear of the earlier press on this same arrow: two presses at one
+    // spot read as the double-press that opens the label for typing.
+    fireEvent.pointerDown(screen.getByTestId('studio-arrow-hit'), {
+      button: 0,
+      pointerId: 664,
+      clientX: 180,
+      clientY: 330,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 664, clientX: 180, clientY: 330 });
+    expect(
+      screen.getByRole('button', { name: 'Move the start of this arrow' }),
+    ).toBeInTheDocument();
+
+    const line = screen.getByRole('button', { name: 'Path with 2 points' });
+    fireEvent.pointerDown(line, { button: 0, pointerId: 665, clientX: 250, clientY: 480 });
+    fireEvent.pointerUp(canvas, { pointerId: 665, clientX: 250, clientY: 480 });
+
+    expect(
+      screen.queryByRole('button', { name: 'Move the start of this arrow' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('edits a label in the element’s own formatting, with no box around it', async () => {
+    // The editor used to be a bordered white field at a fixed 11px, so editing
+    // formatted text showed it unformatted and the original was still visible
+    // around a field too small to cover it.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await typeNodeLabel(user, canvas, 'Rounded rectangle: Unlabelled', 910, 'Idea');
+    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    await user.click(screen.getByRole('button', { name: 'large text' }));
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Idea' });
+    doublePress(node, canvas, 911, 84, 52);
+
+    const field = screen.getByRole('textbox', { name: 'Edit box label' });
+    // The element's own size and weight, not a form field's.
+    expect(field).toHaveStyle({ fontSize: '22px' });
+    expect(field.className).toContain('bg-transparent');
+    expect(field.className).toContain('border-0');
+    // Nothing of the old label is left showing behind the field.
+    expect(node.querySelector('text')).toBeNull();
+  });
+
+  it('breaks an arrow label only where it was asked to, and hides it while editing', async () => {
+    // An arrow has no box to wrap inside, so it only breaks on a newline. It
+    // used to render as one unwrapped line, which ran a long label off the end
+    // of its own arrow.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 920, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 920, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 920, clientX: 300, clientY: 300 });
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    fireEvent.pointerDown(screen.getByTestId('studio-arrow-hit'), {
+      button: 0,
+      pointerId: 921,
+      clientX: 180,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 921, clientX: 180, clientY: 300 });
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    // Nothing of the label is painted underneath the field being typed into.
+    expect(screen.queryByTestId('studio-arrow')?.parentElement?.querySelector('text')).toBeNull();
+
+    await user.type(field, 'first{Shift>}{Enter}{/Shift}second');
+    fireEvent.blur(field);
+
+    // Two lines, because two were asked for — one tspan each.
+    const label = document.querySelector('[data-testid="studio-arrow"]')?.parentElement;
+    expect(label?.querySelectorAll('tspan')).toHaveLength(2);
+  });
+
+  it('wraps a textbox onto a new line and grows to hold it', async () => {
+    // Textboxes wrap and grow; a shape still truncates, because a shape has a
+    // form of its own to keep.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 912, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 912, clientX: 300, clientY: 300 });
+
+    const field = screen.getByRole('textbox', { name: 'Edit text label' });
+    await user.type(field, 'The quick brown fox jumps over the lazy dog and keeps on running');
+    fireEvent.blur(field);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const textbox = artifact.nodes[0]!;
+    // Taller than the 40 a textbox is placed at, because the words needed it.
+    expect(textbox.height).toBeGreaterThan(40);
+    // And nothing was thrown away to make it fit.
+    expect(textbox.label).toContain('running');
+  });
+
+  it('offers a shape at the loose end of an arrow, and undoes both together', async () => {
+    // Dropping an arrow on nothing is a finished arrow, not a half-made one.
+    // The picker is an offer on top of that, not a question that has to be
+    // answered before the arrow counts.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 900, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 900, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 900, clientX: 300, clientY: 300 });
+
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'End with ellipse' }));
+
+    // One entry for both, so Undo does not leave an arrow bound to a shape that
+    // is no longer there.
+    expect(screen.getByRole('button', { name: 'Ellipse: Unlabelled' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.queryByRole('button', { name: 'Ellipse: Unlabelled' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('studio-arrow')).toBeInTheDocument();
+  });
+
+  it('runs an arrow from a connection handle into empty space', async () => {
+    // A connection used to need a second shape to already exist: pressing bare
+    // canvas did nothing at all, so there was no way to point at nothing.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    fireEvent.pointerDown(screen.getAllByTestId('connection-handle')[0]!, {
+      button: 0,
+      pointerId: 904,
+    });
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 905, clientX: 400, clientY: 400 });
+
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'End with decision' }));
+
+    expect(screen.getByRole('button', { name: 'Decision: Unlabelled' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows).toHaveLength(1);
+    // Bound at both ends: the source shape, and the one the picker just made.
+    expect(artifact.arrows![0]!.from.elementId).toBeTruthy();
+    expect(artifact.arrows![0]!.to.elementId).toBeTruthy();
+    expect(proposalCreateSchema.safeParse(send.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('leaves an arrow pointing at nothing when the picker is dismissed', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 902, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 902, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 902, clientX: 300, clientY: 300 });
+
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    expect(screen.queryByTestId('arrow-shape-picker')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows).toHaveLength(1);
+    // Free at the far end: no shape had to exist for the arrow to be valid.
+    expect(artifact.arrows![0]!.to.elementId).toBeUndefined();
+    expect(artifact.nodes).toHaveLength(0);
+  });
+
   it('toggles a node in and out of the selection with shift-click', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
@@ -1468,6 +1703,205 @@ describe('diagram resize and style', () => {
     expect(node.querySelector('rect[width="120"][height="56"]')).not.toBeNull();
   });
 
+  /**
+   * The default-placed shape is 120x56 at (24, 24), so it turns about (84, 52)
+   * and the zone outside its top-left corner covers the quadrant up and left of
+   * (24, 24). Pressing that corner is a bearing of about -155 degrees from the
+   * centre; (50, 3) is about -125, so the pointer sweeps roughly 30.
+   */
+  function rotateDefaultShape(canvas: Element, pointerId: number, shiftKey = false) {
+    fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
+      button: 0,
+      pointerId,
+      clientX: 24,
+      clientY: 24,
+    });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 50, clientY: 3, shiftKey });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 50, clientY: 3, shiftKey });
+  }
+
+  it('turns a shape in five-degree steps and undoes the whole turn at once', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    rotateDefaultShape(canvas, 90);
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    // Turned about its own centre, so the translate that places it is untouched.
+    expect(node).toHaveAttribute('transform', 'translate(24, 24) rotate(30 60 28)');
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+  });
+
+  it('offers a rotate zone outside every corner, behind the resize handles', async () => {
+    // Turning is grabbed from outside a corner rather than from a grip on a
+    // stem. The zones sit under the resize handles in paint order, so the
+    // corner itself still resizes and only the ring beyond it turns.
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    for (const corner of ['nw', 'ne', 'se', 'sw']) {
+      expect(screen.getByTestId(`rotate-zone-${corner}`)).toBeInTheDocument();
+      const zone = screen.getByTestId(`rotate-zone-${corner}`);
+      const handle = screen.getByTestId(`resize-handle-${corner}`);
+      // `compareDocumentPosition` says the handle comes after the zone, which
+      // is what puts it on top in SVG.
+      expect(zone.compareDocumentPosition(handle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it('snaps the turn to 45 degrees while shift is held', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    // The same 30-degree sweep, which rounds up to the nearest 45 instead.
+    rotateDefaultShape(canvas, 91, true);
+
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
+      'transform',
+      'translate(24, 24) rotate(45 60 28)',
+    );
+  });
+
+  it('proposes a turned shape through the real contract', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    rotateDefaultShape(canvas, 92);
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]!.rotation).toBe(30);
+    expect(proposalCreateSchema.safeParse(send.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('leaves no rotation key on a shape that is turned back to square', async () => {
+    // Absent has to keep meaning "never turned", so a shape returned to zero is
+    // indistinguishable from one authored before rotation existed.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    rotateDefaultShape(canvas, 93);
+    // Straight back: the same sweep in reverse, from -125 round to -155.
+    fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
+      button: 0,
+      pointerId: 94,
+      clientX: 50,
+      clientY: 3,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 94, clientX: 24, clientY: 24 });
+    fireEvent.pointerUp(canvas, { pointerId: 94, clientX: 24, clientY: 24 });
+
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
+      'transform',
+      'translate(24, 24)',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).not.toHaveProperty('rotation');
+  });
+
+  /** Arms the shape tool without the auto-place `clickInRailMenu` does. */
+  async function armShapeTool(user: ReturnType<typeof userEvent.setup>) {
+    const trigger = screen.getByRole('button', { name: 'Shapes' });
+    if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+    await user.click(screen.getByRole('button', { name: 'Add rounded rectangle' }));
+  }
+
+  it('drags out a shape at the size it was dragged, previewing as it grows', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 96, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 96, clientX: 400, clientY: 320 });
+
+    // The preview is the rectangle being dragged, not the default footprint.
+    const ghost = screen.getByTestId('placement-ghost');
+    expect(ghost.querySelector('rect[width="200"][height="120"]')).not.toBeNull();
+
+    fireEvent.pointerUp(canvas, { pointerId: 96, clientX: 400, clientY: 320 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node).toHaveAttribute('transform', 'translate(200, 200)');
+    expect(node.querySelector('rect[width="200"][height="120"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ width: 200, height: 120 });
+  });
+
+  it('constrains a dragged-out shape to a square while shift is held', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 97, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 97, clientX: 400, clientY: 320, shiftKey: true });
+    fireEvent.pointerUp(canvas, { pointerId: 97, clientX: 400, clientY: 320, shiftKey: true });
+
+    // The longer side wins, so the 200x120 drag becomes 200x200.
+    expect(
+      screen
+        .getByRole('button', { name: 'Rounded rectangle: Unlabelled' })
+        .querySelector('rect[width="200"][height="200"]'),
+    ).not.toBeNull();
+  });
+
+  it('still places the default size when the press never travels', async () => {
+    // Click-to-place is how every shape was made before drag-to-size, and it has
+    // to keep working for anyone who does not think to drag.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 98, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 98, clientX: 200, clientY: 200 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node.querySelector('rect[width="120"][height="56"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    // A default-sized shape carries no stored size at all, exactly as before.
+    expect(artifact.nodes[0]).not.toHaveProperty('width');
+  });
+
+  it('does not offer a rotate grip on a table', async () => {
+    // A turned table's cells would stop lining up with the rows and columns
+    // people read them by, so tables get the frame without the grip.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Table', '3 by 3 table');
+
+    // A press on a cell outside cell mode picks the whole table up.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Cell row 1 column 1' }), {
+      button: 0,
+      pointerId: 95,
+      clientX: 60,
+      clientY: 60,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 95, clientX: 60, clientY: 60 });
+
+    expect(screen.getByTestId('selection-frame')).toBeInTheDocument();
+    expect(screen.queryByTestId('rotate-zone-nw')).not.toBeInTheDocument();
+  });
+
   it('proposes the resized geometry through the real contract', async () => {
     const send = propose();
     render(<Harness propose={send} />);
@@ -1533,6 +1967,43 @@ describe('diagram resize and style', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Finish resizing the element before proposing.',
     );
+  });
+
+  it('actually makes a shape transparent, and survives the real contract', async () => {
+    // The old clear button deleted the key, and an absent fill means "never
+    // styled" — which resolves to the shape's legacy grey. So "No fill" painted
+    // a box grey and read as broken. Transparent is now a colour you pick.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+    await openMore(user);
+    await openBarPanel(user, 'Fill');
+    await user.click(screen.getByRole('button', { name: 'transparent fill' }));
+
+    const rect = nodeRect('Rounded rectangle: Unlabelled');
+    expect(rect).toHaveAttribute('fill', 'transparent');
+    // Still paintable, so it still catches a press: `none` would make the shape
+    // unselectable everywhere except its border.
+    expect(rect).not.toHaveAttribute('fill', 'none');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]!.fillColor).toBe('transparent');
+  });
+
+  it('leaves an unstyled shape on its legacy fill rather than making it clear', async () => {
+    // The other half of the same rule: absent still means "never styled", so
+    // every diagram authored before transparent existed renders as it always did.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    expect(nodeRect('Rounded rectangle: Unlabelled')).toHaveAttribute('fill', '#EEF2F4');
   });
 
   it('styles the whole selection at once and proposes the palette keys', async () => {
@@ -2504,6 +2975,76 @@ describe('studio pen and line', () => {
     expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
     // Escape ended the path, not the studio.
     expect(canvas).toBeInTheDocument();
+  });
+
+  it('takes back the last point with Backspace while the pen is mid-path', async () => {
+    // The committed-path editor binds Backspace to removing an anchor, but a
+    // draft is not a path yet and had no step back at all: a mis-placed point
+    // could only be fixed by finishing the path and starting over.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 820, 100, 100);
+    clickAt(canvas, 821, 300, 100);
+    clickAt(canvas, 822, 300, 300);
+
+    // The third point goes back, then the path is finished with the two left.
+    await user.keyboard('{Backspace}');
+    await user.keyboard('{Enter}');
+
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+
+    const artifact = diagramArtifactOf(propose.mock.calls[0]![0]);
+    expect(artifact.paths![0]!.anchors).toHaveLength(2);
+  });
+
+  it('puts the pen down entirely when every point is taken back', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 830, 100, 100);
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.keyboard('{Backspace}');
+    // Nothing is left to rubber-band from, so the draft goes rather than
+    // trailing from a point that has just been removed.
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+  });
+
+  it('hands the canvas back in Select when Escape ends a line', async () => {
+    // A finished line leaves the tool armed, because lines are drawn several in
+    // a row. Escape means "I am done", so it is the one finish that does not.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 840, clientX: 100, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 840, clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 840, clientX: 300, clientY: 200 });
+
+    // A second line, left mid-draft, is what Escape then ends.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 841, clientX: 100, clientY: 400 });
+    fireEvent.pointerMove(canvas, { pointerId: 841, clientX: 300, clientY: 400 });
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('button', { name: /^Select$/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('closes the path when the pen returns to its first anchor', async () => {
@@ -3839,6 +4380,75 @@ describe('studio clipboard and snapping', () => {
 
     // The three-unit nudge is pulled on to the next 8-unit grid line.
     expect(drawnPath()).toBe('M 104 200 L 304 200');
+  });
+
+  it('turns a drawn line about the centre of its own points', async () => {
+    // A path has no box of its own the way a shape does, so it turns about the
+    // centre of the box its anchors describe — 100..300 across, flat at y 200.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 790, 200);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 800,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 800, clientX: 200, clientY: 200 });
+
+    // Grabbed outside the line's left end, which is due west of its centre.
+    fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
+      button: 0,
+      pointerId: 801,
+      clientX: 100,
+      clientY: 200,
+    });
+    // Due south of the centre: a quarter turn anticlockwise, stored as 270.
+    fireEvent.pointerMove(canvas, { pointerId: 801, clientX: 200, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 801, clientX: 200, clientY: 300 });
+
+    const group = screen.getAllByTestId('studio-path')[0]!.closest('g');
+    expect(group).toHaveAttribute('transform', 'rotate(270 200 200)');
+    // The anchors themselves are untouched: the turn is drawn, not baked in.
+    expect(drawnPath()).toBe('M 100 200 L 300 200');
+  });
+
+  it('will not let an arrow-key nudge walk a line off the sheet', async () => {
+    // Only nodes were held inside the canvas. Ink, paths, tables and arrows were
+    // offset raw, so holding an arrow key walked a drawing off the sheet a step
+    // at a time and left it somewhere it could never be selected again.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLine(user, canvas, 770, 200);
+    expect(drawnPath()).toBe('M 100 200 L 300 200');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 780,
+      clientX: 200,
+      clientY: 200,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 780, clientX: 200, clientY: 200 });
+
+    // Far more presses than it takes to reach the edge: 100 units at 8 a step.
+    for (let press = 0; press < 25; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+    }
+    expect(drawnPath()).toBe('M 0 200 L 200 200');
+
+    // And the same going up, where the line starts only 200 units from the top.
+    for (let press = 0; press < 40; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowUp' });
+    }
+    expect(drawnPath()).toBe('M 0 0 L 200 0');
   });
 
   it('leaves a drag exactly where the pointer put it once snapping is off', async () => {
@@ -5280,5 +5890,386 @@ describe('studio extend and reopen', () => {
     fireEvent.keyDown(canvas, { key: 'ArrowRight' });
 
     expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
+  });
+});
+
+/**
+ * Fixes for the review of the studio block.
+ *
+ * Each of these encodes a rule rather than a value: a control that did the
+ * opposite of what its own comment claimed, or a gesture that left something
+ * behind. They are grouped because they were found together, not because they
+ * share a code path.
+ */
+describe('studio review fixes', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  /** A proposal carrying an inherited edge, which is what an extend starts from. */
+  function edgeParent(): BoardItem {
+    return {
+      id: 'review-parent',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [
+          { id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' },
+          { id: 'n2', label: 'Server', x: 300, y: 24, shape: 'box' },
+        ],
+        edges: [{ from: 'n1', to: 'n2' }],
+      },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+    } as BoardItem;
+  }
+
+  /** Draws an arrow into empty space, leaving the offer open at its end. */
+  async function drawLooseArrow(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+  ) {
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId, clientX: 300, clientY: 300 });
+  }
+
+  /**
+   * The `foreignObject` an inline editor is drawn in.
+   *
+   * Walked by hand rather than with `closest`, which does not match an SVG tag
+   * name from inside the HTML subtree in jsdom.
+   */
+  function editorFrame(field: Element): Element {
+    let node: Element | null = field;
+    while (node && node.tagName.toLowerCase() !== 'foreignobject') node = node.parentElement;
+    if (!node) throw new Error('the editor is not inside a foreignObject');
+    return node;
+  }
+
+  async function selectLooseArrow(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+  ) {
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    fireEvent.pointerDown(screen.getByTestId('studio-arrow-hit'), {
+      button: 0,
+      pointerId,
+      clientX: 180,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 180, clientY: 300 });
+  }
+
+  it('throws an arrow label away on Escape, and keeps it on blur', async () => {
+    // Escape only closed the editor, and closing it unmounted the field, whose
+    // own blur then committed the very text Escape had just abandoned.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 940);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 941);
+
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    await user.type(field, 'discard me');
+    fireEvent.keyDown(field, { key: 'Escape' });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    // The arrow had no label to begin with, so abandoning leaves it with none.
+    expect(artifact.arrows![0]!.label).toBeUndefined();
+  });
+
+  it('still commits an arrow label when the field simply loses focus', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 953);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 954);
+
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    await user.type(field, 'keep me');
+    fireEvent.blur(field);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows![0]!.label).toBe('keep me');
+  });
+
+  it('grows the arrow label field as lines are added to it', async () => {
+    // rows and the box around it were read off the stored label, so a line
+    // added with Shift-Enter was clipped away until the edit was committed.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 943);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 944);
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    const before = Number(editorFrame(field).getAttribute('height'));
+    await user.type(field, 'first{Shift>}{Enter}{/Shift}second');
+    const after = Number(editorFrame(field).getAttribute('height'));
+
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('gives a long label room to be read while it is being typed', async () => {
+    // The field grows with the text, but the frame around it did not, and SVG
+    // clips: the start of a long label, the end of it, and the caret being
+    // typed at were all hidden, with no scrollbar to find them.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    doublePress(node, canvas, 945, 84, 52);
+    const field = screen.getByRole('textbox', { name: 'Edit box label' });
+    await user.type(field, 'The quick brown fox jumps over the lazy dog and keeps running on');
+
+    const frame = editorFrame(field);
+    expect(Number(frame.getAttribute('height'))).toBeGreaterThan(56);
+    // Centred on the shape, so it overhangs evenly rather than off one edge.
+    expect(Number(frame.getAttribute('y'))).toBeLessThan(0);
+  });
+
+  it('drops a selected arrow when an inherited edge is picked', async () => {
+    // renderEdge cleared only the nodes, so picking an edge on an extended
+    // proposal left an arrow, a stroke, a path or a table lit up beside it.
+    render(
+      <Harness propose={propose()}>
+        <ExtendButton proposal={edgeParent()} />
+      </Harness>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
+    mockSurface(canvas, { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT });
+
+    // Whether this arrow binds to something or ends in space does not matter
+    // here; what matters is that it is selected when the edge is pressed.
+    await drawLooseArrow(user, canvas, 946);
+    await selectLooseArrow(user, canvas, 947);
+    expect(
+      screen.getByRole('button', { name: 'Move the start of this arrow' }),
+    ).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Arrow from Client to Server' }), {
+      button: 0,
+      pointerId: 948,
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Move the start of this arrow' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('creates nothing when the arrow behind the shape offer has been undone', async () => {
+    // The binding quietly found no arrow and the shape was committed anyway, so
+    // undoing the arrow and then taking the offer put an orphan on the canvas
+    // and threw the redo away.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 949);
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    // Undo is one of the things that puts the offer down.
+    expect(screen.queryByTestId('arrow-shape-picker')).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('studio-arrow')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Ellipse: Unlabelled' })).not.toBeInTheDocument();
+  });
+
+  it('puts the shape offer down when the canvas is used for anything else', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 950);
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    expect(screen.queryByTestId('arrow-shape-picker')).not.toBeInTheDocument();
+  });
+
+  it('will not let an arrow be painted out of existence', async () => {
+    // An arrow is its stroke, like a pen path: a transparent one vanishes while
+    // its 18-unit hit band goes on swallowing presses.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 951);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 952);
+
+    await openBarPanel(user, 'Line colour');
+    expect(screen.getByRole('button', { name: 'rose line' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'transparent line' })).not.toBeInTheDocument();
+  });
+});
+
+describe('turning without a pointer', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('turns the selection with the bracket keys, coarser with shift', () => {
+    // Rotation was reachable only by dragging a corner, so a keyboard user
+    // could not turn anything — or straighten something that arrived turned in
+    // someone else's proposal.
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+      fireEvent.keyDown(canvas, { key: ']' });
+      const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+      expect(node).toHaveAttribute('transform', 'translate(24, 24) rotate(5 60 28)');
+
+      fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+      expect(node).toHaveAttribute('transform', 'translate(24, 24) rotate(50 60 28)');
+
+      fireEvent.keyDown(canvas, { key: '[', shiftKey: true });
+      fireEvent.keyDown(canvas, { key: '[' });
+      // Back to square, which drops the key rather than storing a zero.
+      expect(node).toHaveAttribute('transform', 'translate(24, 24)');
+    });
+  });
+
+  it('does not offer to turn a container, by either route', () => {
+    // A container is a group: turning the frame without the shapes inside it
+    // reads as broken, and its drop test and clamp both assume a square box.
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
+
+      expect(screen.queryByTestId('rotate-zone-nw')).not.toBeInTheDocument();
+
+      fireEvent.keyDown(canvas, { key: ']' });
+      expect(screen.getByRole('button', { name: 'Dotted rectangle: Unlabelled' })).toHaveAttribute(
+        'transform',
+        'translate(24, 24)',
+      );
+    });
+  });
+});
+
+describe('studio robustness fixes', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('refuses to propose over a turn that is still in hand', () => {
+    // Every gesture previews into the snapshot the submit reads, so proposing
+    // part-way through one serialises a half-finished state. Four were guarded
+    // and the rest were not.
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+      fireEvent.pointerDown(screen.getByTestId('rotate-zone-nw'), {
+        button: 0,
+        pointerId: 960,
+        clientX: 24,
+        clientY: 24,
+      });
+      fireEvent.pointerMove(canvas, { pointerId: 960, clientX: 50, clientY: 3 });
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Finish turning the element before proposing.',
+      );
+    });
+  });
+
+  it('refuses to propose over a shape that is still being dragged out', () => {
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      const trigger = screen.getByRole('button', { name: 'Shapes' });
+      if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+      await user.click(screen.getByRole('button', { name: 'Add rounded rectangle' }));
+
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 961, clientX: 200, clientY: 200 });
+      fireEvent.pointerMove(canvas, { pointerId: 961, clientX: 400, clientY: 320 });
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Finish drawing the shape before proposing.',
+      );
+    });
+  });
+
+  it('will not paint a shape out of existence entirely', () => {
+    // Invisible but still clickable, with no way back but an undo the user has
+    // no reason to know they need.
+    const send = propose();
+    render(<Harness propose={send} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+      fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+      await openMore(user);
+      await openBarPanel(user, 'Line colour');
+      await user.click(screen.getByRole('button', { name: 'transparent line' }));
+      await openMore(user);
+      await openBarPanel(user, 'Fill');
+      await user.click(screen.getByRole('button', { name: 'transparent fill' }));
+
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+      const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+      if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+      const node = artifact.nodes[0]!;
+      // The fill was the later choice, so it wins and the outline comes back.
+      expect(node.fillColor).toBe('transparent');
+      expect(node.strokeColor).toBeUndefined();
+    });
+  });
+
+  it('resizes a textbox when its text size changes, not only when it is typed', () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    return openDiagram().then(async ({ user, canvas }) => {
+      await user.click(screen.getByRole('button', { name: 'Text' }));
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 962, clientX: 300, clientY: 300 });
+      fireEvent.pointerUp(canvas, { pointerId: 962, clientX: 300, clientY: 300 });
+
+      const field = screen.getByRole('textbox', { name: 'Edit text label' });
+      await user.type(field, 'a few words that will wrap onto more than one line');
+      fireEvent.blur(field);
+
+      await user.click(screen.getByRole('button', { name: /^Text: / }));
+      await user.click(screen.getByRole('button', { name: 'Format text' }));
+      await user.click(screen.getByRole('button', { name: 'xlarge text' }));
+
+      await user.click(screen.getByRole('button', { name: 'Propose' }));
+      const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+      if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+      const layout = diagramNodeLabelLayout(artifact.nodes[0]!);
+      // Every line it lays out fits inside the height it stored.
+      expect(layout.lines.length * layout.lineHeight).toBeLessThanOrEqual(
+        artifact.nodes[0]!.height!,
+      );
+    });
   });
 });

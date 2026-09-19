@@ -15,6 +15,7 @@ import {
   DIAGRAM_LABEL_INK,
   DIAGRAM_STROKE_COLORS,
   arrowFontSize,
+  arrowLabelLines,
   arrowStrokeColor,
   arrowStrokeWidth,
   diagramEdgeDash,
@@ -33,6 +34,14 @@ interface StudioArrowViewProps {
   stroke?: string;
   strokeWidth?: number;
   surface?: string;
+  /**
+   * Leaves the label out, for the editor to draw in its place.
+   *
+   * Without this the stored label stays painted underneath the field being
+   * typed into, and any part of it the field does not cover shows through —
+   * which reads as the text being duplicated rather than edited.
+   */
+  hideLabel?: boolean;
 }
 
 function ArrowCap({
@@ -68,10 +77,12 @@ export function StudioArrowView({
   stroke,
   strokeWidth,
   surface = DEFAULT_SURFACE,
+  hideLabel = false,
 }: StudioArrowViewProps) {
   const color = stroke ?? arrowStrokeColor(arrow);
   const width = strokeWidth ?? arrowStrokeWidth(arrow);
   const fontSize = arrowFontSize(arrow);
+  const labelLines = arrow.label ? arrowLabelLines(arrow.label) : [];
 
   return (
     <>
@@ -90,7 +101,7 @@ export function StudioArrowView({
       />
       <ArrowCap cap={geometry.start} stroke={color} strokeWidth={width} surface={surface} />
       <ArrowCap cap={geometry.end} stroke={color} strokeWidth={width} surface={surface} />
-      {arrow.label ? (
+      {labelLines.length > 0 && !hideLabel ? (
         <text
           x={geometry.label.x}
           y={geometry.label.y}
@@ -109,7 +120,17 @@ export function StudioArrowView({
           }}
           pointerEvents="none"
         >
-          {arrow.label}
+          {labelLines.map((line, index) => (
+            <tspan
+              key={`${index}-${line}`}
+              x={geometry.label.x}
+              // Centred on the label point, so a two-line label straddles the
+              // same spot a one-line label sat on.
+              dy={index === 0 ? -((labelLines.length - 1) * fontSize * 1.2) / 2 : fontSize * 1.2}
+            >
+              {line}
+            </tspan>
+          ))}
         </text>
       ) : null}
     </>

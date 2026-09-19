@@ -1,4 +1,4 @@
-import type { DiagramNode } from '@roundtable/shared';
+import { boxCentre, rotatePoint, type DiagramNode } from '@roundtable/shared';
 import { diagramNodeSchema } from '@roundtable/shared/schemas';
 import { describe, expect, it } from 'vitest';
 
@@ -7,6 +7,7 @@ import {
   DIAGRAM_CANVAS_HEIGHT,
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_LABEL_LIMIT,
+  DIAGRAM_LABEL_LINE_LIMIT,
   DIAGRAM_NODE_HEIGHT,
   DIAGRAM_NODE_WIDTH,
   DIAGRAM_GRID,
@@ -28,7 +29,9 @@ import {
   deleteNodesWithEdges,
   distributeNodes,
   moveNode,
+  diagramContentBounds,
   moveNodesBy,
+  nodeBounds,
   nodeIdsInRect,
   normalizeRect,
   pasteDiagramFragment,
@@ -146,9 +149,22 @@ describe('diagram node model', () => {
 
   it('collapses whitespace and caps labels at the readable limit', () => {
     expect(prepareNodeLabel('  Auth    service  ')).toBe('Auth service');
-    expect(prepareNodeLabel('a'.repeat(80))).toHaveLength(DIAGRAM_LABEL_LIMIT);
+    expect(prepareNodeLabel('a'.repeat(300))).toHaveLength(DIAGRAM_LABEL_LIMIT);
 
     expect(renameNode(buildNodes(1), 'n1', 'Gateway')[0]?.label).toBe('Gateway');
+  });
+
+  it('keeps the lines a label was typed with, and tidies the spaces inside them', () => {
+    // A newline is the only way to say where a line should break, so it is
+    // content. Runs of spaces and tabs still collapse, as they always did.
+    expect(prepareNodeLabel('Auth   service\nand   gateway')).toBe('Auth service\nand gateway');
+    // A stray Enter at either end is almost never intended.
+    expect(prepareNodeLabel('\n\nAuth\n\n')).toBe('Auth');
+    // Still bounded: a label may break where it is asked to, but not become a
+    // column of text running down the sheet.
+    expect(prepareNodeLabel('x\n'.repeat(40)).split('\n').length).toBeLessThanOrEqual(
+      DIAGRAM_LABEL_LINE_LIMIT,
+    );
   });
 
   it('preserves spaces while editing and normalizes them at submission', () => {
@@ -301,6 +317,36 @@ describe('moveNodesBy', () => {
     expect(free[0]).toMatchObject({ x: 35, y: 27 });
     expect(Number.isInteger(free[0]!.x)).toBe(true);
     expect(Number.isInteger(free[0]!.y)).toBe(true);
+  });
+
+  it('holds a turned node on the sheet by the box it actually occupies', () => {
+    // A 45-degree 200x100 box sweeps a ~212x212 square, which starts well left
+    // of and above its stored x/y. Clamping the stored box let the corners be
+    // walked off the canvas — the case this clamp exists for.
+    const turned: DiagramNode = {
+      id: 'a',
+      label: '',
+      x: 400,
+      y: 300,
+      shape: 'rectangle',
+      width: 200,
+      height: 100,
+      rotation: 45,
+    };
+    const origins = { a: { x: 400, y: 300 } };
+
+    const moved = moveNodesBy([turned], origins, { x: 5_000, y: 5_000 }, 'a')[0]!;
+    const bounds = nodeBounds(moved);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(DIAGRAM_CANVAS_HEIGHT);
+
+    const back = moveNodesBy([turned], origins, { x: -5_000, y: -5_000 }, 'a')[0]!;
+    const backBounds = nodeBounds(back);
+    expect(backBounds.x).toBeGreaterThanOrEqual(0);
+    expect(backBounds.y).toBeGreaterThanOrEqual(0);
+    // The stored x/y is *inside* the turned box, so it stays positive — which
+    // is exactly why clamping it was not enough.
+    expect(back.x).toBeGreaterThan(0);
   });
 
   it('leaves the graph alone when the anchor is not part of the drag', () => {
@@ -469,6 +515,74 @@ describe('placement without snapping', () => {
       x: DIAGRAM_CANVAS_WIDTH - DIAGRAM_NODE_WIDTH,
       y: 0,
     });
+  });
+});
+
+describe('resizeNode on a turned node', () => {
+  // Turned a quarter turn, so the element's own +x runs down the screen.
+  const turned: DiagramNode = {
+    id: 'n1',
+    label: '',
+    x: 200,
+    y: 200,
+    shape: 'rectangle',
+    width: 200,
+    height: 100,
+    rotation: 90,
+  };
+  const startBox = { x: 200, y: 200, width: 200, height: 100 };
+
+  /** The scene position of the corner a drag is supposed to leave alone. */
+  function heldCorner(node: DiagramNode) {
+    const box = { x: node.x, y: node.y, width: node.width!, height: node.height! };
+    return rotatePoint({ x: box.x, y: box.y }, boxCentre(box), node.rotation ?? 0);
+  }
+
+  it('grows along the axis the handle was actually dragged', () => {
+    // At 90 degrees the element's width runs down the screen, so dragging the
+    // south-east handle *downward* is what should make it wider. Before the
+    // delta was brought into the element's frame this resized perpendicular to
+    // the drag, and at 180 degrees it resized backwards.
+    const [wider] = resizeNode([turned], 'n1', 'se', startBox, { x: 0, y: 60 }, false);
+
+    expect(wider!.width).toBeGreaterThan(200);
+    expect(wider!.height).toBeCloseTo(100, 0);
+  });
+
+  it('leaves the opposite corner where it was drawn', () => {
+    // The element turns about its centre and the centre moves when the size
+    // does, so holding the far corner in the element's own frame is not enough
+    // — it still swings across the canvas and the shape slides under the cursor.
+    const before = heldCorner(turned);
+    const [resized] = resizeNode([turned], 'n1', 'se', startBox, { x: 0, y: 60 }, false);
+
+    const after = heldCorner(resized!);
+    expect(after.x).toBeCloseTo(before.x, 0);
+    expect(after.y).toBeCloseTo(before.y, 0);
+  });
+
+  it('keeps the turned box on the sheet', () => {
+    const atEdge: DiagramNode = { ...turned, x: 820, y: 60 };
+    const [resized] = resizeNode(
+      [atEdge],
+      'n1',
+      'se',
+      { x: 820, y: 60, width: 200, height: 100 },
+      { x: 400, y: 400 },
+      false,
+    );
+
+    const bounds = nodeBounds(resized!);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(DIAGRAM_CANVAS_HEIGHT);
+  });
+
+  it('is unchanged for a node that is not turned', () => {
+    const plain: DiagramNode = { ...turned, rotation: undefined };
+    const [resized] = resizeNode([plain], 'n1', 'se', startBox, { x: 40, y: 20 }, false);
+    expect(resized).toMatchObject({ x: 200, y: 200, width: 240, height: 120 });
   });
 });
 
@@ -830,5 +944,76 @@ describe('semantic containers', () => {
       expect(copy).not.toHaveProperty('parentId');
       expect(prepareDiagram(pasted.nodes, pasted.edges).ok).toBe(true);
     });
+  });
+});
+
+describe('measuring turned artwork', () => {
+  const turned: DiagramNode = {
+    id: 'a',
+    label: '',
+    x: 400,
+    y: 300,
+    shape: 'rectangle',
+    width: 200,
+    height: 100,
+    rotation: 45,
+  };
+
+  it('frames content by what it draws, not by what it stores', () => {
+    // This decides how a proposal is framed and where a reopened one is
+    // centred, so measuring the stored box cropped the corners a turned
+    // element actually shows off the board card.
+    const bounds = diagramContentBounds([turned], [])!;
+    const swept = nodeBounds(turned);
+
+    expect(bounds.left).toBeCloseTo(swept.x, 0);
+    expect(bounds.right).toBeCloseTo(swept.x + swept.width, 0);
+    // Wider than the 200 it stores, because the corners sweep past it.
+    expect(bounds.right - bounds.left).toBeGreaterThan(200);
+  });
+
+  it('pastes a turned shape without leaving its corners off the sheet', () => {
+    const fragment = copyDiagramFragment([turned], [], ['a']);
+    const pasted = pasteDiagramFragment([turned], [], fragment, { x: 5_000, y: 5_000 });
+
+    expect(pasted.ok).toBe(true);
+    if (!pasted.ok) return;
+    const copy = pasted.nodes[pasted.nodes.length - 1]!;
+    const bounds = nodeBounds(copy);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(DIAGRAM_CANVAS_HEIGHT);
+    // The copy is still turned; rotation travels with a paste.
+    expect(copy.rotation).toBe(45);
+  });
+
+  it('aligns a turned shape by the edge it actually shows', () => {
+    const plain: DiagramNode = { id: 'b', label: '', x: 40, y: 40, shape: 'rectangle' };
+    const aligned = alignNodes([turned, plain], ['a', 'b'], 'left');
+
+    const turnedLeft = nodeBounds(aligned.find((node) => node.id === 'a')!).x;
+    const plainLeft = nodeBounds(aligned.find((node) => node.id === 'b')!).x;
+    expect(turnedLeft).toBeCloseTo(plainLeft, 0);
+  });
+});
+
+describe('text that is typed is the text that is kept', () => {
+  const NEWLINE = String.fromCharCode(10);
+
+  it('drops blank lines before spending the line budget on them', () => {
+    // Stripping the padding after the cap meant leading blanks ate the budget
+    // and were then thrown away, leaving fewer real lines than the limit allows.
+    const padded = NEWLINE + NEWLINE + Array.from({ length: 12 }, (_, i) => `l${i}`).join(NEWLINE);
+    expect(prepareNodeLabel(padded).split(NEWLINE)).toHaveLength(DIAGRAM_LABEL_LINE_LIMIT);
+  });
+
+  it('never leaves a label ending in a line break', () => {
+    // Cutting at the character limit can land straight after a newline, and the
+    // empty line that leaves shifts the whole block half a line off-centre.
+    const long = ('word' + NEWLINE).repeat(60);
+    const prepared = prepareNodeLabel(long);
+    expect(prepared.endsWith(NEWLINE)).toBe(false);
+    expect(prepared.length).toBeLessThanOrEqual(DIAGRAM_LABEL_LIMIT);
   });
 });

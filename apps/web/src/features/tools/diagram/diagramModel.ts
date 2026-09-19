@@ -22,6 +22,11 @@ import {
   diagramNodeSize,
   effectiveDiagramNodeSize,
   offsetArrow,
+  boxCentre,
+  rotatePoint,
+  pathLocalBounds,
+  pointsBounds,
+  rotatedBounds,
   tableSize,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
@@ -75,8 +80,19 @@ export const DIAGRAM_CANVAS_HEIGHT = 600;
 // Eight units keeps hand-placed nodes tidy without feeling magnetic.
 export const DIAGRAM_GRID = 8;
 
-// Twenty-four characters remain editable while SVG text fitting keeps every fixed shape readable.
-export const DIAGRAM_LABEL_LIMIT = 24;
+/**
+ * The same 200 the write path has always allowed, and the same cap an arrow
+ * label and a table cell already carry.
+ *
+ * It was 24 here, which is about four words: long enough for a box on a
+ * flowchart and far too short for a textbox, and it made wrapping almost
+ * unreachable. The server never enforced 24 — this was a client-side limit
+ * alone, so raising it needs no contract change.
+ */
+export const DIAGRAM_LABEL_LIMIT = 200;
+
+/** A label may break where it is asked to, but not become a column of text. */
+export const DIAGRAM_LABEL_LINE_LIMIT = 12;
 
 // Edge labels use the same compact preview typography as node labels.
 export const DIAGRAM_EDGE_LABEL_LIMIT = 24;
@@ -144,22 +160,52 @@ export function snapToGrid(value: number): number {
   return Math.round(value / DIAGRAM_GRID) * DIAGRAM_GRID;
 }
 
+/**
+ * Where the stored top-left may sit so the *drawn* element stays on the sheet.
+ *
+ * A turned element does not occupy the box it stores: its corners sweep out a
+ * larger rectangle that starts above and to the left of `x`/`y`. `offset` is
+ * how far that rectangle begins before the stored corner, and `extent` how big
+ * it is, both taken once from `rotatedBounds` and reused for each axis.
+ *
+ * The far edge is applied before the near one, so an element larger than the
+ * sheet pins to the near edge rather than being pushed off the opposite side —
+ * the same order `clampDragToCanvas` uses, for the same reason.
+ */
+function clampAxisForExtent(value: number, offset: number, extent: number, limit: number): number {
+  const held = Math.max(-offset, Math.min(limit - extent - offset, value));
+  // An unturned element has a zero offset, and negating it gives `-0`, which is
+  // a distinct value to anything comparing positions.
+  return held === 0 ? 0 : held;
+}
+
+function turnedExtent(size: { width: number; height: number }, rotation?: number): DiagramRect {
+  return rotatedBounds({ x: 0, y: 0, width: size.width, height: size.height }, rotation);
+}
+
 function clampPositionForSize(
   point: DiagramPoint,
   size: { width: number; height: number },
+  rotation?: number,
 ): DiagramPoint {
+  const extent = turnedExtent(size, rotation);
   return {
-    x: Math.min(DIAGRAM_CANVAS_WIDTH - size.width, Math.max(0, point.x)),
-    y: Math.min(DIAGRAM_CANVAS_HEIGHT - size.height, Math.max(0, point.y)),
+    x: clampAxisForExtent(point.x, extent.x, extent.width, DIAGRAM_CANVAS_WIDTH),
+    y: clampAxisForExtent(point.y, extent.y, extent.height, DIAGRAM_CANVAS_HEIGHT),
   };
 }
 
 function snapPositionForSize(
   point: DiagramPoint,
   size: { width: number; height: number },
+  rotation?: number,
 ): DiagramPoint {
-  const clamped = clampPositionForSize(point, size);
-  return clampPositionForSize({ x: snapToGrid(clamped.x), y: snapToGrid(clamped.y) }, size);
+  const clamped = clampPositionForSize(point, size, rotation);
+  return clampPositionForSize(
+    { x: snapToGrid(clamped.x), y: snapToGrid(clamped.y) },
+    size,
+    rotation,
+  );
 }
 
 export function clampNodePosition(
@@ -185,9 +231,11 @@ export function placeNodePosition(
   point: DiagramPoint,
   size: DiagramNodeSize,
   snap = true,
+  /** The element's own turn, so the clamp holds what is drawn on the sheet. */
+  rotation?: number,
 ): DiagramPoint {
-  if (snap) return snapPositionForSize(point, size);
-  const clamped = clampPositionForSize(point, size);
+  if (snap) return snapPositionForSize(point, size, rotation);
+  const clamped = clampPositionForSize(point, size, rotation);
   return { x: Math.round(clamped.x), y: Math.round(clamped.y) };
 }
 
@@ -248,7 +296,28 @@ export function diagramRectToClientRect(
   };
 }
 
+/**
+ * Where a node actually sits on the sheet, turned as it is drawn.
+ *
+ * This is the *visual* extent, not the stored box: a rotated shape no longer
+ * occupies the rectangle its `x`/`y`/`width`/`height` describe. Everything that
+ * asks about extent — the marquee, clamping to the sheet, align and distribute,
+ * fit-to-view, the selection box — wants the turned one, which is why rotation
+ * is folded in here rather than at each of those call sites.
+ *
+ * Resizing is the exception and does not come through here: it works in the
+ * element's own unrotated frame, where a corner drag still means what it says.
+ */
 export function nodeBounds(node: DiagramNode): DiagramRect {
+  const size = effectiveDiagramNodeSize(node);
+  return rotatedBounds(
+    { x: node.x, y: node.y, width: size.width, height: size.height },
+    node.rotation,
+  );
+}
+
+/** The stored, unrotated box — for resizing and for placing the label inside it. */
+export function nodeLocalBounds(node: DiagramNode): DiagramRect {
   const size = effectiveDiagramNodeSize(node);
   return { x: node.x, y: node.y, width: size.width, height: size.height };
 }
@@ -285,8 +354,31 @@ export function createNodeId(existing: readonly DiagramNode[]): string {
   return `n${index}`;
 }
 
+/**
+ * Tidy a typed label without destroying the lines in it.
+ *
+ * Runs of spaces and tabs collapse, as they always did, but a newline is now
+ * content: it is the only way to say where a line should break, and collapsing
+ * every whitespace character to one space threw that away before it could be
+ * stored.
+ */
 export function prepareNodeLabel(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, DIAGRAM_LABEL_LIMIT);
+  const tidied = value
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    // Blank lines at either end are almost always a stray Enter, not intent.
+    // Dropped *before* the line cap, or leading blanks eat the budget and are
+    // then thrown away, leaving fewer real lines than the limit allows.
+    .join('\n')
+    .replace(/^\n+|\n+$/g, '')
+    .split('\n')
+    .slice(0, DIAGRAM_LABEL_LINE_LIMIT)
+    .join('\n');
+
+  // Cutting at the character limit can land straight after a newline, leaving a
+  // trailing blank line: `wrapDiagramLabel` then lays out an extra empty line
+  // and the whole block renders half a line off-centre in its shape.
+  return tidied.slice(0, DIAGRAM_LABEL_LIMIT).replace(/\n+$/, '');
 }
 
 export function prepareEdgeLabel(value: string): string {
@@ -346,15 +438,19 @@ export function addNode(
   shape: DiagramNodeShape,
   at?: DiagramPoint,
   snap = true,
+  /**
+   * An explicit size, from dragging the shape out rather than clicking it down.
+   * Absent keeps the shape's own default, which is what a click still gets.
+   */
+  size?: DiagramNodeSize,
 ): AddNodeResult {
   if (nodes.length >= DIAGRAM_NODE_LIMIT) {
     return { ok: false, error: `A diagram can hold ${DIAGRAM_NODE_LIMIT} elements at most.` };
   }
 
   const id = createNodeId(nodes);
-  const position = at
-    ? placeNodePosition(at, diagramNodeSize(shape), snap)
-    : findFreeNodePosition(nodes, shape);
+  const footprint = size ?? diagramNodeSize(shape);
+  const position = at ? placeNodePosition(at, footprint, snap) : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
     // Empty, not named after its shape: the first thing anyone does with a new
@@ -363,6 +459,9 @@ export function addNode(
     x: position.x,
     y: position.y,
     shape,
+    // Only written when it was actually chosen: a default-sized shape carries no
+    // width/height, exactly as every shape did before drag-to-size existed.
+    ...(size ? { width: size.width, height: size.height } : {}),
   };
 
   return { ok: true, nodes: [...nodes, node], addedId: id };
@@ -376,7 +475,7 @@ export function moveNode(
 ): DiagramNode[] {
   return nodes.map((node) =>
     node.id === id
-      ? { ...node, ...placeNodePosition(at, effectiveDiagramNodeSize(node), snap) }
+      ? { ...node, ...placeNodePosition(at, effectiveDiagramNodeSize(node), snap, node.rotation) }
       : node,
   );
 }
@@ -399,6 +498,7 @@ export function moveNodesBy(
     { x: anchorOrigin.x + delta.x, y: anchorOrigin.y + delta.y },
     anchorNode ? effectiveDiagramNodeSize(anchorNode) : diagramNodeSize(undefined),
     snap,
+    anchorNode?.rotation,
   );
   let applied = { x: anchorTarget.x - anchorOrigin.x, y: anchorTarget.y - anchorOrigin.y };
 
@@ -406,9 +506,26 @@ export function moveNodesBy(
     const origin = origins[node.id];
     if (!origin) continue;
     const size = effectiveDiagramNodeSize(node);
+    // The turned box is what has to stay on the sheet. A rotated rectangle
+    // sits in a different, larger rectangle than the one it stores, so
+    // clamping the stored box let a 45-degree shape be walked until its
+    // corners hung off the canvas — which is the case this clamp exists for.
+    const visual = rotatedBounds(
+      { x: origin.x, y: origin.y, width: size.width, height: size.height },
+      node.rotation,
+    );
+    // Rounded inward on both sides: a turned box has fractional extents, and
+    // the position is rounded after this, so an exact limit could be rounded a
+    // fraction past the edge. Giving up at most one unit keeps it honest.
     applied = {
-      x: Math.min(DIAGRAM_CANVAS_WIDTH - size.width - origin.x, Math.max(-origin.x, applied.x)),
-      y: Math.min(DIAGRAM_CANVAS_HEIGHT - size.height - origin.y, Math.max(-origin.y, applied.y)),
+      x: Math.min(
+        Math.floor(DIAGRAM_CANVAS_WIDTH - visual.width - visual.x),
+        Math.max(Math.ceil(-visual.x), applied.x),
+      ),
+      y: Math.min(
+        Math.floor(DIAGRAM_CANVAS_HEIGHT - visual.height - visual.y),
+        Math.max(Math.ceil(-visual.y), applied.y),
+      ),
     };
   }
 
@@ -467,10 +584,15 @@ function applyNodeOffsets(
     if (!offset) return node;
     return {
       ...node,
+      // The offsets are computed from `nodeBounds`, which is the turned extent,
+      // so the clamp has to measure the same thing. Clamping the stored box
+      // instead quietly refused part of the move and left a turned member out
+      // of line with the rest of the selection it was aligned to.
       ...placeNodePosition(
         { x: node.x + offset.x, y: node.y + offset.y },
         effectiveDiagramNodeSize(node),
         false,
+        node.rotation,
       ),
     };
   });
@@ -574,16 +696,25 @@ export function clampNodesInsideContainer(
   return nodes.map((node) => {
     if (!descendants.has(node.id)) return node;
     const size = effectiveDiagramNodeSize(node);
+    // A turned child is held by the corners it actually shows, not by the box
+    // it stores: `node.x` sits inside the swept rectangle, so clamping it left
+    // the corner outside the border while the clamp reported itself done. The
+    // container itself never turns, so its own bounds are already square.
+    const swept = rotatedBounds(
+      { x: node.x, y: node.y, width: size.width, height: size.height },
+      node.rotation,
+    );
+    const lead = { x: swept.x - node.x, y: swept.y - node.y };
     const x = Math.min(
-      Math.max(node.x, bounds.x),
-      Math.max(bounds.x, bounds.x + bounds.width - size.width),
+      Math.max(node.x, bounds.x - lead.x),
+      Math.max(bounds.x - lead.x, bounds.x + bounds.width - swept.width - lead.x),
     );
     const y = Math.min(
-      Math.max(node.y, bounds.y),
-      Math.max(bounds.y, bounds.y + bounds.height - size.height),
+      Math.max(node.y, bounds.y - lead.y),
+      Math.max(bounds.y - lead.y, bounds.y + bounds.height - swept.height - lead.y),
     );
     if (x === node.x && y === node.y) return node;
-    return { ...node, ...placeNodePosition({ x, y }, size, false) };
+    return { ...node, ...placeNodePosition({ x, y }, size, false, node.rotation) };
   });
 }
 
@@ -637,6 +768,15 @@ export function resizeNode(
   const movesLeftEdge = corner === 'nw' || corner === 'sw';
   const movesTopEdge = corner === 'nw' || corner === 'ne';
 
+  const rotation = nodes.find((node) => node.id === id)?.rotation ?? 0;
+  // The handles are drawn inside the element's own turn, so a drag "outward"
+  // is outward *in the element's frame*. Bringing the pointer delta back into
+  // that frame is what makes the shape grow along the axis the handle was
+  // pulled; without it a 90-degree shape resized perpendicular to the drag and
+  // a 180-degree one resized backwards. `updatePathEdit` already does this for
+  // an anchor, and resize was simply missed.
+  const pull = rotation ? rotatePoint(delta, { x: 0, y: 0 }, -rotation) : delta;
+
   const maxWidth = Math.max(
     DIAGRAM_MIN_NODE_WIDTH,
     Math.min(
@@ -652,8 +792,8 @@ export function resizeNode(
     ),
   );
 
-  let width = start.width + (movesLeftEdge ? -delta.x : delta.x);
-  let height = start.height + (movesTopEdge ? -delta.y : delta.y);
+  let width = start.width + (movesLeftEdge ? -pull.x : pull.x);
+  let height = start.height + (movesTopEdge ? -pull.y : pull.y);
 
   if (lockAspect) {
     const scale = clampNumber(
@@ -670,8 +810,32 @@ export function resizeNode(
 
   width = Math.round(width);
   height = Math.round(height);
-  const x = Math.round(movesLeftEdge ? start.x + start.width - width : start.x);
-  const y = Math.round(movesTopEdge ? start.y + start.height - height : start.y);
+  let x = Math.round(movesLeftEdge ? start.x + start.width - width : start.x);
+  let y = Math.round(movesTopEdge ? start.y + start.height - height : start.y);
+
+  if (rotation) {
+    // Holding the far corner still in the element's own frame is not enough:
+    // the element turns about its centre, and the centre moves when the size
+    // changes, so that corner still swings across the canvas and the shape
+    // slides out from under the cursor. Translating the finished box so the
+    // corner lands back where it was drawn fixes it in the frame the user is
+    // actually looking at.
+    const held = {
+      x: movesLeftEdge ? start.x + start.width : start.x,
+      y: movesTopEdge ? start.y + start.height : start.y,
+    };
+    const before = rotatePoint(held, boxCentre(start), rotation);
+    const after = rotatePoint(held, { x: x + width / 2, y: y + height / 2 }, rotation);
+    x = Math.round(x + before.x - after.x);
+    y = Math.round(y + before.y - after.y);
+
+    // And the turned box, not the stored one, is what has to stay on the sheet.
+    const turned = rotatedBounds({ x, y, width, height }, rotation);
+    const back = (edge: number, extent: number, limit: number) =>
+      Math.max(Math.min(edge, limit - extent), 0) - edge;
+    x = Math.round(x + back(turned.x, turned.width, DIAGRAM_CANVAS_WIDTH));
+    y = Math.round(y + back(turned.y, turned.height, DIAGRAM_CANVAS_HEIGHT));
+  }
 
   return nodes.map((node) => (node.id === id ? { ...node, x, y, width, height } : node));
 }
@@ -781,6 +945,7 @@ export function pasteDiagramFragment(
         { x: source.x + offset.x, y: source.y + offset.y },
         effectiveDiagramNodeSize(source),
         snap,
+        source.rotation,
       ),
     };
     nextNodes.push(copy);
@@ -812,7 +977,13 @@ export function renameNode(
   id: string,
   label: string,
 ): DiagramNode[] {
-  const nextLabel = label.slice(0, DIAGRAM_LABEL_LIMIT);
+  // Mid-edit, so the text is left exactly as typed apart from the cap: tidying
+  // it here would fight the caret on every keystroke.
+  const nextLabel = label
+    .split('\n')
+    .slice(0, DIAGRAM_LABEL_LINE_LIMIT)
+    .join('\n')
+    .slice(0, DIAGRAM_LABEL_LIMIT);
   return nodes.map((node) => (node.id === id ? { ...node, label: nextLabel } : node));
 }
 
@@ -927,28 +1098,24 @@ export function diagramContentBounds(
   const rights: number[] = [];
   const bottoms: number[] = [];
 
-  for (const node of nodes) {
-    const size = effectiveDiagramNodeSize(node);
-    xs.push(node.x);
-    ys.push(node.y);
-    rights.push(node.x + size.width);
-    bottoms.push(node.y + size.height);
-  }
+  // Measured as drawn, not as stored. This decides how a proposal is framed and
+  // where a reopened one is centred, so a turned element measured by its stored
+  // box had the corners it actually shows cropped off the board card.
+  const addBox = (box: DiagramRect) => {
+    xs.push(box.x);
+    ys.push(box.y);
+    rights.push(box.x + box.width);
+    bottoms.push(box.y + box.height);
+  };
+
+  for (const node of nodes) addBox(nodeBounds(node));
   for (const stroke of ink) {
-    for (const point of stroke.points) {
-      xs.push(point.x);
-      ys.push(point.y);
-      rights.push(point.x);
-      bottoms.push(point.y);
-    }
+    const local = pointsBounds(stroke.points);
+    if (local) addBox(rotatedBounds(local, stroke.rotation));
   }
   for (const path of paths) {
-    for (const anchor of path.anchors) {
-      xs.push(anchor.x);
-      ys.push(anchor.y);
-      rights.push(anchor.x);
-      bottoms.push(anchor.y);
-    }
+    const local = pathLocalBounds(path);
+    if (local) addBox(rotatedBounds(local, path.rotation));
   }
   for (const table of tables) {
     const size = tableSize(table);

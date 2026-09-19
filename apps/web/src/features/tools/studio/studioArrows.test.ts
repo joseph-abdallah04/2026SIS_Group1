@@ -7,6 +7,9 @@ import {
   arrowCapGeometry,
   arrowGeometry,
   arrowHitTest,
+  arrowLabelLines,
+  prepareArrowLabel,
+  ARROW_LABEL_MAX_LINES,
   nearestTOnRoute,
   offsetArrow,
   type ArrowElement,
@@ -949,5 +952,140 @@ describe('the arrow read path', () => {
     });
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.arrows).toBeUndefined();
+  });
+});
+
+describe('arrow labels', () => {
+  const NEWLINE = String.fromCharCode(10);
+
+  it('cuts a label to the lines it will actually draw, when it is committed', () => {
+    // Storing more lines than the arrow paints meant the extra ones survived
+    // the round trip to the server and came back invisible, reappearing only
+    // when the editor was reopened — the canvas looking like it lost text and
+    // then found it again.
+    const many = Array.from({ length: 10 }, (_, index) => `line ${index}`).join(NEWLINE);
+    const prepared = prepareArrowLabel(many);
+
+    expect(prepared.split(NEWLINE)).toHaveLength(ARROW_LABEL_MAX_LINES);
+    // What is stored is exactly what is drawn.
+    expect(arrowLabelLines(prepared)).toHaveLength(ARROW_LABEL_MAX_LINES);
+  });
+
+  it('collapses runs of spaces, which a centred line shows up', () => {
+    expect(prepareArrowLabel(`needs   review${NEWLINE}  by   Friday  `)).toBe(
+      `needs review${NEWLINE}by Friday`,
+    );
+  });
+
+  it('drops a stray Enter at either end', () => {
+    expect(prepareArrowLabel(`${NEWLINE}${NEWLINE}ship it${NEWLINE}${NEWLINE}`)).toBe('ship it');
+  });
+
+  it('keeps a label that already fits exactly as it was typed', () => {
+    expect(prepareArrowLabel(`one${NEWLINE}two`)).toBe(`one${NEWLINE}two`);
+  });
+});
+
+describe('arrows to a turned element', () => {
+  /** A 200x100 rectangle centred on (200, 200), turned a quarter turn. */
+  const turned: ArrowTarget = {
+    id: 'n1',
+    box: { x: 100, y: 150, width: 200, height: 100 },
+    shape: 'rectangle',
+    rotation: 90,
+  };
+
+  const lookup = (target: ArrowTarget) => (id: string) => (id === target.id ? target : undefined);
+
+  it('lands on the face that is actually facing the arrow', () => {
+    // Turned a quarter turn, the rectangle's long sides run vertically: it is
+    // 100 wide and 200 tall on screen. An arrow coming from the left must stop
+    // 50 from the centre, not the 100 the unturned box would give.
+    const arrow: ArrowElement = {
+      id: 'a1',
+      from: { x: 0, y: 200 },
+      to: { x: 200, y: 200, elementId: 'n1' },
+    };
+
+    const { points } = arrowGeometry(arrow, lookup(turned));
+    const landing = points[points.length - 1]!;
+
+    expect(landing.y).toBeCloseTo(200, 0);
+    expect(landing.x).toBeCloseTo(150, 0);
+  });
+
+  it('clips a turned ellipse on its curve, not on the box around it', () => {
+    // The exact test of working in the element's own frame: a box that merely
+    // contained the ellipse would stop the arrow short of the curve.
+    const ellipse: ArrowTarget = {
+      id: 'e1',
+      box: { x: 100, y: 150, width: 200, height: 100 },
+      shape: 'ellipse',
+      rotation: 90,
+    };
+    const arrow: ArrowElement = {
+      id: 'a2',
+      from: { x: 200, y: 0 },
+      to: { x: 200, y: 200, elementId: 'e1' },
+    };
+
+    const { points } = arrowGeometry(arrow, lookup(ellipse));
+    const landing = points[points.length - 1]!;
+
+    // Turned, the ellipse reaches 100 above its centre along the vertical axis.
+    expect(landing.x).toBeCloseTo(200, 0);
+    expect(landing.y).toBeCloseTo(100, 0);
+  });
+
+  it('carries a pinned attachment round with the element', () => {
+    // `at` names a spot on the element's own frame, so it has to follow the
+    // element round rather than staying put on the canvas.
+    const arrow: ArrowElement = {
+      id: 'a3',
+      from: { x: 0, y: 0 },
+      to: { x: 200, y: 200, elementId: 'n1', at: { u: 0, v: 0.5 } },
+    };
+
+    const { points } = arrowGeometry(arrow, lookup(turned));
+    const landing = points[points.length - 1]!;
+
+    // The middle of the unturned left edge is (100, 200); a quarter turn about
+    // (200, 200) carries it to (200, 100).
+    expect(landing.x).toBeCloseTo(200, 0);
+    expect(landing.y).toBeCloseTo(100, 0);
+  });
+
+  it('is unchanged for an element that is not turned', () => {
+    const plain: ArrowTarget = { ...turned, rotation: undefined };
+    const arrow: ArrowElement = {
+      id: 'a4',
+      from: { x: 0, y: 200 },
+      to: { x: 200, y: 200, elementId: 'n1' },
+    };
+
+    const { points } = arrowGeometry(arrow, lookup(plain));
+    const landing = points[points.length - 1]!;
+
+    expect(landing.x).toBeCloseTo(100, 0);
+    expect(landing.y).toBeCloseTo(200, 0);
+  });
+
+  it('keeps a self-loop attached to the element it describes', () => {
+    const loop: ArrowElement = {
+      id: 'a5',
+      from: { x: 200, y: 200, elementId: 'n1' },
+      to: { x: 200, y: 200, elementId: 'n1' },
+      route: 'elbow',
+    };
+
+    const { points } = arrowGeometry(loop, lookup(turned));
+    const drawn = arrowBounds(points)!;
+    // The loop bulges clear of the element and comes back to it, so its box has
+    // to overlap the turned element rather than sitting off to one side.
+    const turnedBox = { x: 150, y: 100, width: 100, height: 200 };
+    expect(drawn.x).toBeLessThanOrEqual(turnedBox.x + turnedBox.width);
+    expect(drawn.x + drawn.width).toBeGreaterThanOrEqual(turnedBox.x);
+    expect(drawn.y).toBeLessThanOrEqual(turnedBox.y + turnedBox.height);
+    expect(drawn.y + drawn.height).toBeGreaterThanOrEqual(turnedBox.y);
   });
 });

@@ -162,9 +162,23 @@ export function diagramLabelWidthRatio(shape?: DiagramNodeShape): number {
 // representable: the artifact is shared, persisted, and re-rendered by other
 // people's clients.
 
-export type DiagramFillKey = 'neutral' | 'surface' | 'blue' | 'green' | 'amber' | 'rose' | 'violet';
+/**
+ * `transparent` is a colour the user picks, not the absence of a choice.
+ *
+ * The difference matters. An absent `fillColor` means "this was never styled",
+ * and every resolver below answers that with the surface's original hard-coded
+ * fill — which is what keeps pre-v2 diagrams rendering as they always did. So
+ * clearing the key could never mean "see-through": it meant "go back to grey",
+ * and the picker's clear button read as broken because of it.
+ *
+ * An explicit `transparent` says what it means, and says it in the same closed
+ * set as every other colour, so it survives the round trip through the write
+ * boundary and the board card like any other.
+ */
+export type DiagramFillKey =
+  'neutral' | 'surface' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'transparent';
 export type DiagramStrokeKey =
-  'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink';
+  'slate' | 'grey' | 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'ink' | 'transparent';
 export type DiagramStrokeWidthPreset = 'thin' | 'regular' | 'thick';
 export type DiagramFontSizePreset = 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -184,6 +198,9 @@ export const DIAGRAM_FILL_KEYS = [
   'amber',
   'rose',
   'violet',
+  // Appended, like `ink` below: the order drives the inspector's swatch row and
+  // existing diagrams' swatches should not shuffle because a key was added.
+  'transparent',
 ] as const satisfies readonly DiagramFillKey[];
 
 // `ink` is appended rather than inserted: the order drives the inspector's
@@ -198,6 +215,7 @@ export const DIAGRAM_STROKE_KEYS = [
   'rose',
   'violet',
   'ink',
+  'transparent',
 ] as const satisfies readonly DiagramStrokeKey[];
 
 export const DIAGRAM_STROKE_WIDTH_PRESETS = [
@@ -240,6 +258,9 @@ export const DIAGRAM_FILL_COLORS: Record<DiagramFillKey, string> = {
   amber: '#F8ECD4',
   rose: '#FAE0E0',
   violet: '#E8E1F5',
+  // No contrast to assert for this one, so `diagramStyle.test.ts` skips it: a
+  // label on a transparent fill is read against whatever sits behind it.
+  transparent: 'transparent',
 };
 
 // Borders and arrows are graphical objects, so they clear the 3:1 WCAG 1.4.11
@@ -255,6 +276,7 @@ export const DIAGRAM_STROKE_COLORS: Record<DiagramStrokeKey, string> = {
   // The drawing tool's default pen, brought into the shared palette so ink and
   // shapes on one canvas draw from one set of colours instead of two.
   ink: '#080C15',
+  transparent: 'transparent',
 };
 
 // `regular` reproduces the editor's original widths, so choosing it explicitly
@@ -348,6 +370,122 @@ export type DiagramStyledEdge = Partial<
 >;
 
 /** The node's stored size when it has one, otherwise its fixed shape size. */
+// --- Rotation (v4.5) ------------------------------------------------------
+//
+// One element's angle, shared by every surface that draws or measures it. The
+// editor, the board card and the assistant preview all rotate about the same
+// centre by the same rule, so a turned shape looks the same everywhere.
+
+/** A box in scene units. Structural, so `DiagramRect` and `ArrowBox` both fit. */
+export interface RotatableBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ScenePoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Rotation steps, in degrees.
+ *
+ * Five is fine enough to line a shape up by eye and coarse enough that it never
+ * lands on an angle nobody asked for. Shift jumps by 45, which is every
+ * diagonal and every right angle — the angles people actually reach for.
+ */
+export const DIAGRAM_ROTATION_STEP = 5;
+export const DIAGRAM_ROTATION_COARSE_STEP = 45;
+
+/** An angle folded into `[0, 360)`, which is the range the write path accepts. */
+export function normalizeRotation(degrees: number): number {
+  if (!Number.isFinite(degrees)) return 0;
+  const wrapped = degrees % 360;
+  const positive = wrapped < 0 ? wrapped + 360 : wrapped;
+  // Rounded away from floating-point dust so a shape turned back to zero
+  // stores 0 rather than 359.99999999999994 and keeps its `rotation` key.
+  const rounded = Math.round(positive * 100) / 100;
+  // That rounding can reach 360, which is the one value the write path refuses:
+  // the range is half-open, and 360 is the same angle as 0 anyway.
+  return rounded >= 360 ? 0 : rounded;
+}
+
+/** The centre an element turns about: the middle of its unrotated box. */
+export function boxCentre(box: RotatableBox): ScenePoint {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** `point` turned `degrees` clockwise about `origin`. */
+export function rotatePoint(point: ScenePoint, origin: ScenePoint, degrees: number): ScenePoint {
+  if (!degrees) return { x: point.x, y: point.y };
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = point.x - origin.x;
+  const dy = point.y - origin.y;
+  return {
+    x: origin.x + dx * cos - dy * sin,
+    y: origin.y + dx * sin + dy * cos,
+  };
+}
+
+/**
+ * A pointer position expressed in the element's own unrotated frame.
+ *
+ * Hit-testing a rotated element this way means every existing axis-aligned test
+ * keeps working untouched: the shape is never really turned, the question is.
+ */
+export function toElementSpace(
+  point: ScenePoint,
+  box: RotatableBox,
+  rotation: number | undefined,
+): ScenePoint {
+  if (!rotation) return { x: point.x, y: point.y };
+  return rotatePoint(point, boxCentre(box), -rotation);
+}
+
+/**
+ * The axis-aligned box that contains the element once it is turned.
+ *
+ * Always at least as large as the stored box, and larger at every angle that is
+ * not a multiple of 90. This is what clamping and the marquee have to use: the
+ * stored box of a rotated shape describes an area the shape no longer occupies.
+ */
+export function rotatedBounds(box: RotatableBox, rotation: number | undefined): RotatableBox {
+  if (!rotation || rotation % 180 === 0) return { ...box };
+
+  const centre = boxCentre(box);
+  const corners: ScenePoint[] = [
+    { x: box.x, y: box.y },
+    { x: box.x + box.width, y: box.y },
+    { x: box.x + box.width, y: box.y + box.height },
+    { x: box.x, y: box.y + box.height },
+  ].map((corner) => rotatePoint(corner, centre, rotation));
+
+  const xs = corners.map((corner) => corner.x);
+  const ys = corners.map((corner) => corner.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(...xs) - minX,
+    height: Math.max(...ys) - minY,
+  };
+}
+
+/** The SVG transform that turns an element about its own centre, or nothing. */
+export function rotationTransform(
+  box: RotatableBox,
+  rotation: number | undefined,
+): string | undefined {
+  if (!rotation) return undefined;
+  const centre = boxCentre(box);
+  return `rotate(${rotation} ${centre.x} ${centre.y})`;
+}
+
 export function effectiveDiagramNodeSize(
   node: Pick<DiagramNode, 'shape' | 'width' | 'height'>,
 ): DiagramNodeSize {
@@ -412,8 +550,44 @@ export function diagramEdgeDash(edge: DiagramStyledEdge, strokeWidth: number): D
 // the board card renders inside a scaled viewBox and the editor inside another,
 // and both must agree on the wrap without a DOM text-measuring pass.
 const DIAGRAM_GLYPH_ADVANCE_RATIO = 0.55;
-const DIAGRAM_LABEL_PADDING = 12;
+/** Exported so an inline editor can pad itself to wrap exactly where a label does. */
+export const DIAGRAM_LABEL_PADDING = 12;
 export const DIAGRAM_LABEL_MAX_LINES = 3;
+
+/**
+ * The most lines a textbox can show, at a given size.
+ *
+ * Derived from the tallest a node may be rather than fixed, because the two
+ * caps have to agree: a flat 24 lines needs about 930 units at the largest
+ * font, and a node stops at 320. The text was centred in a box that could not
+ * hold it, so it painted straight through the outline, over its neighbours and
+ * off the sheet — nothing clips a label on any surface.
+ */
+export function diagramTextMaxLines(fontSize: number): number {
+  const lineHeight = fontSize * 1.25;
+  const padding = Math.max(8, fontSize);
+  return Math.max(1, Math.floor((DIAGRAM_MAX_NODE_HEIGHT - padding) / lineHeight));
+}
+
+/**
+ * The height a textbox needs to show every line of its label.
+ *
+ * Kept here beside the layout it has to agree with: the editor grows the stored
+ * height with this, and the board card lays the same label out inside it.
+ */
+export function diagramTextBoxHeight(
+  node: Pick<DiagramNode, 'label' | 'shape' | 'width' | 'height' | 'fontSizePreset'>,
+): number {
+  const layout = diagramNodeLabelLayout(node);
+  const padding = Math.max(8, layout.fontSize);
+  return Math.max(
+    DIAGRAM_MIN_NODE_HEIGHT,
+    Math.min(
+      DIAGRAM_MAX_NODE_HEIGHT,
+      Math.round(Math.max(1, layout.lines.length) * layout.lineHeight + padding),
+    ),
+  );
+}
 
 export function wrapDiagramLabel(
   label: string,
@@ -423,33 +597,48 @@ export function wrapDiagramLabel(
 ): string[] {
   const usable = Math.max(1, width - DIAGRAM_LABEL_PADDING);
   const perLine = Math.max(1, Math.floor(usable / (fontSize * DIAGRAM_GLYPH_ADVANCE_RATIO)));
-  const words = label.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [];
+  if (label.trim().length === 0) return [];
 
   const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= perLine) {
-      current = candidate;
+  // Wrapped a paragraph at a time, so a break the author typed is kept and the
+  // text either side of it wraps independently. Before this every whitespace
+  // character was the same thing, and a deliberate line break read as a space.
+  for (const paragraph of label.split('\n')) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      lines.push('');
       continue;
     }
-    if (current) lines.push(current);
-    // A single word longer than the line is hard-broken rather than overflowing.
-    let rest = word;
-    while (rest.length > perLine) {
-      lines.push(rest.slice(0, perLine));
-      rest = rest.slice(perLine);
+
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= perLine) {
+        current = candidate;
+        continue;
+      }
+      if (current) lines.push(current);
+      // A single word longer than the line is hard-broken rather than overflowing.
+      let rest = word;
+      while (rest.length > perLine) {
+        lines.push(rest.slice(0, perLine));
+        rest = rest.slice(perLine);
+      }
+      current = rest;
     }
-    current = rest;
+    if (current) lines.push(current);
   }
-  if (current) lines.push(current);
 
   if (lines.length <= maxLines) return lines;
   const kept = lines.slice(0, maxLines);
-  const last = kept[maxLines - 1]!;
-  kept[maxLines - 1] = `${last.slice(0, Math.max(0, perLine - 1)).trimEnd()}\u2026`;
-  return kept;
+  // The mark goes on the last line that has something on it. A break typed just
+  // before the cut left the final kept line empty, so the shape showed its text,
+  // a gap, and then a line consisting of nothing but an ellipsis.
+  let mark = maxLines - 1;
+  while (mark > 0 && kept[mark]!.length === 0) mark -= 1;
+  const last = kept[mark]!;
+  kept[mark] = `${last.slice(0, Math.max(0, perLine - 1)).trimEnd()}\u2026`;
+  return kept.slice(0, mark + 1);
 }
 
 export interface DiagramLabelLayout {
@@ -470,10 +659,14 @@ export function diagramNodeLabelLayout(
   const size = effectiveDiagramNodeSize(node);
   const fontSize = diagramNodeFontSize(node);
   const lineHeight = fontSize * 1.25;
-  const maxLines = Math.max(
-    1,
-    Math.min(DIAGRAM_LABEL_MAX_LINES, Math.floor(size.height / lineHeight)),
-  );
+  // A textbox is text and nothing else, so it shows all of it: its height is
+  // grown to fit rather than its words being cut off. Every other shape has a
+  // form of its own to keep, so a label too long for it still ends in an
+  // ellipsis — which is the distinction the studio's users asked for.
+  const maxLines =
+    node.shape === 'text'
+      ? diagramTextMaxLines(fontSize)
+      : Math.max(1, Math.min(DIAGRAM_LABEL_MAX_LINES, Math.floor(size.height / lineHeight)));
   // Tapered shapes are narrower than their box where the label sits.
   const usableWidth = size.width * diagramLabelWidthRatio(node.shape);
   const lines = wrapDiagramLabel(node.label, usableWidth, fontSize, maxLines);
@@ -679,6 +872,20 @@ export interface DiagramNode {
   labelBold?: boolean;
   labelColor?: DiagramStrokeKey;
   labelAlign?: DiagramTextAlign;
+  /**
+   * v4.5 rotation, in degrees clockwise about the element's own centre.
+   *
+   * Absent means 0, so every diagram authored before this renders untouched.
+   * Stored as an angle rather than baked into `x`/`y` and the label layout
+   * because rotation has to be reversible: a shape turned 5 degrees at a time
+   * and then straightened must come back to exactly where it started, which a
+   * transform applied destructively cannot promise.
+   *
+   * The stored box stays axis-aligned. Everything that reasons about extent —
+   * clamping to the sheet, the marquee, arrow attachment — asks for the rotated
+   * bounding box instead (`rotatedBounds`).
+   */
+  rotation?: number;
 }
 
 export type DiagramParentedNode = Pick<DiagramNode, 'id' | 'parentId'>;

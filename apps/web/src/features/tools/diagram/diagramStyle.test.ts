@@ -19,7 +19,9 @@ import {
   diagramEdgeStrokeWidth,
   diagramNodeFill,
   diagramNodeFontSize,
+  tableAutoRowHeight,
   diagramNodeLabelLayout,
+  diagramTextBoxHeight,
   diagramNodeSize,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
@@ -48,31 +50,39 @@ function contrastRatio(a: string, b: string): number {
 
 const CANVAS_WHITE = '#FFFFFF';
 
+/**
+ * `transparent` is the one palette entry with no colour of its own, so there is
+ * no ratio to assert: what a transparent fill is read against is whatever the
+ * element happens to sit on. Filtered out here rather than special-cased inside
+ * each assertion, so a future colourless key is excluded once.
+ */
+const opaque = (palette: Record<string, string>): [string, string][] =>
+  Object.entries(palette).filter(([, value]) => value !== 'transparent');
+
+const OPAQUE_FILLS = opaque(DIAGRAM_FILL_COLORS);
+const OPAQUE_STROKES = opaque(DIAGRAM_STROKE_COLORS);
+
 describe('diagram palette accessibility', () => {
   // WCAG 1.4.3: label text on any offered fill.
-  it.each(Object.entries(DIAGRAM_FILL_COLORS))(
-    'keeps label ink readable on the %s fill',
-    (_key, fill) => {
-      expect(contrastRatio(fill, DIAGRAM_LABEL_INK)).toBeGreaterThanOrEqual(4.5);
-    },
-  );
+  it.each(OPAQUE_FILLS)('keeps label ink readable on the %s fill', (_key, fill) => {
+    expect(contrastRatio(fill, DIAGRAM_LABEL_INK)).toBeGreaterThanOrEqual(4.5);
+  });
 
   // WCAG 1.4.11: borders and arrows are graphical objects, not text.
-  it.each(Object.entries(DIAGRAM_STROKE_COLORS))(
-    'keeps the %s stroke visible on the bare canvas',
-    (_key, stroke) => {
-      expect(contrastRatio(stroke, CANVAS_WHITE)).toBeGreaterThanOrEqual(3);
-    },
-  );
+  it.each(OPAQUE_STROKES)('keeps the %s stroke visible on the bare canvas', (_key, stroke) => {
+    expect(contrastRatio(stroke, CANVAS_WHITE)).toBeGreaterThanOrEqual(3);
+  });
 
-  it.each(Object.entries(DIAGRAM_STROKE_COLORS))(
-    'keeps the %s stroke visible on every offered fill',
-    (_key, stroke) => {
-      for (const fill of Object.values(DIAGRAM_FILL_COLORS)) {
-        expect(contrastRatio(stroke, fill)).toBeGreaterThanOrEqual(3);
-      }
-    },
-  );
+  it.each(OPAQUE_STROKES)('keeps the %s stroke visible on every offered fill', (_key, stroke) => {
+    for (const [, fill] of OPAQUE_FILLS) {
+      expect(contrastRatio(stroke, fill)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('offers transparent as a colourless choice in both palettes', () => {
+    expect(DIAGRAM_FILL_COLORS.transparent).toBe('transparent');
+    expect(DIAGRAM_STROKE_COLORS.transparent).toBe('transparent');
+  });
 });
 
 describe('style resolvers', () => {
@@ -391,5 +401,108 @@ describe('read contract tolerance', () => {
         edges: [],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('a textbox grows to hold its own text', () => {
+  const LONG = 'word '.repeat(60).trim();
+
+  it.each(DIAGRAM_FONT_SIZE_PRESETS)(
+    'never lays out more %s lines than the box it is given can hold',
+    (preset) => {
+      // The line cap and the height cap have to agree. A flat 24-line cap needs
+      // roughly 930 units at the largest font while a node stops at 320, so the
+      // text was centred in a box that could not hold it and painted straight
+      // through the outline, over its neighbours and off the sheet — nothing
+      // clips a label on any surface.
+      const node: DiagramNode = {
+        id: 'n1',
+        label: LONG,
+        x: 0,
+        y: 0,
+        shape: 'text',
+        width: 144,
+        height: 40,
+        fontSizePreset: preset,
+      };
+
+      const height = diagramTextBoxHeight(node);
+      const layout = diagramNodeLabelLayout({ ...node, height });
+
+      expect(height).toBeLessThanOrEqual(DIAGRAM_MAX_NODE_HEIGHT);
+      expect(layout.lines.length * layout.lineHeight).toBeLessThanOrEqual(height);
+    },
+  );
+
+  it('still shows every line it kept, rather than truncating a textbox', () => {
+    const node: DiagramNode = {
+      id: 'n1',
+      label: LONG,
+      x: 0,
+      y: 0,
+      shape: 'text',
+      width: 144,
+      height: 40,
+      fontSizePreset: 'small',
+    };
+    const layout = diagramNodeLabelLayout({ ...node, height: diagramTextBoxHeight(node) });
+    // A textbox wraps and grows; the ellipsis belongs to shapes, which have a
+    // form of their own to keep.
+    expect(layout.lines.join(' ')).not.toContain('\u2026');
+  });
+});
+
+describe('wrapping and truncating a label', () => {
+  const NEWLINE = String.fromCharCode(10);
+
+  it('marks the cut on a line that has something on it', () => {
+    // A break typed just before the cut left the final kept line empty, so a
+    // shape showed its text, a gap, and then a lone ellipsis.
+    const lines = wrapDiagramLabel(`A${NEWLINE}${NEWLINE}${NEWLINE}B`, 120, 11, 3);
+
+    expect(lines[lines.length - 1]).not.toBe('\u2026');
+    expect(lines.join('')).toContain('\u2026');
+    expect(lines[0]).toContain('A');
+  });
+
+  it('still truncates a plain overflowing label the way it always did', () => {
+    const lines = wrapDiagramLabel('word '.repeat(40).trim(), 120, 11, 3);
+    expect(lines).toHaveLength(3);
+    expect(lines[2]!.endsWith('\u2026')).toBe(true);
+  });
+});
+
+describe('fitting a table row to its cells', () => {
+  function tableWith(cells: { text: string; fontSizePreset?: 'small' | 'xlarge' }[]) {
+    return {
+      colWidths: cells.map(() => 96),
+      rowHeights: [32],
+      cells: cells.map((cell) => ({ ...cell })),
+    };
+  }
+
+  it('measures each cell whole rather than mixing one cell with another', () => {
+    // Taking the most lines and the largest font as separate maxima multiplied
+    // one cell's height by another's: five wrapped lines beside a single
+    // extra-large word made the row six times taller than anything needed.
+    const mixed = tableWith([
+      { text: 'a fairly long run of words that will certainly wrap over several lines' },
+      { text: 'Big', fontSizePreset: 'xlarge' },
+    ]);
+    const wrapped = tableWith([mixed.cells[0]!]);
+
+    const mixedHeight = tableAutoRowHeight(mixed, 0);
+    const wrappedHeight = tableAutoRowHeight(wrapped, 0);
+    const bigAlone = tableAutoRowHeight(tableWith([mixed.cells[1]!]), 0);
+
+    // The row is the taller of the two cells, not their product.
+    expect(mixedHeight).toBe(Math.max(wrappedHeight, bigAlone));
+  });
+
+  it('comes back down when the text that stretched it is gone', () => {
+    const full = tableAutoRowHeight(tableWith([{ text: 'x '.repeat(60).trim() }]), 0);
+    const empty = tableAutoRowHeight(tableWith([{ text: '' }]), 0);
+
+    expect(full).toBeGreaterThan(empty);
   });
 });

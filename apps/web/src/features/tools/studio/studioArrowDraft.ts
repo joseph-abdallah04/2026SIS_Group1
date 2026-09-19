@@ -19,6 +19,8 @@ import {
   type DiagramStrokeKey,
   type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
+  intoTargetFrame,
+  outOfTargetFrame,
 } from '@roundtable/shared';
 
 export function createArrowId(): string {
@@ -99,12 +101,20 @@ function centreOf(target: ArrowTarget): ArrowPoint {
  */
 function outlineHit(target: ArrowTarget, point: ArrowPoint): { distance: number; on: ArrowPoint } {
   const centre = centreOf(target);
-  const delta = { x: point.x - centre.x, y: point.y - centre.y };
+  // Measured against the element's own outline, which means asking in its own
+  // frame. Measured against the unturned one, the feedback dot floated beside a
+  // turned shape or sank inside it, and the pin-or-aim decision that reads this
+  // distance fired on geometry the user could not see.
+  const local = intoTargetFrame(point, target);
+  const delta = { x: local.x - centre.x, y: local.y - centre.y };
   if (delta.x === 0 && delta.y === 0) return { distance: 0, on: centre };
 
   const size = { width: target.box.width, height: target.box.height };
   const scale = diagramBoundaryScale(target.shape, size, delta);
-  const on = { x: centre.x + delta.x * scale, y: centre.y + delta.y * scale };
+  const on = outOfTargetFrame(
+    { x: centre.x + delta.x * scale, y: centre.y + delta.y * scale },
+    target,
+  );
   // `scale` is how far along `delta` the outline sits. At or past 1 the point is
   // within the outline, so the pointer is over the element itself.
   if (scale >= 1) return { distance: 0, on };
@@ -118,9 +128,15 @@ function area(target: ArrowTarget): number {
 /** A point on an element's box, as the fraction the contract stores. */
 function attachFor(target: ArrowTarget, point: ArrowPoint): ArrowAttach {
   const clamp = (value: number) => Math.min(1, Math.max(0, value));
+  // `at` is a fraction of the element's *own* box, so the point has to be in
+  // that frame before it is divided. Dividing a scene point by an unturned box
+  // stored a fraction naming a different part of the element entirely, which
+  // the renderer then dutifully turned — so the pin landed somewhere the user
+  // had not pointed at.
+  const local = intoTargetFrame(point, target);
   return {
-    u: target.box.width === 0 ? 0.5 : clamp((point.x - target.box.x) / target.box.width),
-    v: target.box.height === 0 ? 0.5 : clamp((point.y - target.box.y) / target.box.height),
+    u: target.box.width === 0 ? 0.5 : clamp((local.x - target.box.x) / target.box.width),
+    v: target.box.height === 0 ? 0.5 : clamp((local.y - target.box.y) / target.box.height),
   };
 }
 
@@ -170,12 +186,14 @@ export function snapArrowPoint(
 /** How far inside the outline the point sits, for the edge band above. */
 function outlineDepth(target: ArrowTarget, point: ArrowPoint): number {
   const centre = centreOf(target);
-  const delta = { x: point.x - centre.x, y: point.y - centre.y };
+  const local = intoTargetFrame(point, target);
+  const delta = { x: local.x - centre.x, y: local.y - centre.y };
   if (delta.x === 0 && delta.y === 0) return Number.POSITIVE_INFINITY;
   const size = { width: target.box.width, height: target.box.height };
   const scale = diagramBoundaryScale(target.shape, size, delta);
   const on = { x: centre.x + delta.x * scale, y: centre.y + delta.y * scale };
-  return Math.hypot(point.x - on.x, point.y - on.y);
+  // Both points in the same frame, so the distance is the real one.
+  return Math.hypot(local.x - on.x, local.y - on.y);
 }
 
 /** An endpoint at this point, bound to whatever it landed on. */

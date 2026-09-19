@@ -8,6 +8,7 @@
 import {
   arrowBounds,
   arrowGeometry,
+  rotatedBounds,
   tableSize,
   type ArrowElement,
   type PathElement,
@@ -80,11 +81,31 @@ function boundsOfPoints(points: readonly { x: number; y: number }[]): DiagramRec
  * whose visible line the sweep never crossed, which reads as a bug rather than
  * as precision.
  */
-export function pathBounds(path: Pick<PathElement, 'anchors'>): DiagramRect | null {
+export function pathBounds(path: Pick<PathElement, 'anchors' | 'rotation'>): DiagramRect | null {
+  const local = boundsOfPoints(path.anchors);
+  return local && rotatedBounds(local, path.rotation);
+}
+
+export function inkBounds(
+  stroke: Pick<StudioInkStroke, 'points' | 'rotation'>,
+): DiagramRect | null {
+  const local = boundsOfPoints(stroke.points);
+  return local && rotatedBounds(local, stroke.rotation);
+}
+
+/**
+ * The same extents before rotation is applied.
+ *
+ * Drawing a turned stroke needs the centre it turns about, and that centre is
+ * defined by the box the points actually describe — not by the larger box they
+ * sweep out once turned. Taking the centre of the rotated bounds instead would
+ * make each further turn pivot somewhere slightly different.
+ */
+export function pathLocalBounds(path: Pick<PathElement, 'anchors'>): DiagramRect | null {
   return boundsOfPoints(path.anchors);
 }
 
-export function inkBounds(stroke: Pick<StudioInkStroke, 'points'>): DiagramRect | null {
+export function inkLocalBounds(stroke: Pick<StudioInkStroke, 'points'>): DiagramRect | null {
   return boundsOfPoints(stroke.points);
 }
 

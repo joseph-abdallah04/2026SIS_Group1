@@ -22,12 +22,14 @@ import {
   DIAGRAM_NODE_STROKE_WIDTHS,
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
+  rotationTransform,
   wrapDiagramLabel,
   type DiagramEdge,
   type DiagramFillKey,
   type DiagramFontSizePreset,
   type DiagramNode,
   type DiagramNodeSize,
+  type RotatableBox,
   type DiagramStrokeKey,
   type DiagramStrokeStyle,
   type DiagramStrokeWidthPreset,
@@ -55,6 +57,14 @@ export interface InkElement {
   points: number[];
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
+  /**
+   * v4.5 rotation about the stroke's own bounding-box centre, in degrees.
+   *
+   * An angle rather than rotated points: baking the turn into `points` would
+   * re-round every coordinate to one decimal place each time, so a stroke
+   * nudged round a few degrees at a time would slowly lose its shape.
+   */
+  rotation?: number;
 }
 
 export const INK_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
@@ -150,6 +160,54 @@ export interface PathElement {
   strokeStyle?: DiagramStrokeStyle;
   /** Only meaningful on a closed path; an open one is never filled. */
   fillColor?: DiagramFillKey;
+  /** v4.5 rotation about the path's own bounding-box centre, in degrees. */
+  rotation?: number;
+}
+
+/**
+ * The box a set of scene points describes, before any rotation.
+ *
+ * This is the frame ink and paths are turned in: their points are absolute, so
+ * the centre they pivot about has to come from the points themselves. Shared so
+ * the editor, the board card and the assistant preview all turn a stroke about
+ * exactly the same point — a centre that differed by a pixel between surfaces
+ * would show up as artwork that shifts when a proposal is posted.
+ */
+export function pointsBounds(points: readonly { x: number; y: number }[]): RotatableBox | null {
+  const first = points[0];
+  if (!first) return null;
+  let minX = first.x;
+  let minY = first.y;
+  let maxX = first.x;
+  let maxY = first.y;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** A path's unrotated extent, from its anchors alone. */
+export function pathLocalBounds(path: Pick<PathElement, 'anchors'>): RotatableBox | null {
+  return pointsBounds(path.anchors);
+}
+
+/** The turn to draw a path with, or nothing when it is not turned. */
+export function pathRotationTransform(
+  path: Pick<PathElement, 'anchors' | 'rotation'>,
+): string | undefined {
+  const local = pathLocalBounds(path);
+  return local ? rotationTransform(local, path.rotation) : undefined;
+}
+
+/** The turn to draw a stroke with, given its points already unpacked. */
+export function inkRotationTransform(
+  stroke: Pick<InkElement, 'rotation'> & { points: readonly { x: number; y: number }[] },
+): string | undefined {
+  const local = pointsBounds(stroke.points);
+  return local ? rotationTransform(local, stroke.rotation) : undefined;
 }
 
 export const PATH_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'ink';
@@ -455,30 +513,39 @@ export function tableCellLines(
 }
 
 /** How tall a row needs to be for its tallest cell's wrapped text to fit. */
+/** Cell text is spaced exactly as a node label is, and a row keeps this much air. */
+const TABLE_LINE_HEIGHT = 1.25;
+const TABLE_ROW_PADDING = 10;
+
 export function tableAutoRowHeight(
   table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset'>,
   row: number,
 ): number {
-  let tallest = tableFontSize(table);
-  let needed = 1;
+  // Each cell is measured whole — its own line count at its own size — and the
+  // row takes the tallest of those. Taking the most lines and the largest font
+  // as separate maxima multiplied one cell's height by another's: five wrapped
+  // lines at 11px beside a single extra-large word made the row six times
+  // taller than anything in it needed.
+  let needed = tableFontSize(table) * TABLE_LINE_HEIGHT;
   for (let col = 0; col < tableColCount(table); col += 1) {
     const cell = tableCellAt(table, row, col);
     const text = cell?.text?.trim();
     if (!text) continue;
-    // Each cell is measured at its own size, so one large cell sets the row.
     const fontSize = tableCellFontSize(table, cell);
-    tallest = Math.max(tallest, fontSize);
     const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
-    // Wrapped against a tall row so the count is what the text needs, not what
-    // the row currently allows.
-    needed = Math.max(
-      needed,
-      wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, TABLE_MAX_ROWS).length,
+    // Capped by what the tallest a row may be can actually show at this size,
+    // rather than by `TABLE_MAX_ROWS`, which counts rows in a table and has
+    // nothing to say about lines in a cell.
+    const maxLines = Math.max(
+      1,
+      Math.floor((TABLE_MAX_ROW_HEIGHT - TABLE_ROW_PADDING) / (fontSize * TABLE_LINE_HEIGHT)),
     );
+    const lines = wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, maxLines).length;
+    needed = Math.max(needed, lines * fontSize * TABLE_LINE_HEIGHT);
   }
   return Math.min(
     TABLE_MAX_ROW_HEIGHT,
-    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(needed * tallest * 1.25 + 10)),
+    Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(needed + TABLE_ROW_PADDING)),
   );
 }
 
