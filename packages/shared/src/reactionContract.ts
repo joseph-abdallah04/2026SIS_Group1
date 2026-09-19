@@ -106,14 +106,40 @@ export function isQuickReaction(value: string): value is QuickReaction {
  * rather than as a stray character in the page.
  */
 export function reactionLabel(emoji: string): string {
-  return isQuickReaction(emoji) ? QUICK_REACTION_LABELS[emoji] : `React with ${emoji}`;
+  return reactionName(emoji) ?? `React with ${emoji}`;
+}
+
+/**
+ * What this reaction is called, where it has a name of its own.
+ *
+ * Only the quick three do. Everything the picker offers is a glyph and the
+ * words that find it, which is a search index rather than a name — "red heart
+ * love like" cannot be shown to anyone as a title. So a heading over a list of
+ * people either names the reaction or leaves the emoji to speak for itself.
+ */
+export function reactionName(emoji: string): string | null {
+  return isQuickReaction(emoji) ? QUICK_REACTION_LABELS[emoji] : null;
+}
+
+/**
+ * One person who left a reaction: who they are, and what to call them.
+ *
+ * The name travels with the reaction because a board has no roster of its own
+ * to look one up in — voice knows only who is talking, and a membership list is
+ * a request away and stale the moment somebody joins. A reaction cannot outlive
+ * its author either: reactions go when an account does, so a name is always
+ * there to show.
+ */
+export interface ReactionPerson {
+  userId: string;
+  displayName: string;
 }
 
 /**
  * Everyone who reacted to one proposal with one emoji, oldest first.
  *
  * The people are carried rather than a bare number for two reasons. The count
- * is `userIds.length`, so a count and its membership can never disagree. And
+ * is `people.length`, so a count and its membership can never disagree. And
  * whether *you* reacted is a question only the viewer can answer, so a row
  * broadcast to the whole room cannot hold a `mine` flag that would be true for
  * one client and false for every other. A session is a roomful of people, so
@@ -121,12 +147,12 @@ export function reactionLabel(emoji: string): string {
  */
 export interface ReactionGroup {
   emoji: string;
-  userIds: string[];
+  people: ReactionPerson[];
 }
 
 /** How many people left this reaction. No group means nobody has. */
 export function reactionCount(groups: readonly ReactionGroup[], emoji: string): number {
-  return groups.find((group) => group.emoji === emoji)?.userIds.length ?? 0;
+  return groups.find((group) => group.emoji === emoji)?.people.length ?? 0;
 }
 
 /** Whether this person is one of them, which is what presses the chip. */
@@ -136,10 +162,32 @@ export function hasReacted(
   userId: string | null,
 ): boolean {
   if (!userId) return false;
-  return groups.find((group) => group.emoji === emoji)?.userIds.includes(userId) ?? false;
+  const people = groups.find((group) => group.emoji === emoji)?.people;
+  return people?.some((person) => person.userId === userId) ?? false;
+}
+
+/**
+ * Who left this reaction, the viewer first: a person looks for themselves in a
+ * list before they read anybody else. Everyone after them keeps the order they
+ * reacted in.
+ *
+ * People rather than names, because what a client does with them differs: a
+ * row of them wants a face and a name each, and a label wants one sentence
+ * with the viewer written as "you".
+ */
+export function reactionPeople(
+  groups: readonly ReactionGroup[],
+  emoji: string,
+  viewerId: string | null,
+): ReactionPerson[] {
+  const people = groups.find((group) => group.emoji === emoji)?.people ?? [];
+  return [
+    ...people.filter((person) => person.userId === viewerId),
+    ...people.filter((person) => person.userId !== viewerId),
+  ];
 }
 
 /** Total reactions across every emoji, for a summary label. */
 export function totalReactions(groups: readonly ReactionGroup[]): number {
-  return groups.reduce((sum, group) => sum + group.userIds.length, 0);
+  return groups.reduce((sum, group) => sum + group.people.length, 0);
 }

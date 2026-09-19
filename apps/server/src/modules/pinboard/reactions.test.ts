@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QUICK_REACTIONS, type QuestionStatus } from '@roundtable/shared';
 
+/** One reactor, named the way the server names them. */
+const person = (userId: string) => ({ userId, displayName: userId.toUpperCase() });
+/** A stored reaction, as the query reads it: the row and who left it. */
+const reactionRow = (emoji: string, userId: string) => ({
+  emoji,
+  userId,
+  user: { displayName: userId.toUpperCase() },
+});
 // F18 - emoji reactions. Prisma and the sessions adapter are stubbed so each
 // rule stands on its own; that a real unique index refuses a second identical
 // row is the database's job and the integration smoke test's.
@@ -133,7 +141,7 @@ describe('who may react', () => {
 
 describe('toggleReaction', () => {
   it('leaves a reaction when this person has none', async () => {
-    findMany.mockResolvedValue([{ emoji: THUMB, userId: 'u2' }] as never);
+    findMany.mockResolvedValue([reactionRow(THUMB, 'u2')] as never);
 
     const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB });
 
@@ -146,7 +154,7 @@ describe('toggleReaction', () => {
     expect(result).toEqual({
       proposalId: 'p1',
       questionId: 'q1',
-      reactions: [{ emoji: THUMB, userIds: ['u2'] }],
+      reactions: [{ emoji: THUMB, people: [person('u2')] }],
     });
   });
 
@@ -165,13 +173,13 @@ describe('toggleReaction', () => {
   // than joining it, because you do not feel two ways about one idea.
   it('moves the reaction when they press a different emoji', async () => {
     findMine.mockResolvedValue({ emoji: THUMB } as never);
-    findMany.mockResolvedValue([{ emoji: HEART, userId: 'u2' }] as never);
+    findMany.mockResolvedValue([reactionRow(HEART, 'u2')] as never);
 
     const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: HEART });
 
     expect(deleteMany).not.toHaveBeenCalled();
     expect(upsert.mock.calls[0]?.[0]).toMatchObject({ update: { emoji: HEART } });
-    expect(result.reactions).toEqual([{ emoji: HEART, userIds: ['u2'] }]);
+    expect(result.reactions).toEqual([{ emoji: HEART, people: [person('u2')] }]);
   });
 
   // Pressing a chip ten times must not count ten: each press either removes
@@ -187,12 +195,13 @@ describe('toggleReaction', () => {
       stored = HEART ?? null;
       return {};
     }) as never);
-    findMany.mockImplementation((async () =>
-      stored ? [{ emoji: stored, userId: 'u2' }] : []) as never);
+    findMany.mockImplementation((async () => (stored ? [reactionRow(stored, 'u2')] : [])) as never);
 
     for (let press = 1; press <= 5; press += 1) {
       const result = await toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: HEART });
-      expect(result.reactions).toEqual(press % 2 === 1 ? [{ emoji: HEART, userIds: ['u2'] }] : []);
+      expect(result.reactions).toEqual(
+        press % 2 === 1 ? [{ emoji: HEART, people: [person('u2')] }] : [],
+      );
     }
   });
 
@@ -201,11 +210,11 @@ describe('toggleReaction', () => {
   // for.
   it('accepts a write that lost a race with an identical one', async () => {
     upsert.mockRejectedValue(uniqueViolation());
-    findMany.mockResolvedValue([{ emoji: THUMB, userId: 'u2' }] as never);
+    findMany.mockResolvedValue([reactionRow(THUMB, 'u2')] as never);
 
     await expect(
       toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB }),
-    ).resolves.toMatchObject({ reactions: [{ emoji: THUMB, userIds: ['u2'] }] });
+    ).resolves.toMatchObject({ reactions: [{ emoji: THUMB, people: [person('u2')] }] });
   });
 
   it('still reports a write that failed for any other reason', async () => {
@@ -231,17 +240,13 @@ describe('reactions on a board item', () => {
   it('groups the rows by emoji, keeping everyone who reacted', () => {
     const item = toBoardItem(
       row({
-        reactions: [
-          { emoji: THUMB, userId: 'u1' },
-          { emoji: HEART, userId: 'u2' },
-          { emoji: THUMB, userId: 'u3' },
-        ],
+        reactions: [reactionRow(THUMB, 'u1'), reactionRow(HEART, 'u2'), reactionRow(THUMB, 'u3')],
       }) as never,
     );
 
     expect(item.reactions).toEqual([
-      { emoji: THUMB, userIds: ['u1', 'u3'] },
-      { emoji: HEART, userIds: ['u2'] },
+      { emoji: THUMB, people: [person('u1'), person('u3')] },
+      { emoji: HEART, people: [person('u2')] },
     ]);
   });
 
@@ -251,10 +256,7 @@ describe('reactions on a board item', () => {
   it('emits the groups in the order the emoji first appeared', () => {
     const item = toBoardItem(
       row({
-        reactions: [
-          { emoji: BULB, userId: 'u1' },
-          { emoji: THUMB, userId: 'u1' },
-        ],
+        reactions: [reactionRow(BULB, 'u1'), reactionRow(THUMB, 'u1')],
       }) as never,
     );
 
@@ -263,9 +265,9 @@ describe('reactions on a board item', () => {
 
   // The picker offers hundreds of emoji, and none of them are second-class.
   it('keeps an emoji the card does not offer as a chip', () => {
-    const item = toBoardItem(row({ reactions: [{ emoji: PARTY, userId: 'u1' }] }) as never);
+    const item = toBoardItem(row({ reactions: [reactionRow(PARTY, 'u1')] }) as never);
 
-    expect(item.reactions).toEqual([{ emoji: PARTY, userIds: ['u1'] }]);
+    expect(item.reactions).toEqual([{ emoji: PARTY, people: [person('u1')] }]);
   });
 
   // Defensive: the write path admits nothing else, and loose text among the
@@ -274,13 +276,13 @@ describe('reactions on a board item', () => {
     const item = toBoardItem(
       row({
         reactions: [
-          { emoji: 'not an emoji', userId: 'u1' },
-          { emoji: THUMB, userId: 'u2' },
+          { emoji: 'not an emoji', userId: 'u1', user: { displayName: 'U1' } },
+          reactionRow(THUMB, 'u2'),
         ],
       }) as never,
     );
 
-    expect(item.reactions).toEqual([{ emoji: THUMB, userIds: ['u2'] }]);
+    expect(item.reactions).toEqual([{ emoji: THUMB, people: [person('u2')] }]);
   });
 
   it('leaves a proposal nobody reacted to with an empty list', () => {
@@ -327,7 +329,7 @@ describe('proposalReact handler', () => {
   // The quick chips are a shortcut, not the vocabulary: anything the picker
   // offers is equally storable.
   it('accepts an emoji the card does not offer as a chip', async () => {
-    findMany.mockResolvedValue([{ emoji: PARTY, userId: 'u2' }] as never);
+    findMany.mockResolvedValue([reactionRow(PARTY, 'u2')] as never);
     const { react } = register({ user: { id: 'u2' }, sessionId: 's1' });
 
     expect(await react({ id: 'p1', emoji: PARTY })).toMatchObject({ ok: true });
@@ -354,7 +356,7 @@ describe('proposalReact handler', () => {
   });
 
   it('acks the writer and broadcasts the new state to the whole room', async () => {
-    findMany.mockResolvedValue([{ emoji: THUMB, userId: 'u2' }] as never);
+    findMany.mockResolvedValue([reactionRow(THUMB, 'u2')] as never);
     const { react, io, emit } = register({ user: { id: 'u2' }, sessionId: 's1' });
 
     expect(await react({ id: 'p1', emoji: THUMB })).toMatchObject({ ok: true });
@@ -362,7 +364,7 @@ describe('proposalReact handler', () => {
     expect(emit).toHaveBeenCalledWith('proposalReactionsUpdated', {
       proposalId: 'p1',
       questionId: 'q1',
-      reactions: [{ emoji: THUMB, userIds: ['u2'] }],
+      reactions: [{ emoji: THUMB, people: [person('u2')] }],
     });
   });
 

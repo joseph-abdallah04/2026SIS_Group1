@@ -3,13 +3,22 @@ import { SmilePlus } from 'lucide-react';
 import {
   hasReacted,
   reactionCount,
-  reactionLabel,
+  reactionName,
+  reactionPeople,
   QUICK_REACTIONS,
   type ReactionGroup,
+  type ReactionPerson,
 } from '@roundtable/shared';
 
+import { emojiName, reactionButtonLabel } from './emojiCatalog';
 import { EmojiPicker } from './EmojiPicker';
-import { REACTION_HOVER_FILL, REACTION_ON_BORDER, REACTION_ON_FILL } from './pinboardTokens';
+import { useCardTooltip } from './useCardTooltip';
+import {
+  FOOT_NAME_ROOM_PX,
+  REACTION_HOVER_FILL,
+  REACTION_ON_BORDER,
+  REACTION_ON_FILL,
+} from './pinboardTokens';
 
 interface ReactionRowProps {
   /** Every emoji anyone used here, in the order they first appeared. */
@@ -23,12 +32,44 @@ interface ReactionRowProps {
 }
 
 /**
+ * Who is in a chip, as one sentence: everyone where there are few, and the
+ * first few and a count where there are many, so one popular chip cannot read
+ * out a whole room.
+ *
+ * This is the chip's accessible name. What is shown on hover is a list, which
+ * a screen reader has no way to reach — a tooltip is nothing to it — so the
+ * same people have to be sayable in a line.
+ */
+function whoReacted(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  if (names.length <= NAMES_SHOWN) {
+    return names.length === 1
+      ? names[0]!
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  }
+  return `${names.slice(0, NAMES_SHOWN).join(', ')} and ${names.length - NAMES_SHOWN} more`;
+}
+
+/** How many names a chip lists before it starts counting the rest. */
+const NAMES_SHOWN = 5;
+
+/**
+ * Least room a name gets, however narrow the card is. A drawing is the
+ * smallest card on the board and its byline is cramped; the list is not held
+ * to that, or a room of people would be a column of ellipses.
+ */
+const MIN_NAME_ROOM_PX = 120;
+
+/**
  * One chip: the emoji, its count once it has one, and whether you are in it.
  */
 function ReactionChip({
   emoji,
   count,
   mine,
+  people,
+  viewerId,
+  nameRoom,
   busy,
   disabled,
   dim,
@@ -37,13 +78,63 @@ function ReactionChip({
   emoji: string;
   count: number;
   mine: boolean;
+  /** Who left this one, the viewer first. */
+  people: readonly ReactionPerson[];
+  viewerId: string | null;
+  /** Room for a name here, as the card's own byline gives it. */
+  nameRoom: number;
   busy: boolean;
   disabled: boolean;
   /** Nothing has been said with this one yet, so it waits until hovered. */
   dim: boolean;
   onClick: () => void;
 }) {
-  const label = reactionLabel(emoji);
+  const label = reactionButtonLabel(emoji);
+  // The board's own name for the quick three — they are offered as things to
+  // say rather than as pictures, and "Agree" is what pressing one means. Every
+  // other emoji goes by the name Unicode gives it.
+  const name = reactionName(emoji) ?? emojiName(emoji);
+  const named = people.map((person) => (person.userId === viewerId ? 'You' : person.displayName));
+  const who = whoReacted(named);
+  const rest = people.length - NAMES_SHOWN;
+
+  // Who reacted, under the chip: a count says how many agreed, and the
+  // question that follows is always who.
+  //
+  // A name per line rather than a sentence of them, read by scanning down a
+  // column. The reaction is named above the list where it has a name — the
+  // glyph itself is already under the pointer, so repeating it in the heading
+  // says nothing the chip has not just said.
+  const names = useCardTooltip<HTMLButtonElement>(
+    people.length === 0 ? null : (
+      <>
+        {name ? (
+          // Unicode writes its names in lower case; a heading starts a line.
+          <p className="text-[11px] leading-none text-rt-ink-muted first-letter:uppercase">
+            {name}
+          </p>
+        ) : null}
+        <ul className={`flex flex-col gap-1 ${name ? 'mt-1.5' : ''}`}>
+          {people.slice(0, NAMES_SHOWN).map((person) => (
+            // Cut off where the byline cuts it off. A name long enough to run
+            // past a card is long enough to run past this, and the two
+            // disagreeing about where it ends reads as a different name.
+            <li
+              key={person.userId}
+              className="truncate text-[12px] leading-tight"
+              style={{ maxWidth: nameRoom }}
+            >
+              {person.userId === viewerId ? 'You' : person.displayName}
+            </li>
+          ))}
+          {rest > 0 ? (
+            <li className="text-[11px] leading-tight text-rt-ink-muted">and {rest} more</li>
+          ) : null}
+        </ul>
+      </>
+    ),
+    'panel',
+  );
 
   return (
     <button
@@ -51,10 +142,12 @@ function ReactionChip({
       // A toggle, so the button reports its state rather than pretending each
       // press is a fresh action.
       aria-pressed={mine}
-      aria-label={count === 0 ? label : `${label} (${count})`}
-      title={mine ? `${label} — click to take it back` : label}
+      // The names are part of what the chip says, not only what it shows on
+      // hover: a tooltip is nothing to a screen reader.
+      aria-label={count === 0 ? label : `${label} (${count}) — ${who}`}
       disabled={busy || disabled}
       onClick={onClick}
+      {...names.anchor}
       // Its own edge and shadow, like the controls on the opposite corner: the
       // chip straddles the card's border, so half of it is over the board and
       // it cannot borrow a background from either side.
@@ -76,7 +169,10 @@ function ReactionChip({
               '--rt-chip-edge': REACTION_ON_BORDER,
             } as React.CSSProperties)
       }
-      className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+      // Holding one asks who is in it, and a held glyph is not a word being
+      // picked out or a picture being saved: both are what a phone otherwise
+      // offers for a long press on something like this.
+      className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] select-none [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
         mine
           ? 'text-rt-ink'
           : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'
@@ -97,6 +193,7 @@ function ReactionChip({
           {count}
         </span>
       ) : null}
+      {names.tooltip}
     </button>
   );
 }
@@ -141,11 +238,11 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
   // Used first, in the server's order, then whichever quick chips are still
   // untouched. A quick emoji that somebody reacted with is already in the
   // first list, so it must not be offered again in the second.
-  const used = reactions.filter((group) => group.userIds.length > 0);
+  const used = reactions.filter((group) => group.people.length > 0);
   const usedEmoji = new Set(used.map((group) => group.emoji));
   const untouched = QUICK_REACTIONS.filter((emoji) => !usedEmoji.has(emoji));
   const mine = reactions
-    .filter((group) => (viewerId ? group.userIds.includes(viewerId) : false))
+    .filter((group) => hasReacted(reactions, group.emoji, viewerId))
     .map((group) => group.emoji);
 
   const toggle = (emoji: string) => {
@@ -157,6 +254,9 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
     <ReactionChip
       key={emoji}
       emoji={emoji}
+      people={reactionPeople(reactions, emoji, viewerId)}
+      viewerId={viewerId}
+      nameRoom={Math.max(width - FOOT_NAME_ROOM_PX, MIN_NAME_ROOM_PX)}
       count={reactionCount(reactions, emoji)}
       mine={hasReacted(reactions, emoji, viewerId)}
       busy={pending === emoji}

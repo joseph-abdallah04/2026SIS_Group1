@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProposalCard } from './ProposalCard';
 
+/** One reactor, named the way the server names them. */
+const person = (userId: string) => ({ userId, displayName: userId.toUpperCase() });
 /** The word a byline mark shows, as opposed to the explanation it carries. */
 function markLabelled(label: string | RegExp): HTMLElement | null {
   const shown = Array.from(
@@ -755,7 +757,7 @@ describe('card layout', () => {
 
     const reacted = render(
       <ProposalCard
-        item={{ ...diagramItem([]), reactions: [{ emoji: '👍', userIds: ['someone'] }] }}
+        item={{ ...diagramItem([]), reactions: [{ emoji: '👍', people: [person('someone')] }] }}
       />,
     );
 
