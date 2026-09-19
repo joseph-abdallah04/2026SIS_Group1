@@ -5891,3 +5891,236 @@ describe('studio extend and reopen', () => {
     expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
   });
 });
+
+/**
+ * Fixes for the review of the studio block.
+ *
+ * Each of these encodes a rule rather than a value: a control that did the
+ * opposite of what its own comment claimed, or a gesture that left something
+ * behind. They are grouped because they were found together, not because they
+ * share a code path.
+ */
+describe('studio review fixes', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  /** A proposal carrying an inherited edge, which is what an extend starts from. */
+  function edgeParent(): BoardItem {
+    return {
+      id: 'review-parent',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [
+          { id: 'n1', label: 'Client', x: 24, y: 24, shape: 'box' },
+          { id: 'n2', label: 'Server', x: 300, y: 24, shape: 'box' },
+        ],
+        edges: [{ from: 'n1', to: 'n2' }],
+      },
+      x: 0,
+      y: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+    } as BoardItem;
+  }
+
+  /** Draws an arrow into empty space, leaving the offer open at its end. */
+  async function drawLooseArrow(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+  ) {
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: 60, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId, clientX: 300, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId, clientX: 300, clientY: 300 });
+  }
+
+  /**
+   * The `foreignObject` an inline editor is drawn in.
+   *
+   * Walked by hand rather than with `closest`, which does not match an SVG tag
+   * name from inside the HTML subtree in jsdom.
+   */
+  function editorFrame(field: Element): Element {
+    let node: Element | null = field;
+    while (node && node.tagName.toLowerCase() !== 'foreignobject') node = node.parentElement;
+    if (!node) throw new Error('the editor is not inside a foreignObject');
+    return node;
+  }
+
+  async function selectLooseArrow(
+    user: ReturnType<typeof userEvent.setup>,
+    canvas: Element,
+    pointerId: number,
+  ) {
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    fireEvent.pointerDown(screen.getByTestId('studio-arrow-hit'), {
+      button: 0,
+      pointerId,
+      clientX: 180,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: 180, clientY: 300 });
+  }
+
+  it('throws an arrow label away on Escape, and keeps it on blur', async () => {
+    // Escape only closed the editor, and closing it unmounted the field, whose
+    // own blur then committed the very text Escape had just abandoned.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 940);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 941);
+
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    await user.type(field, 'discard me');
+    fireEvent.keyDown(field, { key: 'Escape' });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    // The arrow had no label to begin with, so abandoning leaves it with none.
+    expect(artifact.arrows![0]!.label).toBeUndefined();
+  });
+
+  it('still commits an arrow label when the field simply loses focus', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 953);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 954);
+
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    await user.type(field, 'keep me');
+    fireEvent.blur(field);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows![0]!.label).toBe('keep me');
+  });
+
+  it('grows the arrow label field as lines are added to it', async () => {
+    // rows and the box around it were read off the stored label, so a line
+    // added with Shift-Enter was clipped away until the edit was committed.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 943);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 944);
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    const before = Number(editorFrame(field).getAttribute('height'));
+    await user.type(field, 'first{Shift>}{Enter}{/Shift}second');
+    const after = Number(editorFrame(field).getAttribute('height'));
+
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('gives a long label room to be read while it is being typed', async () => {
+    // The field grows with the text, but the frame around it did not, and SVG
+    // clips: the start of a long label, the end of it, and the caret being
+    // typed at were all hidden, with no scrollbar to find them.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    doublePress(node, canvas, 945, 84, 52);
+    const field = screen.getByRole('textbox', { name: 'Edit box label' });
+    await user.type(field, 'The quick brown fox jumps over the lazy dog and keeps running on');
+
+    const frame = editorFrame(field);
+    expect(Number(frame.getAttribute('height'))).toBeGreaterThan(56);
+    // Centred on the shape, so it overhangs evenly rather than off one edge.
+    expect(Number(frame.getAttribute('y'))).toBeLessThan(0);
+  });
+
+  it('drops a selected arrow when an inherited edge is picked', async () => {
+    // renderEdge cleared only the nodes, so picking an edge on an extended
+    // proposal left an arrow, a stroke, a path or a table lit up beside it.
+    render(
+      <Harness propose={propose()}>
+        <ExtendButton proposal={edgeParent()} />
+      </Harness>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
+    mockSurface(canvas, { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT });
+
+    // Whether this arrow binds to something or ends in space does not matter
+    // here; what matters is that it is selected when the edge is pressed.
+    await drawLooseArrow(user, canvas, 946);
+    await selectLooseArrow(user, canvas, 947);
+    expect(
+      screen.getByRole('button', { name: 'Move the start of this arrow' }),
+    ).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Arrow from Client to Server' }), {
+      button: 0,
+      pointerId: 948,
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Move the start of this arrow' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('creates nothing when the arrow behind the shape offer has been undone', async () => {
+    // The binding quietly found no arrow and the shape was committed anyway, so
+    // undoing the arrow and then taking the offer put an orphan on the canvas
+    // and threw the redo away.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 949);
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    // Undo is one of the things that puts the offer down.
+    expect(screen.queryByTestId('arrow-shape-picker')).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('studio-arrow')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Ellipse: Unlabelled' })).not.toBeInTheDocument();
+  });
+
+  it('puts the shape offer down when the canvas is used for anything else', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 950);
+    expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    expect(screen.queryByTestId('arrow-shape-picker')).not.toBeInTheDocument();
+  });
+
+  it('will not let an arrow be painted out of existence', async () => {
+    // An arrow is its stroke, like a pen path: a transparent one vanishes while
+    // its 18-unit hit band goes on swallowing presses.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 951);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 952);
+
+    await openBarPanel(user, 'Line colour');
+    expect(screen.getByRole('button', { name: 'rose line' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'transparent line' })).not.toBeInTheDocument();
+  });
+});

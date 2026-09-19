@@ -177,6 +177,29 @@ export const DIAGRAM_ARROW_LIMIT = 100;
 export const ARROW_LABEL_LIMIT = 200;
 
 /**
+ * Tidy a typed arrow label, and cap it to what will actually be drawn.
+ *
+ * The line cap belongs here rather than in the renderer. Storing ten lines and
+ * painting six meant the extra ones survived the round trip to the server and
+ * came back, invisible, reappearing only when the editor was reopened — which
+ * reads as the canvas losing text and then finding it again. Cutting at the
+ * point the text is committed is what a node label already does.
+ *
+ * Runs of spaces collapse for the same reason they do in a node label: a
+ * centred line padded with trailing spaces is visibly off-centre, and nobody
+ * types them on purpose.
+ */
+export function prepareArrowLabel(value: string): string {
+  return value
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    .slice(0, ARROW_LABEL_MAX_LINES)
+    .join('\n')
+    .replace(/^\n+|\n+$/g, '')
+    .slice(0, ARROW_LABEL_LIMIT);
+}
+
+/**
  * Bound because `bend` is a raw scene offset rather than a fraction: a crafted
  * payload could otherwise put the middle leg a mile off the sheet, where the
  * arrow is unselectable and the diagram's bounds are nonsense.

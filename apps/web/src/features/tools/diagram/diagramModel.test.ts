@@ -1,4 +1,4 @@
-import type { DiagramNode } from '@roundtable/shared';
+import { boxCentre, rotatePoint, type DiagramNode } from '@roundtable/shared';
 import { diagramNodeSchema } from '@roundtable/shared/schemas';
 import { describe, expect, it } from 'vitest';
 
@@ -30,6 +30,7 @@ import {
   distributeNodes,
   moveNode,
   moveNodesBy,
+  nodeBounds,
   nodeIdsInRect,
   normalizeRect,
   pasteDiagramFragment,
@@ -317,6 +318,36 @@ describe('moveNodesBy', () => {
     expect(Number.isInteger(free[0]!.y)).toBe(true);
   });
 
+  it('holds a turned node on the sheet by the box it actually occupies', () => {
+    // A 45-degree 200x100 box sweeps a ~212x212 square, which starts well left
+    // of and above its stored x/y. Clamping the stored box let the corners be
+    // walked off the canvas — the case this clamp exists for.
+    const turned: DiagramNode = {
+      id: 'a',
+      label: '',
+      x: 400,
+      y: 300,
+      shape: 'rectangle',
+      width: 200,
+      height: 100,
+      rotation: 45,
+    };
+    const origins = { a: { x: 400, y: 300 } };
+
+    const moved = moveNodesBy([turned], origins, { x: 5_000, y: 5_000 }, 'a')[0]!;
+    const bounds = nodeBounds(moved);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(DIAGRAM_CANVAS_HEIGHT);
+
+    const back = moveNodesBy([turned], origins, { x: -5_000, y: -5_000 }, 'a')[0]!;
+    const backBounds = nodeBounds(back);
+    expect(backBounds.x).toBeGreaterThanOrEqual(0);
+    expect(backBounds.y).toBeGreaterThanOrEqual(0);
+    // The stored x/y is *inside* the turned box, so it stays positive — which
+    // is exactly why clamping it was not enough.
+    expect(back.x).toBeGreaterThan(0);
+  });
+
   it('leaves the graph alone when the anchor is not part of the drag', () => {
     const nodes = [box('a', 24, 24)];
     expect(moveNodesBy(nodes, {}, { x: 40, y: 40 }, 'a')).toEqual(nodes);
@@ -483,6 +514,74 @@ describe('placement without snapping', () => {
       x: DIAGRAM_CANVAS_WIDTH - DIAGRAM_NODE_WIDTH,
       y: 0,
     });
+  });
+});
+
+describe('resizeNode on a turned node', () => {
+  // Turned a quarter turn, so the element's own +x runs down the screen.
+  const turned: DiagramNode = {
+    id: 'n1',
+    label: '',
+    x: 200,
+    y: 200,
+    shape: 'rectangle',
+    width: 200,
+    height: 100,
+    rotation: 90,
+  };
+  const startBox = { x: 200, y: 200, width: 200, height: 100 };
+
+  /** The scene position of the corner a drag is supposed to leave alone. */
+  function heldCorner(node: DiagramNode) {
+    const box = { x: node.x, y: node.y, width: node.width!, height: node.height! };
+    return rotatePoint({ x: box.x, y: box.y }, boxCentre(box), node.rotation ?? 0);
+  }
+
+  it('grows along the axis the handle was actually dragged', () => {
+    // At 90 degrees the element's width runs down the screen, so dragging the
+    // south-east handle *downward* is what should make it wider. Before the
+    // delta was brought into the element's frame this resized perpendicular to
+    // the drag, and at 180 degrees it resized backwards.
+    const [wider] = resizeNode([turned], 'n1', 'se', startBox, { x: 0, y: 60 }, false);
+
+    expect(wider!.width).toBeGreaterThan(200);
+    expect(wider!.height).toBeCloseTo(100, 0);
+  });
+
+  it('leaves the opposite corner where it was drawn', () => {
+    // The element turns about its centre and the centre moves when the size
+    // does, so holding the far corner in the element's own frame is not enough
+    // — it still swings across the canvas and the shape slides under the cursor.
+    const before = heldCorner(turned);
+    const [resized] = resizeNode([turned], 'n1', 'se', startBox, { x: 0, y: 60 }, false);
+
+    const after = heldCorner(resized!);
+    expect(after.x).toBeCloseTo(before.x, 0);
+    expect(after.y).toBeCloseTo(before.y, 0);
+  });
+
+  it('keeps the turned box on the sheet', () => {
+    const atEdge: DiagramNode = { ...turned, x: 820, y: 60 };
+    const [resized] = resizeNode(
+      [atEdge],
+      'n1',
+      'se',
+      { x: 820, y: 60, width: 200, height: 100 },
+      { x: 400, y: 400 },
+      false,
+    );
+
+    const bounds = nodeBounds(resized!);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(DIAGRAM_CANVAS_WIDTH);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(DIAGRAM_CANVAS_HEIGHT);
+  });
+
+  it('is unchanged for a node that is not turned', () => {
+    const plain: DiagramNode = { ...turned, rotation: undefined };
+    const [resized] = resizeNode([plain], 'n1', 'se', startBox, { x: 40, y: 20 }, false);
+    expect(resized).toMatchObject({ x: 200, y: 200, width: 240, height: 120 });
   });
 });
 

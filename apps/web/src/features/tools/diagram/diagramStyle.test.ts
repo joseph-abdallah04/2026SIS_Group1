@@ -20,6 +20,7 @@ import {
   diagramNodeFill,
   diagramNodeFontSize,
   diagramNodeLabelLayout,
+  diagramTextBoxHeight,
   diagramNodeSize,
   diagramNodeStroke,
   diagramNodeStrokeWidth,
@@ -399,5 +400,53 @@ describe('read contract tolerance', () => {
         edges: [],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('a textbox grows to hold its own text', () => {
+  const LONG = 'word '.repeat(60).trim();
+
+  it.each(DIAGRAM_FONT_SIZE_PRESETS)(
+    'never lays out more %s lines than the box it is given can hold',
+    (preset) => {
+      // The line cap and the height cap have to agree. A flat 24-line cap needs
+      // roughly 930 units at the largest font while a node stops at 320, so the
+      // text was centred in a box that could not hold it and painted straight
+      // through the outline, over its neighbours and off the sheet — nothing
+      // clips a label on any surface.
+      const node: DiagramNode = {
+        id: 'n1',
+        label: LONG,
+        x: 0,
+        y: 0,
+        shape: 'text',
+        width: 144,
+        height: 40,
+        fontSizePreset: preset,
+      };
+
+      const height = diagramTextBoxHeight(node);
+      const layout = diagramNodeLabelLayout({ ...node, height });
+
+      expect(height).toBeLessThanOrEqual(DIAGRAM_MAX_NODE_HEIGHT);
+      expect(layout.lines.length * layout.lineHeight).toBeLessThanOrEqual(height);
+    },
+  );
+
+  it('still shows every line it kept, rather than truncating a textbox', () => {
+    const node: DiagramNode = {
+      id: 'n1',
+      label: LONG,
+      x: 0,
+      y: 0,
+      shape: 'text',
+      width: 144,
+      height: 40,
+      fontSizePreset: 'small',
+    };
+    const layout = diagramNodeLabelLayout({ ...node, height: diagramTextBoxHeight(node) });
+    // A textbox wraps and grows; the ellipsis belongs to shapes, which have a
+    // form of their own to keep.
+    expect(layout.lines.join(' ')).not.toContain('\u2026');
   });
 });

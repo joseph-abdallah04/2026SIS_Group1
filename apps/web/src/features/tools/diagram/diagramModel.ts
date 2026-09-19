@@ -22,6 +22,8 @@ import {
   diagramNodeSize,
   effectiveDiagramNodeSize,
   offsetArrow,
+  boxCentre,
+  rotatePoint,
   rotatedBounds,
   tableSize,
 } from '@roundtable/shared';
@@ -463,9 +465,26 @@ export function moveNodesBy(
     const origin = origins[node.id];
     if (!origin) continue;
     const size = effectiveDiagramNodeSize(node);
+    // The turned box is what has to stay on the sheet. A rotated rectangle
+    // sits in a different, larger rectangle than the one it stores, so
+    // clamping the stored box let a 45-degree shape be walked until its
+    // corners hung off the canvas — which is the case this clamp exists for.
+    const visual = rotatedBounds(
+      { x: origin.x, y: origin.y, width: size.width, height: size.height },
+      node.rotation,
+    );
+    // Rounded inward on both sides: a turned box has fractional extents, and
+    // the position is rounded after this, so an exact limit could be rounded a
+    // fraction past the edge. Giving up at most one unit keeps it honest.
     applied = {
-      x: Math.min(DIAGRAM_CANVAS_WIDTH - size.width - origin.x, Math.max(-origin.x, applied.x)),
-      y: Math.min(DIAGRAM_CANVAS_HEIGHT - size.height - origin.y, Math.max(-origin.y, applied.y)),
+      x: Math.min(
+        Math.floor(DIAGRAM_CANVAS_WIDTH - visual.width - visual.x),
+        Math.max(Math.ceil(-visual.x), applied.x),
+      ),
+      y: Math.min(
+        Math.floor(DIAGRAM_CANVAS_HEIGHT - visual.height - visual.y),
+        Math.max(Math.ceil(-visual.y), applied.y),
+      ),
     };
   }
 
@@ -694,6 +713,15 @@ export function resizeNode(
   const movesLeftEdge = corner === 'nw' || corner === 'sw';
   const movesTopEdge = corner === 'nw' || corner === 'ne';
 
+  const rotation = nodes.find((node) => node.id === id)?.rotation ?? 0;
+  // The handles are drawn inside the element's own turn, so a drag "outward"
+  // is outward *in the element's frame*. Bringing the pointer delta back into
+  // that frame is what makes the shape grow along the axis the handle was
+  // pulled; without it a 90-degree shape resized perpendicular to the drag and
+  // a 180-degree one resized backwards. `updatePathEdit` already does this for
+  // an anchor, and resize was simply missed.
+  const pull = rotation ? rotatePoint(delta, { x: 0, y: 0 }, -rotation) : delta;
+
   const maxWidth = Math.max(
     DIAGRAM_MIN_NODE_WIDTH,
     Math.min(
@@ -709,8 +737,8 @@ export function resizeNode(
     ),
   );
 
-  let width = start.width + (movesLeftEdge ? -delta.x : delta.x);
-  let height = start.height + (movesTopEdge ? -delta.y : delta.y);
+  let width = start.width + (movesLeftEdge ? -pull.x : pull.x);
+  let height = start.height + (movesTopEdge ? -pull.y : pull.y);
 
   if (lockAspect) {
     const scale = clampNumber(
@@ -727,8 +755,32 @@ export function resizeNode(
 
   width = Math.round(width);
   height = Math.round(height);
-  const x = Math.round(movesLeftEdge ? start.x + start.width - width : start.x);
-  const y = Math.round(movesTopEdge ? start.y + start.height - height : start.y);
+  let x = Math.round(movesLeftEdge ? start.x + start.width - width : start.x);
+  let y = Math.round(movesTopEdge ? start.y + start.height - height : start.y);
+
+  if (rotation) {
+    // Holding the far corner still in the element's own frame is not enough:
+    // the element turns about its centre, and the centre moves when the size
+    // changes, so that corner still swings across the canvas and the shape
+    // slides out from under the cursor. Translating the finished box so the
+    // corner lands back where it was drawn fixes it in the frame the user is
+    // actually looking at.
+    const held = {
+      x: movesLeftEdge ? start.x + start.width : start.x,
+      y: movesTopEdge ? start.y + start.height : start.y,
+    };
+    const before = rotatePoint(held, boxCentre(start), rotation);
+    const after = rotatePoint(held, { x: x + width / 2, y: y + height / 2 }, rotation);
+    x = Math.round(x + before.x - after.x);
+    y = Math.round(y + before.y - after.y);
+
+    // And the turned box, not the stored one, is what has to stay on the sheet.
+    const turned = rotatedBounds({ x, y, width, height }, rotation);
+    const back = (edge: number, extent: number, limit: number) =>
+      Math.max(Math.min(edge, limit - extent), 0) - edge;
+    x = Math.round(x + back(turned.x, turned.width, DIAGRAM_CANVAS_WIDTH));
+    y = Math.round(y + back(turned.y, turned.height, DIAGRAM_CANVAS_HEIGHT));
+  }
 
   return nodes.map((node) => (node.id === id ? { ...node, x, y, width, height } : node));
 }

@@ -551,11 +551,19 @@ const DIAGRAM_LABEL_PADDING = 12;
 export const DIAGRAM_LABEL_MAX_LINES = 3;
 
 /**
- * A textbox wraps and grows instead of truncating, so its cap is the point at
- * which a "text element" has become a document — not the point at which it
- * stops fitting the box it was drawn as.
+ * The most lines a textbox can show, at a given size.
+ *
+ * Derived from the tallest a node may be rather than fixed, because the two
+ * caps have to agree: a flat 24 lines needs about 930 units at the largest
+ * font, and a node stops at 320. The text was centred in a box that could not
+ * hold it, so it painted straight through the outline, over its neighbours and
+ * off the sheet — nothing clips a label on any surface.
  */
-export const DIAGRAM_TEXT_MAX_LINES = 24;
+export function diagramTextMaxLines(fontSize: number): number {
+  const lineHeight = fontSize * 1.25;
+  const padding = Math.max(8, fontSize);
+  return Math.max(1, Math.floor((DIAGRAM_MAX_NODE_HEIGHT - padding) / lineHeight));
+}
 
 /**
  * The height a textbox needs to show every line of its label.
@@ -648,7 +656,7 @@ export function diagramNodeLabelLayout(
   // ellipsis — which is the distinction the studio's users asked for.
   const maxLines =
     node.shape === 'text'
-      ? DIAGRAM_TEXT_MAX_LINES
+      ? diagramTextMaxLines(fontSize)
       : Math.max(1, Math.min(DIAGRAM_LABEL_MAX_LINES, Math.floor(size.height / lineHeight)));
   // Tapered shapes are narrower than their box where the label sits.
   const usableWidth = size.width * diagramLabelWidthRatio(node.shape);

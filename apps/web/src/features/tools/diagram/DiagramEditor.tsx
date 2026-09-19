@@ -98,6 +98,7 @@ import {
   DIAGRAM_ROTATION_STEP,
   normalizeRotation,
   offsetArrow,
+  prepareArrowLabel,
   rotationTransform,
   arrowStrokeWidth,
   DIAGRAM_FILL_COLORS,
@@ -1389,6 +1390,19 @@ export function DiagramEditor() {
   // so its label is edited in a field floated over the middle of the line.
   const [editingArrowId, setEditingArrowId] = useState<string | null>(null);
   const arrowLabelInputRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * The arrow label as it is being typed, before it is committed.
+   *
+   * Held here rather than read back off the stored arrow so the field and the
+   * box around it grow with the text. Deliberately not previewed into history
+   * on every keystroke the way a node label is: `commitArrowLabel` is a single
+   * entry, and per-keystroke previews would churn the undo stack for nothing.
+   */
+  const [arrowLabelDraft, setArrowLabelDraft] = useState('');
+  // Closing the editor unmounts the field, which fires its own blur. Without
+  // this flag that blur commits the very text Escape just abandoned — the same
+  // reason the table cell keeps one.
+  const arrowLabelCancelledRef = useRef(false);
   // A canvas element's native dblclick never arrives — pointer capture eats the
   // compatibility events — so a second press is detected the same way every
   // other element on this canvas detects one.
@@ -1998,12 +2012,17 @@ export function DiagramEditor() {
    */
   function beginArrowLabelEdit(arrowId: string | null = selectedArrowId) {
     if (!arrowId) return;
+    const arrow = (history.snapshotRef.current.arrows ?? []).find(
+      (candidate) => candidate.id === arrowId,
+    );
+    arrowLabelCancelledRef.current = false;
+    setArrowLabelDraft(arrow?.label ?? '');
     setEditingArrowId(arrowId);
   }
 
   function commitArrowLabel(arrowId: string, text: string) {
     const graph = history.snapshotRef.current;
-    const trimmed = text.trim().slice(0, ARROW_LABEL_LIMIT);
+    const trimmed = prepareArrowLabel(text);
     history.commit({
       nodes: graph.nodes,
       edges: graph.edges,
@@ -2127,10 +2146,16 @@ export function DiagramEditor() {
                 row
                 itemName="line"
                 // A shape or a table keeps its body without an outline, so it
-                // may drop one. A pen or line path *is* its stroke, so it may
-                // not — that would leave an invisible element behind.
+                // may drop one. Everything drawn *as* a line may not: a path,
+                // a stroke of ink, an arrow and an edge all are their stroke,
+                // so a transparent one is an element that has vanished while
+                // its hit target goes on swallowing presses — an arrow's is 18
+                // units wide, so it becomes an invisible bar across the canvas.
                 keys={
-                  selectedPath || selectedInkIds.length > 0
+                  selectedPath ||
+                  selectedInkIds.length > 0 ||
+                  selectedArrowIds.length > 0 ||
+                  selectedEdge
                     ? QUICK_STROKE_KEYS
                     : OUTLINE_KEYS_WITH_TRANSPARENT
                 }
@@ -2734,6 +2759,8 @@ export function DiagramEditor() {
     cancelConnection();
     cancelNodeLabelEdit();
     cancelEdgeLabelEdit();
+    // Undo can be what removes the very arrow the offer belongs to.
+    setShapePicker(null);
     history.undo();
   }
 
@@ -2741,6 +2768,7 @@ export function DiagramEditor() {
     cancelConnection();
     cancelNodeLabelEdit();
     cancelEdgeLabelEdit();
+    setShapePicker(null);
     history.redo();
   }
 
@@ -3448,6 +3476,8 @@ export function DiagramEditor() {
   function deleteSelection() {
     const selection = currentSelection();
     if (isSelectionEmpty(selection) && !selectedEdge) return;
+    // The arrow the offer belongs to may be part of what is going.
+    setShapePicker(null);
     const graph = history.snapshotRef.current;
 
     // Deleting a container is two different intentions — lose what is inside it,
@@ -3958,6 +3988,13 @@ export function DiagramEditor() {
    */
   function selectCanvasTool(next: CanvasTool) {
     setCanvasTool(next);
+    setShapePicker(null);
+    // A shape being dragged out does not survive the tool it was started under:
+    // the ghost disappears the moment the tool changes, and a release that
+    // still placed a node would put down something nobody could see coming.
+    shapeDraftRef.current = null;
+    shapeDraftSquareRef.current = false;
+    setShapeDraft(null);
     if (next !== 'select') {
       clearAllSelection();
       cancelConnection();
@@ -4534,6 +4571,11 @@ export function DiagramEditor() {
     setPendingTable(null);
     setPendingTemplate(null);
     setGhostCursor(null);
+    // The offer at an arrow's loose end is something being carried too. It
+    // pointed at one arrow, so anything that puts work down has to put it down
+    // as well — otherwise it hangs on the canvas naming an element that may
+    // already be gone, swallowing presses where it sits.
+    setShapePicker(null);
     // A half-dragged shape is being carried too, and Escape puts down whatever
     // is being carried — without placing it.
     shapeDraftRef.current = null;
@@ -4620,21 +4662,35 @@ export function DiagramEditor() {
    */
   function attachShapeToArrowEnd(shape: DiagramNodeShape) {
     const request = shapePickerRef.current;
-    setShapePicker(null);
-    if (!request) return;
+    if (!request || isSubmitting) return;
 
     const graph = history.snapshotRef.current;
+    // The arrow this offer belongs to may be gone: undone, deleted, or left
+    // behind by a Clear. Without this the binding quietly found nothing and the
+    // shape was committed anyway, so undoing an arrow and then taking the offer
+    // put an orphan on the canvas and threw the redo away.
+    const target = (graph.arrows ?? []).find((arrow) => arrow.id === request.arrowId);
+    if (!target) {
+      setShapePicker(null);
+      return;
+    }
+
     const size = diagramNodeSize(shape);
     const placed = addNode(
       graph.nodes,
       shape,
-      { x: request.at.x - size.width / 2, y: request.at.y - size.height / 2 },
+      // Where the arrow ends *now*, not where it ended when the offer opened:
+      // the loose end can be dragged somewhere else while the picker is up, and
+      // placing at the old point would yank the arrow back to it.
+      { x: target.to.x - size.width / 2, y: target.to.y - size.height / 2 },
       snapEnabled,
     );
     if (!placed.ok) {
+      // The offer stays up so the limit can be read and another answer given.
       setValidationError(placed.error);
       return;
     }
+    setShapePicker(null);
 
     const attached = (graph.arrows ?? []).map((arrow) =>
       arrow.id === request.arrowId
@@ -4735,6 +4791,10 @@ export function DiagramEditor() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.focus();
+    // Going anywhere else on the canvas is an answer to the offer: the arrow
+    // stays as it is, pointing at nothing. The picker's own presses never reach
+    // here — it stops them — so this only fires for a press outside it.
+    setShapePicker(null);
 
     // Middle mouse or Space+drag pans; both leave the diagram itself untouched.
     if (event.button === 1 || (event.button === 0 && panReady)) {
@@ -5791,7 +5851,11 @@ export function DiagramEditor() {
           canvasRef.current?.focus();
           lastNodePressRef.current = null;
           cancelConnection();
-          setSelectedIds([]);
+          // Every other kind goes too. This cleared only the nodes, so picking
+          // an inherited edge left an arrow, a stroke, a path or a table still
+          // lit up beside it — and a Delete would then take both. The edge key
+          // is set after the clear, which nulls it.
+          clearAllSelection();
           setSelectedEdgeKey(edgeKey(edge));
         }}
       >
@@ -6643,6 +6707,17 @@ export function DiagramEditor() {
     const isConnectionTarget =
       connectionMode && hoveredTargetId === node.id && connectionSourceId !== node.id;
     const isEditing = editingNodeId === node.id;
+    // The editor is as tall as the text in it, even when that is taller than
+    // the shape. A `foreignObject` clips, and the field inside it does not
+    // scroll, so a field sized to the shape hid the start of a long label, the
+    // end of it, and the caret being typed at — the opposite of what growing
+    // the field was for. Overhanging the outline is correct while editing: it
+    // shows what is being written before the shape truncates it.
+    const editorRows = isEditing ? inlineLabelRows(node) : 1;
+    const editorHeight = Math.max(
+      size.height,
+      Math.ceil(editorRows * diagramNodeFontSize(node) * INLINE_LINE_HEIGHT) + 8,
+    );
     return (
       <g
         key={node.id}
@@ -6716,9 +6791,11 @@ export function DiagramEditor() {
         {isEditing ? (
           <foreignObject
             x={0}
-            y={0}
+            // Centred on the shape, so a field taller than its box overhangs
+            // evenly rather than growing off one edge.
+            y={(size.height - editorHeight) / 2}
             width={size.width}
-            height={size.height}
+            height={editorHeight}
             onPointerDown={(event) => event.stopPropagation()}
           >
             {/* Centred the way the rendered label is, and the field is only as
@@ -7137,9 +7214,11 @@ export function DiagramEditor() {
             ? (() => {
                 const geometry = arrowGeometry(editingArrow, arrowTargetsById);
                 const fontSize = arrowFontSize(editingArrow);
-                // Sized from the text rather than fixed at 140x24, which is what
-                // used to crop a long label halfway through a word.
-                const lines = arrowLabelLines(editingArrow.label ?? '');
+                // Sized from the text being typed, not from the stored label:
+                // reading the stored one left the box the size it was when the
+                // editor opened, so a line added with Shift-Enter was clipped
+                // by `overflow-hidden` until the edit was committed.
+                const lines = arrowLabelLines(arrowLabelDraft);
                 const longest = lines.reduce((most, line) => Math.max(most, line.length), 1);
                 const width = Math.max(120, longest * fontSize * 0.62 + 16);
                 const height = Math.max(24, lines.length * fontSize * INLINE_LINE_HEIGHT + 8);
@@ -7156,12 +7235,25 @@ export function DiagramEditor() {
                         ref={arrowLabelInputRef}
                         aria-label="Arrow label"
                         autoFocus
-                        defaultValue={editingArrow.label ?? ''}
+                        value={arrowLabelDraft}
                         rows={lines.length}
                         maxLength={ARROW_LABEL_LIMIT}
-                        onBlur={(event) => commitArrowLabel(editingArrow.id, event.target.value)}
+                        onChange={(event) => setArrowLabelDraft(event.target.value)}
+                        onBlur={(event) => {
+                          // Escape already threw this edit away; the blur that
+                          // its own unmount fires must not put it back.
+                          if (arrowLabelCancelledRef.current) {
+                            arrowLabelCancelledRef.current = false;
+                            return;
+                          }
+                          commitArrowLabel(editingArrow.id, event.target.value);
+                        }}
                         onKeyDown={(event) => {
                           event.stopPropagation();
+                          // Mid-composition Enter belongs to the IME: it picks a
+                          // candidate, and committing here would store the raw
+                          // reading instead of the word.
+                          if (event.nativeEvent.isComposing) return;
                           // An arrow label only ever breaks where it is asked to,
                           // so Shift-Enter is the one thing that adds a line.
                           if (event.key === 'Enter' && !event.shiftKey) {
@@ -7169,13 +7261,17 @@ export function DiagramEditor() {
                             commitArrowLabel(editingArrow.id, event.currentTarget.value);
                           }
                           // Escape abandons the edit and keeps what was there.
-                          if (event.key === 'Escape') setEditingArrowId(null);
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            arrowLabelCancelledRef.current = true;
+                            setEditingArrowId(null);
+                          }
                         }}
                         className={INLINE_EDITOR_CLASS}
                         style={{
                           fontSize: `${fontSize}px`,
                           fontFamily: INLINE_FONT_FAMILY,
-                          fontWeight: editingArrow.labelBold ? 700 : 500,
+                          fontWeight: editingArrow.labelBold ? 700 : 400,
                           color: editingArrow.labelColor
                             ? DIAGRAM_STROKE_COLORS[editingArrow.labelColor]
                             : DIAGRAM_LABEL_INK,
@@ -7215,6 +7311,7 @@ export function DiagramEditor() {
                       aria-label={`End with ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
                       title={DIAGRAM_SHAPE_LABELS[shape]}
                       className={TILE_BUTTON}
+                      disabled={showSubmitting}
                       onClick={() => attachShapeToArrowEnd(shape)}
                     >
                       <ShapeIcon aria-hidden="true" size={14} />

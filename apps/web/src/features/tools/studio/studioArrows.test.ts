@@ -7,6 +7,9 @@ import {
   arrowCapGeometry,
   arrowGeometry,
   arrowHitTest,
+  arrowLabelLines,
+  prepareArrowLabel,
+  ARROW_LABEL_MAX_LINES,
   nearestTOnRoute,
   offsetArrow,
   type ArrowElement,
@@ -949,5 +952,36 @@ describe('the arrow read path', () => {
     });
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.arrows).toBeUndefined();
+  });
+});
+
+describe('arrow labels', () => {
+  const NEWLINE = String.fromCharCode(10);
+
+  it('cuts a label to the lines it will actually draw, when it is committed', () => {
+    // Storing more lines than the arrow paints meant the extra ones survived
+    // the round trip to the server and came back invisible, reappearing only
+    // when the editor was reopened — the canvas looking like it lost text and
+    // then found it again.
+    const many = Array.from({ length: 10 }, (_, index) => `line ${index}`).join(NEWLINE);
+    const prepared = prepareArrowLabel(many);
+
+    expect(prepared.split(NEWLINE)).toHaveLength(ARROW_LABEL_MAX_LINES);
+    // What is stored is exactly what is drawn.
+    expect(arrowLabelLines(prepared)).toHaveLength(ARROW_LABEL_MAX_LINES);
+  });
+
+  it('collapses runs of spaces, which a centred line shows up', () => {
+    expect(prepareArrowLabel(`needs   review${NEWLINE}  by   Friday  `)).toBe(
+      `needs review${NEWLINE}by Friday`,
+    );
+  });
+
+  it('drops a stray Enter at either end', () => {
+    expect(prepareArrowLabel(`${NEWLINE}${NEWLINE}ship it${NEWLINE}${NEWLINE}`)).toBe('ship it');
+  });
+
+  it('keeps a label that already fits exactly as it was typed', () => {
+    expect(prepareArrowLabel(`one${NEWLINE}two`)).toBe(`one${NEWLINE}two`);
   });
 });
