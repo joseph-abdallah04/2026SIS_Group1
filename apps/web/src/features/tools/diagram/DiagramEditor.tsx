@@ -4407,6 +4407,7 @@ export function DiagramEditor() {
               <Rows3 aria-hidden="true" size={13} className="shrink-0" />
               <span className="sr-only">Rows</span>
               <input
+                autoComplete="off"
                 type="number"
                 aria-label="Rows"
                 min={1}
@@ -4422,6 +4423,7 @@ export function DiagramEditor() {
               <Columns3 aria-hidden="true" size={13} className="shrink-0" />
               <span className="sr-only">Columns</span>
               <input
+                autoComplete="off"
                 type="number"
                 aria-label="Cols"
                 min={1}

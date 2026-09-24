@@ -243,6 +243,7 @@ export function DashboardPage() {
           <Search aria-hidden size={16} className="shrink-0 text-rt-ink-faint" />
           <span className="sr-only">Search sessions by title</span>
           <input
+            autoComplete="off"
             type="search"
             value={titleQuery}
             onChange={(e) => setTitleQuery(e.target.value)}

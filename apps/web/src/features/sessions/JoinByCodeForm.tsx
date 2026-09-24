@@ -48,6 +48,7 @@ export function JoinByCodeForm() {
         <p className="text-[13px] font-semibold text-rt-ink">Join a session</p>
         <div className="flex items-center gap-2">
           <input
+            autoComplete="off"
             type="text"
             value={code}
             onChange={(event) => setCode(event.target.value)}
