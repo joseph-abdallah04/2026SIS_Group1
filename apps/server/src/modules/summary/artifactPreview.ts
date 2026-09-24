@@ -203,6 +203,8 @@ function drawingSvg(item: BoardItem, kind: FeaturedKind): string {
  * a browser would. It is only embedded once it has passed the same check the
  * board makes before drawing it, so a row that somehow holds anything else
  * gives an empty plate rather than handing resvg a reference to follow.
+ * Escaped all the same, although the check admits only the base64 alphabet:
+ * the attribute stays closed even if that check is ever widened.
  */
 function imageSvg(item: BoardItem, kind: FeaturedKind): string {
   if (item.artifactJson.type !== 'image') return '';
@@ -211,7 +213,7 @@ function imageSvg(item: BoardItem, kind: FeaturedKind): string {
   const artH = artHeight(artW, Math.max(1, width), Math.max(1, imageH));
   const height = PAD + artH + FOOTER_H + 12;
   const picture = isStorableImage(src)
-    ? `<image x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" href="${src}" preserveAspectRatio="xMidYMid meet"/>`
+    ? `<image x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" href="${xml(src)}" preserveAspectRatio="xMidYMid meet"/>`
     : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, WHITE, kind)}

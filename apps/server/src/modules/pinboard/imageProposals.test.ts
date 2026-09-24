@@ -6,6 +6,22 @@ import { describe, expect, it } from 'vitest';
 const PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
+/**
+ * The start of a PNG whose header says it is `width` by `height`: what every
+ * viewer's decoder would believe, and allocate for.
+ */
+function pngClaiming(width: number, height: number): string {
+  const header = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+  header.writeUInt32BE(13, 8);
+  header.write('IHDR', 12, 'ascii');
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  header[24] = 8;
+  header[25] = 6;
+  return `data:image/png;base64,${header.toString('base64')}`;
+}
+
 function create(artifactJson: Record<string, unknown>, type = 'image') {
   return proposalCreateSchema.safeParse({ type, artifactJson, x: 100, y: 100 });
 }
@@ -31,6 +47,20 @@ describe('image proposals', () => {
     const fractional = create({ type: 'image', src: PNG, width: 1.5, height: 1 });
     expect(tooWide.success).toBe(false);
     expect(fractional.success).toBe(false);
+  });
+
+  // A few hundred kilobytes of PNG can ask every viewer to decode a poster.
+  // What the proposal says about its size is not what gets decoded; the
+  // picture's own header is.
+  it('refuses a picture whose header asks for more than the board keeps', () => {
+    const poster = pngClaiming(20_000, 20_000);
+    expect(create({ type: 'image', src: poster, width: 1, height: 1 }).success).toBe(false);
+  });
+
+  it('refuses a picture that is not the size it says it is', () => {
+    expect(create({ type: 'image', src: PNG, width: 800, height: 600 }).success).toBe(false);
+    const wide = pngClaiming(1200, 675);
+    expect(create({ type: 'image', src: wide, width: 1200, height: 675 }).success).toBe(true);
   });
 
   // Pictures carry no caption, like every other proposal: one sent anyway is

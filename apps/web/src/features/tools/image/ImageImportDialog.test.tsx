@@ -182,6 +182,68 @@ describe('ImageImportDialog', () => {
   });
 
   // Closing mid-propose would drop the result the person is waiting on.
+  // aria-modal says the board is out of reach; Tab has to agree.
+  it('keeps Tab inside the dialog', async () => {
+    const user = userEvent.setup();
+    render(<button type="button">On the board</button>);
+    renderDialog();
+    await screen.findByRole('group', { name: /crop area/i });
+
+    const board = screen.getByRole('button', { name: 'On the board' });
+    for (let press = 0; press < 8; press += 1) {
+      await user.tab();
+      expect(board).not.toHaveFocus();
+    }
+    for (let press = 0; press < 8; press += 1) {
+      await user.tab({ shift: true });
+      expect(board).not.toHaveFocus();
+    }
+  });
+
+  function renderOpenedFrom(opener: HTMLElement) {
+    opener.focus();
+    return render(
+      <ImageImportDialog
+        file={photo}
+        decode={vi.fn(async () => decoded())}
+        onPropose={vi.fn(async (): Promise<ProposeResult> => ({ ok: true }))}
+        onClose={vi.fn()}
+      />,
+    );
+  }
+
+  it('hands focus back to the Image button when the keyboard opened it', async () => {
+    render(<button type="button">Image</button>);
+    const opener = screen.getByRole('button', { name: 'Image' });
+    // jsdom has no idea of the keyboard's focus ring: this is the button as a
+    // browser shows it after Tab and Enter.
+    const matches = opener.matches.bind(opener);
+    vi.spyOn(opener, 'matches').mockImplementation(
+      (selector) => selector === ':focus-visible' || matches(selector),
+    );
+    const dialog = renderOpenedFrom(opener);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Propose image' })).toHaveFocus(),
+    );
+
+    dialog.unmount();
+
+    expect(opener).toHaveFocus();
+  });
+
+  it('leaves focus alone when a pointer opened it', async () => {
+    render(<button type="button">Image</button>);
+    const opener = screen.getByRole('button', { name: 'Image' });
+    const dialog = renderOpenedFrom(opener);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Propose image' })).toHaveFocus(),
+    );
+
+    dialog.unmount();
+
+    expect(opener).not.toHaveFocus();
+  });
+
   it('cannot be closed while it is proposing', async () => {
     const user = userEvent.setup();
     let land: (value: { ok: true }) => void = () => {};

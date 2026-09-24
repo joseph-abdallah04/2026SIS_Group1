@@ -4,6 +4,7 @@ import { ImageIcon, LoaderCircle, RotateCcw, X } from 'lucide-react';
 import type { ImageArtifact } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
+import { keepTabWithin, showsFocusRing } from '../../../lib/focus';
 import { boardPopupRoom, CENTRED_ON_WINDOW, EDGE_PX } from '../../pinboard/boardPopup';
 import type { ProposeResult } from '../CreativeToolsContext';
 import { ImageCropper } from './ImageCropper';
@@ -74,7 +75,8 @@ function panelStyle(): { style: CSSProperties; width: number; maxHeight: number 
  *
  * A light scrim behind it, unlike the board's other popups. This one is a task
  * with a result, and a press on the board behind it — starting a sticky, say —
- * would leave two half-made proposals open at once.
+ * would leave two half-made proposals open at once. Modal for the keyboard as
+ * well: Tab goes round the dialog rather than out across the board.
  */
 export function ImageImportDialog({
   file,
@@ -90,6 +92,14 @@ export function ImageImportDialog({
   const [error, setError] = useState<string | null>(null);
   const [layout, setLayout] = useState(panelStyle);
   const formRef = useRef<HTMLFormElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Whatever had focus as it opened: the Image button, or wherever a drop or a
+  // paste happened. Read while rendering, before Propose takes focus.
+  const [opener] = useState(() => document.activeElement);
+  // Reached from the keyboard, so owed focus back, as the sticky popup is.
+  // Pressed with a pointer it is not: put back by Escape, focus would draw the
+  // keyboard's ring round a button nobody reached with the keyboard.
+  const [openedFromKeyboard] = useState(() => showsFocusRing(opener));
   // Stays true across the await, so a second Enter cannot propose twice.
   const proposing = useRef(false);
 
@@ -144,6 +154,7 @@ export function ImageImportDialog({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (panelRef.current) keepTabWithin(event, panelRef.current);
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
@@ -152,6 +163,16 @@ export function ImageImportDialog({
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [onClose]);
+
+  // However it closes, focus goes back to the keyboard's place on the page.
+  useEffect(
+    () => () => {
+      if (openedFromKeyboard && opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus();
+      }
+    },
+    [opener, openedFromKeyboard],
+  );
 
   const reset = () => {
     if (loaded.state !== 'ready') return;
@@ -192,6 +213,7 @@ export function ImageImportDialog({
     <div className="fixed inset-0 z-50" role="presentation">
       <div aria-hidden="true" className="absolute inset-0 bg-rt-ink/30" />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

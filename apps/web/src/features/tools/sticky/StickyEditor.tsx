@@ -11,6 +11,7 @@ import { LoaderCircle, X } from 'lucide-react';
 import type { StickyColor } from '@roundtable/shared';
 
 import { Button } from '../../../components/ui/Button';
+import { showsFocusRing } from '../../../lib/focus';
 import { closingFades } from '../../../lib/motion';
 import { CENTRED_ON_WINDOW, placeAboveBoardToolbar } from '../../pinboard/boardPopup';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
@@ -486,17 +487,4 @@ export function StickyEditor() {
     </div>,
     document.body,
   );
-}
-
-/**
- * Whether an element is showing the keyboard's focus ring. Where the browser
- * cannot say, it is taken to be, so focus still goes back as it always did.
- */
-function showsFocusRing(element: Element | null): boolean {
-  if (!element) return false;
-  try {
-    return element.matches(':focus-visible');
-  } catch {
-    return true;
-  }
 }

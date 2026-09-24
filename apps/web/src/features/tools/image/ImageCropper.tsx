@@ -146,7 +146,16 @@ export function ImageCropper({
       onPointerCancel={end}
     >
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <img src={imageUrl} alt="" draggable={false} className="absolute inset-0 h-full w-full" />
+        {/* Turned by the photo's own note, as the decoded copy that gets cropped
+            is. It is what browsers do by default; said here so the frame can
+            never be laid over a picture shown on its side. */}
+        <img
+          src={imageUrl}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full"
+          style={{ imageOrientation: 'from-image' }}
+        />
         {/* Everything outside the frame, darkened: one shadow as wide as the
             picture, clipped by it, rather than four boxes to keep in step. */}
         <div className="absolute" style={{ ...frame, boxShadow: '0 0 0 9999px rgba(0,0,0,0.6)' }} />

@@ -1,8 +1,10 @@
 import {
   IMAGE_ARTIFACT_LIMIT,
   IMAGE_MAX_EDGE,
+  imageFileSize,
   isStorableImage,
   type ImageArtifact,
+  type PixelSize,
 } from '@roundtable/shared';
 
 import type { CropRect } from './cropGeometry';
@@ -25,6 +27,40 @@ export class ImageImportError extends Error {
  */
 export const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 
+/**
+ * Past this many pixels a picture is refused, however few bytes it is.
+ *
+ * The byte limit does not bound what a picture decodes to: a PNG of one flat
+ * colour can be a few kilobytes and ask for a poster. Room for any phone's
+ * full-resolution photo, 48 megapixels included, and no more.
+ */
+export const MAX_SOURCE_PIXELS = 50_000_000;
+/**
+ * The longest side a picture may have, however few pixels it is. Wide enough
+ * for a phone's panorama.
+ */
+export const MAX_SOURCE_EDGE = 16_384;
+/**
+ * How much of a file is read to find its size before decoding it. Enough to
+ * step over a phone photo's metadata to the JPEG frame that says how big it is.
+ */
+const HEADER_BYTES = 256 * 1024;
+
+const TOO_MANY_PIXELS = 'That image is too large to import. Try a smaller copy of it.';
+
+function tooManyPixels({ width, height }: PixelSize): boolean {
+  return width * height > MAX_SOURCE_PIXELS || Math.max(width, height) > MAX_SOURCE_EDGE;
+}
+
+/** The size a file says it is, if it says so near its start. */
+async function sizeFromHeader(file: File): Promise<PixelSize | null> {
+  try {
+    return imageFileSize(new Uint8Array(await file.slice(0, HEADER_BYTES).arrayBuffer()));
+  } catch {
+    return null;
+  }
+}
+
 /** What `accept` offers in the file picker. Anything the browser can decode still gets through a drop. */
 export const IMAGE_FILE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp';
 
@@ -45,6 +81,11 @@ export function isImageFile(file: File): boolean {
  * Turned the right way up on the way in: a photo from a phone is stored on its
  * side with a note saying so, and cropping the sideways pixels would crop the
  * wrong part of the picture.
+ *
+ * Its size is checked before it is decoded where the file says it near the
+ * start, which a PNG always does and a JPEG nearly always does, so a picture
+ * too large to hold is refused without ever being held. Any other format is
+ * checked once decoded, and let go of at once if it is too large.
  */
 export async function decodeImageFile(file: File): Promise<DecodedImage> {
   if (!isImageFile(file)) throw new ImageImportError('That file is not an image.');
@@ -56,13 +97,21 @@ export async function decodeImageFile(file: File): Promise<DecodedImage> {
   if (file.size > MAX_SOURCE_BYTES) {
     throw new ImageImportError('That image is over 30MB. Try a smaller copy of it.');
   }
+  const declared = await sizeFromHeader(file);
+  if (declared && tooManyPixels(declared)) throw new ImageImportError(TOO_MANY_PIXELS);
+
+  let bitmap: ImageBitmap;
   try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    return { bitmap, width: bitmap.width, height: bitmap.height };
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   } catch {
     // HEIC off an iPhone is the usual reason: most browsers cannot read it.
     throw new ImageImportError('This image could not be read here. Try a PNG or JPEG.');
   }
+  if (tooManyPixels(bitmap)) {
+    bitmap.close();
+    throw new ImageImportError(TOO_MANY_PIXELS);
+  }
+  return { bitmap, width: bitmap.width, height: bitmap.height };
 }
 
 /** Qualities tried at each size before the picture itself is made smaller. */

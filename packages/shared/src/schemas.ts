@@ -7,7 +7,12 @@ import {
   DRAWING_VIEWBOX_HEIGHT,
   DRAWING_VIEWBOX_WIDTH,
 } from './drawingContract.js';
-import { IMAGE_ARTIFACT_LIMIT, IMAGE_MAX_EDGE, isStorableImage } from './imageContract.js';
+import {
+  IMAGE_ARTIFACT_LIMIT,
+  IMAGE_MAX_EDGE,
+  imagePixelSize,
+  isStorableImage,
+} from './imageContract.js';
 import { isEmoji, MAX_REACTION_LENGTH } from './reactionContract.js';
 import {
   STICKY_HREF_MAX_LENGTH,
@@ -407,7 +412,10 @@ export const imageArtifactSchema = z.object({
  *
  * The size of the stored picture is checked against its bytes as well as its
  * label, and its dimensions are held to what the importer produces, so a
- * payload that skipped the importer cannot store a poster.
+ * payload that skipped the importer cannot store a poster. Those dimensions are
+ * read from the picture's own header, which is what every viewer decodes, and
+ * the width and height beside it must say the same: the card and the recap lay
+ * the picture out by them.
  */
 const imageStrictArtifactSchema = z.object({
   type: z.literal('image'),
@@ -419,7 +427,18 @@ const imageStrictArtifactSchema = z.object({
   height: z.number().int().min(1).max(IMAGE_MAX_EDGE),
 });
 
-export const imageWriteArtifactSchema = imageStrictArtifactSchema;
+export const imageWriteArtifactSchema = imageStrictArtifactSchema.superRefine((artifact, ctx) => {
+  const size = imagePixelSize(artifact.src);
+  // An unreadable picture has already been refused by `src`.
+  if (!size) return;
+  if (size.width !== artifact.width || size.height !== artifact.height) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'This image is not the size it says it is',
+      path: ['width'],
+    });
+  }
+});
 
 const diagramFillKeySchema = z.enum(DIAGRAM_FILL_KEYS);
 const diagramStrokeKeySchema = z.enum(DIAGRAM_STROKE_KEYS);
