@@ -85,9 +85,16 @@ describe('ImageImportDialog', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  /** Drags a handle of the frame by a distance on screen. */
-  function dragHandle(handle: string, dx: number, dy: number) {
+  /**
+   * Drags a handle of the frame by a distance in the picture's own pixels,
+   * turned into screen pixels at whatever size the dialog draws the picture.
+   */
+  function dragHandle(handle: string, pictureDx: number, pictureDy: number) {
     const target = document.querySelector<HTMLElement>(`[data-crop-handle="${handle}"]`)!;
+    const cropper = screen.getByRole('group', { name: /crop area/i }).parentElement!;
+    const scale = parseFloat(cropper.style.width) / 1200;
+    const dx = pictureDx * scale;
+    const dy = pictureDy * scale;
     fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientX: 500, clientY: 400 });
     fireEvent.pointerMove(target, { pointerId: 1, clientX: 500 + dx, clientY: 400 + dy });
     fireEvent.pointerUp(target, { pointerId: 1, clientX: 500 + dx, clientY: 400 + dy });
@@ -101,16 +108,17 @@ describe('ImageImportDialog', () => {
     expect(await screen.findByText(/drag the edges to crop/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reset/i })).toBeNull();
 
-    // The picture is drawn at 0.44 of its size here, so 88px on screen is 200
-    // of its own pixels.
-    dragHandle('se', -88, -44);
+    dragHandle('se', -200, -100);
     expect(screen.getByText('1000 × 700')).toBeInTheDocument();
     expect(screen.queryByText(/drag the edges to crop/i)).toBeNull();
 
     await user.click(screen.getByRole('button', { name: /reset/i }));
-    expect(screen.getByText('1200 × 800')).toBeInTheDocument();
+    // The whole picture again: the hint is back, and the size of a picture
+    // nobody has cropped is not shown.
+    expect(screen.getByText(/drag the edges to crop/i)).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ × \d+/)).toBeNull();
 
-    dragHandle('w', 44, 0);
+    dragHandle('w', 100, 0);
     await user.click(screen.getByRole('button', { name: 'Propose image' }));
     await waitFor(() =>
       expect(encode).toHaveBeenCalledWith(expect.anything(), {
@@ -126,7 +134,7 @@ describe('ImageImportDialog', () => {
     renderDialog();
     await screen.findByText(/drag the edges to crop/i);
 
-    dragHandle('se', -88, -44);
+    dragHandle('se', -200, -100);
     const frame = screen.getByRole('group', { name: /crop area/i });
     const before = frame.style.left;
     fireEvent.keyDown(frame, { key: 'ArrowRight' });

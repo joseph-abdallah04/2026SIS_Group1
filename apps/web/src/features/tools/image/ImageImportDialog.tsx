@@ -12,15 +12,15 @@ import { decodeImageFile, encodeImage, ImageImportError, type DecodedImage } fro
 
 /** As wide as it opens, where the board has room: the picture is the point of it. */
 const PANEL_WIDTH = 600;
-/** The panel's side padding, which the picture is drawn inside. */
-const PANEL_PAD = 20;
 /**
- * Room kept round the picture for its handles, which sit half outside it on
- * the edge it starts at. Also the panel's own border, one pixel each side.
+ * Space round the picture on its stage. Enough for the frame's handles, which
+ * sit half outside the picture on the edge a crop starts at, to be whole.
  */
-const HANDLE_ROOM = 14 + 2;
-/** The most height the picture itself may take, leaving the controls in view. */
-const PICTURE_MAX_HEIGHT = 420;
+const STAGE_PAD = 28;
+/** The most height the picture itself may take, leaving the header and footer in view. */
+const PICTURE_MAX_HEIGHT = 400;
+/** What the header and footer take, which the picture's stage cannot have. */
+const CHROME_HEIGHT = 130;
 
 interface ImageImportDialogProps {
   file: File;
@@ -181,26 +181,31 @@ export function ImageImportDialog({
     setBusy(false);
   };
 
-  const pictureWidth = layout.width - PANEL_PAD * 2 - HANDLE_ROOM * 2;
-  // Whatever the panel has left once its header, controls and footer are in.
-  const pictureHeight = Math.max(160, Math.min(PICTURE_MAX_HEIGHT, layout.maxHeight - 195));
+  const pictureWidth = layout.width - STAGE_PAD * 2 - 2;
+  const pictureHeight = Math.max(
+    160,
+    Math.min(PICTURE_MAX_HEIGHT, layout.maxHeight - CHROME_HEIGHT - STAGE_PAD * 2),
+  );
+  const cropped = loaded.state === 'ready' && crop !== null && !isFullCrop(crop, loaded.decoded);
 
   return createPortal(
     <div className="fixed inset-0 z-50" role="presentation">
-      <div aria-hidden="true" className="absolute inset-0 bg-rt-ink/25" />
+      <div aria-hidden="true" className="absolute inset-0 bg-rt-ink/30" />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="rt-enlarge-open absolute flex flex-col overflow-hidden rounded-2xl border border-rt-tertiary bg-rt-surface shadow-[0_18px_48px_rgba(8,12,21,0.22)]"
+        className="rt-enlarge-open absolute flex flex-col overflow-hidden rounded-3xl border border-rt-ink/15 bg-rt-surface shadow-[0_24px_64px_rgba(8,12,21,0.28)]"
         style={layout.style}
       >
-        <header className="flex items-center gap-2.5 border-b border-rt-tertiary px-5 py-3">
-          <ImageIcon aria-hidden="true" size={17} strokeWidth={1.8} className="text-rt-ink-muted" />
-          <h2 id={titleId} className="text-[14px] font-semibold text-rt-ink">
+        {/* The warm header every popup that makes a proposal wears, the studio
+            and the board's own, so this reads as one of them. */}
+        <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-rt-secondary/40 bg-rt-secondary-wash px-5">
+          <ImageIcon aria-hidden="true" size={18} strokeWidth={1.8} className="text-rt-ink" />
+          <h2 id={titleId} className="shrink-0 text-[15px] font-semibold text-rt-ink">
             Add an image
           </h2>
-          <span className="min-w-0 truncate text-[12px] text-rt-ink-faint" title={file.name}>
+          <span className="min-w-0 truncate text-[12px] text-rt-ink-muted" title={file.name}>
             {file.name}
           </span>
           <button
@@ -208,7 +213,7 @@ export function ImageImportDialog({
             aria-label="Close"
             onClick={close}
             disabled={busy}
-            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted transition-colors hover:bg-rt-surface-alt hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none disabled:opacity-45"
+            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-rt-ink-muted transition-colors hover:bg-rt-secondary/15 hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none disabled:opacity-45"
           >
             <X aria-hidden="true" size={16} strokeWidth={2} />
           </button>
@@ -216,14 +221,21 @@ export function ImageImportDialog({
 
         <form
           ref={formRef}
-          className="flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto px-5 py-4"
+          className="flex min-h-0 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void propose();
           }}
         >
-          {loaded.state === 'ready' && crop ? (
-            <>
+          {/* The stage: one fixed size whatever is on it, so the dialog does not
+              change shape as a picture loads, and a tall picture and a wide one
+              sit in the same frame. Grey rather than white, so a picture with a
+              white edge still shows where it ends. */}
+          <div
+            className="flex shrink-0 items-center justify-center bg-rt-surface-alt"
+            style={{ height: pictureHeight + STAGE_PAD * 2, padding: STAGE_PAD }}
+          >
+            {loaded.state === 'ready' && crop ? (
               <ImageCropper
                 imageUrl={loaded.url}
                 size={loaded.decoded}
@@ -232,48 +244,52 @@ export function ImageImportDialog({
                 maxWidth={pictureWidth}
                 maxHeight={pictureHeight}
               />
+            ) : loaded.state === 'failed' ? (
+              <p role="alert" className="max-w-xs text-center text-[13px] text-rt-secondary-deep">
+                {loaded.message}
+              </p>
+            ) : (
+              <p className="flex items-center gap-2 text-[13px] text-rt-ink-muted">
+                <LoaderCircle aria-hidden="true" size={16} className="animate-spin" />
+                Reading image…
+              </p>
+            )}
+          </div>
 
-              {/* A fixed height, so trading the hint for Reset never moves the
-                  buttons under the pointer. */}
-              <div className="flex min-h-7 items-center gap-2">
-                {isFullCrop(crop, loaded.decoded) ? (
-                  // Nothing else on this screen says the picture can be cut
-                  // down, so it is said once, until somebody does it.
-                  <span className="text-[12px] text-rt-ink-faint">
-                    Drag the edges to crop, or propose it as it is
-                  </span>
-                ) : (
+          {/* One row: what can be done to the picture on the left, what can be
+              done with it on the right. */}
+          <div className="flex min-h-16 items-center gap-3 border-t border-rt-tertiary px-5 py-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              {error ? (
+                <p role="alert" className="text-[12px] leading-snug text-rt-secondary-deep">
+                  {error}
+                </p>
+              ) : cropped && crop ? (
+                <>
                   <button
                     type="button"
                     onClick={reset}
-                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-surface-alt hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
+                    disabled={busy}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-rt-tertiary px-3 py-1.5 text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-surface-alt hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none disabled:opacity-45"
                   >
                     <RotateCcw aria-hidden="true" size={13} strokeWidth={2} />
                     Reset
                   </button>
-                )}
-                <span className="ml-auto text-[12px] text-rt-ink-faint tabular-nums">
-                  {crop.width} × {crop.height}
+                  {/* Only once there is a crop: the size of a picture nobody has
+                      touched says nothing, the size of a crop says how much of
+                      it is left. */}
+                  <span className="truncate text-[12px] text-rt-ink-faint tabular-nums">
+                    {crop.width} × {crop.height}
+                  </span>
+                </>
+              ) : loaded.state === 'ready' ? (
+                // Nothing else on this screen says the picture can be cut down,
+                // so it is said once, until somebody does it.
+                <span className="text-[12px] leading-snug text-rt-ink-muted">
+                  Drag the edges to crop, or propose it as it is.
                 </span>
-              </div>
-            </>
-          ) : loaded.state === 'failed' ? (
-            <p role="alert" className="py-10 text-center text-[13px] text-rt-secondary-deep">
-              {loaded.message}
-            </p>
-          ) : (
-            <p className="flex items-center justify-center gap-2 py-16 text-[13px] text-rt-ink-muted">
-              <LoaderCircle aria-hidden="true" size={16} className="animate-spin" />
-              Reading image…
-            </p>
-          )}
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            {error ? (
-              <p role="alert" className="mr-auto text-[12px] leading-snug text-rt-secondary-deep">
-                {error}
-              </p>
-            ) : null}
+              ) : null}
+            </div>
             <Button variant="quiet" onClick={close} disabled={busy}>
               Cancel
             </Button>
