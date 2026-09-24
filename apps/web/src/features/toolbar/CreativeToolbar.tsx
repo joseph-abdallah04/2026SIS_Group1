@@ -79,7 +79,7 @@ export function CreativeToolbar({ children }: CreativeToolbarProps) {
         onClick={() => openTool('diagram')}
         title={
           isLive
-            ? 'New studio canvas — shapes, arrows and freehand drawing together'
+            ? 'New studio canvas for shapes, arrows and freehand drawing'
             : 'Reconnect to open the studio'
         }
         aria-label="Studio"
@@ -95,7 +95,7 @@ export function CreativeToolbar({ children }: CreativeToolbarProps) {
           onClick={imageImport.pickFile}
           title={
             isLive
-              ? 'Add an image — or drop one on the board, or paste a screenshot'
+              ? 'Add an image, drop one on the board, or paste a screenshot'
               : 'Reconnect to add an image'
           }
           aria-label="Image"

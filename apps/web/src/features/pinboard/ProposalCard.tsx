@@ -414,22 +414,30 @@ export function ProposalArtwork({ item }: { item: BoardItem }) {
     // every viewer's browser fetch from wherever a proposal pointed it.
     if (!canShowImage(artifact.src)) return null;
     return (
-      <img
-        src={artifact.src}
-        alt={`Image by ${item.authorName}`}
-        width={artifact.width}
-        height={artifact.height}
-        // Kept whole and letterboxed rather than cropped to the plate: the
-        // author already chose the framing when they imported it, and a card
-        // that trimmed it again would be showing something they did not pick.
-        // Shrunk to fit but never enlarged past its own size, so a small icon
-        // stays crisp rather than blown up into a blur.
-        className="absolute inset-0 h-full w-full object-scale-down"
-        loading="lazy"
-        decoding="async"
-        // Images are natively draggable, which would hijack a card drag.
-        draggable={false}
-      />
+      // Mounted on the plate rather than run to its edges, inset as far as a
+      // drawing is, so a wide picture, a tall one and a panorama all sit in
+      // the card the same way rather than some touching its sides and some not.
+      <div className="absolute inset-0 flex items-center justify-center p-2.5">
+        <img
+          src={artifact.src}
+          alt={`Image by ${item.authorName}`}
+          width={artifact.width}
+          height={artifact.height}
+          // Kept whole and letterboxed rather than cropped to the plate: the
+          // author already chose the framing when they imported it, and a card
+          // that trimmed it again would be showing something they did not pick.
+          // Sized by its own box, not an object-fit inside a bigger one, so the
+          // rounding lands on the picture's corners: shrunk to fit but never
+          // enlarged past its own size, so a small icon stays crisp rather than
+          // blown up into a blur. Rounded here and never in the crop, where the
+          // corners are the exact cut being made.
+          className="h-auto max-h-full min-h-0 w-auto max-w-full min-w-0 rounded-md"
+          loading="lazy"
+          decoding="async"
+          // Images are natively draggable, which would hijack a card drag.
+          draggable={false}
+        />
+      </div>
     );
   }
   if (artifact.type !== 'drawing') return null;
