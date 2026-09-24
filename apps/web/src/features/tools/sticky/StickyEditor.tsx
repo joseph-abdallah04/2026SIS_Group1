@@ -94,6 +94,9 @@ export function StickyEditor() {
   // Read while rendering, before the note takes focus, so this is whatever
   // opened the popup: the toolbar button, or a card's Extend.
   const [opener] = useState(() => document.activeElement);
+  // Whether that was reached from the keyboard, which is when it shows a ring.
+  // Pressed with a pointer it is focused all the same, but without one.
+  const [openedFromKeyboard] = useState(() => showsFocusRing(opener));
   // Editing rewrites this proposal; extending starts a new one from it.
   const sourceProposal = editSource ?? extensionSource;
   const sourceArtifact =
@@ -258,12 +261,18 @@ export function StickyEditor() {
 
   /**
    * Closing from inside the popup, by Escape or the close button, puts focus
-   * back on whatever opened it. Without a dialog to do that, somebody on the
-   * keyboard would be left with focus on nothing. A press outside does not:
-   * focus belongs to whatever was pressed.
+   * back on whatever opened it, if that was reached from the keyboard. Without
+   * a dialog to do that, somebody on the keyboard would be left with focus on
+   * nothing. A press outside does not: focus belongs to whatever was pressed.
+   *
+   * Opened with a pointer, it is left alone. Escape is a key, so focus put
+   * back by it draws the keyboard's ring round the button or the card, for
+   * somebody who never used the keyboard to get there.
    */
   function dismiss() {
-    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    if (openedFromKeyboard && opener instanceof HTMLElement && opener.isConnected) {
+      opener.focus();
+    }
     beginClose();
   }
 
@@ -477,4 +486,17 @@ export function StickyEditor() {
     </div>,
     document.body,
   );
+}
+
+/**
+ * Whether an element is showing the keyboard's focus ring. Where the browser
+ * cannot say, it is taken to be, so focus still goes back as it always did.
+ */
+function showsFocusRing(element: Element | null): boolean {
+  if (!element) return false;
+  try {
+    return element.matches(':focus-visible');
+  } catch {
+    return true;
+  }
 }

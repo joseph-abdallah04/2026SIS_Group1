@@ -466,32 +466,6 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
     }
   }, [phase]);
 
-  /**
-   * Keep Escape from ever being a close request.
-   *
-   * Refusing the request in `onCancel` is not enough on its own: a browser will
-   * only let a dialog decline so many times before closing anyway, so the third
-   * press in a row got through. Preventing the key means the request is never
-   * made.
-   *
-   * Last, in the bubble phase, so every handler inside the studio has already
-   * had the key and seen it unprevented. Several of them decline an Escape that
-   * something else has already dealt with — the editor will not put down what it
-   * is carrying if a popover just closed on the same press — so marking it
-   * early would quietly switch those off.
-   *
-   * Only while the studio is up: resting on the board, there is no close request
-   * to refuse, and the board's own Escape handlers are owed an unprevented key.
-   */
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (dialogRef.current?.open && !ON_BOARD.has(phaseRef.current)) event.preventDefault();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
-
   const peek = useCallback(() => {
     const dialog = dialogRef.current;
     if (!dialog?.open || AWAY.has(phaseRef.current)) return;
@@ -571,6 +545,45 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
       if (onClose() === false) setPhase('open');
     });
   }, [after, onClose]);
+
+  /**
+   * Escape leaves the studio, once nothing inside it wants the key.
+   *
+   * Inside, Escape steps back first: out of a cell, out of a shape, out of a
+   * selection, out of a half-placed element, and each of those marks the key
+   * as dealt with. Only a press none of them took leaves, the way the Back
+   * button does, and leaving keeps the canvas, so the key is no longer one
+   * that can throw work away.
+   *
+   * On the window, so it hears the key after every handler in the page has,
+   * the editor's own document listeners included. Not while typing, where the
+   * key belongs to the field, and not from inside another dialog, which closes
+   * itself on the same press.
+   *
+   * It always marks the key, taken or not. An unmarked Escape is a close
+   * request to a <dialog>, which would shut the studio without the fade, and
+   * refusing that in `onCancel` is not enough on its own: a browser only lets
+   * a dialog decline so many times before closing anyway.
+   *
+   * Only while the studio is up: resting on the board, Escape brings it back
+   * instead, and the board's own Escape handlers are owed an unprevented key.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const dialog = dialogRef.current;
+      if (!dialog?.open || ON_BOARD.has(phaseRef.current)) return;
+      const taken = event.defaultPrevented;
+      event.preventDefault();
+      if (taken || phaseRef.current !== 'open' || isTyping(event.target)) return;
+      const inside =
+        event.target instanceof Element && event.target.closest('dialog, [role="dialog"]');
+      if (inside && inside !== dialog) return;
+      leave();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [leave]);
 
   // Once what was made is on the board there is nothing left to do here, so
   // the studio fades out back to the board on its own, as the sticky popup
@@ -705,12 +718,9 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
             } as CSSProperties)
           : undefined
       }
-      // Escape is a close request to a <dialog>, and closing the studio is far
-      // too much for it to mean. Inside, Escape steps back — out of a cell, out
-      // of a shape, out of a selection, out of a half-placed element — and each
-      // of those is one keystroke away from being the thing the user wanted.
-      // Having the last of them also throw the whole canvas away made the key
-      // dangerous to press. Leaving is the Back button, which is always there.
+      // Escape is a close request to a <dialog>, which would shut the studio
+      // at once. Escape is handled above instead: it steps back out of what is
+      // in hand first, and leaves by the same fade as the Back button.
       onCancel={(event) => event.preventDefault()}
     >
       <ReportStudioStatus.Provider value={setStatus}>

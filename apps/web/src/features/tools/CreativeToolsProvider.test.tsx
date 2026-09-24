@@ -675,7 +675,29 @@ describe('sticky drafts', () => {
     expect(note()).toBe(opened);
   });
 
-  it('closes on Escape and hands focus back to what opened it', async () => {
+  it('closes on Escape and hands focus back to what the keyboard opened it from', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
+
+    const opener = screen.getByRole('button', { name: 'Sticky' });
+    // jsdom has no idea of the keyboard's focus ring, so it is told: this is
+    // the button as a browser shows it after Tab.
+    const matches = opener.matches.bind(opener);
+    vi.spyOn(opener, 'matches').mockImplementation(
+      (selector) => selector === ':focus-visible' || matches(selector),
+    );
+    while (document.activeElement !== opener) await user.tab();
+    await user.keyboard('{Enter}');
+    expect(note()).not.toBeNull();
+    await user.keyboard('{Escape}');
+
+    expect(note()).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  // Put back by a key, focus would draw the keyboard's ring round a button
+  // nobody reached with the keyboard.
+  it('leaves focus alone on Escape when it was opened with a pointer', async () => {
     const user = userEvent.setup();
     render(<Harness propose={vi.fn(async () => undefined)} {...inSession} />);
 
@@ -684,7 +706,7 @@ describe('sticky drafts', () => {
     await user.keyboard('{Escape}');
 
     expect(note()).toBeNull();
-    expect(opener).toHaveFocus();
+    expect(opener).not.toHaveFocus();
   });
 
   it('starts empty again once the draft has been proposed', async () => {
