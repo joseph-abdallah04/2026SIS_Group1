@@ -12,6 +12,7 @@ import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
+import { ImageImportProvider } from '../tools/image/ImageImportProvider';
 import { ShortlistBar } from '../voting/ShortlistBar';
 import { ShortlistPrompt } from '../voting/ShortlistPrompt';
 import { useVoting } from '../voting/useVoting';
@@ -190,141 +191,146 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
       propose={propose}
       editProposal={editProposal}
     >
-      {/* `relative` so VoiceNotice's `absolute` banner positions against this
+      {/* Inside the tools, since an imported picture is proposed through them,
+          and around the whole page, since a picture can arrive from the
+          toolbar, a drop on the board, or a paste. */}
+      <ImageImportProvider>
+        {/* `relative` so VoiceNotice's `absolute` banner positions against this
           frame; `overflow-hidden` so nothing on the board can produce a
           page-level scrollbar; `h-dvh` so mobile browser chrome does not cut
           it off. */}
-      <main className="relative h-dvh overflow-hidden">
-        <VoiceNotice
-          status={voice.status}
-          micStatus={voice.micStatus}
-          micPermissionDenied={voice.micPermissionDenied}
-          error={voice.error}
-          audioBlocked={voice.audioBlocked}
-          retry={voice.retry}
-          requestMicrophone={voice.requestMicrophone}
-          unlockAudio={voice.unlockAudio}
-        />
-        <PinboardCanvas
-          board={board}
-          isLive={isLive}
-          newItemIds={newItemIds}
-          isLeader={isLeader}
-          viewerId={viewerId}
-          editProposal={editProposal}
-          arrangeProposal={arrangeProposal}
-          deleteProposal={deleteProposal}
-          shortlist={voting.proposalIds}
-          canToggleShortlist={isLeader && selecting && !voting.locked}
-          onToggleShortlist={voting.toggle}
-          shortlistControl={
-            selecting ? (
-              <ShortlistBar isLeader={isLeader} count={voting.proposalIds.length} />
-            ) : null
-          }
-          boardOverlay={
-            selecting && isLeader ? (
-              <ShortlistPrompt
-                count={voting.proposalIds.length}
-                busy={voting.busy || phaseBusyId === board.questionId}
-                error={voting.error ?? phaseError}
-                limitHits={voting.limitHits}
-                onProceed={() => void voting.startVote()}
-                onClear={() => void voting.clear()}
-                onBack={() => {
-                  if (board.questionId) void setPhase(board.questionId, 'discussion');
-                }}
-              />
-            ) : null
-          }
-          ballot={
-            balloting ? (
-              <VotingBallot
-                questionText={board.questionText}
-                items={ballotItems}
-                tallies={voting.tallies}
-                myVote={voting.myVote}
-                votedCount={voting.votedCount}
-                voterCount={voting.voterCount}
+        <main className="relative h-dvh overflow-hidden">
+          <VoiceNotice
+            status={voice.status}
+            micStatus={voice.micStatus}
+            micPermissionDenied={voice.micPermissionDenied}
+            error={voice.error}
+            audioBlocked={voice.audioBlocked}
+            retry={voice.retry}
+            requestMicrophone={voice.requestMicrophone}
+            unlockAudio={voice.unlockAudio}
+          />
+          <PinboardCanvas
+            board={board}
+            isLive={isLive}
+            newItemIds={newItemIds}
+            isLeader={isLeader}
+            viewerId={viewerId}
+            editProposal={editProposal}
+            arrangeProposal={arrangeProposal}
+            deleteProposal={deleteProposal}
+            shortlist={voting.proposalIds}
+            canToggleShortlist={isLeader && selecting && !voting.locked}
+            onToggleShortlist={voting.toggle}
+            shortlistControl={
+              selecting ? (
+                <ShortlistBar isLeader={isLeader} count={voting.proposalIds.length} />
+              ) : null
+            }
+            boardOverlay={
+              selecting && isLeader ? (
+                <ShortlistPrompt
+                  count={voting.proposalIds.length}
+                  busy={voting.busy || phaseBusyId === board.questionId}
+                  error={voting.error ?? phaseError}
+                  limitHits={voting.limitHits}
+                  onProceed={() => void voting.startVote()}
+                  onClear={() => void voting.clear()}
+                  onBack={() => {
+                    if (board.questionId) void setPhase(board.questionId, 'discussion');
+                  }}
+                />
+              ) : null
+            }
+            ballot={
+              balloting ? (
+                <VotingBallot
+                  questionText={board.questionText}
+                  items={ballotItems}
+                  tallies={voting.tallies}
+                  myVote={voting.myVote}
+                  votedCount={voting.votedCount}
+                  voterCount={voting.voterCount}
+                  isLeader={isLeader}
+                  viewerId={viewerId}
+                  leaderId={board.leaderId}
+                  voterStatuses={voting.voterStatuses}
+                  winnerProposalId={voting.winnerProposalId}
+                  tiedProposalIds={voting.tiedProposalIds}
+                  votingEndsAt={voting.votingEndsAt}
+                  phase={voting.phase === 'closed' ? 'closed' : 'open'}
+                  busy={voting.busy}
+                  error={voting.error}
+                  onVote={(id) => void voting.castVote(id)}
+                  onClose={() => void voting.closeVote()}
+                  onContinue={() => void voting.continueVote()}
+                />
+              ) : null
+            }
+            agenda={
+              <AgendaPanel
+                sessionId={sessionId}
+                questions={questions}
+                activeQuestionId={board.questionId}
                 isLeader={isLeader}
-                viewerId={viewerId}
-                leaderId={board.leaderId}
-                voterStatuses={voting.voterStatuses}
-                winnerProposalId={voting.winnerProposalId}
-                tiedProposalIds={voting.tiedProposalIds}
-                votingEndsAt={voting.votingEndsAt}
-                phase={voting.phase === 'closed' ? 'closed' : 'open'}
-                busy={voting.busy}
-                error={voting.error}
-                onVote={(id) => void voting.castVote(id)}
-                onClose={() => void voting.closeVote()}
-                onContinue={() => void voting.continueVote()}
+                votingPhase={voting.phase}
+                hasProposals={
+                  board.questionStatus === 'discussion'
+                    ? board.items.length >= SHORTLIST_MIN
+                    : undefined
+                }
               />
-            ) : null
-          }
-          agenda={
-            <AgendaPanel
-              sessionId={sessionId}
-              questions={questions}
-              activeQuestionId={board.questionId}
-              isLeader={isLeader}
-              votingPhase={voting.phase}
-              hasProposals={
-                board.questionStatus === 'discussion'
-                  ? board.items.length >= SHORTLIST_MIN
-                  : undefined
-              }
-            />
-          }
-          myProposals={
-            <MyProposalsLauncher
-              sessionId={sessionId}
-              revision={myProposalsRevision}
-              canPropose={acceptsProposals}
-            />
-          }
-          micControl={
-            <MicToggle
-              name={selfName}
-              micEnabled={voice.micEnabled}
-              micStatus={voice.micStatus}
-              status={voice.status}
-              busy={voice.micBusy}
-              toggle={voice.toggleMic}
-            />
-          }
-          participants={
-            <ParticipantCluster participants={voice.participants} status={voice.status} />
-          }
-          joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
-          reactToProposal={reactToProposal}
-          onSelectProposal={onSelectProposal}
-          headerTimer={
-            board.discussionTimer &&
-            (board.questionStatus === 'discussion' ||
-              (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (
-              <PhaseTimer
-                startedAt={board.discussionTimer.startedAt}
-                durationSeconds={board.discussionTimer.durationSeconds}
-                allowOvertime
-                label="Discussion"
+            }
+            myProposals={
+              <MyProposalsLauncher
+                sessionId={sessionId}
+                revision={myProposalsRevision}
+                canPropose={acceptsProposals}
               />
-            ) : null
-          }
-        />
-        <SessionJoinNotices />
-      </main>
-      <CreativeStudio />
-      {/* Propose reads these items so it can unlock after a delete. The model
+            }
+            micControl={
+              <MicToggle
+                name={selfName}
+                micEnabled={voice.micEnabled}
+                micStatus={voice.micStatus}
+                status={voice.status}
+                busy={voice.micBusy}
+                toggle={voice.toggleMic}
+              />
+            }
+            participants={
+              <ParticipantCluster participants={voice.participants} status={voice.status} />
+            }
+            joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
+            reactToProposal={reactToProposal}
+            onSelectProposal={onSelectProposal}
+            headerTimer={
+              board.discussionTimer &&
+              (board.questionStatus === 'discussion' ||
+                (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (
+                <PhaseTimer
+                  startedAt={board.discussionTimer.startedAt}
+                  durationSeconds={board.discussionTimer.durationSeconds}
+                  allowOvertime
+                  label="Discussion"
+                />
+              ) : null
+            }
+          />
+          <SessionJoinNotices />
+        </main>
+        <CreativeStudio />
+        {/* Propose reads these items so it can unlock after a delete. The model
           still reads the board server-side on every turn (F35). */}
-      <AssistantBubble
-        key={sessionId}
-        sessionId={sessionId}
-        getContext={getAssistantContext}
-        boardItems={board.items}
-        questionStatus={board.questionStatus}
-        suppressed={balloting}
-      />
+        <AssistantBubble
+          key={sessionId}
+          sessionId={sessionId}
+          getContext={getAssistantContext}
+          boardItems={board.items}
+          questionStatus={board.questionStatus}
+          suppressed={balloting}
+        />
+      </ImageImportProvider>
     </CreativeToolsProvider>
   );
 }

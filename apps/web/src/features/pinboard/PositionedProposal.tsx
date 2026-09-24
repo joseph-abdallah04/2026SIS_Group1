@@ -168,6 +168,7 @@ const PROPOSAL_KIND: Record<BoardItem['type'], string> = {
   sticky: 'sticky note',
   drawing: 'drawing',
   diagram: 'diagram',
+  image: 'image',
 };
 
 /**

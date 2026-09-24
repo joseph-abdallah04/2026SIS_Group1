@@ -93,7 +93,7 @@ export function normalizeSessionCode(raw: string): string {
 
 // === pinboard module ===
 
-export type ProposalType = 'sticky' | 'drawing' | 'diagram';
+export type ProposalType = 'sticky' | 'drawing' | 'diagram' | 'image';
 
 export type StickyColor = 'yellow' | 'pink' | 'blue' | 'green';
 
@@ -131,6 +131,18 @@ export interface DrawingArtifact {
   strokes?: DrawingStrokeData[];
 }
 
+export interface ImageArtifact {
+  type: 'image';
+  /**
+   * The picture itself, as a data URL in one of `IMAGE_FORMATS` — already
+   * cropped, shrunk and re-encoded by the importer. See `imageContract`.
+   */
+  src: string;
+  /** The stored picture's own size in pixels, so a card can be laid out before it loads. */
+  width: number;
+  height: number;
+}
+
 // The diagram artifact contract (shapes, sizes, palettes, grouping, routing)
 // lives in its own module; re-exported here so `@roundtable/shared` is still
 // the single import for domain types.
@@ -142,6 +154,7 @@ export * from './studioElements.js';
 // artwork with free endpoints rather than a semantic node-to-node edge.
 export * from './studioArrows.js';
 export * from './drawingContract.js';
+export * from './imageContract.js';
 export * from './reactionContract.js';
 export * from './stickyContract.js';
 import type { DiagramArtifact } from './diagramContract.js';
@@ -149,7 +162,7 @@ import type { DrawingStrokeData } from './drawingContract.js';
 import type { ReactionGroup } from './reactionContract.js';
 import type { StickyLineStyle, StickyLink, StickyMark } from './stickyContract.js';
 
-export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact;
+export type ArtifactJson = StickyArtifact | DrawingArtifact | DiagramArtifact | ImageArtifact;
 
 // Shown as `authorName` wherever a proposal's author account has been
 // deleted (`authorId` is null). One constant so every place that might ever

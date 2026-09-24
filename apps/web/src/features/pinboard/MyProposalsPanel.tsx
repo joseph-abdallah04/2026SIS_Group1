@@ -5,6 +5,7 @@ import { RotateCcw } from 'lucide-react';
 function summarise(item: BoardItem): string {
   const artifact = item.artifactJson;
   if (artifact.type === 'sticky') return artifact.text;
+  if (artifact.type === 'image') return 'Image';
   if (artifact.type === 'diagram') {
     const labelled = artifact.nodes.find((node) => node.label.trim().length > 0);
     const count = artifact.nodes.length;
@@ -17,6 +18,7 @@ const KIND_LABEL: Record<BoardItem['type'], string> = {
   sticky: 'Sticky',
   drawing: 'Drawing',
   diagram: 'Diagram',
+  image: 'Image',
 };
 
 interface MyProposalsPanelProps {

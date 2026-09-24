@@ -161,6 +161,7 @@ enum ProposalType {
   sticky
   drawing
   diagram
+  image
 }
 
 model Proposal {

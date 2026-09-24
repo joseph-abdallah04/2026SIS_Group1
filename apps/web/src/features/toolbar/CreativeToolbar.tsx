@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { Palette, StickyNote } from 'lucide-react';
+import { ImagePlus, Palette, StickyNote } from 'lucide-react';
 
 import { useCreativeTools } from '../tools/CreativeToolsContext';
+import { useImageImport } from '../tools/image/ImageImportProvider';
 
 /**
  * The chrome every bar floating over the board shares: the creative tools, the
@@ -18,14 +19,14 @@ export const FLOATING_BAR =
  * container (the dev workbench, the editor tests) it never matches, so the
  * labels show.
  *
- * 36rem because the right-anchored main bar (~290px) and the zoom control
- * (~181px), with their 24px insets and a 16px gap between, need about 535px.
+ * 42rem because the right-anchored main bar (~375px) and the zoom control
+ * (~181px), with their 24px insets and a 16px gap between, need about 620px.
  * Re-derive it if the labels change.
  */
-export const TOOL_LABEL = '@max-[36rem]/board:hidden';
+export const TOOL_LABEL = '@max-[42rem]/board:hidden';
 
 /** Horizontal padding for a labelled tool button, tightened once it is only an icon. */
-export const TOOL_BUTTON_PAD = 'px-3.5 @max-[36rem]/board:px-2.5';
+export const TOOL_BUTTON_PAD = 'px-3.5 @max-[42rem]/board:px-2.5';
 
 interface CreativeToolbarProps {
   /**
@@ -37,7 +38,8 @@ interface CreativeToolbarProps {
 }
 
 /**
- * The two things anyone can start here.
+ * The things anyone can start here: a sticky, a studio canvas, or a picture
+ * brought in from elsewhere.
  *
  * The drawing tool has no button any more: the studio draws freehand on the
  * same canvas as everything else, so a separate surface that can only hold
@@ -47,6 +49,8 @@ interface CreativeToolbarProps {
  */
 export function CreativeToolbar({ children }: CreativeToolbarProps) {
   const { activeTool, isLive, openTool, submissionStatus } = useCreativeTools();
+  // Absent outside a board, where there is nowhere to bring a picture to.
+  const imageImport = useImageImport();
   const disabled = !isLive || submissionStatus === 'submitting';
 
   return (
@@ -84,6 +88,23 @@ export function CreativeToolbar({ children }: CreativeToolbarProps) {
         <Palette aria-hidden="true" size={17} strokeWidth={1.8} />
         <span className={TOOL_LABEL}>Studio</span>
       </button>
+      {imageImport ? (
+        <button
+          type="button"
+          disabled={disabled || !imageImport.canImport}
+          onClick={imageImport.pickFile}
+          title={
+            isLive
+              ? 'Add an image — or drop one on the board, or paste a screenshot'
+              : 'Reconnect to add an image'
+          }
+          aria-label="Image"
+          className={`flex h-9 items-center gap-2 rounded-full text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-secondary-wash hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${TOOL_BUTTON_PAD}`}
+        >
+          <ImagePlus aria-hidden="true" size={17} strokeWidth={1.8} />
+          <span className={TOOL_LABEL}>Image</span>
+        </button>
+      ) : null}
       {children ? (
         <>
           <span aria-hidden="true" className="mx-1 h-5 w-px bg-rt-tertiary" />
