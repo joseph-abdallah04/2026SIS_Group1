@@ -120,6 +120,7 @@ export function SessionQuestionsForm({
           Focus / title
         </label>
         <input
+          autoComplete="off"
           id="session-title"
           type="text"
           value={title}
@@ -139,6 +140,7 @@ export function SessionQuestionsForm({
                 {index + 1}.
               </span>
               <input
+                autoComplete="off"
                 type="text"
                 value={question}
                 onChange={(e) => updateQuestion(index, e.target.value)}

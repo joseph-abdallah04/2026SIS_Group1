@@ -51,6 +51,12 @@ export type ArtifactParseResult =
 export function parseArtifact(input: unknown): ArtifactParseResult {
   const parsed = artifactWriteJsonSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: describeIssues(parsed.error.issues) };
+  // A picture is something a person brings to the board. The agent has none of
+  // its own to bring, and a model asked to "make an image" would be inventing
+  // the bytes of one.
+  if (parsed.data.type === 'image') {
+    return { ok: false, error: 'The assistant cannot propose images' };
+  }
 
   const size = new TextEncoder().encode(JSON.stringify(parsed.data)).length;
   if (size > MAX_ARTIFACT_BYTES) {
@@ -98,6 +104,8 @@ export function summarizeArtifact(artifact: ArtifactJson): string {
       return 'Freehand drawing';
     case 'diagram':
       return summarizeDiagram(artifact);
+    case 'image':
+      return 'Image';
   }
 }
 
@@ -256,7 +264,7 @@ export const assistantHistoryMessageSchema = z.object({
   content: z.string().max(8000),
   /** Artifact types this turn actually produced and showed to the user. */
   artifacts: z
-    .array(z.enum(['sticky', 'drawing', 'diagram']))
+    .array(z.enum(['sticky', 'drawing', 'diagram', 'image']))
     .max(20)
     .optional(),
   /** Tools this turn called that failed, producing nothing. */

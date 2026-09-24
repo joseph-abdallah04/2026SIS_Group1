@@ -10,9 +10,12 @@ function Canvas() {
   const [count, setCount] = useState(0);
   useReportStudioStatus([`${count} ${count === 1 ? 'element' : 'elements'}`, '1 arrow']);
   return (
-    <button type="button" onClick={() => setCount((current) => current + 1)}>
-      Add element ({count})
-    </button>
+    <>
+      <button type="button" onClick={() => setCount((current) => current + 1)}>
+        Add element ({count})
+      </button>
+      <input aria-label="Element label" />
+    </>
   );
 }
 
@@ -172,19 +175,47 @@ describe('studio overlay', () => {
     expect(bar()).not.toBeNull();
   });
 
-  // Escape inside the studio steps back out of whatever is in hand. Closing
-  // the whole studio on the last of those presses made the key dangerous.
-  it('still does not close on Escape while the studio is showing', async () => {
+  // Leaving keeps the canvas, so Escape can be a way out like any popup's.
+  it('leaves on an Escape nothing inside the studio took', async () => {
     const user = userEvent.setup();
-    const { studio, onClose } = renderStudio();
+    const { onClose } = renderStudio();
 
     await user.click(screen.getByRole('button', { name: 'Add element (0)' }));
-    await user.keyboard('{Escape}{Escape}{Escape}');
+    const escape = createEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    fireEvent(document.activeElement!, escape);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Marked all the same, so the browser does not also close the <dialog>.
+    expect(escape.defaultPrevented).toBe(true);
+  });
+
+  // Inside, Escape steps back out of whatever is in hand first: a cell, a
+  // shape, a selection. A press one of those took is not also a way out.
+  it('stays when something inside took the Escape', async () => {
+    const user = userEvent.setup();
+    const { studio, onClose } = renderStudio();
+    const stepBack = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') event.preventDefault();
+    };
+    document.addEventListener('keydown', stepBack);
+
+    await user.click(screen.getByRole('button', { name: 'Add element (0)' }));
+    await user.keyboard('{Escape}');
+    document.removeEventListener('keydown', stepBack);
 
     expect(studio.open).toBe(true);
     expect(phaseOf(studio)).toBe('open');
     expect(onClose).not.toHaveBeenCalled();
-    expect(bar()).toBeNull();
+  });
+
+  it('leaves Escape to a field being typed into inside the studio', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderStudio();
+
+    await user.click(screen.getByRole('textbox', { name: 'Element label' }));
+    await user.keyboard('{Escape}');
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // Like the sticky popup, the studio is done once its work is on the board. It
@@ -538,6 +569,20 @@ describe('studio overlay motion', () => {
 
     expect(studio).toHaveClass('rt-studio-leave');
     expect(phaseOf(studio)).toBe('leaving');
+  });
+
+  it('fades out before it leaves on Escape, as by the back arrow', async () => {
+    motion({ reduced: false });
+    const user = userEvent.setup();
+    const { studio, onClose } = renderStudio();
+    await waitFor(() => expect(phaseOf(studio)).toBe('open'));
+
+    await user.click(screen.getByRole('button', { name: 'Add element (0)' }));
+    await user.keyboard('{Escape}');
+
+    expect(studio).toHaveClass('rt-studio-leave');
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('comes back into view if the tool declines to close', async () => {

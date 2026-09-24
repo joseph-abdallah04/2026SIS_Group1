@@ -282,6 +282,7 @@ export function AgendaPanel({
           </label>
           <div className="flex gap-1.5">
             <input
+              autoComplete="off"
               id="agenda-new-question"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}

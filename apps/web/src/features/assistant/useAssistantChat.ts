@@ -412,6 +412,10 @@ export function artifactFingerprint(artifact: ArtifactJson): string {
       return `diagram:${JSON.stringify(artifact.nodes)}:${JSON.stringify(artifact.edges)}`;
     case 'drawing':
       return `drawing:${artifact.svg}`;
+    case 'image':
+      // The tail of the encoded bytes rather than all of them: enough to tell
+      // two pictures apart without comparing a few hundred kilobytes.
+      return `image:${artifact.width}x${artifact.height}:${artifact.src.slice(-64)}`;
   }
 }
 

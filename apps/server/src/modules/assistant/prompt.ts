@@ -64,10 +64,11 @@ export function buildSystemPrompt(
     .join('\n\n');
 }
 
-const ARTIFACT_NOUNS: Record<'sticky' | 'drawing' | 'diagram', [string, string]> = {
+const ARTIFACT_NOUNS: Record<'sticky' | 'drawing' | 'diagram' | 'image', [string, string]> = {
   sticky: ['sticky note', 'sticky notes'],
   drawing: ['drawing', 'drawings'],
   diagram: ['diagram', 'diagrams'],
+  image: ['image', 'images'],
 };
 
 /**

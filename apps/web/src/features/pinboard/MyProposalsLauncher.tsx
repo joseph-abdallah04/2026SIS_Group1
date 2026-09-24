@@ -33,7 +33,9 @@ interface MyProposalsLauncherProps {
  */
 export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyProposalsLauncherProps) {
   const { data, error } = useMyProposals(sessionId, revision);
-  const { openEditorForReuse } = useCreativeTools();
+  const { openEditorForReuse, proposeArtifact } = useCreativeTools();
+  // Only a picture's reuse can fail here: everything else fails in its editor.
+  const [reuseError, setReuseError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
 
@@ -59,6 +61,17 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
   }, [open]);
 
   const reuse = (item: BoardItem) => {
+    // A picture has no editor to open a copy in, and nothing about it would be
+    // changed there if it did. Bringing it across is the whole act, so it is
+    // proposed as it is, still recording what it came from.
+    if (item.artifactJson.type === 'image') {
+      setReuseError(null);
+      void proposeArtifact(item.artifactJson, { extendsProposalId: item.id }).then((result) => {
+        if (result.ok) setOpen(false);
+        else setReuseError(result.error);
+      });
+      return;
+    }
     setOpen(false);
     openEditorForReuse(item);
   };
@@ -125,7 +138,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
             currentQuestionId={data?.currentQuestionId ?? null}
             canPropose={canPropose}
             onReuse={reuse}
-            error={error}
+            error={reuseError ?? error}
           />
         </div>
       ) : null}

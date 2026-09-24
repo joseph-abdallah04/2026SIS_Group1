@@ -172,13 +172,16 @@ export const STICKY_SHADOW =
   '0 7px 10px -5px rgba(8,12,21,0.30), 0 2px 3px -1px rgba(8,12,21,0.16)';
 
 /** Intrinsic widths — types differ on purpose. */
-export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram', number> = {
+export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram' | 'image', number> = {
   // The smallest sticky, eight lines square. A sticky grows past this with its
   // note, so read `cardWidth` for a real one; this is only its floor, and a
   // test holds it to the size the sticky ladder starts at.
   sticky: 217,
   drawing: 250,
   diagram: 300,
+  // Between the two: a photo or a screenshot is denser than a sketch, but a
+  // card is still a glance at it, and Enlarge is how it is read.
+  image: 280,
 };
 
 /**

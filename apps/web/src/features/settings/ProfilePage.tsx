@@ -213,6 +213,7 @@ export function ProfilePage() {
           Display name
           <input
             className={INPUT_CLASSES}
+            autoComplete="off"
             type="text"
             value={displayName}
             onChange={(e) => {

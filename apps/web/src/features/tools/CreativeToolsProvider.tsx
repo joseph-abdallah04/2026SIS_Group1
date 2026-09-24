@@ -88,7 +88,9 @@ export function CreativeToolsProvider({
   }
 
   function openCopy(proposal: BoardItem, kind: 'extend' | 'reuse') {
-    if (sending()) return;
+    // A picture has no editor to open a copy in. Reusing one proposes it
+    // directly (see MyProposalsLauncher), and the board offers no Extend.
+    if (sending() || proposal.type === 'image') return;
     submission.reset();
     setEditSource(null);
     setExtensionSource(proposal);
@@ -100,7 +102,7 @@ export function CreativeToolsProvider({
   const openEditorForReuse = (proposal: BoardItem) => openCopy(proposal, 'reuse');
 
   function openEditorForEdit(proposal: BoardItem) {
-    if (sending()) return;
+    if (sending() || proposal.type === 'image') return;
     submission.reset();
     setExtensionSource(null);
     setEditSource(proposal);

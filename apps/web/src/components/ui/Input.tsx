@@ -9,10 +9,19 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
 }
 
-export function Input({ invalid = false, className = '', ...rest }: InputProps) {
+export function Input({
+  invalid = false,
+  className = '',
+  // The browser's list of things typed into boxes with the same name before is
+  // noise over a field of this app's own, so it is off unless a field asks for
+  // it — a login's email, say, where the browser genuinely knows the answer.
+  autoComplete = 'off',
+  ...rest
+}: InputProps) {
   return (
     <input
       {...rest}
+      autoComplete={autoComplete}
       aria-invalid={invalid || undefined}
       className={[
         'block w-full rounded-lg bg-rt-surface px-3 py-2 text-sm text-rt-ink',

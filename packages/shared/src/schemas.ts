@@ -7,6 +7,12 @@ import {
   DRAWING_VIEWBOX_HEIGHT,
   DRAWING_VIEWBOX_WIDTH,
 } from './drawingContract.js';
+import {
+  IMAGE_ARTIFACT_LIMIT,
+  IMAGE_MAX_EDGE,
+  imagePixelSize,
+  isStorableImage,
+} from './imageContract.js';
 import { isEmoji, MAX_REACTION_LENGTH } from './reactionContract.js';
 import {
   STICKY_HREF_MAX_LENGTH,
@@ -387,6 +393,52 @@ export const drawingWriteArtifactSchema = drawingStrictArtifactSchema.superRefin
     }
   },
 );
+
+/**
+ * Read shape for an imported picture: forgiving, like the other artifacts.
+ *
+ * The picture itself is not checked here — the card checks it again before
+ * drawing it, with `isStorableImage`, and draws nothing if it fails.
+ */
+export const imageArtifactSchema = z.object({
+  type: z.literal('image'),
+  src: z.string().max(IMAGE_ARTIFACT_LIMIT),
+  width: z.number(),
+  height: z.number(),
+});
+
+/**
+ * Write shape: a real picture, in an accepted format, within the limits.
+ *
+ * The size of the stored picture is checked against its bytes as well as its
+ * label, and its dimensions are held to what the importer produces, so a
+ * payload that skipped the importer cannot store a poster. Those dimensions are
+ * read from the picture's own header, which is what every viewer decodes, and
+ * the width and height beside it must say the same: the card and the recap lay
+ * the picture out by them.
+ */
+const imageStrictArtifactSchema = z.object({
+  type: z.literal('image'),
+  src: z
+    .string()
+    .max(IMAGE_ARTIFACT_LIMIT, 'This image is too large to store')
+    .refine(isStorableImage, 'This is not an image the board can show'),
+  width: z.number().int().min(1).max(IMAGE_MAX_EDGE),
+  height: z.number().int().min(1).max(IMAGE_MAX_EDGE),
+});
+
+export const imageWriteArtifactSchema = imageStrictArtifactSchema.superRefine((artifact, ctx) => {
+  const size = imagePixelSize(artifact.src);
+  // An unreadable picture has already been refused by `src`.
+  if (!size) return;
+  if (size.width !== artifact.width || size.height !== artifact.height) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'This image is not the size it says it is',
+      path: ['width'],
+    });
+  }
+});
 
 const diagramFillKeySchema = z.enum(DIAGRAM_FILL_KEYS);
 const diagramStrokeKeySchema = z.enum(DIAGRAM_STROKE_KEYS);
@@ -973,6 +1025,7 @@ export const artifactJsonSchema = z.discriminatedUnion('type', [
   stickyArtifactSchema,
   drawingArtifactSchema,
   diagramArtifactSchema,
+  imageArtifactSchema,
 ]);
 
 /**
@@ -985,9 +1038,10 @@ export const artifactWriteJsonSchema = z.discriminatedUnion('type', [
   stickyArtifactSchema,
   drawingStrictArtifactSchema,
   diagramStrictArtifactSchema,
+  imageStrictArtifactSchema,
 ]);
 
-export const proposalTypeSchema = z.enum(['sticky', 'drawing', 'diagram']);
+export const proposalTypeSchema = z.enum(['sticky', 'drawing', 'diagram', 'image']);
 
 // Write contract for F15/tools — the column and the artifact must agree, so a
 // `sticky` proposal can never carry a diagram payload.
@@ -1015,7 +1069,9 @@ export const proposalCreateSchema = z
         ? diagramWriteArtifactSchema
         : value.artifactJson.type === 'drawing'
           ? drawingWriteArtifactSchema
-          : stickyWriteArtifactSchema;
+          : value.artifactJson.type === 'image'
+            ? imageWriteArtifactSchema
+            : stickyWriteArtifactSchema;
 
     if (writeSchema) {
       const parsed = writeSchema.safeParse(value.artifactJson);
@@ -1069,7 +1125,9 @@ export const proposalUpdateSchema = z
           ? drawingWriteArtifactSchema
           : value.artifactJson?.type === 'sticky'
             ? stickyWriteArtifactSchema
-            : null;
+            : value.artifactJson?.type === 'image'
+              ? imageWriteArtifactSchema
+              : null;
 
     if (writeSchema && value.artifactJson) {
       const parsed = writeSchema.safeParse(value.artifactJson);

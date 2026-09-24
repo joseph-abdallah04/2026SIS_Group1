@@ -50,6 +50,7 @@ import {
   STICKY_NOTE_CLASS,
   STICKY_NOTE_PADDING,
 } from '../tools/sticky/stickyPresentation';
+import { canShowImage } from '../tools/image/canShowImage';
 import { StickyText } from '../tools/sticky/StickyText';
 import { useCardTooltip } from './useCardTooltip';
 import { ProposalEnlarge } from './ProposalEnlarge';
@@ -112,6 +113,7 @@ const PLATE_ASPECT = 4 / 3;
 export function hasArtwork(item: BoardItem): boolean {
   const artifact = item.artifactJson;
   if (artifact.type === 'drawing') return artifact.svg.trim().length > 0;
+  if (artifact.type === 'image') return canShowImage(artifact.src);
   if (artifact.type !== 'diagram') return false;
   return (
     artifact.nodes.length > 0 ||
@@ -407,6 +409,37 @@ export function diagramExtent(artifact: DiagramArtifact): { width: number; heigh
 export function ProposalArtwork({ item }: { item: BoardItem }) {
   const artifact = item.artifactJson;
   if (artifact.type === 'diagram') return <DiagramArtwork item={item} />;
+  if (artifact.type === 'image') {
+    // Only ever a data URL this build has checked. An address here would have
+    // every viewer's browser fetch from wherever a proposal pointed it.
+    if (!canShowImage(artifact.src)) return null;
+    return (
+      // Mounted on the plate rather than run to its edges, inset as far as a
+      // drawing is, so a wide picture, a tall one and a panorama all sit in
+      // the card the same way rather than some touching its sides and some not.
+      <div className="absolute inset-0 flex items-center justify-center p-2.5">
+        <img
+          src={artifact.src}
+          alt={`Image by ${item.authorName}`}
+          width={artifact.width}
+          height={artifact.height}
+          // Kept whole and letterboxed rather than cropped to the plate: the
+          // author already chose the framing when they imported it, and a card
+          // that trimmed it again would be showing something they did not pick.
+          // Sized by its own box, not an object-fit inside a bigger one, so the
+          // rounding lands on the picture's corners: shrunk to fit but never
+          // enlarged past its own size, so a small icon stays crisp rather than
+          // blown up into a blur. Rounded here and never in the crop, where the
+          // corners are the exact cut being made.
+          className="h-auto max-h-full min-h-0 w-auto max-w-full min-w-0 rounded-md"
+          loading="lazy"
+          decoding="async"
+          // Images are natively draggable, which would hijack a card drag.
+          draggable={false}
+        />
+      </div>
+    );
+  }
   if (artifact.type !== 'drawing') return null;
   // Never inject a peer's SVG into this document: it is arbitrary user-authored
   // markup, so an inline <svg> would run any <script>/onload it carries in every
@@ -750,7 +783,8 @@ export function ProposalCard({
   const artwork = <ProposalArtwork item={item} />;
   // A drawing proposed before strokes were stored has nothing to draw, and so
   // nothing to open: the plate stays, the way into the preview does not.
-  const hasPlate = artifact.type === 'diagram' || artifact.type === 'drawing';
+  const hasPlate =
+    artifact.type === 'diagram' || artifact.type === 'drawing' || artifact.type === 'image';
   const openable = hasArtwork(item);
   // Kept here, not in the button, because the plate opens it as well.
   const [openedHere, setOpenedHere] = useState(false);

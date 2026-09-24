@@ -4,7 +4,11 @@ import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/share
 
 import { findOpenProposalPosition } from './proposalPlacement';
 import { proposalErrorMessage } from './proposeErrors';
-import type { ProposalSubmissionStatus, ProposeResult } from './CreativeToolsContext';
+import type {
+  ProposalSubmissionStatus,
+  ProposeOptions,
+  ProposeResult,
+} from './CreativeToolsContext';
 
 interface UseProposalSubmissionOptions {
   extensionSource: BoardItem | null;
@@ -102,7 +106,10 @@ export function useProposalSubmission({
    *
    * Always a create. Extending and editing are things you do from a tool.
    */
-  async function proposeArtifact(artifactJson: ArtifactJson): Promise<ProposeResult> {
+  async function proposeArtifact(
+    artifactJson: ArtifactJson,
+    options: ProposeOptions = {},
+  ): Promise<ProposeResult> {
     if (!isLive)
       return { ok: false, error: 'Reconnect to the session before proposing your idea.' };
 
@@ -110,7 +117,8 @@ export function useProposalSubmission({
       await propose({
         type: artifactJson.type,
         artifactJson,
-        ...findOpenProposalPosition(proposals, artifactJson),
+        ...findOpenProposalPosition(proposals, artifactJson, undefined, options.at),
+        ...(options.extendsProposalId ? { extendsProposalId: options.extendsProposalId } : {}),
       });
       return { ok: true };
     } catch (cause) {

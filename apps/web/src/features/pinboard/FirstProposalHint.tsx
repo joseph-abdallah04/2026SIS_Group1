@@ -102,11 +102,11 @@ export function FirstProposalHint({
       // Centred over the toolbar, and left-anchored with it at the same stage
       // (see the toolbar row in PinboardCanvas). The width is capped by the
       // board, not the window, so it never runs off a narrow board.
-      className="absolute bottom-full left-1/2 mb-3.5 w-max max-w-[min(19rem,calc(100cqw-3rem))] -translate-x-1/2 @max-[48rem]/board:left-0 @max-[48rem]/board:translate-x-0"
+      className="absolute bottom-full left-1/2 mb-3.5 w-max max-w-[min(19rem,calc(100cqw-3rem))] -translate-x-1/2 @max-[52rem]/board:left-0 @max-[52rem]/board:translate-x-0"
     >
       <div
         // Grown from, and retracted into, the arrow's tip.
-        className={`relative flex origin-bottom items-start gap-3 rounded-2xl border border-rt-secondary/35 bg-linear-to-b from-rt-secondary-wash to-rt-surface py-3 pr-9 pl-3 shadow-[0_4px_18px_rgba(8,12,21,0.12)] @max-[48rem]/board:origin-[1.65rem_100%] @max-[36rem]/board:origin-[1.4rem_100%] ${
+        className={`relative flex origin-bottom items-start gap-3 rounded-2xl border border-rt-secondary/35 bg-linear-to-b from-rt-secondary-wash to-rt-surface py-3 pr-9 pl-3 shadow-[0_4px_18px_rgba(8,12,21,0.12)] @max-[52rem]/board:origin-[1.65rem_100%] @max-[42rem]/board:origin-[1.4rem_100%] ${
           phase === 'leaving' ? 'rt-hint-retract' : 'rt-hint-rise'
         }`}
       >
@@ -118,8 +118,9 @@ export function FirstProposalHint({
             Propose your first idea
           </p>
           <p className="mt-0.5 text-[11.5px] leading-snug text-rt-ink-muted">
-            Start with a <span className="font-medium text-rt-ink">Sticky</span> or open the{' '}
-            <span className="font-medium text-rt-ink">Studio</span>.
+            Start with a <span className="font-medium text-rt-ink">Sticky</span>, open the{' '}
+            <span className="font-medium text-rt-ink">Studio</span>, or add an{' '}
+            <span className="font-medium text-rt-ink">Image</span>.
           </p>
         </div>
 
@@ -139,7 +140,7 @@ export function FirstProposalHint({
             meet. Over Sticky once the toolbar anchors left. */}
         <span
           aria-hidden="true"
-          className="absolute -bottom-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 rounded-br-[3px] border-r border-b border-rt-secondary/35 bg-rt-surface @max-[48rem]/board:left-[1.65rem] @max-[36rem]/board:left-[1.4rem]"
+          className="absolute -bottom-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 rounded-br-[3px] border-r border-b border-rt-secondary/35 bg-rt-surface @max-[52rem]/board:left-[1.65rem] @max-[42rem]/board:left-[1.4rem]"
         />
       </div>
     </div>

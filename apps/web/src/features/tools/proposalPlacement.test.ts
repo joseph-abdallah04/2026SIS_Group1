@@ -130,3 +130,26 @@ describe('findOpenProposalPosition beside an original', () => {
     expect(Math.abs(position.y - 300)).toBeLessThanOrEqual(CELL_HEIGHT);
   });
 });
+
+describe('findOpenProposalPosition around a point', () => {
+  // A dropped picture lands where it was dropped, not in the middle of the view.
+  it('centres the card on the point it is given', () => {
+    const image: ArtifactJson = { type: 'image', src: '', width: 1, height: 1 };
+    const width = cardWidth({ type: 'image', artifactJson: image });
+    setBoardCentre({ x: 2000, y: 2000 });
+
+    expect(findOpenProposalPosition([], image, undefined, { x: 900, y: 700 })).toEqual({
+      x: 900 - width / 2,
+      y: 700 - 130,
+    });
+  });
+
+  it('still finds it a clear spot when dropped onto a card', () => {
+    const image: ArtifactJson = { type: 'image', src: '', width: 1, height: 1 };
+    const landed = findOpenProposalPosition([stickyAt(800, 600)], image, undefined, {
+      x: 900,
+      y: 700,
+    });
+    expect(landed).not.toEqual({ x: 900 - 140, y: 570 });
+  });
+});

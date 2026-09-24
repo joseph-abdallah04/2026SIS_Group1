@@ -1,4 +1,9 @@
-import type { BoardItem, DiagramArtifact, DrawingArtifact } from '@roundtable/shared';
+import type {
+  BoardItem,
+  DiagramArtifact,
+  DrawingArtifact,
+  ImageArtifact,
+} from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import { rasterizeProposalPreview } from './artifactPreview.js';
@@ -68,6 +73,36 @@ describe('rasterizeProposalPreview', () => {
       item(drawing('<svg><path d="M0,0 L10,10" stroke="#000"/></svg>')),
       'winner',
     );
+    expect(png.png.subarray(1, 4).toString()).toBe('PNG');
+  });
+
+  // What the importer writes: a JPEG for anything opaque. Made by the importer
+  // itself, in a browser, so this is the real encoding and not a hand-made one.
+  const RED_JPEG =
+    'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAQDAwQDAwQEBAQFBQQFBwsHBwYGBw4KCggLEA4RERAOEA8SFBoWEhMYEw8QFh8XGBsbHR0dERYgIh8cIhocHRz/2wBDAQUFBQcGBw0HBw0cEhASHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBz/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABgj/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCWgBimH//Z';
+
+  function image(src: string, width = 8, height = 8): ImageArtifact {
+    return { type: 'image', src, width, height };
+  }
+
+  it('paints an imported picture into the card', () => {
+    const png = rasterizeProposalPreview(item(image(RED_JPEG)), 'winner');
+    expect(png.png.subarray(1, 4).toString()).toBe('PNG');
+  });
+
+  // A picture as tall as it is allowed to be is still held to the recap's
+  // ceiling, the same as a drawing or a diagram.
+  it('caps a very tall picture', () => {
+    const png = rasterizeProposalPreview(item(image(RED_JPEG, 10, 1600)), 'tied');
+    // The same ceiling a drawing is held to, rather than a strip 160 times
+    // taller than it is wide.
+    expect(png.height).toBeLessThan(3000);
+  });
+
+  // A row that somehow holds an address is drawn as an empty plate, never
+  // handed to resvg to follow.
+  it('leaves the plate empty for a picture it cannot vouch for', () => {
+    const png = rasterizeProposalPreview(item(image('https://example.com/x.jpg')), 'winner');
     expect(png.png.subarray(1, 4).toString()).toBe('PNG');
   });
 });

@@ -14,6 +14,7 @@ import {
   diagramNodeStrokeWidth,
   diagramNodesInDrawOrder,
   effectiveDiagramNodeSize,
+  isStorableImage,
   type BoardItem,
   type DiagramNodeShape,
   type DiagramNodeSize,
@@ -116,10 +117,7 @@ function stickySvg(item: BoardItem, kind: FeaturedKind): string {
   const textTop = 72;
   const height = Math.max(420, textTop + lines.length * lineH + FOOTER_H + 16);
   const tspans = lines
-    .map(
-      (line, index) =>
-        `<tspan x="${PAD}" y="${textTop + index * lineH}">${xml(line)}</tspan>`,
-    )
+    .map((line, index) => `<tspan x="${PAD}" y="${textTop + index * lineH}">${xml(line)}</tspan>`)
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, paper, kind)}
@@ -160,7 +158,10 @@ function drawingInner(svg: string): DrawingInner {
   let viewW = DRAWING_VIEWBOX_WIDTH;
   let viewH = DRAWING_VIEWBOX_HEIGHT;
   if (view?.[1]) {
-    const parts = view[1].trim().split(/[\s,]+/).map(Number);
+    const parts = view[1]
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
     // Only the extents have to be positive; an origin of 0 is the normal case,
     // which is why this checks what each number means rather than all four
     // being non-zero.
@@ -190,6 +191,34 @@ function drawingSvg(item: BoardItem, kind: FeaturedKind): string {
     ${cardShell(height, WHITE, kind)}
     <rect x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" rx="12" fill="${ART_BG}"/>
     <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="${minX} ${minY} ${viewW} ${viewH}" preserveAspectRatio="xMidYMid meet" fill="none">${markup}</svg>
+    ${footer(item.authorName, height - 18)}
+  </svg>`;
+}
+
+/**
+ * An imported picture, painted into the card above the byline — the same shape
+ * as a drawing's card, since that is all a picture proposal is.
+ *
+ * The picture goes in as it is stored, a data URL: resvg decodes it the same way
+ * a browser would. It is only embedded once it has passed the same check the
+ * board makes before drawing it, so a row that somehow holds anything else
+ * gives an empty plate rather than handing resvg a reference to follow.
+ * Escaped all the same, although the check admits only the base64 alphabet:
+ * the attribute stays closed even if that check is ever widened.
+ */
+function imageSvg(item: BoardItem, kind: FeaturedKind): string {
+  if (item.artifactJson.type !== 'image') return '';
+  const { src, width, height: imageH } = item.artifactJson;
+  const artW = CARD_W - PAD * 2;
+  const artH = artHeight(artW, Math.max(1, width), Math.max(1, imageH));
+  const height = PAD + artH + FOOTER_H + 12;
+  const picture = isStorableImage(src)
+    ? `<image x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" href="${xml(src)}" preserveAspectRatio="xMidYMid meet"/>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
+    ${cardShell(height, WHITE, kind)}
+    <rect x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" rx="12" fill="${ART_BG}"/>
+    ${picture}
     ${footer(item.authorName, height - 18)}
   </svg>`;
 }
@@ -309,14 +338,13 @@ function proposalCardSvg(item: BoardItem, kind: FeaturedKind): string {
       return drawingSvg(item, kind);
     case 'diagram':
       return diagramSvg(item, kind);
+    case 'image':
+      return imageSvg(item, kind);
   }
 }
 
 /** Paint a board card to PNG so the recap PDF can show the proposal, not a caption. */
-export function rasterizeProposalPreview(
-  item: BoardItem,
-  kind: FeaturedKind,
-): ProposalPreviewPng {
+export function rasterizeProposalPreview(item: BoardItem, kind: FeaturedKind): ProposalPreviewPng {
   const svg = proposalCardSvg(item, kind);
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: 1400 },

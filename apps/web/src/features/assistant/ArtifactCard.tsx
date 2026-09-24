@@ -30,6 +30,7 @@ const TYPE_LABELS: Record<ArtifactJson['type'], string> = {
   sticky: 'Sticky note',
   drawing: 'Drawing',
   diagram: 'Diagram',
+  image: 'Image',
 };
 
 export function ArtifactCard({

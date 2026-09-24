@@ -12,6 +12,14 @@ export type ProposalSubmissionStatus = 'idle' | 'submitting' | 'success';
  */
 export type ProposeResult = { ok: true } | { ok: false; error: string };
 
+/** Where a write from outside an editor lands, and what it came from. */
+export interface ProposeOptions {
+  /** A point on the board to centre it on — where an image was dropped. */
+  at?: { x: number; y: number };
+  /** The proposal it copies, when it is a reuse (F38) rather than something new. */
+  extendsProposalId?: string;
+}
+
 export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
   /**
@@ -63,10 +71,11 @@ export interface CreativeToolsContextValue {
   submitArtifact: (artifact: ArtifactJson) => Promise<boolean>;
   /**
    * A write from somewhere that is not an editor — the assistant's chat cards,
-   * which never open a tool and each keep their own state. Same placement and
-   * same error copy; none of the editor's one-at-a-time state.
+   * which never open a tool and each keep their own state, and the image
+   * importer. Same placement and same error copy; none of the editor's
+   * one-at-a-time state.
    */
-  proposeArtifact: (artifact: ArtifactJson) => Promise<ProposeResult>;
+  proposeArtifact: (artifact: ArtifactJson, options?: ProposeOptions) => Promise<ProposeResult>;
 }
 
 export const CreativeToolsContext = createContext<CreativeToolsContextValue | null>(null);

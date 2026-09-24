@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
 import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
-import { Scan } from 'lucide-react';
+import { ImagePlus, Scan } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { copyText } from '../../lib/copyText';
 import { EndSessionControl } from '../sessions/EndSessionControl';
 import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
+import { useImageImport } from '../tools/image/ImageImportProvider';
+import { isImageFile } from '../tools/image/imageEncoding';
 import { stickyPlainText } from '../tools/sticky/stickyMarks';
 import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
@@ -632,6 +634,70 @@ export function PinboardCanvas({
       ? 'Proposals are locked while this question is in voting'
       : 'This question is closed to new proposals';
 
+  /**
+   * A picture dragged in from the desktop, dropped where it should go.
+   *
+   * Every drag of files over the board is taken, whether or not it can land:
+   * left to the browser, a missed drop opens the file in the tab and throws the
+   * whole session away. So a drop that cannot land says why instead.
+   *
+   * `dragDepth` counts enters against leaves, because the drag passes over the
+   * cards and each one it crosses is an enter of its own; the overlay goes
+   * only when the count is back to nothing.
+   */
+  const imageImport = useImageImport();
+  const canDropImage = boardOpen && (imageImport?.canImport ?? false);
+  const [droppingFiles, setDroppingFiles] = useState(false);
+  const dragDepth = useRef(0);
+  const carriesFiles = (event: React.DragEvent) =>
+    Array.from(event.dataTransfer.types).includes('Files');
+  const dropHandlers = imageImport
+    ? {
+        onDragEnter: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          dragDepth.current += 1;
+          setDroppingFiles(true);
+        },
+        onDragOver: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = canDropImage ? 'copy' : 'none';
+        },
+        onDragLeave: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDroppingFiles(false);
+        },
+        onDrop: (event: React.DragEvent) => {
+          if (!carriesFiles(event)) return;
+          event.preventDefault();
+          dragDepth.current = 0;
+          setDroppingFiles(false);
+          if (!canDropImage) {
+            showNotice(boardOpen ? 'Wait a moment, then drop it again' : closedMessage);
+            return;
+          }
+          const file = Array.from(event.dataTransfer.files).find(isImageFile);
+          if (!file) {
+            showNotice('Only images can be added to the board');
+            return;
+          }
+          // The board point under the pointer: the scene transform, undone.
+          const frame = viewportRef.current?.getBoundingClientRect();
+          imageImport.importFile(
+            file,
+            frame
+              ? {
+                  x: (event.clientX - frame.left - DESK_MARGIN - restX + pan.x) / scale,
+                  y: (event.clientY - frame.top - DESK_MARGIN - restY + pan.y) / scale,
+                }
+              : undefined,
+          );
+        },
+      }
+    : {};
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
       <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-3 text-rt-ink">
@@ -743,6 +809,7 @@ export function PinboardCanvas({
               touchAction: 'none',
             }}
             {...panHandlers}
+            {...dropHandlers}
           >
             {/* Drawn empty or not: an empty board is still the board, and Fit
                 has already put its middle in the window. */}
@@ -819,6 +886,29 @@ export function PinboardCanvas({
               </div>
             </div>
 
+            {/* A file held over the board: where it will land, or why it will
+                not. Transparent to the pointer, so the drag goes on reaching
+                the board underneath and the drop lands on it. */}
+            {droppingFiles ? (
+              <div
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed ${
+                  canDropImage
+                    ? 'border-rt-secondary bg-rt-secondary/10'
+                    : 'border-rt-tertiary bg-rt-ink/5'
+                }`}
+              >
+                <span
+                  className={`${FLOATING_BAR} gap-2 px-4 text-[13px] font-semibold ${
+                    canDropImage ? 'text-rt-ink' : 'text-rt-ink-muted'
+                  }`}
+                >
+                  <ImagePlus aria-hidden="true" size={17} strokeWidth={1.8} />
+                  {canDropImage ? 'Drop to add the image here' : closedMessage}
+                </span>
+              </div>
+            ) : null}
+
             {/*
           Only past 100%: below that the whole board is on screen or a pan away,
           and bars are furniture. Magnified, the board really does continue past
@@ -877,9 +967,9 @@ export function PinboardCanvas({
 
             {/* The main toolbar. Centred on the board until it would run
                   into the zoom control on the left, then anchored right: the
-                  centred bar (~290px) meets the zoom control (~181px, 24px in
-                  from the edge, 16px gap) on a board narrower than ~732px, so
-                  48rem leaves a margin. Extra right padding clears the
+                  centred bar (~375px) meets the zoom control (~181px, 24px in
+                  from the edge, 16px gap) on a board narrower than ~816px, so
+                  52rem leaves a margin. Extra right padding clears the
                   assistant orb in that corner. `bottom-6` clears the
                   horizontal scrollbar. On a board too narrow even for icons
                   (~320px) the two can still touch.
@@ -897,7 +987,7 @@ export function PinboardCanvas({
               className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
                 !boardOpen && boardOverlay
                   ? '@max-[60rem]/board:justify-end @max-[60rem]/board:pr-[5.75rem]'
-                  : '@max-[48rem]/board:justify-end @max-[48rem]/board:pr-[5.75rem]'
+                  : '@max-[52rem]/board:justify-end @max-[52rem]/board:pr-[5.75rem]'
               }`}
             >
               {/* `relative` so the first-proposal hint can rise off whichever
@@ -908,7 +998,9 @@ export function PinboardCanvas({
                   viewerId={viewerId}
                   boardOpen={boardOpen}
                   isLive={isLive}
-                  toolOpen={activeTool !== null}
+                  // Framing a picture counts: it is making a proposal, and
+                  // the hint that says how to make one has done its job.
+                  toolOpen={activeTool !== null || (imageImport?.importing ?? false)}
                 />
                 {boardOpen ? (
                   // Reuse sits in the same pill as the tools that start from

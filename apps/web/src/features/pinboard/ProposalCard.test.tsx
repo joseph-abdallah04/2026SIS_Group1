@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { BoardItem, DiagramNode, StickyMark } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
+import { TINY_PNG } from '../tools/image/testImages';
 import { ProposalCard } from './ProposalCard';
 
 /** One reactor, named the way the server names them. */
@@ -816,5 +817,39 @@ describe('the board card draws what the editor drew', () => {
     // Absent still means "never styled", which is what keeps older diagrams
     // rendering as they always did.
     expect(fills).toContain('#EEF2F4');
+  });
+});
+
+describe('image card', () => {
+  function imageItem(artifact: Partial<BoardItem['artifactJson']> = {}): BoardItem {
+    return {
+      ...diagramItem([]),
+      id: 'image-1',
+      type: 'image',
+      artifactJson: {
+        type: 'image',
+        src: TINY_PNG,
+        width: 1,
+        height: 1,
+        ...artifact,
+      } as BoardItem['artifactJson'],
+    };
+  }
+
+  it('shows the picture, named after its author, and offers to enlarge it', () => {
+    render(<ProposalCard item={imageItem()} />);
+
+    const picture = screen.getByRole('img', { name: 'Image by Alice' });
+    expect(picture).toHaveAttribute('src', TINY_PNG);
+    expect(screen.getByRole('button', { name: /enlarge image by alice/i })).toBeInTheDocument();
+  });
+
+  // A row that somehow holds an address must never make every viewer's
+  // browser fetch from it: the card draws nothing rather than follow it.
+  it('draws nothing for a picture it cannot vouch for', () => {
+    render(<ProposalCard item={imageItem({ src: 'https://example.com/pixel.png' } as never)} />);
+
+    expect(document.querySelector('img')).toBeNull();
+    expect(screen.queryByRole('button', { name: /enlarge/i })).toBeNull();
   });
 });
