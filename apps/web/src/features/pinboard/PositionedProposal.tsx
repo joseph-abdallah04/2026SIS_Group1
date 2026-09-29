@@ -97,7 +97,10 @@ interface PositionedProposalProps {
    * the viewer has already pressed. Null until the board is joined.
    */
   viewerId: string | null;
-  /** Toggle one of this viewer's reactions on this proposal (F18). Absent once the board is frozen. */
+  /**
+   * Toggle one of this viewer's reactions on this proposal (F18). Absent once
+   * the board is frozen, when the reactions already left are shown read-only.
+   */
   onReact?: (item: BoardItem, emoji: string) => Promise<void>;
   /** Whether this proposal is on the leader's voting shortlist (F27). */
   isShortlisted: boolean;
@@ -490,14 +493,14 @@ export function PositionedProposal({
           onEnlargedOpenChange={setEnlargedOpen}
         />
 
-        {onReact ? (
-          <ReactionRow
-            reactions={item.reactions}
-            viewerId={viewerId}
-            onReact={(emoji) => onReact(item, emoji)}
-            width={cardWidth(item)}
-          />
-        ) : null}
+        {/* Always there, reacting or not: once the board closes for voting,
+            what people said about each idea stays on it to be read. */}
+        <ReactionRow
+          reactions={item.reactions}
+          viewerId={viewerId}
+          onReact={onReact ? (emoji) => onReact(item, emoji) : undefined}
+          width={cardWidth(item)}
+        />
 
         {hasActions ? (
           <CardMenuButton
