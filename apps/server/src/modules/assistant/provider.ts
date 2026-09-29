@@ -10,6 +10,7 @@
 //     is something they typed
 import { APICallError } from '@ai-sdk/provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { assistantErrorMessage, type AssistantErrorCode } from '@roundtable/shared';
 import { generateText, type LanguageModel } from 'ai';
 
 import { env } from '../../env.js';
@@ -94,18 +95,18 @@ export async function probeCredentials(
  * Turns whatever the provider or the network threw into an error worth showing.
  *
  * The user chose the base URL, the key and the model, so nearly every failure here is a
- * setup mistake they can fix — but only if the message says which one.
+ * setup mistake they can fix — but only if the error says which one. So each one gets a
+ * code from `ASSISTANT_ERRORS`, whose title and hint become the message, and what the
+ * provider actually said rides along as `details`. It used to be the other way round: the
+ * provider's raw text *was* the message, which put things like
+ * "'messages.2' : for 'role:assistant' the following must be satisfied" in front of people.
  */
 export function describeProviderError(cause: unknown, baseUrl: string): ApiError {
   const blocked = findInCauseChain(cause, (error): error is BlockedHostError =>
     isNamed(error, 'BlockedHostError'),
   );
   if (blocked) {
-    return new ApiError(
-      400,
-      `Refused to connect to ${blocked.host}: ${blocked.message}. The assistant only calls public hosts.`,
-      'LLM_URL_PRIVATE_HOST',
-    );
+    return providerError(400, 'LLM_URL_PRIVATE_HOST', `${blocked.host}: ${blocked.message}`);
   }
 
   if (APICallError.isInstance(cause)) {
@@ -113,7 +114,7 @@ export function describeProviderError(cause: unknown, baseUrl: string): ApiError
   }
 
   if (isNamed(cause, 'TimeoutError') || /timed? ?out/i.test(messageOf(cause))) {
-    return new ApiError(504, 'The model provider timed out.', 'LLM_TIMEOUT');
+    return providerError(504, 'LLM_TIMEOUT', messageOf(cause));
   }
 
   if (isNamed(cause, 'AbortError')) {
@@ -123,57 +124,51 @@ export function describeProviderError(cause: unknown, baseUrl: string): ApiError
   // DNS failure, refused connection, TLS problem — usually a wrong base URL.
   const code = errnoOf(cause);
   if (code) {
-    return new ApiError(502, `Could not reach ${hostOf(baseUrl)}: ${code}`, 'LLM_UNREACHABLE');
+    return providerError(502, 'LLM_UNREACHABLE', `${hostOf(baseUrl)}: ${code}`);
   }
 
-  return new ApiError(502, `The model provider failed: ${messageOf(cause)}`, 'LLM_FAILED');
+  return providerError(502, 'LLM_FAILED', messageOf(cause));
 }
+
+// What providers say when the account, the conversation, or the model is the problem. Each
+// is matched against the provider's own message, because the status alone cannot tell them
+// apart: OpenAI reports an empty account as a 429, the same status as a rate limit.
+const QUOTA_EXCEEDED =
+  /insufficient[_ ]quota|exceeded your current quota|insufficient (?:credits?|balance|funds)|credit balance is too low|out of credits?/i;
+const CONTEXT_TOO_LONG =
+  /context[_ ]length|context window|maximum context|too many tokens|prompt is too long|reduce the length|request too large/i;
+const TOOLS_UNSUPPORTED =
+  /does not support (?:tools|tool[ _-]?(?:use|calling|calls)|function[ _-]?calling)|tools? (?:are|is) not supported|no endpoints found that support tool use|tool[ _-]?choice requires/i;
 
 function fromApiCallError(error: APICallError): ApiError {
   const status = error.statusCode ?? 0;
-  const detail = extractProviderMessage(error.responseBody);
+  const said = extractProviderMessage(error.responseBody) || error.message;
+  const detail = `HTTP ${status || '?'}${said ? ` — ${said}` : ''}`;
 
-  if (status === 401 || status === 403) {
-    return new ApiError(
-      400,
-      `The provider rejected the API key (${status})${detail ? `: ${detail}` : ''}`,
-      'LLM_AUTH_FAILED',
-    );
+  const clientError = status >= 400 && status < 500;
+
+  if (status === 401 || status === 403) return providerError(400, 'LLM_AUTH_FAILED', detail);
+  // Ahead of 429: an empty account and a busy one need different fixes.
+  if (status === 402 || (clientError && QUOTA_EXCEEDED.test(said))) {
+    return providerError(402, 'LLM_QUOTA_EXCEEDED', detail);
   }
-
-  if (status === 404) {
-    // A 404 from chat/completions is nearly always a retired or misspelled model rather
-    // than a wrong path, so lead with what the provider said.
-    return new ApiError(
-      400,
-      detail
-        ? `The provider returned 404: ${detail} (if the model name is right, check the base URL ends at /v1)`
-        : 'Model endpoint not found (404) — check the model name, and that the base URL ends at /v1',
-      'LLM_MODEL_NOT_FOUND',
-    );
+  // Ahead of 404: OpenRouter answers a model without tool support with one.
+  if (clientError && TOOLS_UNSUPPORTED.test(said)) {
+    return providerError(400, 'LLM_TOOLS_UNSUPPORTED', detail);
   }
-
-  if (status === 429) {
-    return new ApiError(
-      429,
-      `The provider rate-limited the request${detail ? `: ${detail}` : ''}`,
-      'LLM_RATE_LIMITED',
-    );
+  // Otherwise a 404 from chat/completions is nearly always a retired or misspelled model.
+  if (status === 404) return providerError(400, 'LLM_MODEL_NOT_FOUND', detail);
+  if (status === 429) return providerError(429, 'LLM_RATE_LIMITED', detail);
+  if (status === 413 || (clientError && CONTEXT_TOO_LONG.test(said))) {
+    return providerError(400, 'LLM_CONTEXT_TOO_LONG', detail);
   }
+  if (status === 400 || status === 422) return providerError(400, 'LLM_REQUEST_REJECTED', detail);
+  if (status >= 500) return providerError(502, 'LLM_PROVIDER_ERROR', detail);
+  return providerError(502, 'LLM_HTTP_ERROR', detail);
+}
 
-  if (status >= 500) {
-    return new ApiError(
-      502,
-      `The provider returned ${status}${detail ? `: ${detail}` : ''}`,
-      'LLM_PROVIDER_ERROR',
-    );
-  }
-
-  return new ApiError(
-    502,
-    detail || error.message || 'The model provider rejected the request',
-    'LLM_HTTP_ERROR',
-  );
+function providerError(status: number, code: AssistantErrorCode, detail?: string): ApiError {
+  return new ApiError(status, assistantErrorMessage(code), code, detail || undefined);
 }
 
 /** Providers wrap their message differently; check the three common shapes. */
@@ -186,11 +181,11 @@ function extractProviderMessage(body: string | undefined): string {
     };
     const message =
       typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message ?? parsed.message);
-    if (message) return message.slice(0, 300);
+    if (message) return message.slice(0, 500);
   } catch {
     // Non-JSON body — an HTML error page from a proxy, usually.
   }
-  return body.slice(0, 300);
+  return body.slice(0, 500);
 }
 
 /**

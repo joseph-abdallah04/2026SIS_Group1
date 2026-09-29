@@ -181,6 +181,10 @@ export interface LlmConfigPublic {
 export interface LlmConfigTestResult {
   ok: boolean;
   error?: string;
+  /** Why the test failed, as one of the `ASSISTANT_ERRORS` codes. */
+  code?: string;
+  /** What the provider actually said, when it said something. */
+  detail?: string;
   /** Round-trip latency in ms when the probe succeeded. */
   latencyMs?: number;
   /** Model string the provider echoed back, when it differs from what was requested. */
@@ -336,7 +340,18 @@ export type AssistantStreamEvent =
       source: AssistantToolName;
       artifact: ArtifactJson;
     }
-  | { type: 'error'; message: string; code?: string }
+  | {
+      type: 'error';
+      /** A complete sentence on its own, for anything that shows a single line. */
+      message: string;
+      /** Stable identifier — see `ASSISTANT_ERRORS` for what each one means. */
+      code?: string;
+      /**
+       * What the provider or the server actually said, verbatim and trimmed. Kept out of
+       * `message` because it is often machine-shaped, but worth having one click away.
+       */
+      detail?: string;
+    }
   | {
       /** The model started a reasoning block. Not a token of the visible reply. */
       type: 'status';
@@ -354,6 +369,150 @@ export type AssistantStreamEvent =
  * criteria). Errors arrive as an `error` frame immediately before it.
  */
 export const ASSISTANT_STREAM_TERMINATOR = 'done' satisfies AssistantStreamEvent['type'];
+
+// ---------------------------------------------------------------------------
+// Error codes
+// ---------------------------------------------------------------------------
+
+/**
+ * Every code an assistant error can carry, and what to tell the person who hit it.
+ *
+ * The code is the stable part: safe to search logs and the codebase for, and to quote in a
+ * bug report. The words can change. `title` says what went wrong; `hint` says what to do
+ * next, written for someone in the middle of a session rather than for us.
+ *
+ * Codes come from three places: what the provider said (`LLM_*`), RoundTable's own checks
+ * before a turn starts, and the browser's side of the connection (the last group).
+ */
+export const ASSISTANT_ERRORS = {
+  // Setting up a provider
+  LLM_NOT_CONFIGURED: {
+    title: 'No AI provider is set up yet',
+    hint: 'Add one in the assistant or on the Settings page, then send your message again.',
+  },
+  LLM_KEY_UNDECRYPTABLE: {
+    title: 'Your saved API key can no longer be read',
+    hint: 'The server has changed how it stores keys. Enter your key again in the provider settings.',
+  },
+  LLM_ENCRYPTION_UNCONFIGURED: {
+    title: 'This server cannot store API keys yet',
+    hint: 'LLM_KEY_ENCRYPTION_SECRET is not set on the server. Ask whoever runs it to set one.',
+  },
+  LLM_URL_INVALID: {
+    title: 'That base URL is not valid',
+    hint: 'Use the full address, for example https://api.groq.com/openai/v1.',
+  },
+  LLM_URL_PRIVATE_HOST: {
+    title: 'That provider address is not allowed',
+    hint: 'This server only calls public addresses, so a model on your own computer (such as Ollama) works only when RoundTable runs there too.',
+  },
+  LLM_URL_UNRESOLVABLE: {
+    title: 'That provider address does not exist',
+    hint: 'Check the base URL in your provider settings for a typo.',
+  },
+
+  // What the provider said
+  LLM_AUTH_FAILED: {
+    title: 'The provider rejected your API key',
+    hint: 'It may have been revoked, or belong to a different provider. Enter it again in the provider settings.',
+  },
+  LLM_MODEL_NOT_FOUND: {
+    title: 'The provider does not have that model',
+    hint: 'Check the model name in your provider settings (providers retire models), and that the base URL ends at /v1.',
+  },
+  LLM_QUOTA_EXCEEDED: {
+    title: 'Your provider account is out of credit',
+    hint: "Check billing on the provider's website, or switch to a model on a free tier.",
+  },
+  LLM_RATE_LIMITED: {
+    title: 'The provider is limiting how fast you can ask',
+    hint: 'Wait a few seconds, then send it again. Free tiers allow only a few requests a minute.',
+  },
+  LLM_CONTEXT_TOO_LONG: {
+    title: 'This chat is too long for the model',
+    hint: 'Press Clear to start a fresh chat, or choose a model with a larger context window.',
+  },
+  LLM_TOOLS_UNSUPPORTED: {
+    title: 'This model cannot use tools',
+    hint: 'Sticky notes, diagrams, web search and session look-ups all need tool calling. Choose a model that supports it.',
+  },
+  LLM_REQUEST_REJECTED: {
+    title: 'The provider refused the request',
+    hint: 'RoundTable sent something this provider or model does not accept; it was not something you typed. Try again, or choose a different model.',
+  },
+  LLM_PROVIDER_ERROR: {
+    title: 'The provider had a problem on its side',
+    hint: 'Nothing is wrong with your setup. Try again in a moment.',
+  },
+  LLM_HTTP_ERROR: {
+    title: 'The provider answered with an unexpected error',
+    hint: 'Try again. If it keeps happening, compare the details below with your provider settings.',
+  },
+  LLM_TIMEOUT: {
+    title: 'The provider took too long to answer',
+    hint: 'Try again, or ask something shorter. A local model can take a while to load.',
+  },
+  LLM_UNREACHABLE: {
+    title: 'Could not reach the provider',
+    hint: 'Check the base URL in your provider settings, and that the provider is up.',
+  },
+  LLM_FAILED: {
+    title: 'The model call failed',
+    hint: 'Try again. The details below say what went wrong.',
+  },
+
+  // RoundTable's own checks before a turn starts
+  UNAUTHENTICATED: {
+    title: 'You are signed out',
+    hint: 'Log in again, then send your message again.',
+  },
+  NOT_SESSION_MEMBER: {
+    title: 'You are not in this session',
+    hint: 'Rejoin it with the session code, then try again.',
+  },
+  ASSISTANT_RATE_LIMITED: {
+    title: 'Too many messages in a short time',
+    hint: 'Wait a moment, then send it again.',
+  },
+  VALIDATION_FAILED: {
+    title: 'That message could not be sent',
+    hint: 'Try a shorter message, or press Clear and ask again.',
+  },
+  INTERNAL: {
+    title: 'RoundTable hit an unexpected error',
+    hint: 'Try again. If it keeps happening, report the code below.',
+  },
+
+  // The browser's side of the connection
+  NETWORK_ERROR: {
+    title: 'Could not reach RoundTable',
+    hint: 'Check your connection, and that the server is running.',
+  },
+  STREAM_INTERRUPTED: {
+    title: 'The connection dropped mid-answer',
+    hint: 'Whatever arrived is above. Ask again for the rest.',
+  },
+  STREAM_EMPTY: {
+    title: 'The server sent back nothing',
+    hint: 'Try again.',
+  },
+  REQUEST_FAILED: {
+    title: 'The request failed',
+    hint: 'Try again. The details below have the status the server returned.',
+  },
+} as const satisfies Record<string, { title: string; hint: string }>;
+
+export type AssistantErrorCode = keyof typeof ASSISTANT_ERRORS;
+
+export function isAssistantErrorCode(code: unknown): code is AssistantErrorCode {
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(ASSISTANT_ERRORS, code);
+}
+
+/** Title and hint as one line, for places that show a single string. */
+export function assistantErrorMessage(code: AssistantErrorCode): string {
+  const { title, hint } = ASSISTANT_ERRORS[code];
+  return `${title}. ${hint}`;
+}
 
 /** Guard for narrowing a parsed SSE payload without trusting `as`. */
 export function isAssistantStreamEvent(value: unknown): value is AssistantStreamEvent {

@@ -13,6 +13,7 @@ import { CreativeToolsContext } from '../tools/CreativeToolsContext';
 import { LlmSettingsForm } from '../settings/LlmSettingsForm';
 import { AgentActivity } from './AgentActivity';
 import { ArtifactCard } from './ArtifactCard';
+import { AssistantErrorNotice } from './AssistantErrorNotice';
 import { shouldRenderToolEntry } from './assistantActivity';
 import { ToolActivity } from './ToolActivity';
 import type { AssistantChat, ChatEntry } from './useAssistantChat';
@@ -241,9 +242,13 @@ export function AssistantPanel({
 
               case 'error':
                 return (
-                  <p key={entry.id} className="rt-assistant-error">
-                    {entry.message}
-                  </p>
+                  <AssistantErrorNotice
+                    key={entry.id}
+                    message={entry.message}
+                    {...(entry.code ? { code: entry.code } : {})}
+                    {...(entry.detail ? { detail: entry.detail } : {})}
+                    {...(entry.cardsAbove ? { cardsAbove: entry.cardsAbove } : {})}
+                  />
                 );
             }
           })}

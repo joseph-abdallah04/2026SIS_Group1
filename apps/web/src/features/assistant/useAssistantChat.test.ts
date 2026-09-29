@@ -277,10 +277,7 @@ describe('reconcileProposed', () => {
 
   it('keeps two identical stickies independent when only one is deleted', () => {
     const note = { type: 'sticky' as const, text: 'Use Postgres', color: 'yellow' as const };
-    const card = (
-      id: string,
-      seenOnBoard?: boolean,
-    ): Extract<ChatEntry, { kind: 'artifact' }> => ({
+    const card = (id: string, seenOnBoard?: boolean): Extract<ChatEntry, { kind: 'artifact' }> => ({
       kind: 'artifact',
       id,
       source: 'sticky_ideation',
@@ -301,5 +298,70 @@ describe('reconcileProposed', () => {
     );
     expect(proposed).toHaveLength(1);
     expect(idle).toHaveLength(1);
+  });
+});
+
+describe('errors', () => {
+  const STICKY = { type: 'sticky', text: 'Use Postgres', color: 'yellow' } as const;
+
+  /** `reduceUnderStrictMode`, from a transcript that already has turns in it. */
+  function reduceFrom(prev: ChatEntry[], events: AssistantStreamEvent[]): ChatEntry[] {
+    let entries = prev;
+    events.forEach((event, index) => {
+      const id = `n${index + 1}`;
+      const first = applyEvent(entries, event, id);
+      const second = applyEvent(entries, event, id);
+      expect(second).toEqual(first);
+      entries = second;
+    });
+    return entries;
+  }
+
+  it('keeps the code and what the provider said', () => {
+    const entries = reduceUnderStrictMode([
+      {
+        type: 'error',
+        message: 'The provider refused the request. Try again.',
+        code: 'LLM_REQUEST_REJECTED',
+        detail: 'HTTP 400 — property reasoning_content is unsupported',
+      },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: 'error',
+        id: 'e1',
+        message: 'The provider refused the request. Try again.',
+        code: 'LLM_REQUEST_REJECTED',
+        detail: 'HTTP 400 — property reasoning_content is unsupported',
+      },
+    ]);
+  });
+
+  it('counts the cards this turn made before failing, and only this turn', () => {
+    const prev: ChatEntry[] = [
+      { kind: 'user', id: 'u0', text: 'Sticky notes please' },
+      { kind: 'artifact', id: 'old', source: 'sticky_ideation', artifact: STICKY, propose: 'idle' },
+      { kind: 'user', id: 'u1', text: 'Now a diagram' },
+    ];
+
+    const entries = reduceFrom(prev, [
+      { type: 'tool', toolName: 'create_diagram', status: 'running', args: {} },
+      { type: 'artifact', artifactId: 'a1', source: 'create_diagram', artifact: STICKY },
+      { type: 'tool-result', toolName: 'create_diagram', ok: true, summary: 'Diagram: 2 nodes' },
+      { type: 'error', message: 'm', code: 'LLM_REQUEST_REJECTED' },
+    ]);
+
+    // One, not two: the sticky from the earlier turn is not this turn's work.
+    expect(entries.at(-1)).toMatchObject({ kind: 'error', cardsAbove: 1 });
+  });
+
+  it('says nothing about cards when the turn made none', () => {
+    const entries = reduceFrom(
+      [{ kind: 'user', id: 'u1', text: 'hi' }],
+      [{ type: 'error', message: 'm', code: 'LLM_AUTH_FAILED' }],
+    );
+
+    expect(entries.at(-1)).not.toHaveProperty('cardsAbove');
   });
 });

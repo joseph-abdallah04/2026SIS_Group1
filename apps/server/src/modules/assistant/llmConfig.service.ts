@@ -8,7 +8,12 @@
 // Rule that drives the whole design: the API key goes in and never comes back out.
 // It is AES-256-GCM encrypted at rest (docs/05 §8) and decrypted into a local variable for
 // the lifetime of one LLM call — never logged, never returned, never cached.
-import type { LlmConfigPublic, LlmConfigTestResult, LlmConfigUpsert } from '@roundtable/shared';
+import {
+  assistantErrorMessage,
+  type LlmConfigPublic,
+  type LlmConfigTestResult,
+  type LlmConfigUpsert,
+} from '@roundtable/shared';
 
 import { prisma } from '../../db.js';
 import { env } from '../../env.js';
@@ -114,11 +119,7 @@ export async function getLlmCredentials(userId: string): Promise<LlmCredentials>
   });
 
   if (!row) {
-    throw new ApiError(
-      400,
-      'No LLM provider configured. Add one in Settings to use the assistant.',
-      'LLM_NOT_CONFIGURED',
-    );
+    throw new ApiError(400, assistantErrorMessage('LLM_NOT_CONFIGURED'), 'LLM_NOT_CONFIGURED');
   }
 
   try {
@@ -148,7 +149,7 @@ export async function getLlmCredentials(userId: string): Promise<LlmCredentials>
       // Almost always LLM_KEY_ENCRYPTION_SECRET changing under existing rows.
       throw new ApiError(
         400,
-        'Your stored API key could not be decrypted. Re-enter it in Settings.',
+        assistantErrorMessage('LLM_KEY_UNDECRYPTABLE'),
         'LLM_KEY_UNDECRYPTABLE',
       );
     }
@@ -182,6 +183,7 @@ export async function testLlmConfig(
     return {
       ok: false,
       error: cause instanceof ApiError ? cause.message : 'No usable configuration',
+      ...(cause instanceof ApiError && cause.code ? { code: cause.code } : {}),
     };
   }
 
@@ -193,6 +195,11 @@ export async function testLlmConfig(
     // point of the button, so it goes through the same translation as a failed turn.
     const described =
       cause instanceof ApiError ? cause : describeProviderError(cause, credentials.baseUrl);
-    return { ok: false, error: described.message };
+    return {
+      ok: false,
+      error: described.message,
+      ...(described.code ? { code: described.code } : {}),
+      ...(typeof described.details === 'string' ? { detail: described.details } : {}),
+    };
   }
 }
