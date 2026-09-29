@@ -232,6 +232,14 @@ export const setQuestionPhaseSchema = z.object({
 
 export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
 
+/** The leader locking or unlocking one question's board: whether only they may move proposals. */
+export const setBoardLockSchema = z.object({
+  questionId: z.string().min(1),
+  locked: z.boolean(),
+});
+
+export type SetBoardLockInput = z.infer<typeof setBoardLockSchema>;
+
 // Leader pointing the board at a question without changing its status — so
 // an answered question's pinboard can be shown again without reopening it.
 export const focusQuestionSchema = z.object({

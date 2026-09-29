@@ -68,6 +68,7 @@ const REST_BOARD: BoardResponse = {
   questionText: 'What ships first?',
   questionPosition: 0,
   questionStatus: 'discussion',
+  boardLocked: true,
   items: [],
   discussionTimer: null,
 };
@@ -81,6 +82,7 @@ function snapshot(overrides: Partial<SessionStatePayload> = {}): SessionStatePay
     questionText: 'What ships first?',
     questionPosition: 0,
     questionStatus: 'discussion',
+    boardLocked: true,
     status: 'active',
     proposals: [],
     participants: [{ id: 'u1', displayName: 'Alice' }],
@@ -151,6 +153,23 @@ describe('usePinboard room wiring', () => {
       resolveBoard({ ...REST_BOARD, items: [sticky('stale')] });
     });
     expect(result.current.board?.items.map((item) => item.id)).toEqual(['live']);
+  });
+
+  // The leader locked or unlocked the board: only who may move changes, so
+  // the one field follows the event rather than the board being read again.
+  it('follows the leader locking and unlocking the board', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+    expect(result.current.board?.boardLocked).toBe(true);
+
+    act(() => emitServer('boardLock', { sessionId: 's1', questionId: 'q1', locked: false }));
+    expect(result.current.board?.boardLocked).toBe(false);
+
+    // Each question has its own lock, and another session's is none of this board's.
+    act(() => emitServer('boardLock', { sessionId: 's1', questionId: 'q2', locked: true }));
+    act(() => emitServer('boardLock', { sessionId: 'other', questionId: 'q1', locked: true }));
+    expect(result.current.board?.boardLocked).toBe(false);
+    expect(get).toHaveBeenCalledOnce();
   });
 
   it('ignores a sessionState snapshot for a different session', async () => {

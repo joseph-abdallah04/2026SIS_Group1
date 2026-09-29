@@ -85,7 +85,11 @@ vi.mock('../../db.js', () => ({
       findUnique: sessionMemberFindUnique,
       update: sessionMemberUpdate,
     },
-    question: { findMany: questionFindManyTopLevel, findUnique: questionFindUnique },
+    question: {
+      findMany: questionFindManyTopLevel,
+      findUnique: questionFindUnique,
+      update: questionUpdate,
+    },
     votingRound: { findUnique: votingRoundFindUnique, deleteMany: votingRoundDeleteMany },
   },
 }));
@@ -114,6 +118,8 @@ const {
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setBoardLock,
+  emitBoardLock,
   startSession,
   updateSessionDraft,
   getDiscussionTimer,
@@ -1073,6 +1079,7 @@ describe('setQuestionPhase (F25/F26)', () => {
       text: 'What ships first?',
       position: 0,
       status: 'pending',
+      boardLocked: true,
       ...overrides,
     };
   }
@@ -1083,6 +1090,7 @@ describe('setQuestionPhase (F25/F26)', () => {
     text: string;
     position: number;
     status: 'pending' | 'discussion' | 'voting' | 'answered' | 'skipped';
+    boardLocked: boolean;
   }
 
   function advance(status: QuestionRow['status'], leaderId = 'leader-1') {
@@ -1415,5 +1423,64 @@ describe('findLiveSessionForUser', () => {
   it('returns null when the user is not in a lobby or active session', async () => {
     sessionFindFirst.mockResolvedValueOnce(null);
     await expect(findLiveSessionForUser('u1')).resolves.toBeNull();
+  });
+});
+
+describe('setBoardLock', () => {
+  const live = { leaderId: 'leader-1', status: 'active' as const };
+  const lock = (locked: boolean, leaderId = 'leader-1') =>
+    setBoardLock({ sessionId: 's1', questionId: 'q1', leaderId, locked });
+
+  it.each([true, false])('lets the leader set a question’s lock to %s', async (locked) => {
+    sessionFindUnique.mockResolvedValue(live);
+    questionFindUnique.mockResolvedValue({ sessionId: 's1' });
+    questionUpdate.mockResolvedValue({});
+
+    await expect(lock(locked)).resolves.toBe(locked);
+    // On the question, so the next one starts locked again.
+    expect(questionUpdate).toHaveBeenCalledWith({
+      where: { id: 'q1' },
+      data: { boardLocked: locked },
+    });
+  });
+
+  it('can be set from the waiting room, before anyone moves anything', async () => {
+    sessionFindUnique.mockResolvedValue({ ...live, status: 'lobby' });
+    questionFindUnique.mockResolvedValue({ sessionId: 's1' });
+    questionUpdate.mockResolvedValue({});
+    await expect(lock(false)).resolves.toBe(false);
+  });
+
+  it('refuses anyone but the leader', async () => {
+    sessionFindUnique.mockResolvedValue(live);
+    await expect(lock(false, 'member')).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a session that has ended', async () => {
+    sessionFindUnique.mockResolvedValue({ ...live, status: 'ended' });
+    await expect(lock(false)).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+  });
+
+  it('refuses a question from another session', async () => {
+    sessionFindUnique.mockResolvedValue(live);
+    questionFindUnique.mockResolvedValue({ sessionId: 'elsewhere' });
+    await expect(lock(false)).rejects.toMatchObject({ code: 'QUESTION_NOT_FOUND' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('emitBoardLock tells the whole room which question it was', () => {
+    const emit = vi.fn();
+    const to = vi.fn(() => ({ emit }));
+    const io = { to } as unknown as Parameters<typeof emitBoardLock>[0];
+
+    emitBoardLock(io, 's1', 'q1', false);
+
+    expect(to).toHaveBeenCalledWith('session:s1');
+    expect(emit).toHaveBeenCalledWith('boardLock', {
+      sessionId: 's1',
+      questionId: 'q1',
+      locked: false,
+    });
   });
 });

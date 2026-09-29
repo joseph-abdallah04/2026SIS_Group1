@@ -109,6 +109,11 @@ model Question {
   // When this question last entered `discussion`. The discussion clock
   // counts from here; it is not a deadline — overtime is display-only.
   discussionStartedAt DateTime? @map("discussion_started_at")
+  // Whether only the leader may move proposals around this question's board.
+  // Per question, so every question starts locked; unlocked, members may also
+  // move their own. Only positions: what a proposal says, and who may edit,
+  // remove or react to it, are unaffected.
+  boardLocked         Boolean   @default(true) @map("board_locked")
 
   proposals   Proposal[]
   votingRound VotingRound?

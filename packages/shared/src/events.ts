@@ -219,6 +219,11 @@ export interface ServerToClientEvents {
    */
   sessionFocus(payload: { sessionId: string; questionId: string }): void;
   /**
+   * The leader locked or unlocked one question's board. Locked, only the
+   * leader may move proposals on it; unlocked, members may move their own too.
+   */
+  boardLock(payload: { sessionId: string; questionId: string; locked: boolean }): void;
+  /**
    * The leader appended a question to a live agenda (`POST /:id/questions`).
    * Clients insert this row — they do not invent one locally after the POST,
    * same rule as `sessionPhase`.

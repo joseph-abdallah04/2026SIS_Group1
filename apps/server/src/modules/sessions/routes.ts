@@ -4,6 +4,7 @@ import {
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
+  setBoardLockSchema,
   setQuestionPhaseSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
@@ -16,6 +17,7 @@ import {
   addSessionQuestion,
   createSession,
   deleteSession,
+  emitBoardLock,
   emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
@@ -31,6 +33,7 @@ import {
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setBoardLock,
   setQuestionPhase,
   startSession,
   updateSessionDraft,
@@ -168,6 +171,31 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       });
       emitQuestionPhase(io, req.params.id, question);
       res.json(question);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Lock or unlock the board: whether only the leader may move proposals.
+  sessionsRoutes.post<{ id: string }>('/:id/board-lock', requireAuth, async (req, res, next) => {
+    try {
+      const parsed = setBoardLockSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ApiError(
+          400,
+          parsed.error.issues[0]?.message ?? 'Invalid board lock',
+          'VALIDATION_ERROR',
+        );
+      }
+
+      const locked = await setBoardLock({
+        sessionId: req.params.id,
+        questionId: parsed.data.questionId,
+        leaderId: req.userId!,
+        locked: parsed.data.locked,
+      });
+      emitBoardLock(io, req.params.id, parsed.data.questionId, locked);
+      res.json({ questionId: parsed.data.questionId, locked });
     } catch (err) {
       next(err);
     }

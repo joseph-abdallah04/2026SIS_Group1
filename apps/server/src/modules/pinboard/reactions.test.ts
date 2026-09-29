@@ -53,7 +53,7 @@ const AUTHOR = { id: 'u1', sessionId: 's1' };
 const OTHER = { id: 'u2', sessionId: 's1' };
 
 function questionRef(status: QuestionStatus = 'discussion', sessionId = 's1') {
-  return { id: 'q1', sessionId, text: 'Q', position: 0, status };
+  return { id: 'q1', sessionId, text: 'Q', position: 0, status, boardLocked: false };
 }
 
 function row(overrides: Record<string, unknown> = {}) {
@@ -99,7 +99,7 @@ beforeEach(() => {
 
 describe('who may react', () => {
   const proposal = { id: 'p1', authorId: 'u1', deletedAt: null };
-  const react = { mutation: 'react', isLeader: false } as const;
+  const react = { mutation: 'react', isLeader: false, boardLocked: false } as const;
 
   // The whole point of reactions: they are how the room answers an idea, so
   // the one person who cannot leave one must not be everybody but its author.

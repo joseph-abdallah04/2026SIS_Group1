@@ -328,8 +328,13 @@ async function loadForMutation(proposalId: string, actor: Actor, mutation: Propo
   const question = row ? await getQuestion(row.questionId) : null;
   const session = question ? await getSession(question.sessionId) : null;
   const isLeader = session?.leaderId === actor.id;
+  // A question that could not be read is taken as locked: the stricter answer.
+  const boardLocked = question?.boardLocked ?? true;
 
-  return { row: requireMutableProposal(row, question, actor, { mutation, isLeader }), question };
+  return {
+    row: requireMutableProposal(row, question, actor, { mutation, isLeader, boardLocked }),
+    question,
+  };
 }
 
 /**
@@ -666,6 +671,7 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
       questionText: null,
       questionPosition: null,
       questionStatus: null,
+      boardLocked: true,
       items: [],
       discussionTimer,
     };
@@ -679,6 +685,7 @@ export async function getBoardForSession(sessionId: string): Promise<BoardRespon
     questionText: question.text,
     questionPosition: question.position,
     questionStatus: question.status,
+    boardLocked: question.boardLocked,
     items: await listProposals(question.id),
     discussionTimer,
   };

@@ -134,6 +134,7 @@ export function usePinboard(sessionId: string) {
         questionText: snapshot.questionText,
         questionPosition: snapshot.questionPosition,
         questionStatus: snapshot.questionStatus,
+        boardLocked: snapshot.boardLocked,
         items: [...snapshot.proposals].sort(compareBoardItems),
         discussionTimer: snapshot.discussionTimer,
       });
@@ -288,6 +289,23 @@ export function usePinboard(sessionId: string) {
     const onFocus = ({ sessionId: id }: { sessionId: string }) => {
       if (id === sessionId) reload();
     };
+    // The leader locked or unlocked a question's board. Only who may move
+    // changes, so the one field is set rather than the board read again; and
+    // only for the question on screen, since each question has its own.
+    const onBoardLock = ({
+      sessionId: id,
+      questionId,
+      locked,
+    }: {
+      sessionId: string;
+      questionId: string;
+      locked: boolean;
+    }) => {
+      if (id !== sessionId) return;
+      setBoard((prev) =>
+        prev && prev.questionId === questionId ? { ...prev, boardLocked: locked } : prev,
+      );
+    };
 
     if (socket.connected) onConnect();
     socket.on('connect', onConnect);
@@ -298,6 +316,7 @@ export function usePinboard(sessionId: string) {
     socket.on('proposalDeleted', onDeleted);
     socket.on('sessionPhase', onPhase);
     socket.on('sessionFocus', onFocus);
+    socket.on('boardLock', onBoardLock);
     socket.on('proposalReactionsUpdated', applyReactions);
 
     return () => {
@@ -311,6 +330,7 @@ export function usePinboard(sessionId: string) {
       socket.off('proposalDeleted', onDeleted);
       socket.off('sessionPhase', onPhase);
       socket.off('sessionFocus', onFocus);
+      socket.off('boardLock', onBoardLock);
       socket.off('proposalReactionsUpdated', applyReactions);
     };
   }, [
@@ -391,11 +411,25 @@ export function usePinboard(sessionId: string) {
     [],
   );
 
+  /**
+   * Lock or unlock a question's board — the leader deciding whether members
+   * may move their own proposals on it. Not applied here: the change arrives on
+   * `boardLock` for the whole room at once, this client included.
+   */
+  const setBoardLocked = useCallback(
+    async (questionId: string, locked: boolean) => {
+      if (!sessionId) return;
+      await api.post(`/api/sessions/${sessionId}/board-lock`, { questionId, locked });
+    },
+    [sessionId],
+  );
+
   return {
     board,
     loading,
     error,
     reload,
+    setBoardLocked,
     propose,
     editProposal,
     arrangeProposal,

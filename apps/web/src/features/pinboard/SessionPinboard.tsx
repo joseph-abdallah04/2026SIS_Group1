@@ -70,6 +70,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
     loading,
     error,
     reload,
+    setBoardLocked,
     propose,
     editProposal,
     arrangeProposal,
@@ -279,6 +280,13 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                     ? board.items.length >= SHORTLIST_MIN
                     : undefined
                 }
+                boardLock={{
+                  locked: board.boardLocked,
+                  onToggle:
+                    isLeader && board.questionId
+                      ? () => setBoardLocked(board.questionId!, !board.boardLocked)
+                      : undefined,
+                }}
               />
             }
             myProposals={

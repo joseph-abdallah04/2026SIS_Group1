@@ -734,6 +734,64 @@ export function emitQuestionFocus(io: RealtimeServer, sessionId: string, questio
   io.to(sessionRoom(sessionId)).emit('sessionFocus', { sessionId, questionId });
 }
 
+export interface SetBoardLockArgs {
+  sessionId: string;
+  questionId: string;
+  leaderId: string;
+  locked: boolean;
+}
+
+/**
+ * Lock or unlock one question's board: whether only the leader may move
+ * proposals on it.
+ *
+ * Per question, so each one starts locked and the leader decides again for
+ * the next. The leader's alone, like the agenda, and only while the session is
+ * running: from the waiting room on, not once it has ended.
+ */
+export async function setBoardLock({
+  sessionId,
+  questionId,
+  leaderId,
+  locked,
+}: SetBoardLockArgs): Promise<boolean> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { leaderId: true, status: true },
+  });
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.leaderId !== leaderId) {
+    throw new ApiError(403, 'Only the session leader can lock the board', 'NOT_SESSION_LEADER');
+  }
+  if (session.status !== 'lobby' && session.status !== 'active') {
+    throw new ApiError(
+      409,
+      `Cannot lock the board of a session that is ${session.status}`,
+      'INVALID_TRANSITION',
+    );
+  }
+  const question = await prisma.question.findUnique({
+    where: { id: questionId },
+    select: { sessionId: true },
+  });
+  if (!question || question.sessionId !== sessionId) {
+    throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+  }
+  await prisma.question.update({ where: { id: questionId }, data: { boardLocked: locked } });
+  return locked;
+}
+
+export function emitBoardLock(
+  io: RealtimeServer,
+  sessionId: string,
+  questionId: string,
+  locked: boolean,
+): void {
+  io.to(sessionRoom(sessionId)).emit('boardLock', { sessionId, questionId, locked });
+}
+
 export interface AddSessionQuestionArgs {
   sessionId: string;
   leaderId: string;
@@ -1232,6 +1290,8 @@ export interface QuestionRef {
   text: string;
   position: number;
   status: Question['status'];
+  /** Whether only the leader may move proposals around this question's board. */
+  boardLocked: boolean;
 }
 
 /** Every read that returns a `QuestionRef` selects exactly these columns. */
@@ -1241,6 +1301,7 @@ const QUESTION_REF_SELECT = {
   text: true,
   position: true,
   status: true,
+  boardLocked: true,
 } as const;
 
 /**
