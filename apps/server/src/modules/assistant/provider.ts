@@ -15,6 +15,7 @@ import { generateText, type LanguageModel } from 'ai';
 import { env } from '../../env.js';
 import { ApiError } from '../../middleware/error.js';
 import { assertPublicUrl, BlockedHostError, guardedFetch } from './network/guardedFetch.js';
+import { withReasoningReplayFallback } from './network/reasoningReplay.js';
 
 export interface LlmCredentials {
   baseUrl: string;
@@ -39,13 +40,26 @@ export async function assertCredentialsAllowed(credentials: LlmCredentials): Pro
   await assertPublicUrl(credentials.baseUrl, hostPolicy());
 }
 
+export interface CreateAssistantModelOptions {
+  /**
+   * Test seam: the transport underneath everything this module layers on top. Defaults to
+   * the SSRF-guarded fetch, which is what every real call uses.
+   */
+  baseFetch?: typeof fetch;
+}
+
 /** Builds the model the agent talks to. Cheap — safe to call once per turn. */
-export function createAssistantModel(credentials: LlmCredentials): LanguageModel {
+export function createAssistantModel(
+  credentials: LlmCredentials,
+  options: CreateAssistantModelOptions = {},
+): LanguageModel {
   const provider = createOpenAICompatible({
     name: 'byo-provider',
     baseURL: credentials.baseUrl,
     apiKey: credentials.apiKey,
-    fetch: guardedFetch(hostPolicy()),
+    // Outermost: resend without replayed reasoning to providers that refuse it (Groq).
+    // Innermost: every request, including that resend, goes through the SSRF guard.
+    fetch: withReasoningReplayFallback(options.baseFetch ?? guardedFetch(hostPolicy())),
     // Without this, providers omit the usage block from streamed responses and every turn
     // records zero tokens.
     includeUsage: true,
