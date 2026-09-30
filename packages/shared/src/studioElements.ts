@@ -602,6 +602,26 @@ export function tableCellIsCovered(
   return merge !== null && (merge.row !== row || merge.col !== col);
 }
 
+/**
+ * Every cell a merge covers emptied, as v4.6 stores them: the top-left cell
+ * alone holds a merged cell's content and look. The same table back when
+ * nothing needed clearing, so callers can tell an edit from none.
+ */
+export function clearCoveredCells<
+  T extends Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'merges'>,
+>(table: T): T {
+  if (!table.merges?.length) return table;
+  const cols = table.colWidths.length;
+  let changed = false;
+  const cells = table.cells.map((cell, index) => {
+    if (!tableCellIsCovered(table, Math.floor(index / cols), index % cols)) return cell;
+    if (Object.keys(cell).length === 0) return cell;
+    changed = true;
+    return {};
+  });
+  return changed ? { ...table, cells } : table;
+}
+
 /** How big an area is: the rows and columns it spans, added up. */
 export function tableAreaSize(
   table: Pick<TableElement, 'colWidths' | 'rowHeights'>,

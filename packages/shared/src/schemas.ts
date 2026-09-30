@@ -63,8 +63,10 @@ import {
   TABLE_MIN_COL_WIDTH,
   TABLE_MIN_ROW_HEIGHT,
   DIAGRAM_Z_LIMIT,
+  clearCoveredCells,
   diagramEdgeKey,
   normalizeTableMerges,
+  tableCellIsCovered,
   type TableMerge,
 } from './studioElements.js';
 
@@ -714,7 +716,9 @@ const diagramReadTableSchema = tableElementSchema
     // One shape either way, so readers see `merges` as the optional key it is.
     const repaired: typeof table & { merges?: TableMerge[] } = { ...table, cells };
     if (merges.length > 0) repaired.merges = merges;
-    return repaired;
+    // Whatever a merge covers is empty, as the write path requires: anything a
+    // client left there could otherwise surface the moment the cell is split.
+    return clearCoveredCells(repaired);
   });
 
 const diagramReadPathSchema = pathElementSchema.extend({
@@ -978,6 +982,23 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
             message: 'Merged cells must be in bounds, larger than one cell and must not overlap',
             path: ['tables', index, 'merges'],
           });
+        } else {
+          // Only the top-left cell of a merge holds anything. Content in a
+          // covered cell is never drawn, so it could only resurface — unasked
+          // for — when the cell is split.
+          const cols = table.colWidths.length;
+          const stray = table.cells.findIndex(
+            (cell, at) =>
+              Object.keys(cell).length > 0 &&
+              tableCellIsCovered(table, Math.floor(at / cols), at % cols),
+          );
+          if (stray !== -1) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'Cells inside a merged cell must be empty',
+              path: ['tables', index, 'cells', stray],
+            });
+          }
         }
       }
     });

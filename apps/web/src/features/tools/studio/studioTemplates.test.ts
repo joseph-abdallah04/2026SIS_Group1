@@ -4,6 +4,7 @@ import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { DIAGRAM_CANVAS_HEIGHT, DIAGRAM_CANVAS_WIDTH } from '../diagram/diagramModel';
 import { studioSceneBounds } from './StudioArtwork';
+import { pasteStudioFragment } from './studioClipboard';
 import { STUDIO_TEMPLATES, templateFragment } from './studioTemplates';
 
 describe('studio starter templates', () => {
@@ -75,6 +76,20 @@ describe('studio starter templates', () => {
       if (arrow.label) expect(arrow.fontSizePreset, arrow.id).toBeDefined();
     }
     for (const table of tables) expect(table.fontSizePreset, table.id).toBeDefined();
+  });
+
+  it('builds each template once, and a drop never changes the one it shares', () => {
+    const template = STUDIO_TEMPLATES.find((entry) => entry.id === 'flowchart')!;
+    const fragment = templateFragment(template);
+    expect(templateFragment(template)).toBe(fragment);
+    const before = JSON.stringify(fragment);
+    const empty = { nodes: [], edges: [] };
+    const first = pasteStudioFragment(empty, fragment, { x: 0, y: 0 });
+    const second = pasteStudioFragment(empty, fragment, { x: 0, y: 0 });
+    if (!first.ok || !second.ok) throw new Error('expected both drops to land');
+    expect(JSON.stringify(fragment)).toBe(before);
+    // Two drops, two sets of ids.
+    expect(first.arrows[0]!.id).not.toBe(second.arrows[0]!.id);
   });
 
   it('gives every element a unique id within its template', () => {

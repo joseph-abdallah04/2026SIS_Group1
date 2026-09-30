@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -279,6 +280,7 @@ import {
   type StudioSelection,
 } from '../studio/studioSelection';
 import {
+  anchorCellsInRange,
   bakeHeaderRow,
   cellAtPoint,
   cellsInRange,
@@ -306,6 +308,8 @@ import {
   parseTabularText,
   pasteGrid,
   rangeAsTabularText,
+  rangeFocusCell,
+  resolveCell,
   rangeAfterDelete,
   resizeColumn,
   resizeOuterTrack,
@@ -381,6 +385,7 @@ import { arrowTargets } from '../studio/studioArrowTargets';
 import { StudioArrowView } from '../studio/StudioArrowView';
 import { toolForShortcut } from '../studio/studioShortcuts';
 import { STUDIO_TEMPLATES, templateFragment, type StudioTemplate } from '../studio/studioTemplates';
+import { studioLimitError } from '../studio/studioLimits';
 import {
   StudioArtwork,
   StudioSceneContent,
@@ -831,8 +836,35 @@ function templateSize(template: StudioTemplate): DiagramNodeSize {
  * preview, where it lands and what the card shows all agree.
  */
 function templateBounds(template: StudioTemplate) {
-  return studioSceneBounds(templateFragment(template));
+  // Templates never change, and this runs on every pointer move while one is
+  // carried — arrow routes and all — so each is measured once.
+  const known = TEMPLATE_BOUNDS.get(template.id);
+  if (known) return known;
+  const bounds = studioSceneBounds(templateFragment(template));
+  TEMPLATE_BOUNDS.set(template.id, bounds);
+  return bounds;
 }
+
+const TEMPLATE_BOUNDS = new Map<string, ReturnType<typeof studioSceneBounds>>();
+
+/**
+ * A template's picture in the picker. Its own component, and memoised, so the
+ * eight of them are drawn once rather than again on every render of the
+ * editor while the picker is open.
+ */
+const TemplateThumbnail = memo(function TemplateThumbnail({
+  template,
+}: {
+  template: StudioTemplate;
+}) {
+  return (
+    <StudioArtwork
+      scene={templateFragment(template)}
+      fit="content"
+      className="absolute inset-0 h-full w-full p-1"
+    />
+  );
+});
 
 /**
  * A control on the properties bar: an icon that opens its own choices.
@@ -1627,6 +1659,8 @@ export function DiagramEditor() {
     original: TableElement;
     /** How far into the carried block the pointer took hold, along the drag. */
     grab: number;
+    /** The carried rows or columns on their own, taken once when the drag starts. */
+    lifted: TableElement | null;
   } | null>(null);
   // What is drawn while they are carried: the gap they will drop into, and the
   // rows themselves under the pointer.
@@ -2022,7 +2056,8 @@ export function DiagramEditor() {
     cellEditCancelledRef.current = false;
     cellEditSelectAllRef.current = selectAll;
     setCellDraft(text);
-    setEditingCell(cell);
+    // Only a cell that shows can be typed into: a covered one has no editor.
+    setEditingCell(selectedTable ? resolveCell(selectedTable, cell) : cell);
   }
 
   function clearError() {
@@ -2743,7 +2778,7 @@ export function DiagramEditor() {
          */
         const cellsAllBold =
           selectedTable && cellStyleTarget
-            ? cellsInRange(cellStyleTarget).every((ref) =>
+            ? anchorCellsInRange(selectedTable, cellStyleTarget).every((ref) =>
                 tableCellBold(selectedTable, tableCellAt(selectedTable, ref.row, ref.col), ref.row),
               )
             : false;
@@ -2773,12 +2808,14 @@ export function DiagramEditor() {
           : Boolean(selectedNode?.labelBold ?? selectedArrow?.labelBold);
         // A cell with no alignment of its own is drawn left-aligned, so that
         // is what the control says; claiming centre lit the wrong button.
+        // What the controls show is read from the cell that shows at the
+        // range's end — a merged cell's top-left, never a cell it covers.
+        const shownCell =
+          selectedTable && cellStyleTarget
+            ? rangeFocusCell(selectedTable, cellStyleTarget)
+            : { row: 0, col: 0 };
         const align: DiagramTextAlign = selectedTable
-          ? (tableCellAt(
-              selectedTable,
-              cellStyleTarget?.focus.row ?? 0,
-              cellStyleTarget?.focus.col ?? 0,
-            )?.align ?? 'left')
+          ? (tableCellAt(selectedTable, shownCell.row, shownCell.col)?.align ?? 'left')
           : (selectedNode?.labelAlign ?? 'center');
 
         function setBold(next: boolean) {
@@ -2807,11 +2844,7 @@ export function DiagramEditor() {
         // button lights up. Claiming Medium there showed a size that was not
         // the one being drawn. A cell with no size of its own uses its table's.
         const size: DiagramFontSizePreset | null = selectedTable
-          ? (tableCellAt(
-              selectedTable,
-              cellStyleTarget?.focus.row ?? 0,
-              cellStyleTarget?.focus.col ?? 0,
-            )?.fontSizePreset ??
+          ? (tableCellAt(selectedTable, shownCell.row, shownCell.col)?.fontSizePreset ??
             selectedTable.fontSizePreset ??
             null)
           : (selectedNode?.fontSizePreset ?? selectedArrow?.fontSizePreset ?? null);
@@ -2949,7 +2982,7 @@ export function DiagramEditor() {
         mergeAction: inCellMode && heldRange ? mergeAction(table, heldRange) : null,
         cellsHaveText:
           inCellMode && heldRange
-            ? cellsInRange(heldRange).some((ref) =>
+            ? anchorCellsInRange(table, heldRange).some((ref) =>
                 Boolean(tableCellAt(table, ref.row, ref.col)?.text?.trim()),
               )
             : false,
@@ -4415,8 +4448,13 @@ export function DiagramEditor() {
 
   function placeTable(at: DiagramPoint, rows = tableRows, cols = tableCols) {
     clearError();
-    const table = createTable(rows, cols, at);
     const graph = history.snapshotRef.current;
+    const over = studioLimitError({ tables: (graph.tables ?? []).length + 1 });
+    if (over) {
+      setValidationError(over);
+      return;
+    }
+    const table = createTable(rows, cols, at);
     history.commit({
       nodes: graph.nodes,
       edges: graph.edges,
@@ -4435,7 +4473,11 @@ export function DiagramEditor() {
 
   /** The one cell a keystroke acts on: the focus end of the current range. */
   function activeCell(): CellRef | null {
-    return cellRange?.focus ?? null;
+    if (!cellRange) return null;
+    // The cell that shows at the range's end: a whole row picked by its handle
+    // can end inside a merged cell, and typing there went into a cell that is
+    // never drawn.
+    return selectedTable ? rangeFocusCell(selectedTable, cellRange) : cellRange.focus;
   }
 
   function selectCell(table: TableElement, row: number, col: number, extend: boolean) {
@@ -4587,6 +4629,7 @@ export function DiagramEditor() {
       previous: history.snapshotRef.current,
       original: table,
       grab: along - (offsets[start] ?? 0),
+      lifted: null,
     };
   }
 
@@ -4605,6 +4648,7 @@ export function DiagramEditor() {
     if (!drag.moved) {
       if (Math.hypot(point.x - drag.origin.x, point.y - drag.origin.y) < travelSlop()) return true;
       drag.moved = true;
+      drag.lifted = tracksAsTable(bakeHeaderRow(drag.original), drag.axis, drag.start, drag.end);
     }
     const { original, axis, start, end } = drag;
     // The gap goes to the boundary of the table-as-pressed nearest the pointer:
@@ -4630,7 +4674,7 @@ export function DiagramEditor() {
       axis,
       first: moved === original ? start : movedTrackStart(start, end, boundary),
       count: end - start + 1,
-      lifted: tracksAsTable(bakeHeaderRow(original), axis, start, end),
+      lifted: drag.lifted ?? tracksAsTable(bakeHeaderRow(original), axis, start, end),
       at: along - drag.grab,
     });
     return true;
@@ -4706,12 +4750,14 @@ export function DiagramEditor() {
     const top = { row: rows.start, col: cols.start };
     clearError();
 
-    // One value over a block fills every cell of it, as a spreadsheet does.
+    // One value over a block fills every cell of it, as a spreadsheet does —
+    // every cell that shows, so a merged cell takes it once, in its top-left,
+    // and nothing lands in the cells it covers.
+    const shown = anchorCellsInRange(table, range);
     if (grid.length === 1 && grid[0]!.length === 1 && cellsInRange(range).length > 1) {
       const value = grid[0]![0]!.slice(0, TABLE_CELL_TEXT_LIMIT);
       let next = table;
-      for (const ref of cellsInRange(range))
-        next = setCell(next, ref.row, ref.col, { text: value });
+      for (const ref of shown) next = setCell(next, ref.row, ref.col, { text: value });
       const touched = Array.from({ length: rows.end - rows.start + 1 }, (_, i) => rows.start + i);
       replaceTable(fitRowsToContent(next, touched, 'grow'), table.id);
       return;
@@ -5514,11 +5560,7 @@ export function DiagramEditor() {
               data-testid="template-thumbnail"
               className="relative block aspect-[4/3] w-full overflow-hidden rounded-md border border-rt-tertiary/60 bg-white"
             >
-              <StudioArtwork
-                scene={templateFragment(template)}
-                fit="content"
-                className="absolute inset-0 h-full w-full p-1"
-              />
+              <TemplateThumbnail template={template} />
             </span>
             <span className="px-0.5 text-[11px] font-semibold text-rt-ink-muted group-hover:text-rt-ink">
               {template.label}
@@ -6369,7 +6411,8 @@ export function DiagramEditor() {
 
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
     updateExtendProximity(event.clientX, event.clientY);
-    tableChromeRef.current?.updatePointer(surfacePoint(event));
+    // Only measured when there is table chrome to wake: this runs on every move.
+    if (tableChromeRef.current) tableChromeRef.current.updatePointer(surfacePoint(event));
     if (updateArrowEdit(event)) return;
     if (updateExtendPress(event)) return;
 

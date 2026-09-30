@@ -935,6 +935,20 @@ describe('proposalCreate handler', () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    it('rejects content stored in a cell a merge covers', async () => {
+      // Never drawn, so it could only surface — unasked for — when the merge is split.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const stray = table('table-1', {
+        cells: [{ text: 'kept' }, { text: 'hidden' }, {}, {}],
+        merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+      });
+      expect(await propose(studio({ tables: [stray] }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
     it('rejects merges that overlap', async () => {
       const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
       const overlapping = table('table-1', {

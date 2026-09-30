@@ -22,6 +22,7 @@ import {
 import { createArrowId } from './studioArrowDraft';
 import { createInkId, type StudioInkStroke } from './studioInk';
 import { createPathId } from './studioPaths';
+import { studioLimitError } from './studioLimits';
 import { createTableId } from './studioTables';
 import { EMPTY_STUDIO_SELECTION, type StudioSelection } from './studioSelection';
 
@@ -110,6 +111,16 @@ export function pasteStudioFragment(
 ): StudioPasteResult {
   if (isFragmentEmpty(fragment)) return { ok: false, error: 'Copy something first.' };
   const source = fragment as StudioFragment;
+
+  // Refused whole, before anything is pasted, rather than landing and then
+  // failing at Propose. Shapes and edges are the node paster's to check.
+  const over = studioLimitError({
+    ink: (scene.ink?.length ?? 0) + source.ink.length,
+    paths: (scene.paths?.length ?? 0) + source.paths.length,
+    tables: (scene.tables?.length ?? 0) + source.tables.length,
+    arrows: (scene.arrows?.length ?? 0) + source.arrows.length,
+  });
+  if (over) return { ok: false, error: over };
 
   // Nodes and edges are delegated; only ask when the fragment has any, since
   // the diagram paster refuses an empty one.

@@ -25,6 +25,7 @@ import {
   expandRangeToMerges,
   mergeAction,
   mergeCells,
+  rangeFocusCell,
   resolveCell,
   unmergeCells,
   cellAtPoint,
@@ -808,6 +809,14 @@ describe('merging cells', () => {
     expect(mergeAction(tall(), block(0, 0, 1, 0))).toBe('unmerge');
     expect(mergeAction(tall(), block(0, 0, 0, 1))).toBe('merge');
     expect(mergeAction(labelled(2, 2), block(1, 1, 1, 1))).toBeNull();
+  });
+
+  it('reads a range from the cell that shows at its end, never one a merge covers', () => {
+    // A whole first row whose last two cells are merged: the corner is covered.
+    const table = mergeCells(labelled(2, 3), block(0, 1, 0, 2));
+    const row = { anchor: { row: 0, col: 0 }, focus: { row: 0, col: 2 }, whole: 'row' as const };
+    expect(rangeFocusCell(table, row)).toEqual({ row: 0, col: 1 });
+    expect(rangeFocusCell(table, block(1, 1, 1, 1))).toEqual({ row: 1, col: 1 });
   });
 
   it('lands on a merged cell, and steps off it from its far side', () => {

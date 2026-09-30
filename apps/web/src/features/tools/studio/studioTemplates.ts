@@ -617,7 +617,26 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
 ];
 
 /** A template as a fragment the studio's paster takes, with nothing else in it. */
-export function templateFragment(template: StudioTemplate) {
-  const scene = template.build();
-  return { ...scene, edges: [], ink: [], paths: [] };
+export type StudioTemplateFragment = StudioTemplateScene & {
+  edges: [];
+  ink: [];
+  paths: [];
+};
+
+const FRAGMENTS = new Map<string, StudioTemplateFragment>();
+
+/**
+ * A template as a fragment the studio's paster takes, with nothing else in it.
+ *
+ * Built once per template and shared: the picker's thumbnails, the drop preview
+ * following the pointer and the drop itself all ask for it, some on every
+ * pointer move. Treated as read-only everywhere — the paster copies what it
+ * takes and mints new ids — so sharing one is safe.
+ */
+export function templateFragment(template: StudioTemplate): StudioTemplateFragment {
+  const known = FRAGMENTS.get(template.id);
+  if (known) return known;
+  const fragment: StudioTemplateFragment = { ...template.build(), edges: [], ink: [], paths: [] };
+  FRAGMENTS.set(template.id, fragment);
+  return fragment;
 }

@@ -222,6 +222,43 @@ describe('diagram node model', () => {
 });
 
 describe('prepareDiagram', () => {
+  const box = { id: 'n1', label: 'Box', x: 24, y: 24, shape: 'box' as const };
+  const tableAt = (id: string) => ({
+    id,
+    x: 200,
+    y: 200,
+    colWidths: [96, 96],
+    rowHeights: [32, 32],
+    cells: [{}, {}, {}, {}],
+  });
+
+  it('says plainly which limit a canvas is over', () => {
+    const tables = Array.from({ length: 21 }, (_, index) => tableAt(`t${index}`));
+    expect(prepareDiagram([box], [], [], [], [], tables)).toEqual({
+      ok: false,
+      error: 'A diagram can hold 20 tables at most.',
+    });
+  });
+
+  it("passes on the contract's own sentence when it refuses something", () => {
+    const misshapen = { ...tableAt('t1'), cells: [{}, {}, {}] };
+    expect(prepareDiagram([box], [], [], [], [], [misshapen])).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('one cell per column per row'),
+    });
+  });
+
+  it('drops whatever an edit left under a merge rather than refusing the canvas', () => {
+    const merged = {
+      ...tableAt('t1'),
+      cells: [{ text: 'kept' }, { text: 'stray' }, {}, {}],
+      merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+    };
+    const prepared = prepareDiagram([box], [], [], [], [], [merged]);
+    if (!prepared.ok) throw new Error(prepared.error);
+    expect(prepared.artifact.tables?.[0]?.cells[1]).toEqual({});
+  });
+
   it('rejects an empty diagram before any write is attempted', () => {
     expect(prepareDiagram([], [])).toEqual({
       ok: false,

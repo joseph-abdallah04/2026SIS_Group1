@@ -20,6 +20,7 @@ import {
   TABLE_MERGE_LIMIT,
   TABLE_MIN_COL_WIDTH,
   TABLE_MIN_ROW_HEIGHT,
+  clearCoveredCells,
   normalizeTableMerges,
   tableAutoRowHeight,
   tableCellArea,
@@ -388,7 +389,7 @@ export function insertColumn(table: TableElement, at: number): TableElement {
       ...table.cells.slice(start + index, start + cols),
     );
   }
-  return clearCovered(
+  return clearCoveredCells(
     withMerges({ ...table, colWidths, cells }, shiftMergesForInsert(table, 'col', index)),
   );
 }
@@ -427,16 +428,6 @@ function withMerges(table: TableElement, merges: readonly TableMerge[]): TableEl
   if (kept.length > 0) next.merges = kept;
   else delete next.merges;
   return next;
-}
-
-/** Every cell a merge covers emptied, as the contract has them. */
-function clearCovered(table: TableElement): TableElement {
-  if (!table.merges?.length) return table;
-  const cols = tableColCount(table);
-  const cells = table.cells.map((cell, index) =>
-    tableCellIsCovered(table, Math.floor(index / cols), index % cols) ? {} : cell,
-  );
-  return { ...table, cells };
 }
 
 function mergeSpan(merge: TableMerge, axis: TableAxis): { start: number; end: number } {
@@ -507,6 +498,19 @@ function handAnchorsOn(table: TableElement, axis: TableAxis, at: number): TableC
 export function resolveCell(table: Pick<TableElement, 'merges'>, ref: CellRef): CellRef {
   const merge = tableMergeAt(table, ref.row, ref.col);
   return merge ? { row: merge.row, col: merge.col } : ref;
+}
+
+/**
+ * The cell a range's keys act on and its controls read from: the end it was
+ * dragged or stepped to, as the cell that shows there.
+ *
+ * Never the raw corner. A range grown to take in a merged cell whole — or a
+ * whole row picked by its handle — can end on a cell the merge covers, which
+ * holds nothing and has nowhere to type; reading or editing it there is how a
+ * merged cell showed as not bold, or took keystrokes into a cell never drawn.
+ */
+export function rangeFocusCell(table: Pick<TableElement, 'merges'>, range: CellRange): CellRef {
+  return resolveCell(table, range.focus);
 }
 
 /**

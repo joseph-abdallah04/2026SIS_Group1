@@ -24,6 +24,13 @@
 //
 // A handle — the FigJam grip — wakes the same way. A click on it takes the
 // whole row or column; a drag carries it somewhere else.
+//
+// All of these are pointer controls on purpose: `role="button"` names them for
+// assistive tech and tests, but none takes focus. The keyboard's way to the
+// same things is the canvas's own — Enter into the cells, arrows and Shift to
+// pick them, Delete to clear or remove — and the bar's Rows and Columns menus
+// for adding, duplicating and deleting. Giving these a `tabIndex` would start
+// a second focus model inside the canvas, fighting the one it already has.
 
 import { forwardRef, useImperativeHandle, useRef, type PointerEvent, type ReactNode } from 'react';
 

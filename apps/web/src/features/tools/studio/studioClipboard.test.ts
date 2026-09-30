@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DiagramNode, PathElement } from '@roundtable/shared';
+import { DIAGRAM_TABLE_LIMIT, type DiagramNode, type PathElement } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 
 import { copyStudioFragment, isFragmentEmpty, pasteStudioFragment } from './studioClipboard';
@@ -209,5 +209,23 @@ describe('pasting', () => {
         tables: result.tables,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('pasting past a limit', () => {
+  it('refuses the whole paste, and says which limit, rather than failing at Propose', () => {
+    const full = {
+      ...scene,
+      tables: Array.from({ length: DIAGRAM_TABLE_LIMIT }, (_, index) => ({
+        ...table,
+        id: `table-${index}`,
+      })),
+    };
+    const fragment = copyStudioFragment(full, { ...EMPTY_STUDIO_SELECTION, tableIds: ['table-0'] });
+    const pasted = pasteStudioFragment(full, fragment, { x: 16, y: 16 });
+    expect(pasted).toEqual({
+      ok: false,
+      error: `A diagram can hold ${DIAGRAM_TABLE_LIMIT} tables at most.`,
+    });
   });
 });

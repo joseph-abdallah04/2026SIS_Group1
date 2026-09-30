@@ -16,7 +16,12 @@ import {
 
 import { eraseInkAtPoint, type StudioInkStroke } from './studioInk';
 import { diagramArtifactSchema, diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
-import { normalizeTableMerges, tableAutoRowHeight, tableCellLines } from '@roundtable/shared';
+import {
+  clearCoveredCells,
+  normalizeTableMerges,
+  tableAutoRowHeight,
+  tableCellLines,
+} from '@roundtable/shared';
 
 const box = (id: string, extra: Partial<DiagramNode> = {}): DiagramNode => ({
   id,
@@ -236,6 +241,37 @@ describe('v4 contract', () => {
     // Nothing usable left: no key at all, as a table that never had one.
     const none = diagramArtifactSchema.parse({ ...legacy, tables: [{ ...table, merges: 'x' }] });
     expect(none.tables?.[0]).not.toHaveProperty('merges');
+  });
+
+  it('empties what a merge covers, and leaves a table with nothing to clear as it is', () => {
+    const table = {
+      colWidths: [96, 96],
+      rowHeights: [32, 32],
+      cells: [{ text: 'kept' }, { text: 'hidden', fill: 'rose' as const }, { text: 'c' }, {}],
+      merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+    };
+    expect(clearCoveredCells(table).cells).toEqual([{ text: 'kept' }, {}, { text: 'c' }, {}]);
+    const clean = { ...table, cells: [{ text: 'kept' }, {}, {}, {}] };
+    expect(clearCoveredCells(clean)).toBe(clean);
+  });
+
+  it('clears on read anything stored under a merge, so splitting it shows nothing stray', () => {
+    const parsed = diagramArtifactSchema.parse({
+      ...legacy,
+      tables: [
+        {
+          id: 't1',
+          x: 0,
+          y: 0,
+          colWidths: [96, 96],
+          rowHeights: [32, 32],
+          cells: [{ text: 'kept' }, { text: 'stray' }, {}, {}],
+          merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+        },
+      ],
+    });
+    expect(parsed.tables?.[0]?.cells[1]).toEqual({});
+    expect(parsed.tables?.[0]?.cells[0]).toEqual({ text: 'kept' });
   });
 
   it('keeps the first of two overlapping merges, and puts them in reading order', () => {

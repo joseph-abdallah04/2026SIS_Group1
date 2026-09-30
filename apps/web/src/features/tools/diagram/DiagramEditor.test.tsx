@@ -5012,6 +5012,87 @@ describe('studio tables', () => {
     expect(screen.getByRole('button', { name: 'Row 2' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('reads the weight and size of a merged cell from the cell itself, so bold turns off', async () => {
+    // The controls read the far corner of the range, a covered cell that is
+    // always empty: Bold never lit, so every press sent "bold" and a bold
+    // merged cell could not be made plain again.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 820);
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    await openBarPanel(user, 'Format text');
+    await user.click(screen.getByRole('button', { name: 'large text' }));
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+    expect(screen.getByRole('button', { name: 'Bold cell text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'large text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const cells = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells;
+    expect(cells[0]).toMatchObject({ fontSizePreset: 'large' });
+    expect(cells[0]!.bold).toBeUndefined();
+    // Nothing was written to the cell the merge covers.
+    expect(cells[1]).toEqual({});
+  });
+
+  it('pastes one value onto a merged cell once, into the cell that shows', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 830);
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    fireEvent.paste(canvas, { clipboardData: { getData: () => 'Pasted' } });
+    // Split again: the cell that was covered is still empty.
+    await user.click(screen.getByRole('button', { name: 'Unmerge cells' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const cells = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells;
+    expect(cells[0]!.text).toBe('Pasted');
+    expect(cells[1]!.text).toBeUndefined();
+  });
+
+  it('types into the merged cell when a whole row ends inside one', async () => {
+    // A row picked by its handle ends on its last cell, which a merge covers
+    // here: typing went into a cell that is never drawn, and was lost.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 840);
+    await user.keyboard('{ArrowRight}');
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 1' }), {
+      button: 0,
+      pointerId: 841,
+      clientX: 274,
+      clientY: 268,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 841, clientX: 274, clientY: 268 });
+
+    await user.keyboard('z');
+    expect(screen.getByRole('textbox', { name: 'Cell row 1 column 2' })).toHaveValue('z');
+  });
+
   it('undoes a whole table in one step', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
