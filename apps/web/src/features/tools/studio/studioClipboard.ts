@@ -188,7 +188,12 @@ export function pasteStudioFragment(
     const moved = { x: endpoint.x + offset.x, y: endpoint.y + offset.y };
     if (endpoint.elementId === undefined) return moved;
     const copied = copiedIds.get(endpoint.elementId);
-    return copied ? { ...moved, elementId: copied } : moved;
+    // Where on the element it meets travels with the binding: dropping `at`
+    // sent a pasted arrow pinned to a shape's edge back to aiming at its centre.
+    if (!copied) return moved;
+    return endpoint.at
+      ? { ...moved, elementId: copied, at: { ...endpoint.at } }
+      : { ...moved, elementId: copied };
   };
 
   const arrows = [...(scene.arrows ?? [])];

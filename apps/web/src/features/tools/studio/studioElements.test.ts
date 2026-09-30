@@ -16,6 +16,7 @@ import {
 
 import { eraseInkAtPoint, type StudioInkStroke } from './studioInk';
 import { diagramArtifactSchema, diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
+import { normalizeTableMerges, tableAutoRowHeight, tableCellLines } from '@roundtable/shared';
 
 const box = (id: string, extra: Partial<DiagramNode> = {}): DiagramNode => ({
   id,
@@ -187,6 +188,83 @@ describe('v4 contract', () => {
     const parsed = diagramArtifactSchema.parse({ ...legacy, ink: 'not an array' });
     expect(parsed.ink).toBeUndefined();
     expect(parsed.nodes).toHaveLength(1);
+  });
+
+  it('repairs a table whose cells do not match its grid rather than dropping it', () => {
+    const table = { id: 't1', x: 0, y: 0, colWidths: [96, 96], rowHeights: [32, 32] };
+    const short = diagramArtifactSchema.parse({
+      ...legacy,
+      tables: [{ ...table, cells: [{ text: 'a' }] }],
+    });
+    expect(short.tables?.[0]?.cells).toEqual([{ text: 'a' }, {}, {}, {}]);
+    const long = diagramArtifactSchema.parse({
+      ...legacy,
+      tables: [
+        { ...table, cells: Array.from({ length: 6 }, (_, index) => ({ text: `${index}` })) },
+      ],
+    });
+    expect(long.tables?.[0]?.cells).toHaveLength(4);
+    expect(long.tables?.[0]?.cells[3]).toEqual({ text: '3' });
+  });
+
+  it('drops a merge the grid cannot hold rather than the table (v4.6)', () => {
+    const table = {
+      id: 't1',
+      x: 0,
+      y: 0,
+      colWidths: [96, 96],
+      rowHeights: [32, 32],
+      cells: [{}, {}, {}, {}],
+    };
+    const parsed = diagramArtifactSchema.parse({
+      ...legacy,
+      tables: [
+        {
+          ...table,
+          merges: [
+            { row: 0, col: 0, rowSpan: 1, colSpan: 2 },
+            // Overlaps the first, off the grid, and not a merge at all.
+            { row: 0, col: 1, rowSpan: 2, colSpan: 1 },
+            { row: 1, col: 1, rowSpan: 3, colSpan: 1 },
+            'nonsense',
+          ],
+        },
+      ],
+    });
+    expect(parsed.tables?.[0]?.merges).toEqual([{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }]);
+
+    // Nothing usable left: no key at all, as a table that never had one.
+    const none = diagramArtifactSchema.parse({ ...legacy, tables: [{ ...table, merges: 'x' }] });
+    expect(none.tables?.[0]).not.toHaveProperty('merges');
+  });
+
+  it('keeps the first of two overlapping merges, and puts them in reading order', () => {
+    expect(
+      normalizeTableMerges(3, 3, [
+        { row: 1, col: 1, rowSpan: 2, colSpan: 2 },
+        { row: 0, col: 0, rowSpan: 1, colSpan: 2 },
+        { row: 2, col: 2, rowSpan: 1, colSpan: 1 },
+        { row: 1, col: 0, rowSpan: 2, colSpan: 2 },
+      ]),
+    ).toEqual([
+      { row: 0, col: 0, rowSpan: 1, colSpan: 2 },
+      { row: 1, col: 1, rowSpan: 2, colSpan: 2 },
+    ]);
+  });
+
+  it('wraps a merged cell across everything it spans, and draws nothing in the cells it covers', () => {
+    const text = 'a heading long enough to need two lines in one column';
+    const table = {
+      colWidths: [128, 128],
+      rowHeights: [32, 32],
+      cells: [{ text }, { text: 'hidden' }, {}, {}],
+      fontSizePreset: 'medium' as const,
+    };
+    const merged = { ...table, merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }] };
+    expect(tableCellLines(merged, merged.cells[0]!, 0, 0)).toHaveLength(1);
+    expect(tableCellLines(merged, merged.cells[1]!, 1, 0)).toEqual([]);
+    // The same text in one column needs more room than across two.
+    expect(tableAutoRowHeight(table, 0)).toBeGreaterThan(tableAutoRowHeight(merged, 0));
   });
 
   it('accepts a sketch with no shapes at all', () => {

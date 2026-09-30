@@ -36,7 +36,6 @@ function renderRail(overrides: Partial<Parameters<typeof StudioToolRail>[0]> = {
       </button>
     ),
     templateOptions: () => <button type="button">Flow</button>,
-    arrangeOptions: () => <button type="button">Arrange now</button>,
     canUndo: true,
     canRedo: true,
     onUndo: vi.fn(),
@@ -265,16 +264,14 @@ describe('the rail sub-toolbars', () => {
     expect(panel.parentElement).toBe(rail.parentElement);
   });
 
-  it('keeps arranging with the canvas settings, not with the tools', async () => {
-    // Arranging acts on the whole board and needs nothing selected first, which
-    // makes it a canvas setting rather than a tool you pick up.
-    const user = userEvent.setup();
+  it('keeps only the grid toggles in the canvas settings', () => {
+    // Arrange used to sit here too. It laid out by legacy edges only, so it
+    // could not see anything drawn in the studio, and it was taken away.
     renderRail();
     const canvas = screen.getByRole('toolbar', { name: 'Canvas' });
-    expect(canvas.querySelector('[aria-label="Arrange"]')).not.toBeNull();
-
-    await user.click(screen.getByRole('button', { name: 'Arrange' }));
-    expect(screen.getByRole('button', { name: 'Arrange now' })).toBeInTheDocument();
+    expect(
+      Array.from(canvas.querySelectorAll('button')).map((b) => b.getAttribute('aria-label')),
+    ).toEqual(['Show grid', 'Snap to grid']);
   });
 
   it('hangs a short sub-toolbar from the button that opened it', async () => {

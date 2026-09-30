@@ -61,6 +61,18 @@ describe('arrows in a fragment', () => {
     expect(pasted.nodes.map((node) => node.id)).toContain(copy.to.elementId);
   });
 
+  it('keeps where a pinned arrow meets the copied shape', () => {
+    // An arrow pinned two thirds down a shape's left edge stays pinned there on
+    // the copy, rather than falling back to aiming at the copy's centre.
+    const pinned = {
+      ...withArrow,
+      arrows: [{ ...arrow, to: { ...arrow.to, at: { u: 0, v: 2 / 3 } } }],
+    };
+    const pasted = pasteStudioFragment(pinned, copyStudioFragment(pinned, both), { x: 40, y: 40 });
+    if (!pasted.ok) throw new Error(pasted.error);
+    expect(pasted.arrows.at(-1)!.to.at).toEqual({ u: 0, v: 2 / 3 });
+  });
+
   it('drops a binding to something left behind', () => {
     // The shape stayed where it was, so binding the copy to it would tie the
     // two together. The point survives, so the arrow still has its shape.

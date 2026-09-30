@@ -56,8 +56,8 @@ describe('element bounds', () => {
   });
 
   it('boxes a table from its origin and its tracks', () => {
-    // A 2x2 default table is 192 x 64.
-    expect(tableBounds(table)).toEqual({ x: 700, y: 400, width: 192, height: 64 });
+    // A new 2x2 table is 256 x 64.
+    expect(tableBounds(table)).toEqual({ x: 700, y: 400, width: 256, height: 64 });
   });
 
   describe('a curved path', () => {

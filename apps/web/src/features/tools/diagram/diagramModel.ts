@@ -877,11 +877,32 @@ export function resizeNode(
     width = start.width * scale;
     height = start.height * scale;
   } else {
+    // The *pulled edge* lands on the grid, not the size: a shape left off the
+    // grid (by a group scale, or placed with snapping off) would otherwise keep
+    // its edge off the grid however it was resized. On the grid to begin with,
+    // the two are the same thing. A turned shape's edges are not horizontal or
+    // vertical, so there only the size can be snapped.
+    const snapExtent = (h: number, lo: number, extent: number, size: number) => {
+      if (!snap) return size;
+      if (rotation) return snapToGrid(size);
+      const heldAt = fromCentre ? lo + extent / 2 : h > 0 ? lo : lo + extent;
+      const edge = heldAt + h * (fromCentre ? size / 2 : size);
+      const snapped = (snapToGrid(edge) - heldAt) * h;
+      return fromCentre ? snapped * 2 : snapped;
+    };
     if (hx !== 0) {
-      width = clampNumber(snap ? snapToGrid(width) : width, DIAGRAM_MIN_NODE_WIDTH, maxWidth);
+      width = clampNumber(
+        snapExtent(hx, start.x, start.width, width),
+        DIAGRAM_MIN_NODE_WIDTH,
+        maxWidth,
+      );
     }
     if (hy !== 0) {
-      height = clampNumber(snap ? snapToGrid(height) : height, DIAGRAM_MIN_NODE_HEIGHT, maxHeight);
+      height = clampNumber(
+        snapExtent(hy, start.y, start.height, height),
+        DIAGRAM_MIN_NODE_HEIGHT,
+        maxHeight,
+      );
     }
   }
 

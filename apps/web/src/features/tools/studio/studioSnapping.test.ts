@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampDragToCanvas, offsetRect, snapDragToGrid, unionBounds } from './studioSnapping';
+import {
+  clampDragToCanvas,
+  offsetRect,
+  snapDragToGrid,
+  snapResizePull,
+  unionBounds,
+} from './studioSnapping';
 
 const rect = (x: number, y: number, width = 100, height = 50) => ({ x, y, width, height });
 
@@ -84,5 +90,42 @@ describe('holding a drag inside the sheet', () => {
   it('pins a group wider than the sheet to the near edge instead of jittering', () => {
     // No offset fits a 1000-wide box on a 960-wide sheet; it settles at x = 0.
     expect(clampDragToCanvas(rect(-50, 0, 1000, 50), { x: 0, y: 0 })).toEqual({ x: 50, y: 0 });
+  });
+});
+
+describe('snapping a resize pull to the grid', () => {
+  it('puts the pulled edge on the grid and leaves the held one alone', () => {
+    // Held left edge at 203 (off the grid); the right edge pulled to 313 lands on 312.
+    expect(snapResizePull(rect(203, 400, 100, 48), 'e', { x: 10, y: 5 })).toEqual({ x: 9, y: 5 });
+  });
+
+  it('snaps both pulled edges from a corner', () => {
+    // Top-left pulled to 197, 395: the nearest lines are 200 and 392.
+    expect(snapResizePull(rect(200, 400), 'nw', { x: -3, y: -5 })).toEqual({ x: 0, y: -8 });
+  });
+
+  it('snaps the pulled edge when resizing from the centre', () => {
+    // The right edge pulled to 307 lands on 304; the left mirrors it.
+    expect(snapResizePull(rect(200, 400), 'e', { x: 7, y: 0 }, { fromCentre: true })).toEqual({
+      x: 4,
+      y: 0,
+    });
+  });
+
+  it('never snaps a frame through its own held edge', () => {
+    // Pulled almost flat: the nearest line is at or behind the held edge.
+    expect(snapResizePull(rect(200, 400, 100, 50), 'e', { x: -97, y: 0 })).toEqual({
+      x: -97,
+      y: 0,
+    });
+  });
+
+  it('keeps a uniform scale uniform, with the longer side on the grid', () => {
+    const frame = rect(200, 400, 100, 50);
+    const pull = snapResizePull(frame, 'se', { x: 13, y: 0 }, { uniform: true });
+    // Along the reach, so both axes grow by the same factor.
+    expect(pull.x / 100).toBeCloseTo(pull.y / 50);
+    // And the right edge, the longer reach, lands on a grid line.
+    expect((frame.x + frame.width + pull.x) % 8).toBeCloseTo(0);
   });
 });

@@ -22,6 +22,7 @@ const CANVAS_KEYS: { keys: string; description: string }[] = [
   { keys: '[ ]', description: 'Turn the selection' },
   { keys: 'Enter', description: 'Edit the selected element' },
   { keys: 'Escape', description: 'Step out, clear the selection, then leave' },
+  { keys: 'Tab / Escape', description: 'In a table cell: next cell / finish typing' },
   { keys: 'Space (held)', description: 'Pan the canvas' },
   { keys: 'Shift (held)', description: 'Constrain a pen or line to 45°' },
 ];

@@ -18,6 +18,13 @@ import {
   type DiagramPoint,
   type DiagramRect,
 } from '../diagram/diagramModel';
+import {
+  handleAxes,
+  handlePoint,
+  heldPoint,
+  uniformScaleFromPull,
+  type ResizeHandle,
+} from './studioScale';
 
 /**
  * Adjust a proposed drag so the moving artwork lands on the grid.
@@ -85,4 +92,59 @@ export function clampDragToCanvas(moving: DiagramRect, delta: DiagramPoint): Dia
     x: axis(moving.x, moving.width, DIAGRAM_CANVAS_WIDTH, delta.x),
     y: axis(moving.y, moving.height, DIAGRAM_CANVAS_HEIGHT, delta.y),
   };
+}
+
+/**
+ * Adjust a resize pull so the edge being pulled lands on the grid.
+ *
+ * The same rule a shape's own resize keeps — its pulled edge on the grid —
+ * for anything scaled from a frame: a multi-selection, a table from its
+ * corner, a freehand stroke or a pen path. Only the pulled edge is snapped;
+ * the held one stays where it was, so a group that started off the grid is
+ * not jolted across by the first pixel of a pull.
+ *
+ * A `uniform` scale moves both axes together, so only one edge can be put on
+ * the grid: the one along the longer reach, which is the one the eye follows.
+ * The pull is returned re-aimed along the handle so that it asks for exactly
+ * that scale.
+ */
+export function snapResizePull(
+  frame: DiagramRect,
+  handle: ResizeHandle,
+  pull: DiagramPoint,
+  { uniform = false, fromCentre = false }: { uniform?: boolean; fromCentre?: boolean } = {},
+): DiagramPoint {
+  const { hx, hy } = handleAxes(handle);
+  const held = heldPoint(frame, handle, fromCentre);
+  const grip = handlePoint(frame, handle);
+  // From the centre both sides move, so the pulled edge travels half as far as
+  // the size changes — which is exactly the pointer's own travel.
+  const snapAxis = (h: number, heldAt: number, gripAt: number, travel: number): number => {
+    if (h === 0) return travel;
+    const edge = gripAt + travel;
+    const snapped = snapToGrid(edge);
+    // Never snap through the held edge: a tiny frame would flip inside out.
+    if ((snapped - heldAt) * h <= 0) return travel;
+    return travel + (snapped - edge);
+  };
+
+  if (!uniform) {
+    return {
+      x: snapAxis(hx, held.x, grip.x, pull.x),
+      y: snapAxis(hy, held.y, grip.y, pull.y),
+    };
+  }
+
+  const reach = { x: grip.x - held.x, y: grip.y - held.y };
+  const scale = uniformScaleFromPull(frame, handle, pull, fromCentre);
+  // The axis that decides: whichever the handle reaches further along.
+  const alongX = Math.abs(reach.x) >= Math.abs(reach.y);
+  const reachOnAxis = alongX ? reach.x : reach.y;
+  if (Math.abs(reachOnAxis) < 1e-6) return pull;
+  const heldOnAxis = alongX ? held.x : held.y;
+  const edge = heldOnAxis + reachOnAxis * scale;
+  const snapped = snapToGrid(edge);
+  const snappedScale = (snapped - heldOnAxis) / reachOnAxis;
+  if (snappedScale <= 0) return pull;
+  return { x: reach.x * (snappedScale - 1), y: reach.y * (snappedScale - 1) };
 }
