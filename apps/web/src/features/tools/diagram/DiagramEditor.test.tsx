@@ -264,6 +264,27 @@ function mockSurface(canvas: Element, surface: { width: number; height: number }
 }
 
 /**
+ * Joins the selected shape to another by dragging its right-hand extend button
+ * onto it: the way an arrow is drawn out of a shape. The drop lands just inside
+ * the target's top-left corner, which is inside every shape the palette has.
+ */
+function connectByHandle(canvas: Element, targetName: string, pointerId: number) {
+  const target = screen.getByRole('button', { name: targetName });
+  const [x, y] = (target.getAttribute('transform') ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number);
+  fireEvent.pointerDown(
+    screen.getByRole('button', { name: 'Add a connected shape to the right' }),
+    {
+      button: 0,
+      pointerId,
+      clientX: 0,
+      clientY: 0,
+    },
+  );
+  fireEvent.pointerMove(canvas, { pointerId, clientX: x! + 30, clientY: y! + 20 });
+  fireEvent.pointerUp(canvas, { pointerId, clientX: x! + 30, clientY: y! + 20 });
+}
+
+/**
  * Two quick presses on the same spot.
  *
  * The DOM's `dblclick` never arrives on this canvas — taking pointer capture
@@ -568,27 +589,38 @@ describe('diagram editor', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows connection handles and previews an arrow to the pointer and target', async () => {
+  it('draws an arrow out of a shape by dragging one of its extend buttons onto another', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user, canvas } = await openDiagram({ width: 480, height: 300 });
+    const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     expect(screen.getAllByTestId('connection-handle')).toHaveLength(4);
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
-    fireEvent.pointerDown(screen.getAllByTestId('connection-handle')[1]!, {
-      button: 0,
-      pointerId: 21,
-    });
+    const target = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    const [x, y] = (target.getAttribute('transform') ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number);
 
-    fireEvent.pointerMove(canvas, { pointerId: 21, clientX: 300, clientY: 150 });
-    const preview = screen.getByTestId('connection-preview');
-    expect(preview).toHaveAttribute('x2', '600');
-    expect(preview).toHaveAttribute('y2', '300');
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Add a connected shape to the right' }),
+      { button: 0, pointerId: 21, clientX: 700, clientY: 300 },
+    );
+    // Past the travel threshold, it is an arrow being drawn, not a click.
+    fireEvent.pointerMove(canvas, { pointerId: 21, clientX: 600, clientY: 400 });
+    expect(screen.getByTestId('arrow-draft')).toBeInTheDocument();
 
-    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
-    expect(preview.getAttribute('x2')).not.toBe('600');
+    // Let go over the other shape: bound to it, and to the shape it came from.
+    fireEvent.pointerMove(canvas, { pointerId: 21, clientX: x! + 60, clientY: y! + 28 });
+    fireEvent.pointerUp(canvas, { pointerId: 21, clientX: x! + 60, clientY: y! + 28 });
+    expect(screen.queryByTestId('arrow-draft')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = propose.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows).toHaveLength(1);
+    expect(artifact.arrows![0]!.from.elementId).toBeTruthy();
+    expect(artifact.arrows![0]!.to.elementId).toBeTruthy();
+    expect(artifact.arrows![0]!.to.elementId).not.toBe(artifact.arrows![0]!.from.elementId);
   });
 
   it('undoes a node deletion and its cascade-deleted arrow together', async () => {
@@ -828,9 +860,11 @@ describe('diagram editor', () => {
     expect(screen.getByText("Extending Alice's diagram")).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /rectangle:/ })).toHaveLength(2);
     await clickInRailMenu(user, 'Shapes', 'Add ellipse');
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Idea' }));
+    // Opened from the board rather than through `openDiagram`, so the surface
+    // is given its size here, or every pointer would land at the origin.
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
+    mockSurface(canvas, { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT });
+    connectByHandle(canvas, 'Rounded rectangle: Idea', 41);
     await user.click(screen.getByRole('button', { name: 'Add text' }));
     await user.type(screen.getByRole('textbox', { name: 'Arrow label' }), 'references');
     await user.keyboard('{Enter}');
@@ -866,9 +900,9 @@ describe('diagram editor', () => {
   });
 
   it('connects two nodes with an arrow bound to both of them', async () => {
-    // Connect used to write an `edge`. It writes the studio's own arrow now —
-    // the same thing the arrow tool draws — so what it makes can be restyled,
-    // capped, bent and labelled. Edges are still read; none are written.
+    // Joining two shapes used to write an `edge`. It writes the studio's own
+    // arrow now — the same thing the arrow tool draws — so what it makes can be
+    // restyled, capped, bent and labelled. Edges are still read; none are written.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -879,10 +913,8 @@ describe('diagram editor', () => {
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
     await typeNodeLabel(user, canvas, 'Dotted rectangle: Unlabelled', 35, 'Server');
 
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-    expect(screen.getByText('Choose a destination for Server.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Client' }));
+    // Server is the shape just typed into, so it is the one selected.
+    connectByHandle(canvas, 'Rounded rectangle: Client', 42);
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     const payload = propose.mock.calls[0]?.[0];
@@ -910,12 +942,10 @@ describe('diagram editor', () => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
+    const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
+    connectByHandle(canvas, 'Rounded rectangle: Unlabelled', 43);
 
     expect(screen.getByRole('button', { name: 'Start point' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Line shape' })).toBeInTheDocument();
@@ -928,12 +958,10 @@ describe('diagram editor', () => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
+    const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
+    connectByHandle(canvas, 'Rounded rectangle: Unlabelled', 44);
 
     await user.click(screen.getByRole('button', { name: 'Add text' }));
     await user.type(screen.getByRole('textbox', { name: 'Arrow label' }), 'calls');
@@ -970,12 +998,10 @@ describe('diagram editor', () => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
+    const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-    await user.click(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }));
+    connectByHandle(canvas, 'Rounded rectangle: Unlabelled', 45);
 
     expect(screen.getByTestId('studio-arrow')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Delete selection' }));
@@ -1028,28 +1054,43 @@ describe('diagram editor', () => {
     expect(payload?.artifactJson.type === 'diagram' && payload.artifactJson.nodes).toHaveLength(1);
   });
 
-  it('blocks submission until an unfinished connection is completed or cancelled', async () => {
+  it('blocks submission while an arrow is still being drawn out of a shape', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
+    const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
-    await openMore(user);
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Add a connected shape to the right' }),
+      {
+        button: 0,
+        pointerId: 49,
+        clientX: 160,
+        clientY: 52,
+      },
+    );
+    fireEvent.pointerMove(canvas, { pointerId: 49, clientX: 500, clientY: 400 });
     await user.click(screen.getByRole('button', { name: 'Propose' }));
 
     expect(propose).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Finish or cancel the arrow before proposing.',
+      'Finish the arrow with Esc before proposing.',
     );
 
     await user.keyboard('{Escape}');
-    await openMore(user);
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
+    expect(screen.queryByTestId('arrow-draft')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     expect(propose).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no Connect button: an arrow is drawn out of the shape itself', async () => {
+    render(<Harness propose={vi.fn(async () => {})} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await openMore(user);
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+    expect(screen.getAllByTestId('connection-handle')).toHaveLength(4);
   });
 
   it('commits an inline label before Ctrl+Enter proposes', async () => {
@@ -1123,6 +1164,8 @@ describe('diagram viewport and productivity', () => {
 
     expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
 
+    // Two stops: 110%, then 125%.
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     // The viewBox is the zoom level; the percentage that used to echo it back
     // was the least-reached thing in the busiest corner.
@@ -1133,10 +1176,63 @@ describe('diagram viewport and productivity', () => {
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
   });
 
+  it('zooms the canvas, not the page, with Ctrl and plus, minus or zero', async () => {
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    // From the rail as much as the canvas, so it is heard on the document.
+    const plus = fireEvent.keyDown(document.body, { key: '=', ctrlKey: true });
+    // Handled, so the browser does not zoom the whole tab as well.
+    expect(plus).toBe(false);
+    fireEvent.keyDown(document.body, { key: '+', ctrlKey: true, shiftKey: true });
+    expect(canvas).toHaveAttribute('viewBox', '96 60 768 480');
+
+    fireEvent.keyDown(document.body, { key: '-', metaKey: true });
+    expect(canvas).not.toHaveAttribute('viewBox', '96 60 768 480');
+    expect(canvas).not.toHaveAttribute('viewBox', '0 0 960 600');
+
+    fireEvent.keyDown(document.body, { key: '0', ctrlKey: true });
+    expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
+  });
+
+  it('leaves Ctrl and plus to the board while the studio is tucked away', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Peek at board' }));
+    // The editor is still mounted — its canvas keeps its zoom — but the key is
+    // the board's now, and the board's own zoom has to be the one that moves.
+    const plus = fireEvent.keyDown(document.body, { key: '=', ctrlKey: true });
+    expect(plus).toBe(true);
+    expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
+  });
+
+  it('moves one zoom stop per mouse-wheel notch, and zooms smoothly on a pinch', () => {
+    render(<Harness propose={propose()} />);
+    return openDiagram().then(({ canvas }) => {
+      // Two notches about the centre: 110%, then 125%. One notch used to be
+      // about 165%.
+      fireEvent.wheel(canvas, { deltaY: -100, ctrlKey: true, clientX: 480, clientY: 300 });
+      fireEvent.wheel(canvas, { deltaY: -100, ctrlKey: true, clientX: 480, clientY: 300 });
+      expect(canvas).toHaveAttribute('viewBox', '96 60 768 480');
+
+      fireEvent.wheel(canvas, { deltaY: 100, ctrlKey: true, clientX: 480, clientY: 300 });
+      fireEvent.wheel(canvas, { deltaY: 100, ctrlKey: true, clientX: 480, clientY: 300 });
+      expect(canvas).toHaveAttribute('viewBox', '0 0 960 600');
+
+      // A pinch's small delta is a small, continuous zoom, not a whole stop.
+      fireEvent.wheel(canvas, { deltaY: -4, ctrlKey: true, clientX: 480, clientY: 300 });
+      const [, , width] = (canvas.getAttribute('viewBox') ?? '').split(' ').map(Number);
+      expect(width).toBeLessThan(960);
+      expect(width).toBeGreaterThan(960 / 1.1);
+    });
+  });
+
   it('pans with Space and drag without touching the diagram', async () => {
     render(<Harness propose={propose()} />);
     const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
     const before = node.getAttribute('transform');
@@ -1168,6 +1264,40 @@ describe('diagram viewport and productivity', () => {
       'transform',
       'translate(424, 272)',
     );
+  });
+
+  it('previews a shape dragged from the palette exactly where the drop puts it', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    const trigger = screen.getByRole('button', { name: 'Shapes' });
+    if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Add rounded rectangle' }), {
+      dataTransfer: { setData: vi.fn(), effectAllowed: 'none' },
+    });
+    const over = createEvent.dragOver(canvas, {
+      dataTransfer: { types: [DIAGRAM_SHAPE_MEDIA_TYPE], dropEffect: 'none' },
+    });
+    Object.defineProperty(over, 'clientX', { value: 300 });
+    Object.defineProperty(over, 'clientY', { value: 200 });
+    fireEvent(canvas, over);
+
+    const ghost = screen.getByTestId('placement-ghost');
+    const previewedAt = ghost.getAttribute('transform');
+    expect(previewedAt).toBeTruthy();
+
+    dropOnCanvas(canvas, {
+      clientX: 300,
+      clientY: 200,
+      types: [DIAGRAM_SHAPE_MEDIA_TYPE],
+      data: 'box',
+    });
+
+    expect(screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveAttribute(
+      'transform',
+      previewedAt!,
+    );
+    expect(screen.queryByTestId('placement-ghost')).toBeNull();
   });
 
   it('ignores a drop that is not carrying a palette shape', async () => {
@@ -1438,11 +1568,15 @@ describe('diagram viewport and productivity', () => {
     const { user, canvas } = await openDiagram();
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
 
+    // Dragged out of the shape and let go over nothing.
     fireEvent.pointerDown(screen.getAllByTestId('connection-handle')[0]!, {
       button: 0,
       pointerId: 904,
+      clientX: 84,
+      clientY: 0,
     });
-    fireEvent.pointerDown(canvas, { button: 0, pointerId: 905, clientX: 400, clientY: 400 });
+    fireEvent.pointerMove(canvas, { pointerId: 904, clientX: 400, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 904, clientX: 400, clientY: 400 });
 
     expect(screen.getByTestId('arrow-shape-picker')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'End with decision' }));
@@ -1457,6 +1591,202 @@ describe('diagram viewport and productivity', () => {
     expect(artifact.arrows![0]!.from.elementId).toBeTruthy();
     expect(artifact.arrows![0]!.to.elementId).toBeTruthy();
     expect(proposalCreateSchema.safeParse(send.mock.calls[0]![0]).success).toBe(true);
+  });
+
+  it('offers shapes from a click on an extend button, and adds one and its arrow as one step', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    // A press that never travels is a click: it opens the picker instead of
+    // arming a connection that has to be finished or escaped from.
+    const button = screen.getByRole('button', { name: 'Add a connected shape to the right' });
+    fireEvent.pointerDown(button, { button: 0, pointerId: 906, clientX: 170, clientY: 52 });
+    fireEvent.pointerUp(canvas, { pointerId: 906, clientX: 170, clientY: 52 });
+
+    const picker = screen.getByTestId('extend-shape-picker');
+    // The source's own shape comes first, and is ready for Enter.
+    const same = within(picker).getByRole('button', { name: 'Connect another rounded rectangle' });
+    expect(same).toHaveFocus();
+    expect(within(picker).getByRole('button', { name: 'Connect a decision' })).toBeInTheDocument();
+
+    await user.click(same);
+    expect(screen.queryByTestId('extend-shape-picker')).toBeNull();
+    const boxes = screen.getAllByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(boxes).toHaveLength(2);
+    // The new one, to the right, is selected: the next step is one click away.
+    expect(boxes[1]).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(screen.getAllByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveLength(
+      1,
+    );
+    expect(screen.queryByTestId('studio-arrow')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const [first, second] = artifact.nodes;
+    expect(second!.x).toBeGreaterThan(first!.x);
+    expect(second!.y).toBe(first!.y);
+    expect(artifact.arrows).toEqual([
+      expect.objectContaining({
+        from: expect.objectContaining({ elementId: first!.id }),
+        to: expect.objectContaining({ elementId: second!.id }),
+      }),
+    ]);
+  });
+
+  it('puts the picker away with Escape, adding nothing and leaving the studio open', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    const button = screen.getByRole('button', { name: 'Add a connected shape below' });
+    fireEvent.pointerDown(button, { button: 0, pointerId: 907, clientX: 84, clientY: 110 });
+    fireEvent.pointerUp(canvas, { pointerId: 907, clientX: 84, clientY: 110 });
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByTestId('extend-shape-picker')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Rounded rectangle: Unlabelled' })).toHaveLength(
+      1,
+    );
+    expect(screen.getByRole('application', { name: 'Studio canvas' })).toBeInTheDocument();
+  });
+
+  it('wakes an extend button from a dot only as the pointer comes near it', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const button = screen.getByRole('button', { name: 'Add a connected shape above' });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 73, y: -38, width: 22, height: 22 }),
+    );
+
+    fireEvent.pointerMove(canvas, { clientX: 500, clientY: 500 });
+    expect(button).not.toHaveAttribute('data-near');
+    fireEvent.pointerMove(canvas, { clientX: 90, clientY: -10 });
+    expect(button).toHaveAttribute('data-near', 'true');
+    fireEvent.pointerLeave(canvas);
+    expect(button).not.toHaveAttribute('data-near');
+  });
+
+  it('keeps the four extend buttons the same distance out, centred on their sides', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    fireEvent(window, new Event('resize'));
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    const at = (side: string) => {
+      const style = screen.getByRole('button', { name: `Add a connected shape ${side}` }).style;
+      return { x: parseFloat(style.left), y: parseFloat(style.top) };
+    };
+    const [up, right, down, left] = ['above', 'to the right', 'below', 'to the left'].map(at);
+    const centre = { x: (left!.x + right!.x) / 2, y: (up!.y + down!.y) / 2 };
+    // On the middle line of their own sides…
+    expect(up!.x).toBeCloseTo(centre.x);
+    expect(down!.x).toBeCloseTo(centre.x);
+    expect(left!.y).toBeCloseTo(centre.y);
+    expect(right!.y).toBeCloseTo(centre.y);
+    // …and as far out past the shape's edge on every side. The box is 120 x 56.
+    expect(right!.x - centre.x - 60).toBeCloseTo(centre.y - up!.y - 28);
+    expect(down!.y - centre.y - 28).toBeCloseTo(centre.x - left!.x - 60);
+  });
+
+  it('puts the properties bar away while the shape picker is open', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    expect(screen.getByRole('toolbar', { name: 'Selection properties' })).toBeInTheDocument();
+
+    const button = screen.getByRole('button', { name: 'Add a connected shape above' });
+    fireEvent.pointerDown(button, { button: 0, pointerId: 908, clientX: 84, clientY: -10 });
+    fireEvent.pointerUp(canvas, { pointerId: 908, clientX: 84, clientY: -10 });
+    // The picker hangs on the same side as the bar: only one of them shows.
+    expect(screen.getByTestId('extend-shape-picker')).toBeInTheDocument();
+    expect(screen.queryByRole('toolbar', { name: 'Selection properties' })).toBeNull();
+
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('toolbar', { name: 'Selection properties' })).toBeInTheDocument();
+  });
+
+  it('loops an arrow round its own shape when it is drawn out and back onto it', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Add a connected shape to the right' }),
+      {
+        button: 0,
+        pointerId: 909,
+        clientX: 170,
+        clientY: 52,
+      },
+    );
+    fireEvent.pointerMove(canvas, { pointerId: 909, clientX: 400, clientY: 300 });
+    // Back onto the top of the shape it came out of.
+    fireEvent.pointerMove(canvas, { pointerId: 909, clientX: 60, clientY: 30 });
+    fireEvent.pointerUp(canvas, { pointerId: 909, clientX: 60, clientY: 30 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const [loop] = artifact.arrows!;
+    expect(loop!.from.elementId).toBe(artifact.nodes[0]!.id);
+    expect(loop!.to.elementId).toBe(artifact.nodes[0]!.id);
+    // Leaving from the side whose button was pulled, square.
+    expect(loop!.from.at).toEqual({ u: 1, v: 0.5 });
+    expect(loop!.route).toBe('elbow');
+  });
+
+  it("slides a joined elbow's middle leg from its handle, as one undo step", async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    // Carried well away, below and to the right, so there is room for a leg to
+    // slide between the two: side by side, it has nowhere to go.
+    const ellipse = screen.getByRole('button', { name: 'Ellipse: Unlabelled' });
+    const [ex, ey] = (ellipse.getAttribute('transform') ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number);
+    fireEvent.pointerDown(ellipse, {
+      button: 0,
+      pointerId: 912,
+      clientX: ex! + 20,
+      clientY: ey! + 20,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 912, clientX: 520, clientY: 380 });
+    fireEvent.pointerUp(canvas, { pointerId: 912, clientX: 520, clientY: 380 });
+    // Drawn out of the ellipse onto the rectangle: elbowed, and selected.
+    connectByHandle(canvas, 'Rounded rectangle: Unlabelled', 910);
+    const route = () => screen.getByTestId('studio-arrow').getAttribute('d');
+    const before = route();
+
+    const handle = screen.getByRole('button', { name: 'Slide this arrow’s bend' });
+    const cx = Number(handle.getAttribute('cx'));
+    const cy = Number(handle.getAttribute('cy'));
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 911, clientX: cx, clientY: cy });
+    fireEvent.pointerMove(canvas, { pointerId: 911, clientX: cx + 40, clientY: cy + 40 });
+    fireEvent.pointerUp(canvas, { pointerId: 911, clientX: cx + 40, clientY: cy + 40 });
+    expect(route()).not.toBe(before);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(route()).toBe(before);
+  });
+
+  it('opens the same picker from the keyboard', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+
+    // Enter or Space on a focused button is a click with no pointer behind it.
+    fireEvent.click(screen.getByRole('button', { name: 'Add a connected shape to the left' }), {
+      detail: 0,
+    });
+    expect(screen.getByTestId('extend-shape-picker')).toBeInTheDocument();
   });
 
   it('leaves an arrow pointing at nothing when the picker is dismissed', async () => {
@@ -1678,7 +2008,9 @@ describe('diagram resize and style', () => {
   function nodeRect(name: string) {
     return screen
       .getByRole('button', { name })
-      .querySelector<SVGRectElement>('rect:not([stroke-dasharray="4 3"])');
+      .querySelector<SVGRectElement>(
+        'rect:not([stroke-dasharray="4 3"]):not([data-testid="selection-member"])',
+      );
   }
 
   it('resizes a node from its corner as one undoable step', async () => {
@@ -1861,6 +2193,57 @@ describe('diagram resize and style', () => {
     ).not.toBeNull();
   });
 
+  it('drags a shape out as large as the sheet allows, with no smaller cap', async () => {
+    // The only wall is the canvas edge the user can see: a node used to stop at
+    // 480x320 partway across an empty sheet.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 196, clientX: 40, clientY: 40 });
+    fireEvent.pointerMove(canvas, { pointerId: 196, clientX: 2_000, clientY: 2_000 });
+    fireEvent.pointerUp(canvas, { pointerId: 196, clientX: 2_000, clientY: 2_000 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node.querySelector('rect[width="920"][height="560"]')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ width: 920, height: 560 });
+  });
+
+  it('keeps a shift-dragged shape square when it runs out of room on one axis', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    // 100 units from the bottom edge: the square stops at 100 on both sides
+    // rather than becoming 300 wide and 100 tall.
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 197, clientX: 200, clientY: 500 });
+    fireEvent.pointerMove(canvas, { pointerId: 197, clientX: 500, clientY: 590, shiftKey: true });
+    fireEvent.pointerUp(canvas, { pointerId: 197, clientX: 500, clientY: 590, shiftKey: true });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node).toHaveAttribute('transform', 'translate(200, 500)');
+    expect(node.querySelector('rect[width="100"][height="100"]')).not.toBeNull();
+  });
+
+  it('grows a shape dragged up and to the left away from the press', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 198, clientX: 400, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 198, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 198, clientX: 200, clientY: 200 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node).toHaveAttribute('transform', 'translate(200, 200)');
+    expect(node.querySelector('rect[width="200"][height="100"]')).not.toBeNull();
+  });
+
   it('still places the default size when the press never travels', async () => {
     // Click-to-place is how every shape was made before drag-to-size, and it has
     // to keep working for anyone who does not think to drag.
@@ -1967,6 +2350,283 @@ describe('diagram resize and style', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Finish resizing the element before proposing.',
     );
+  });
+
+  it('resizes a shape from the edge of its frame, along that axis only', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const outline = () =>
+      screen
+        .getByRole('button', { name: 'Rounded rectangle: Unlabelled' })
+        .querySelector('rect[rx="8"]');
+
+    // The right edge of the frame, well away from either corner.
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-e'), {
+      button: 0,
+      pointerId: 171,
+      clientX: 149,
+      clientY: 60,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 171, clientX: 229, clientY: 90 });
+    fireEvent.pointerUp(canvas, { pointerId: 171, clientX: 229, clientY: 90 });
+
+    expect(outline()).toHaveAttribute('width', '200');
+    expect(outline()).toHaveAttribute('height', '56');
+
+    // One undo step for the whole pull.
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(outline()).toHaveAttribute('width', '120');
+  });
+
+  it('grows a shape about its centre while Alt is held', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const node = () => screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    const before = node().getAttribute('transform');
+
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
+      button: 0,
+      pointerId: 172,
+      clientX: 149,
+      clientY: 85,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 172, clientX: 169, clientY: 97, altKey: true });
+    fireEvent.pointerUp(canvas, { pointerId: 172, clientX: 169, clientY: 97, altKey: true });
+
+    // Each side moved by the pull, so the size grew by twice it.
+    expect(node().querySelector('rect[rx="8"]')).toHaveAttribute('width', '160');
+    expect(node().querySelector('rect[rx="8"]')).toHaveAttribute('height', '80');
+    expect(node().getAttribute('transform')).not.toBe(before);
+  });
+
+  it('offers only side grips on a text box, and re-wraps it as it is pulled', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeText(user, canvas, 173, [400, 296], 'The quick brown fox jumps');
+    const text = screen.getByRole('button', { name: 'Text: The quick brown fox jumps' });
+    pressNode(text, canvas, { pointerId: 174, time: 4000 });
+
+    // Its height is whatever its text needs, so there is nothing to pull there.
+    expect(screen.queryByTestId('resize-handle-n')).toBeNull();
+    expect(screen.queryByTestId('resize-handle-s')).toBeNull();
+
+    // Wide enough for one line: 144 + 160.
+    const edge = screen.getByTestId('resize-handle-e');
+    fireEvent.pointerDown(edge, { button: 0, pointerId: 175, clientX: 477, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 175, clientX: 637, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 175, clientX: 637, clientY: 340 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    // Two lines at 144 wide; one line once there is room, and the box follows.
+    expect(artifact.nodes[0]).toMatchObject({ width: 304, height: 36 });
+  });
+
+  it('scales a freehand stroke from its frame, keeping its proportions and its weight', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 176, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 176, clientX: 400, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 176, clientX: 400, clientY: 340 });
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Freehand stroke' }), {
+      button: 0,
+      pointerId: 177,
+      clientX: 350,
+      clientY: 320,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 177, clientX: 350, clientY: 320 });
+    const weight = screen.getByTestId('ink-stroke').getAttribute('stroke-width');
+
+    // Pulled out along the right edge alone: a drawing never stretches, so the
+    // height doubles with the width.
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-e'), {
+      button: 0,
+      pointerId: 178,
+      clientX: 405,
+      clientY: 320,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 178, clientX: 505, clientY: 320 });
+    fireEvent.pointerUp(canvas, { pointerId: 178, clientX: 505, clientY: 320 });
+    // A thin line stays thin at any size.
+    expect(screen.getByTestId('ink-stroke')).toHaveAttribute('stroke-width', weight!);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const [stroke] = artifact.ink!;
+    const xs = stroke!.points.filter((_, index) => index % 2 === 0);
+    const ys = stroke!.points.filter((_, index) => index % 2 === 1);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(200, 0);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(80, 0);
+  });
+
+  it('scales a line from an end, and offers no grip across a flat one', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 179, clientX: 100, clientY: 480 });
+    fireEvent.pointerMove(canvas, { pointerId: 179, clientX: 400, clientY: 480 });
+    fireEvent.pointerUp(canvas, { pointerId: 179, clientX: 400, clientY: 480 });
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Path with 2 points' }), {
+      button: 0,
+      pointerId: 180,
+      clientX: 250,
+      clientY: 480,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 180, clientX: 250, clientY: 480 });
+
+    expect(screen.queryByTestId('resize-handle-n')).toBeNull();
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-e'), {
+      button: 0,
+      pointerId: 181,
+      clientX: 405,
+      clientY: 480,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 181, clientX: 555, clientY: 480 });
+    fireEvent.pointerUp(canvas, { pointerId: 181, clientX: 555, clientY: 480 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    const [line] = artifact.paths!;
+    expect(Math.abs(line!.anchors[1]!.x - line!.anchors[0]!.x)).toBeCloseTo(450, 0);
+  });
+
+  it('scales a whole selection from one frame round it, as one undo step', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+
+    // One frame for the group, and no member keeps grips of its own.
+    const group = screen.getByTestId('group-frame');
+    expect(screen.getAllByTestId('resize-handle-e')).toHaveLength(1);
+    expect(screen.getAllByTestId('selection-member').length).toBeGreaterThanOrEqual(2);
+
+    const outline = (name: string) =>
+      screen.getByRole('button', { name }).querySelector('rect[width]:not([data-testid])');
+    const widthOf = (name: string) => Number(outline(name)?.getAttribute('width'));
+    fireEvent.pointerDown(within(group).getByTestId('resize-handle-e'), {
+      button: 0,
+      pointerId: 190,
+      clientX: 500,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 190, clientX: 600, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 190, clientX: 600, clientY: 200 });
+
+    // Both widened by the same factor (a box starts at 120, a container at 184).
+    const factor = widthOf('Rounded rectangle: Unlabelled') / 120;
+    expect(factor).toBeGreaterThan(1);
+    expect(widthOf('Dotted rectangle: Unlabelled') / 184).toBeCloseTo(factor, 2);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(widthOf('Rounded rectangle: Unlabelled')).toBe(120);
+    expect(widthOf('Dotted rectangle: Unlabelled')).toBe(184);
+  });
+
+  it('keeps the resize grips the same size on screen at every zoom', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    // The surface is sized after it mounts here, so it is measured again the
+    // way a real window resize would.
+    fireEvent(window, new Event('resize'));
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const corner = () => screen.getByTestId('resize-handle-se').querySelector('rect');
+    expect(corner()).toHaveAttribute('width', '7');
+
+    // Out to 400%: a quarter of a scene unit per pixel.
+    for (let step = 0; step < 9; step += 1) {
+      await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    }
+    expect(Number(corner()!.getAttribute('width'))).toBeCloseTo(7 / 4, 5);
+  });
+
+  it('keeps the selection frame the same on screen at every zoom', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    fireEvent(window, new Event('resize'));
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    const frame = () => screen.getByTestId('selection-frame');
+    expect(frame()).toHaveAttribute('stroke-width', '1.5');
+    expect(frame()).toHaveAttribute('rx', '6');
+
+    for (let step = 0; step < 9; step += 1) {
+      await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    }
+    // A quarter of a scene unit per pixel at 400%: the same 1.5px line, the
+    // same 6px corner, the same 5px clearance.
+    expect(Number(frame().getAttribute('stroke-width'))).toBeCloseTo(1.5 / 4, 5);
+    expect(Number(frame().getAttribute('rx'))).toBeCloseTo(6 / 4, 5);
+  });
+
+  it("draws a selected arrow's grips over the shapes it joins", async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    connectByHandle(canvas, 'Rounded rectangle: Unlabelled', 192);
+
+    const grips = screen.getByTestId('arrow-handles');
+    for (const name of ['Rounded rectangle: Unlabelled', 'Ellipse: Unlabelled']) {
+      const shape = screen.getByRole('button', { name });
+      // Later in the document is later in the paint: on top.
+      expect(shape.compareDocumentPosition(grips) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(within(grips).getByRole('button', { name: 'Move the end of this arrow' })).toBeTruthy();
+  });
+
+  it('outlines the element an arrow will bind to, not only the point', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+
+    fireEvent.pointerMove(canvas, { pointerId: 193, clientX: 700, clientY: 500 });
+    expect(screen.queryByTestId('arrow-snap-target')).toBeNull();
+    fireEvent.pointerMove(canvas, { pointerId: 193, clientX: 60, clientY: 40 });
+    expect(screen.getByTestId('arrow-snap')).toBeInTheDocument();
+    expect(screen.getByTestId('arrow-snap-target')).toBeInTheDocument();
+  });
+
+  it('shows each palette shape as the outline the canvas draws it with', async () => {
+    render(<Harness propose={propose()} />);
+    const { user } = await openDiagram();
+    await user.click(screen.getByRole('button', { name: 'Shapes' }));
+    expect(
+      screen.getByRole('button', { name: 'Add ellipse' }).querySelector('ellipse'),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Add rectangle' }).querySelector('rect'),
+    ).not.toBeNull();
+  });
+
+  it('turns the resize cursor with a turned shape', async () => {
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    expect(screen.getByTestId('resize-handle-n')).toHaveStyle({ cursor: 'ns-resize' });
+
+    // Turned a quarter (two coarse steps), its top edge is a vertical line.
+    fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+    fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+    expect(screen.getByTestId('resize-handle-n')).toHaveStyle({ cursor: 'ew-resize' });
   });
 
   it('actually makes a shape transparent, and survives the real contract', async () => {
@@ -3573,6 +4233,30 @@ describe('studio tables', () => {
     expect(screen.queryByRole('button', { name: 'Cell row 4 column 1' })).toBeNull();
   });
 
+  it('scales a table from its frame, clear of where rows and columns are added', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 431);
+    // Both are there at once: the frame's grips sit beyond the add strip.
+    expect(screen.getByRole('button', { name: 'Add a column' })).toBeInTheDocument();
+    const grip = screen.getByTestId('resize-handle-e');
+
+    // Half as wide again, from the right edge alone: every column grows, no row does.
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 432, clientX: 700, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 432, clientX: 844, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 432, clientX: 844, clientY: 300 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = propose.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.tables?.[0]?.colWidths).toEqual([144, 144, 144]);
+    expect(artifact.tables?.[0]?.rowHeights).toEqual([32, 32, 32]);
+  });
+
   it('inserts a row where the pointer is rather than at the end', async () => {
     // The whole point of moving this onto the table: a menu could only ever act
     // on the last row, or on whichever cell happened to be selected.
@@ -5070,6 +5754,98 @@ describe('the text tool', () => {
       screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' }),
     ).toBeInTheDocument();
   });
+
+  it('offers no arrow handles on a text box, but is still something an arrow can point at', async () => {
+    const send = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    const user = userEvent.setup();
+    render(<Harness propose={send} />);
+    const { canvas } = await openDiagram();
+
+    await placeText(user, canvas, 186, [400, 296], 'Risk');
+    pressNode(screen.getByRole('button', { name: 'Text: Risk' }), canvas, {
+      pointerId: 187,
+      time: 3000,
+    });
+    expect(screen.queryAllByTestId('connection-handle')).toHaveLength(0);
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 190, clientX: 100, clientY: 296 });
+    fireEvent.pointerMove(canvas, { pointerId: 190, clientX: 400, clientY: 296 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 190, clientX: 400, clientY: 296 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows?.[0]?.to.elementId).toBe(artifact.nodes[0]?.id);
+  });
+
+  it('starts at Medium, in a box one Medium line tall that does not jump once typed', async () => {
+    const send = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    const user = userEvent.setup();
+    render(<Harness propose={send} />);
+    const { canvas } = await openDiagram();
+
+    // The ghost already shows the size the typing will be.
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+    fireEvent.pointerMove(canvas, { pointerId: 188, clientX: 400, clientY: 300 });
+    const ghost = screen.getByTestId('placement-ghost');
+    expect(ghost.querySelector('rect[width="144"][height="36"]')).not.toBeNull();
+    expect(ghost.querySelector('text')).toHaveStyle({ fontSize: '16px' });
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 188, clientX: 400, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 188, clientX: 400, clientY: 300 });
+    const input = await screen.findByLabelText('Edit text label');
+    await user.type(input, 'Risk');
+    fireEvent.blur(input);
+
+    await user.click(screen.getByRole('button', { name: 'Text: Risk' }));
+    await user.click(screen.getByRole('button', { name: 'Format text' }));
+    expect(screen.getByRole('button', { name: 'medium text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ fontSizePreset: 'medium', width: 144, height: 36 });
+  });
+
+  it('drags a text box out to the width it was dragged, one line tall', async () => {
+    const send = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    const user = userEvent.setup();
+    render(<Harness propose={send} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 189, clientX: 200, clientY: 296 });
+    fireEvent.pointerMove(canvas, { pointerId: 189, clientX: 520, clientY: 420 });
+    // Only the width follows the drag: a text box is as tall as its text.
+    expect(
+      screen.getByTestId('placement-ghost').querySelector('rect[width="320"][height="36"]'),
+    ).not.toBeNull();
+    fireEvent.pointerUp(canvas, { pointerId: 189, clientX: 520, clientY: 420 });
+
+    const input = await screen.findByLabelText('Edit text label');
+    await user.type(input, 'Wide');
+    fireEvent.blur(input);
+    // Grown from the press, as a dragged-out shape is.
+    expect(screen.getByRole('button', { name: 'Text: Wide' })).toHaveAttribute(
+      'transform',
+      'translate(200, 296)',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ width: 320, height: 36 });
+  });
 });
 
 describe('placing a shape from the palette', () => {
@@ -5623,6 +6399,36 @@ describe('picking things up before putting them down', () => {
       void input;
     });
   }
+
+  it('lights the shape being carried in the palette', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Shapes' }));
+    const ellipse = screen.getByRole('button', { name: 'Add ellipse' });
+    expect(ellipse).toHaveAttribute('aria-pressed', 'false');
+    await user.click(ellipse);
+    expect(ellipse).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Add rounded rectangle' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('picks up a table with G, ready to place, as R picks up a box', async () => {
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    fireEvent.keyDown(canvas, { key: 'g' });
+    fireEvent.pointerMove(canvas, { pointerId: 39, clientX: 400, clientY: 300 });
+    expect(screen.getByTestId('placement-ghost')).toBeInTheDocument();
+
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 39, clientX: 400, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 39, clientX: 400, clientY: 300 });
+    // The size the menu starts on, 3x3.
+    expect(screen.getByRole('button', { name: 'Cell row 3 column 3' })).toBeInTheDocument();
+  });
 
   it('does nothing on a stray press while the table tool is merely armed', async () => {
     // Arming the tool used to be enough, so a click meant to deselect something

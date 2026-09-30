@@ -217,6 +217,16 @@ describe('the rail sub-toolbars', () => {
     expect(templates).toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('keeps Templates lit while a template is being carried', () => {
+    // Picking one closes the menu, and the rail used to go dark with a frame
+    // still under the cursor.
+    renderRail({ tool: 'template' });
+    expect(screen.getByRole('button', { name: 'Templates' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
   it('closes on a press outside, and on Escape', async () => {
     const user = userEvent.setup();
     renderRail();

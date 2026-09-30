@@ -61,6 +61,17 @@ describe('where the properties bar goes', () => {
     expect(placed.side).toBe('below');
   });
 
+  it('keeps its gap from whatever is drawn round the selection, not the selection itself', () => {
+    // The extend buttons sit up to 32px outside a selected shape.
+    const selection = { x: 300, y: 300, width: 100, height: 60 };
+    const plain = placePropertiesBar(selection, bar, viewport);
+    const padded = placePropertiesBar(selection, bar, viewport, BAR_GAP, 32);
+    expect(padded.side).toBe('above');
+    expect(plain.y - padded.y).toBe(32);
+    // Centred on the same selection either way.
+    expect(padded.x).toBe(plain.x);
+  });
+
   it('left-aligns a bar wider than the canvas rather than pushing it off', () => {
     const narrow = { x: 0, y: 0, width: 200, height: 400 };
     const placed = placePropertiesBar({ x: 20, y: 200, width: 40, height: 40 }, bar, narrow);

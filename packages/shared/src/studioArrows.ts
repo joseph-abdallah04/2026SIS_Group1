@@ -333,6 +333,23 @@ export interface ArrowCapGeometry {
   angle: number;
 }
 
+/**
+ * The one leg of an elbow that can be slid, and the frame `bend` is measured in.
+ *
+ * An elbow's middle leg runs across the direction the arrow set off in, and
+ * `bend` is how far it sits from halfway between the two ends it joins. Given
+ * alongside the drawn route so the editor puts its handle on the leg that
+ * actually moves, and measures a drag the same way the route reads it back.
+ */
+export interface ArrowElbowLeg {
+  from: ArrowPoint;
+  to: ArrowPoint;
+  /** The coordinate the leg slides along: a vertical leg slides along x. */
+  axis: 'x' | 'y';
+  /** Where the leg sits with no bend. */
+  base: number;
+}
+
 export interface ArrowGeometry {
   /** The route's corners, after clipping to any bound elements. */
   points: ArrowPoint[];
@@ -342,6 +359,12 @@ export interface ArrowGeometry {
   end: ArrowCapGeometry;
   /** Where the label sits: along the route, and off to whichever side it asked for. */
   label: ArrowPoint;
+  /**
+   * The leg a drag can slide, on an elbow that has exactly one. Absent on a
+   * straight arrow, a loop, and a route that had to go around something — none
+   * of those has a single middle to move.
+   */
+  elbow?: ArrowElbowLeg;
 }
 
 function centreOf(box: ArrowBox): ArrowPoint {
@@ -864,6 +887,54 @@ function simpleConnector(
 }
 
 /**
+ * A Z between two ends: along `firstAxis`, across at the middle leg, along
+ * again. `offset` moves the middle leg off halfway.
+ */
+function zRoute(
+  stubFrom: ArrowPoint,
+  stubTo: ArrowPoint,
+  firstAxis: RouteAxis,
+  offset: number,
+): ArrowPoint[] {
+  if (firstAxis === 'h') {
+    const x = (stubFrom.x + stubTo.x) / 2 + offset;
+    return [stubFrom, { x, y: stubFrom.y }, { x, y: stubTo.y }, stubTo];
+  }
+  const y = (stubFrom.y + stubTo.y) / 2 + offset;
+  return [stubFrom, { x: stubFrom.x, y }, { x: stubTo.x, y }, stubTo];
+}
+
+/**
+ * The route's one leg running across `firstAxis`, if it has exactly one.
+ *
+ * That is the middle of a Z, or the second leg of an L — which a drag turns
+ * into a Z. A route with more than one had to go around something, and has no
+ * single middle to slide.
+ */
+function slidableLeg(
+  route: readonly ArrowPoint[],
+  stubFrom: ArrowPoint,
+  stubTo: ArrowPoint,
+  firstAxis: RouteAxis,
+): ArrowElbowLeg | null {
+  const axis = firstAxis === 'h' ? 'x' : 'y';
+  const across: [ArrowPoint, ArrowPoint][] = [];
+  for (let index = 1; index < route.length; index += 1) {
+    const a = route[index - 1]!;
+    const b = route[index]!;
+    const runsAcross =
+      axis === 'x'
+        ? Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) >= 0.5
+        : Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) >= 0.5;
+    if (runsAcross) across.push([a, b]);
+  }
+  if (across.length !== 1) return null;
+  const [from, to] = across[0]!;
+  const base = axis === 'x' ? (stubFrom.x + stubTo.x) / 2 : (stubFrom.y + stubTo.y) / 2;
+  return { from, to, axis, base };
+}
+
+/**
  * An elbow route that leaves and arrives square to whatever it is attached to.
  *
  * Each bound end gets a stub along its face's normal before the route is
@@ -871,17 +942,28 @@ function simpleConnector(
  * set off along the very edge it just left, which reads as grazing the element
  * rather than pointing at it. From those two stubs the route is searched around
  * whatever the arrow is attached to.
+ *
+ * `bend` places the middle leg: that far off halfway between the two stubs. It
+ * used to apply only when the search happened to return a Z, which for an arrow
+ * bound to two shapes was almost never — the search prefers an L — so dragging
+ * the leg stored a bend that was then thrown away. Now a bend always builds the
+ * Z it describes, pulled back towards halfway just far enough to clear the
+ * elements it joins, and only an unbent arrow is left to the search.
  */
 function elbowRoute(
   from: { point: ArrowPoint; normal: ArrowPoint | null },
   to: { point: ArrowPoint; normal: ArrowPoint | null },
   bend: number,
   obstacles: readonly ArrowBox[],
-): ArrowPoint[] {
+): { points: ArrowPoint[]; leg: ArrowElbowLeg | null } {
   if (!from.normal && !to.normal) {
     // Neither end is attached, so there is nothing to go around: the plain
     // rule, leading with the longer axis.
-    return elbowCorners(from.point, to.point, bend);
+    const firstAxis: RouteAxis =
+      Math.abs(to.point.x - from.point.x) >= Math.abs(to.point.y - from.point.y) ? 'h' : 'v';
+    const corners = elbowCorners(from.point, to.point, bend);
+    const leg = slidableLeg([from.point, ...corners, to.point], from.point, to.point, firstAxis);
+    return { points: corners, leg };
   }
 
   const stubFrom = from.normal
@@ -905,37 +987,40 @@ function elbowRoute(
       ? 'h'
       : 'v';
 
+  if (bend !== 0) {
+    // Kept a half-stub clear of each element, so a leg pulled up to one stops
+    // beside it rather than grazing its outline.
+    const margins = obstacles.map((box) => inflate(box, ARROW_ELBOW_STUB / 2));
+    const clear = (route: readonly ArrowPoint[]) =>
+      margins.every((box) =>
+        route.every(
+          (_, index) => index === 0 || !segmentCrossesBox(route[index - 1]!, route[index]!, box),
+        ),
+      );
+    let bent: ArrowPoint[] | null = zRoute(stubFrom, stubTo, firstAxis, bend);
+    if (!clear(bent)) {
+      // Pulled into an element: back off towards halfway until it clears.
+      bent = null;
+      let low = 0;
+      let high = 1;
+      for (let step = 0; step < 16; step += 1) {
+        const middle = (low + high) / 2;
+        const candidate = zRoute(stubFrom, stubTo, firstAxis, bend * middle);
+        if (clear(candidate)) {
+          bent = candidate;
+          low = middle;
+        } else high = middle;
+      }
+    }
+    if (bent) return { points: bent, leg: slidableLeg(bent, stubFrom, stubTo, firstAxis) };
+  }
+
   const found = routeBetweenEscapes(stubFrom, stubTo, firstAxis, obstacles);
   const middle = found
     ? found.slice(1, -1)
-    : simpleConnector(stubFrom, stubTo, firstAxis, to.normal, bend);
+    : simpleConnector(stubFrom, stubTo, firstAxis, to.normal, 0);
   const route = [stubFrom, ...middle, stubTo];
-
-  // `bend` slides the middle leg, but only where there is exactly one to slide.
-  // A route that had to go around has no single middle, and moving one of its
-  // legs would push it back through whatever it went around.
-  if (bend !== 0 && route.length === 4) {
-    const a = route[1]!;
-    const b = route[2]!;
-    const vertical = Math.abs(a.x - route[0]!.x) > Math.abs(a.y - route[0]!.y);
-    const shifted = vertical
-      ? [
-          { ...a, x: a.x + bend },
-          { ...b, x: b.x + bend },
-        ]
-      : [
-          { ...a, y: a.y + bend },
-          { ...b, y: b.y + bend },
-        ];
-    const bent = [route[0]!, ...shifted, route[3]!];
-    const clear = obstacles.every((box) =>
-      bent.every(
-        (_, index) => index === 0 || !segmentCrossesBox(bent[index - 1]!, bent[index]!, box),
-      ),
-    );
-    if (clear) return bent;
-  }
-  return route;
+  return { points: route, leg: slidableLeg(dedupe(route), stubFrom, stubTo, firstAxis) };
 }
 
 function angleBetween(from: ArrowPoint, to: ArrowPoint): number {
@@ -1159,24 +1244,17 @@ export function arrowGeometry(arrow: ArrowElement, lookup?: ArrowTargetLookup): 
   const to = resolveEnd(arrow.to, lookup);
   const route = arrowRoute(arrow);
 
-  // Both ends on one element. Only an elbow loops around it: a straight arrow
-  // was asked to be straight, so it stays the line between its two ends.
+  // Both ends on one element: it loops around it, whatever its route. A
+  // straight self-arrow used to be the chord between its two attachments, which
+  // cut straight across the element it was pointing back at. The route still
+  // says how it looks — square corners for an elbow, a rounded loop otherwise.
   const onItself = Boolean(from.target && to.target && from.target.id === to.target.id);
-  const loop =
-    onItself && route === 'elbow' ? selfLoopPoints(from.target!, arrow.from, arrow.to) : null;
+  const loop = onItself ? selfLoopPoints(from.target!, arrow.from, arrow.to) : null;
 
   let points: ArrowPoint[];
+  let elbow: ArrowElbowLeg | null = null;
   if (loop) {
     points = dedupe(loop);
-  } else if (onItself) {
-    // A straight self-arrow, drawn between the two places it attaches — with
-    // defaults when it named none, or it would have no length at all.
-    const [defaultFrom, defaultTo] = defaultLoopAttachments();
-    const target = from.target!;
-    points = dedupe([
-      attachPointOn(target, arrow.from.at ?? defaultFrom).point,
-      attachPointOn(target, arrow.to.at ?? defaultTo).point,
-    ]);
   } else if (route === 'elbow') {
     // Square routing needs a face to leave through. An end that only aims at a
     // centre takes the middle of the face it is travelling towards, which is
@@ -1206,22 +1284,20 @@ export function arrowGeometry(arrow: ArrowElement, lookup?: ArrowTargetLookup): 
     // elbow on a turned shape set off in a direction its own end did not face.
     const startNormal = from.target ? normalOn(from.target, startClip) : null;
     const endNormal = to.target ? normalOn(to.target, endClip) : null;
-    points = dedupe([
-      startClip,
-      ...elbowRoute(
-        { point: startClip, normal: startNormal },
-        { point: endClip, normal: endNormal },
-        arrow.bend ?? 0,
-        // What the route must not cut through: the elements it joins, measured
-        // as they are drawn. Avoidance is already an approximation — every box
-        // is inflated by a stub width first — so a turned element is given the
-        // rectangle that contains it rather than its exact silhouette.
-        [from.target, to.target]
-          .filter((target): target is ArrowTarget => target !== undefined)
-          .map((target) => rotatedBounds(target.box, target.rotation) as ArrowBox),
-      ),
-      endClip,
-    ]);
+    const routed = elbowRoute(
+      { point: startClip, normal: startNormal },
+      { point: endClip, normal: endNormal },
+      arrow.bend ?? 0,
+      // What the route must not cut through: the elements it joins, measured
+      // as they are drawn. Avoidance is already an approximation — every box
+      // is inflated by a stub width first — so a turned element is given the
+      // rectangle that contains it rather than its exact silhouette.
+      [from.target, to.target]
+        .filter((target): target is ArrowTarget => target !== undefined)
+        .map((target) => rotatedBounds(target.box, target.rotation) as ArrowBox),
+    );
+    points = dedupe([startClip, ...routed.points, endClip]);
+    elbow = routed.leg;
   } else {
     // Straight: each end is clipped towards the other, exactly as an edge is.
     const startPoint = from.pinned
@@ -1261,6 +1337,7 @@ export function arrowGeometry(arrow: ArrowElement, lookup?: ArrowTargetLookup): 
     start,
     end,
     label: arrowLabelPoint(points, arrowLabelT(arrow), arrowLabelSide(arrow), arrowFontSize(arrow)),
+    ...(elbow ? { elbow } : {}),
   };
 }
 

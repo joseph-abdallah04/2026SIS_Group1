@@ -133,7 +133,7 @@ interface StudioToolRailProps {
   canClear?: boolean;
 }
 
-const RAIL_BUTTON = `flex h-8 w-8 items-center justify-center max-sm:h-11 max-sm:w-11 rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const RAIL_BUTTON = `flex h-8 w-8 items-center justify-center max-sm:h-11 max-sm:w-11 rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
 const RAIL_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
 const RAIL_IDLE =
   'border-transparent bg-transparent text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink';
@@ -155,7 +155,7 @@ function RailGroup({
       role="toolbar"
       aria-orientation={orientation}
       aria-label={label}
-      className={`rt-studio-rise flex w-fit shrink-0 gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)] ${
+      className={`rt-studio-rise flex w-fit shrink-0 gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.14)] ${
         orientation === 'vertical' ? 'flex-col' : ''
       }`}
     >
@@ -418,7 +418,10 @@ export function StudioToolRail({
           <RailButton
             label="Templates"
             Icon={LayoutTemplate}
-            active={openMenu === 'templates'}
+            // Lit while a template is being carried as well as while its menu
+            // is open: picking one closes the menu, and the rail went dark with
+            // a frame still under the cursor.
+            active={openMenu === 'templates' || slot === 'templates'}
             disabled={disabled}
             {...menuButton('templates')}
             onClick={() => toggleMenu('templates')}

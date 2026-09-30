@@ -355,12 +355,22 @@ export const DIAGRAM_LEGACY_NODE_FILLS: Record<DiagramNodeShape, string> = {
 
 export const DIAGRAM_LEGACY_EDGE_STROKE = '#8CA4AC';
 
+/**
+ * The studio's fixed sheet, in scene units. Every element is placed on it and
+ * clamped to it, and the board card scales it down as a whole.
+ */
+export const DIAGRAM_CANVAS_WIDTH = 960;
+export const DIAGRAM_CANVAS_HEIGHT = 600;
+
 // A stored size is a bounded width/height pair. Both or neither: a lone
 // dimension has no meaning and is rejected at the write boundary.
 export const DIAGRAM_MIN_NODE_WIDTH = 56;
 export const DIAGRAM_MIN_NODE_HEIGHT = 32;
-export const DIAGRAM_MAX_NODE_WIDTH = 480;
-export const DIAGRAM_MAX_NODE_HEIGHT = 320;
+// The largest a node may be is the sheet itself. Anything smaller is a limit
+// the editor has to enforce as an arbitrary wall partway across the canvas;
+// the sheet's edge is a limit the user can already see.
+export const DIAGRAM_MAX_NODE_WIDTH = DIAGRAM_CANVAS_WIDTH;
+export const DIAGRAM_MAX_NODE_HEIGHT = DIAGRAM_CANVAS_HEIGHT;
 
 export type DiagramStyledNode = Pick<DiagramNode, 'shape' | 'width' | 'height'> &
   Partial<Pick<DiagramNode, 'fillColor' | 'strokeColor' | 'strokeWidthPreset' | 'fontSizePreset'>>;
@@ -453,10 +463,22 @@ export function toElementSpace(
  * not a multiple of 90. This is what clamping and the marquee have to use: the
  * stored box of a rotated shape describes an area the shape no longer occupies.
  */
-export function rotatedBounds(box: RotatableBox, rotation: number | undefined): RotatableBox {
-  if (!rotation || rotation % 180 === 0) return { ...box };
+export function rotatedBounds(
+  box: RotatableBox,
+  rotation: number | undefined,
+  /**
+   * Where the turn is centred, when that is not the box's own centre. A pen
+   * path turns about its anchors' centre while its curve can reach further, so
+   * the box it paints is turned about a point that is not its middle.
+   */
+  pivot?: ScenePoint,
+): RotatableBox {
+  if (!rotation) return { ...box };
+  // Half a turn about the box's own centre lands the box on itself; about any
+  // other point it does not, so the shortcut only holds without a pivot.
+  if (!pivot && rotation % 180 === 0) return { ...box };
 
-  const centre = boxCentre(box);
+  const centre = pivot ?? boxCentre(box);
   const corners: ScenePoint[] = [
     { x: box.x, y: box.y },
     { x: box.x + box.width, y: box.y },

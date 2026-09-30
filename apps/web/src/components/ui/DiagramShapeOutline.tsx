@@ -13,6 +13,11 @@ export interface DiagramShapeOutlineProps {
    * its own rather than silently repainting old diagrams.
    */
   containerDashArray: string;
+  /**
+   * Dashes the whole outline, whatever the shape: a preview of a shape about
+   * to be placed is drawn dashed, the way every other placement preview is.
+   */
+  strokeDasharray?: string;
 }
 
 /**
@@ -27,9 +32,10 @@ export function DiagramShapeOutline({
   stroke,
   strokeWidth,
   containerDashArray,
+  strokeDasharray,
 }: DiagramShapeOutlineProps) {
   const { width, height } = size;
-  const common = { fill, stroke, strokeWidth };
+  const common = { fill, stroke, strokeWidth, ...(strokeDasharray ? { strokeDasharray } : {}) };
 
   switch (shape) {
     case 'ellipse':
@@ -60,6 +66,7 @@ export function DiagramShapeOutline({
             fill="none"
             stroke={stroke}
             strokeWidth={strokeWidth}
+            {...(strokeDasharray ? { strokeDasharray } : {})}
           />
         </>
       );
@@ -75,7 +82,7 @@ export function DiagramShapeOutline({
           height={height}
           rx={3}
           {...common}
-          strokeDasharray={containerDashArray}
+          strokeDasharray={strokeDasharray ?? containerDashArray}
         />
       );
 

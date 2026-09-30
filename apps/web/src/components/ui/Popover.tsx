@@ -167,7 +167,7 @@ export function Popover({
       ref={panelRef}
       role="group"
       aria-label={label}
-      className={`rt-studio-fade absolute z-30 w-max rounded-xl border border-rt-tertiary bg-rt-surface p-1.5 shadow-[0_8px_30px_rgba(8,12,21,0.16)] ${PLACEMENT_CLASSES[(flipped && FLIPPED[placement]) || placement]} ${width ?? ''}`}
+      className={`rt-studio-fade absolute z-30 w-max rounded-xl border border-rt-tertiary bg-rt-surface p-1.5 shadow-[0_6px_24px_rgba(8,12,21,0.14)] ${PLACEMENT_CLASSES[(flipped && FLIPPED[placement]) || placement]} ${width ?? ''}`}
     >
       {children}
     </div>
