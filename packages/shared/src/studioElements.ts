@@ -22,6 +22,7 @@ import {
   DIAGRAM_NODE_STROKE_WIDTHS,
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
+  rotatedBounds,
   rotationTransform,
   wrapDiagramLabel,
   type DiagramEdge,
@@ -189,9 +190,100 @@ export function pointsBounds(points: readonly { x: number; y: number }[]): Rotat
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-/** A path's unrotated extent, from its anchors alone. */
+/**
+ * A path's unrotated extent, from its anchors alone.
+ *
+ * This is the box a path *turns about* and the box arrow attach points are
+ * fractions of, so it must not change meaning: widening it to the curve would
+ * move the pivot of every stored rotated path, and slide every arrow already
+ * attached to one. What the path *covers* is `pathCurveLocalBounds`.
+ */
 export function pathLocalBounds(path: Pick<PathElement, 'anchors'>): RotatableBox | null {
   return pointsBounds(path.anchors);
+}
+
+/**
+ * The parameters in (0, 1) where one axis of a cubic bezier turns around.
+ *
+ * B'(t) is a quadratic in t; its roots are where the curve stops moving along
+ * that axis, which is the only place it can bulge past its endpoints.
+ */
+function cubicTurningPoints(p0: number, p1: number, p2: number, p3: number): number[] {
+  const a = -p0 + 3 * p1 - 3 * p2 + p3;
+  const b = 2 * (p0 - 2 * p1 + p2);
+  const c = p1 - p0;
+  const roots: number[] = [];
+  if (Math.abs(a) < 1e-9) {
+    if (Math.abs(b) > 1e-9) roots.push(-c / b);
+  } else {
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant >= 0) {
+      const root = Math.sqrt(discriminant);
+      roots.push((-b + root) / (2 * a), (-b - root) / (2 * a));
+    }
+  }
+  return roots.filter((t) => t > 0 && t < 1);
+}
+
+function cubicAt(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  const u = 1 - t;
+  return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+}
+
+/**
+ * The box a path actually paints, bulges included, before any rotation.
+ *
+ * A bezier can swing well outside its anchors, so a frame drawn around the
+ * anchors alone cut through the curve it was meant to enclose. This is the box
+ * for everything that is about what the path covers — the selection frame, the
+ * marquee, the canvas-edge clamp, alignment, and how a proposal is framed —
+ * while `pathLocalBounds` stays the pivot and attach box. Stroke width is left
+ * to the caller, as it is for every other element's bounds.
+ */
+export function pathCurveLocalBounds(
+  path: Pick<PathElement, 'anchors' | 'closed'>,
+): RotatableBox | null {
+  const anchors = path.anchors;
+  const first = anchors[0];
+  if (!first) return null;
+  const points: StrokePoint[] = anchors.map((anchor) => ({ x: anchor.x, y: anchor.y }));
+
+  const addSegment = (from: PathAnchor, to: PathAnchor) => {
+    if (segmentIsStraight(from, to)) return;
+    const c1 = pathHandlePoint(from, 'out');
+    const c2 = pathHandlePoint(to, 'in');
+    for (const axis of ['x', 'y'] as const) {
+      for (const t of cubicTurningPoints(from[axis], c1[axis], c2[axis], to[axis])) {
+        points.push({
+          x: cubicAt(from.x, c1.x, c2.x, to.x, t),
+          y: cubicAt(from.y, c1.y, c2.y, to.y, t),
+        });
+      }
+    }
+  };
+
+  for (let index = 1; index < anchors.length; index += 1) {
+    addSegment(anchors[index - 1]!, anchors[index]!);
+  }
+  if (path.closed && anchors.length > 2) addSegment(anchors.at(-1)!, first);
+
+  return pointsBounds(points);
+}
+
+/**
+ * What a path paints on the sheet once it is turned: its curve's box, turned
+ * about the anchors' centre, because that is the point a path pivots on.
+ */
+export function pathPaintedBounds(
+  path: Pick<PathElement, 'anchors' | 'closed' | 'rotation'>,
+): RotatableBox | null {
+  const pivotBox = pathLocalBounds(path);
+  const curve = pathCurveLocalBounds(path);
+  if (!pivotBox || !curve) return null;
+  return rotatedBounds(curve, path.rotation, {
+    x: pivotBox.x + pivotBox.width / 2,
+    y: pivotBox.y + pivotBox.height / 2,
+  });
 }
 
 /** The turn to draw a path with, or nothing when it is not turned. */

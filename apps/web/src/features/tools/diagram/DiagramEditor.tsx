@@ -18,17 +18,13 @@ import {
   ArrowRight,
   ArrowUpFromLine,
   Columns3,
-  Circle,
-  Database,
   AlignCenter,
   AlignLeft,
   AlignRight,
   Bold,
-  Diamond,
   DropletOff,
   Eraser,
   Grid2x2,
-  Link2,
   LayoutTemplate,
   CornerDownRight,
   GitBranch,
@@ -39,23 +35,19 @@ import {
   Pencil,
   PenTool,
   RotateCcw,
-  RectangleHorizontal,
   Rows3,
   BringToFront,
   SendToBack,
-  SquareDashed,
   Spline,
-  Squircle,
   Trash2,
-  Triangle,
   Type,
   Ungroup,
-  X,
   ZoomIn,
   ZoomOut,
   type LucideIcon,
 } from 'lucide-react';
 import type {
+  ArrowAttach,
   ArrowCap,
   ArrowElement,
   ArrowGeometry,
@@ -90,8 +82,6 @@ import {
   arrowLabelSide,
   arrowRoute,
   arrowStartCap,
-  DIAGRAM_MAX_NODE_HEIGHT,
-  DIAGRAM_MAX_NODE_WIDTH,
   DIAGRAM_MIN_NODE_HEIGHT,
   DIAGRAM_MIN_NODE_WIDTH,
   DIAGRAM_ROTATION_COARSE_STEP,
@@ -110,11 +100,9 @@ import {
   DIAGRAM_STROKE_STYLES,
   DIAGRAM_STROKE_WIDTH_PRESETS,
   diagramEdgeDash,
-  diagramEdgeGeometry,
   diagramEdgeRoutes,
   diagramEdgeStroke,
   diagramEdgeStrokeWidth,
-  diagramEdgeToPointGeometry,
   diagramNodeFill,
   diagramNodeLabelLayout,
   diagramLabelWidthRatio,
@@ -171,12 +159,16 @@ import {
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_GRID,
   DIAGRAM_LABEL_LIMIT,
+  DIAGRAM_NEW_NODE_FONT_SIZE,
+  DIAGRAM_NEW_TEXT_SIZE,
   DIAGRAM_NODE_SHAPES,
   DIAGRAM_SHAPE_LABELS,
   placeNodePosition,
   DIAGRAM_SHAPE_PALETTE_ORDER,
   DIAGRAM_SHAPE_MEDIA_TYPE,
   addNode,
+  createNodeId,
+  newNodeSize,
   centreStudioContent,
   clampNodesInsideContainer,
   clientPointToDiagramPoint,
@@ -207,17 +199,20 @@ import {
   type DiagramDistributeAxis,
   type DiagramPoint,
   type DiagramRect,
-  type DiagramResizeCorner,
+  type DiagramResizeHandle,
 } from './diagramModel';
 import { type DiagramSnapshot } from './diagramHistory';
 import {
   DIAGRAM_DEFAULT_VIEW,
-  DIAGRAM_ZOOM_STEP,
+  DIAGRAM_MAX_ZOOM,
+  DIAGRAM_MIN_ZOOM,
   diagramViewBoxAttribute,
   expandViewToAspect,
   diagramViewZoom,
   isDefaultDiagramView,
   panDiagramView,
+  scenePerPixel,
+  stepDiagramView,
   zoomDiagramView,
   type DiagramView,
 } from './diagramView';
@@ -225,6 +220,16 @@ import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
 import { StudioPropertiesBar } from '../studio/toolbar/StudioPropertiesBar';
 import { STUDIO_LAYER } from '../studio/studioLayers';
+import { shortcutLabelFor } from '../studio/studioShortcuts';
+import { ShapeThumbnail } from '../studio/ShapeThumbnail';
+import {
+  CHROME,
+  STUDIO_ACCENT,
+  STUDIO_ACCENT_DEEP,
+  STUDIO_ACCENT_WASH,
+  STUDIO_COOL,
+  chromeDash,
+} from '../studio/studioTheme';
 import { StudioShortcutSheet } from '../studio/toolbar/StudioShortcutSheet';
 import { StudioToolRail } from '../studio/toolbar/StudioToolRail';
 import {
@@ -236,6 +241,25 @@ import {
   eraserRadiusForView,
   type StudioInkStroke,
 } from '../studio/studioInk';
+import {
+  RESIZE_CORNER_HANDLES,
+  RESIZE_EDGE_HANDLES,
+  RESIZE_HANDLE_LABELS,
+  resizeCursorFor,
+  scaleInk,
+  scalePath,
+} from '../studio/studioScale';
+import { groupFrame, scaleGroup } from '../studio/studioGroupScale';
+import {
+  EXTEND_SIDES,
+  EXTEND_SIDE_ANGLE,
+  EXTEND_SIDE_LABELS,
+  extendShapeChoices,
+  extendSideNormal,
+  planExtension,
+  type ExtendSide,
+} from '../studio/studioExtend';
+import { StudioShapePicker, type ShapePickerSide } from '../studio/StudioShapePicker';
 import {
   copyStudioFragment,
   isFragmentEmpty,
@@ -253,6 +277,7 @@ import {
   inkBounds,
   inkLocalBounds,
   pathBounds,
+  pathFrameBounds,
   pathLocalBounds,
   tableBounds,
   EMPTY_STUDIO_SELECTION,
@@ -332,7 +357,9 @@ import {
   elbowHandlePoint,
   finishArrow,
   snapArrowPoint,
+  POINTER_TRAVEL_SLOP,
   type ArrowDraft,
+  type ArrowStyle,
   type ArrowSnap,
 } from '../studio/studioArrowDraft';
 import { arrowTargets } from '../studio/studioArrowTargets';
@@ -368,14 +395,31 @@ interface DragSession {
 // Below this the press reads as a click rather than a drag, in sheet units.
 const DRAG_THRESHOLD = 1;
 
+/**
+ * A ctrl+wheel delta at least this big is one click of a mouse wheel rather
+ * than part of a trackpad pinch. Browsers report a notch as roughly 100 pixels
+ * (more under display scaling); a pinch sends a stream of single digits.
+ */
+const WHEEL_NOTCH_DELTA = 50;
+
 interface ResizeSession {
   pointerId: number;
-  nodeId: string;
-  corner: DiagramResizeCorner;
+  kind: ResizableKind;
+  id: string;
+  handle: DiagramResizeHandle;
+  /** A shape's stored box at the press. Ink and paths scale from `previous`. */
   start: DiagramRect;
+  /** A table or group: the frame being pulled, and what is inside it. */
+  frame: DiagramRect;
+  selection: StudioSelection;
   origin: DiagramPoint;
   previous: DiagramSnapshot;
+  /** A press on a grip that never moves changes nothing and records nothing. */
+  moved: boolean;
 }
+
+/** What a selection frame can be pulled to resize. */
+type ResizableKind = 'node' | 'ink' | 'path' | 'table' | 'group';
 
 /** Which kinds can be turned. Arrows and tables are deliberately not among them. */
 type RotatableKind = 'node' | 'ink' | 'path';
@@ -422,17 +466,6 @@ interface NodePress {
   clientX: number;
   clientY: number;
 }
-
-const SHAPE_ICONS: Record<DiagramNodeShape, LucideIcon> = {
-  box: Squircle,
-  rectangle: RectangleHorizontal,
-  ellipse: Circle,
-  diamond: Diamond,
-  triangle: Triangle,
-  cylinder: Database,
-  container: SquareDashed,
-  text: Type,
-};
 
 /**
  * The colours a sub-toolbar offers. The contract's palette is unchanged and
@@ -505,7 +538,7 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
 const SUBTOOL_SIZE = 'h-7 w-7';
 const SUBTOOL_SWATCH_SIZE = 'h-5 w-5';
 
-const TILE_SHAPE = `flex ${SUBTOOL_SIZE} items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
+const TILE_SHAPE = `flex ${SUBTOOL_SIZE} items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45`;
 const TILE_IDLE =
   'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink';
 const TILE_ACTIVE = 'border-rt-primary bg-rt-primary-tint text-rt-ink';
@@ -532,10 +565,10 @@ const CELL_ALIGN_ICONS: Record<TableCellAlign, LucideIcon> = {
 };
 
 const CHROME_ROUND_BUTTON =
-  'flex h-6 w-6 items-center justify-center rounded-full text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 max-sm:h-9 max-sm:w-9';
+  'flex h-6 w-6 items-center justify-center rounded-lg text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 max-sm:h-9 max-sm:w-9';
 
 const BAR_CONTROL =
-  'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
+  'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
 
 /**
  * One run of related controls inside a tool strip. Named for the screen reader
@@ -702,20 +735,64 @@ type Ghost =
   | { kind: 'template'; size: DiagramNodeSize };
 
 /**
- * The size a drag-out asks for, held inside what a node may actually be.
+ * The box a drag-out asks for, grown from the corner the press started at.
  *
+ * The only upper limit is the sheet: the pointer is already held on it, so a
+ * drag can never ask for more than the room between the press and the edge.
  * A shape dragged smaller than the minimum still becomes the minimum rather
- * than being refused: the gesture said "a small one", and the nearest legal
+ * than being refused — the gesture said "a small one", and the nearest legal
  * answer is more useful than nothing appearing at all.
+ *
+ * Square (Shift) takes the longer side, but no more than the room on *both*
+ * axes, so it stays square instead of being flattened by whichever edge it
+ * reached first. Every size grows away from the press, so a drag up and to the
+ * left keeps its corner under the press rather than jumping below it.
  */
-function shapeSizeFromDrag(rect: DiagramRect, square: boolean): DiagramNodeSize {
-  const side = Math.max(rect.width, rect.height);
-  const clamp = (value: number, min: number, max: number) =>
-    Math.round(Math.min(max, Math.max(min, value)));
+function shapeRectFromDrag(
+  origin: DiagramPoint,
+  current: DiagramPoint,
+  square: boolean,
+  min: DiagramNodeSize = { width: DIAGRAM_MIN_NODE_WIDTH, height: DIAGRAM_MIN_NODE_HEIGHT },
+): DiagramRect {
+  const towardsRight = current.x >= origin.x;
+  const towardsBottom = current.y >= origin.y;
+  const roomX = towardsRight ? DIAGRAM_CANVAS_WIDTH - origin.x : origin.x;
+  const roomY = towardsBottom ? DIAGRAM_CANVAS_HEIGHT - origin.y : origin.y;
+  const dx = Math.abs(current.x - origin.x);
+  const dy = Math.abs(current.y - origin.y);
+
+  let width: number;
+  let height: number;
+  if (square) {
+    const side = Math.max(Math.min(Math.max(dx, dy), roomX, roomY), min.width, min.height);
+    width = side;
+    height = side;
+  } else {
+    width = Math.max(dx, min.width);
+    height = Math.max(dy, min.height);
+  }
+  width = Math.round(width);
+  height = Math.round(height);
   return {
-    width: clamp(square ? side : rect.width, DIAGRAM_MIN_NODE_WIDTH, DIAGRAM_MAX_NODE_WIDTH),
-    height: clamp(square ? side : rect.height, DIAGRAM_MIN_NODE_HEIGHT, DIAGRAM_MAX_NODE_HEIGHT),
+    x: towardsRight ? origin.x : origin.x - width,
+    y: towardsBottom ? origin.y : origin.y - height,
+    width,
+    height,
   };
+}
+
+/**
+ * The box a text-tool drag asks for: only its width.
+ *
+ * A text box's height is always what its text needs — it is refitted the
+ * moment the text is committed — so a dragged height would only snap back.
+ * The drag sets how wide the lines run, and the box starts one line tall.
+ */
+function textRectFromDrag(origin: DiagramPoint, current: DiagramPoint): DiagramRect {
+  return shapeRectFromDrag(origin, { x: current.x, y: origin.y }, false, {
+    width: DIAGRAM_MIN_NODE_WIDTH,
+    height: DIAGRAM_NEW_TEXT_SIZE.height,
+  });
 }
 
 function emptyTableSize({ rows, cols }: { rows: number; cols: number }): DiagramNodeSize {
@@ -886,14 +963,43 @@ const LEGACY_NODE_STROKE_WIDTH = 1.5;
 const LEGACY_CONTAINER_DASH = '5 3';
 const LEGACY_EDGE_STROKE_WIDTH = 2;
 
-const SELECTION_ACCENT = '#E0A33C';
+// The resize bands, in CSS pixels: the same size on screen at every zoom. The
+// corner grips' sizes are shared with every other grip (`CHROME`).
+/**
+ * How wide the invisible band along each edge of the frame is. Centred on the
+ * frame line, which sits `CHROME.frameOutset` outside the element, so even at 100%
+ * it stops short of the element's body and a press there still moves it.
+ */
+const RESIZE_EDGE_PX = 8;
+/** A finger needs more to aim at than a pointer does. */
+const RESIZE_EDGE_COARSE_PX = 12;
 
-const RESIZE_CORNERS: { corner: DiagramResizeCorner; label: string; cursor: string }[] = [
-  { corner: 'nw', label: 'Resize from the top left', cursor: 'nwse-resize' },
-  { corner: 'ne', label: 'Resize from the top right', cursor: 'nesw-resize' },
-  { corner: 'se', label: 'Resize from the bottom right', cursor: 'nwse-resize' },
-  { corner: 'sw', label: 'Resize from the bottom left', cursor: 'nesw-resize' },
-];
+// The glow along a selected stroke or path, the same on both: how much wider
+// than the mark it is drawn, and how strongly.
+const SELECTION_HALO_GROW = 5;
+const SELECTION_HALO_OPACITY = 0.28;
+
+// The buttons that grow the diagram from a selected shape, in CSS pixels.
+/** Half the button, which is the size it opens up to near the pointer. */
+const EXTEND_HANDLE_RADIUS_PX = 11;
+/** Clear space between the resize band and the button. */
+const EXTEND_HANDLE_CLEARANCE_PX = 6;
+/** An average glyph's width over its size, as the label wrapping estimates it. */
+const LABEL_GLYPH_ADVANCE = 0.55;
+/** Room around an arrow label's grab area, so its edge is easy to catch. */
+const LABEL_GRAB_PADDING = 6;
+/** Where on a shape each side's button leaves from, for a loop back onto it. */
+const EXTEND_SIDE_ATTACH: Record<ExtendSide, ArrowAttach> = {
+  n: { u: 0.5, v: 0 },
+  e: { u: 1, v: 0.5 },
+  s: { u: 0.5, v: 1 },
+  w: { u: 0, v: 0.5 },
+};
+/** How close the pointer has to come before a button wakes from a dot. */
+const EXTEND_NEAR_PX = 36;
+/** How far past the frame the outer edge of a button reaches, for the bar to clear. */
+const EXTEND_HANDLE_REACH_PX =
+  RESIZE_EDGE_COARSE_PX / 2 + EXTEND_HANDLE_CLEARANCE_PX + EXTEND_HANDLE_RADIUS_PX * 2;
 
 /**
  * An inline editor should look like the text it replaces, not like a form field.
@@ -929,19 +1035,11 @@ function labelEditorInset(node: DiagramNode): number {
 const INLINE_LINE_HEIGHT = 1.25;
 
 /**
- * The shape picker's footprint, in scene units: seven tiles and a dismiss, at
- * the tile size the rail already uses.
- */
-const SHAPE_PICKER_WIDTH = 252;
-const SHAPE_PICKER_HEIGHT = 44;
-
-/**
  * How far outside each corner you can still grab to turn the element.
  *
  * Deep enough to find without aiming, shallow enough that two shapes sitting
  * beside each other do not both claim the gap between them.
  */
-const ROTATE_ZONE_REACH = 22;
 
 /**
  * There is no CSS cursor that means "rotate", so this draws one.
@@ -973,28 +1071,47 @@ const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(ROTATE_CURSO
  */
 function SelectionFrame({
   bounds,
-  inset = 5,
-  accent = SELECTION_ACCENT,
+  pixel,
+  inset = CHROME.frameOutset * pixel,
+  member = false,
+  target = false,
+  testId,
 }: {
   bounds: DiagramRect;
+  /** One CSS pixel in scene units, so the frame looks the same at every zoom. */
+  pixel: number;
   inset?: number;
-  accent?: string;
+  /**
+   * One of several selected elements. The group's frame is the one to pull
+   * then, so each member only shows a quiet outline saying it is in the group.
+   */
+  member?: boolean;
+  /**
+   * Something a drop or a snap will land on. The same box as a selection, so
+   * the eye reads it as "this one", but solid and heavier: it is a promise
+   * about what a release will do, not a statement about what is held.
+   */
+  target?: boolean;
+  testId?: string;
 }) {
+  const strokeWidth =
+    (target ? CHROME.targetStroke : member ? CHROME.memberStroke : CHROME.frameStroke) * pixel;
   return (
     <rect
       // Fades up rather than snapping on, so a selection that changes under the
       // cursor is followed rather than noticed.
       className="rt-studio-fade"
-      data-testid="selection-frame"
+      data-testid={testId ?? (member ? 'selection-member' : 'selection-frame')}
       x={bounds.x - inset}
       y={bounds.y - inset}
       width={bounds.width + inset * 2}
       height={bounds.height + inset * 2}
-      rx={7}
+      rx={CHROME.frameRadius * pixel}
       fill="none"
-      stroke={accent}
-      strokeWidth={2}
-      strokeDasharray="4 3"
+      stroke={STUDIO_ACCENT}
+      strokeWidth={strokeWidth}
+      strokeOpacity={member ? CHROME.memberOpacity : 1}
+      {...(member || target ? {} : { strokeDasharray: chromeDash(CHROME.frameDash, pixel) })}
       pointerEvents="none"
     />
   );
@@ -1041,8 +1158,8 @@ const TRANSPARENT_SWATCH_STYLE: CSSProperties = {
   backgroundSize: '7px 7px',
 };
 
-// Sized by its grid column rather than fixed: seven fixed 28px swatches overflow
-// the 260px sidebar.
+// Sized by its grid column rather than fixed, so a row of swatches fits
+// whichever strip it is laid out in.
 function SwatchButton({
   label,
   color,
@@ -1057,18 +1174,19 @@ function SwatchButton({
   onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onSelect}
-      className={`${SUBTOOL_SWATCH_SIZE} shrink-0 rounded-full border-2 transition-shadow disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
-        active ? 'border-rt-ink shadow-[0_0_0_2px_rgba(224,163,60,0.45)]' : 'border-rt-tertiary'
-      }`}
-      style={color === 'transparent' ? TRANSPARENT_SWATCH_STYLE : { backgroundColor: color }}
-    />
+    <Tooltip label={label} placement="top">
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={active}
+        disabled={disabled}
+        onClick={onSelect}
+        className={`${SUBTOOL_SWATCH_SIZE} shrink-0 rounded-full border-2 transition-shadow disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none ${
+          active ? 'border-rt-ink shadow-[0_0_0_2px_rgba(224,163,60,0.45)]' : 'border-rt-tertiary'
+        }`}
+        style={color === 'transparent' ? TRANSPARENT_SWATCH_STYLE : { backgroundColor: color }}
+      />
+    </Tooltip>
   );
 }
 
@@ -1088,21 +1206,22 @@ function PresetButton({
   onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={name}
-      title={name}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onSelect}
-      className={`flex ${SUBTOOL_SIZE} shrink-0 items-center justify-center rounded-lg border text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none ${
-        active
-          ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
-          : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:bg-rt-surface-alt'
-      }`}
-    >
-      {label}
-    </button>
+    <Tooltip label={name} placement="top">
+      <button
+        type="button"
+        aria-label={name}
+        aria-pressed={active}
+        disabled={disabled}
+        onClick={onSelect}
+        className={`flex ${SUBTOOL_SIZE} shrink-0 items-center justify-center rounded-lg border text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none ${
+          active
+            ? 'border-rt-primary bg-rt-primary-tint text-rt-ink'
+            : 'border-rt-tertiary bg-rt-surface text-rt-ink-muted hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink'
+        }`}
+      >
+        {label}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -1300,7 +1419,19 @@ export function DiagramEditor() {
   const paintOrder = studioPaintOrder(history.snapshot);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
-  const [connectionMode, setConnectionMode] = useState(false);
+  // The picker opened from a shape's extend button: which shape, which side.
+  const [extendPicker, setExtendPicker] = useState<{ sourceId: string; side: ExtendSide } | null>(
+    null,
+  );
+  // A press on an extend button, until it is known to be a click or a drag.
+  const extendPressRef = useRef<{
+    pointerId: number;
+    sourceId: string;
+    side: ExtendSide;
+    startClient: DiagramPoint;
+    dragging: boolean;
+  } | null>(null);
+  const extendHandleRefs = useRef(new Map<ExtendSide, HTMLButtonElement>());
   /**
    * An arrow that has just been left pointing at nothing, and where it ends.
    *
@@ -1313,13 +1444,14 @@ export function DiagramEditor() {
   );
   const shapePickerRef = useRef<{ arrowId: string; at: DiagramPoint } | null>(null);
   shapePickerRef.current = shapePicker;
-  const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
-  const [connectionPointer, setConnectionPointer] = useState<DiagramPoint | null>(null);
-  const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   // Where the element being placed would land. Following the cursor lets it be
   // positioned before it exists, rather than dropped somewhere and dragged.
   const [ghostCursor, setGhostCursor] = useState<DiagramPoint | null>(null);
+  // The shape being dragged in from the palette, if any. A drag's payload can
+  // only be read on the drop, so the palette says what it is carrying up front
+  // — otherwise there is nothing to preview until it lands.
+  const [paletteDrag, setPaletteDrag] = useState<DiagramNodeShape | null>(null);
   /**
    * The rectangle being dragged out for a new shape, if one is.
    *
@@ -1346,7 +1478,7 @@ export function DiagramEditor() {
   // Which of the two arrow tiles is armed, and the arrow being drawn. The draft
   // is the whole of the placement state: a press sets `from`, the pointer sets
   // `to`, and the second press turns it into an element.
-  const [pendingArrowRoute, setPendingArrowRoute] = useState<ArrowRoute>('straight');
+  const [pendingArrowRoute, setPendingArrowRoute] = useState<ArrowRoute>('elbow');
   const [arrowDraft, setArrowDraftState] = useState<ArrowDraft | null>(null);
   // Mirrored in a ref: a press and the release that follows it can land in one
   // React batch, and the release has to see what the move just wrote.
@@ -1529,25 +1661,48 @@ export function DiagramEditor() {
   // The shape of the surface, watched rather than assumed: the canvas fills the
   // window, so it changes with the window.
   const [canvasAspect, setCanvasAspect] = useState(DIAGRAM_CANVAS_WIDTH / DIAGRAM_CANVAS_HEIGHT);
+  // The surface's size in CSS pixels, so chrome that should stay the same size
+  // on screen can be converted into scene units. Zero until first measured.
+  const [canvasPixels, setCanvasPixels] = useState({ width: 0, height: 0 });
   // What is actually drawn. Wider or taller than the view being manipulated, by
   // exactly the difference between the view's shape and the surface's, so the
   // space around the sheet is visible instead of letterboxed away.
   const renderedView = expandViewToAspect(view, canvasAspect);
   const renderedViewRef = useRef(renderedView);
   renderedViewRef.current = renderedView;
+  /** One CSS pixel, in scene units at the current zoom. */
+  const pixel = scenePerPixel(renderedView, canvasPixels);
+  /** How far every selection frame sits outside what it surrounds. */
+  const frameOutset = CHROME.frameOutset * pixel;
+  /**
+   * A table's frame sits beyond the strip its add and remove targets occupy,
+   * so the grips on the frame and the targets beside the grid never overlap.
+   */
+  const tableFrameOutset = TABLE_INSERT_REACH + frameOutset;
+  // More than one element selected, of whatever kinds: the group's frame takes
+  // over from each element's own grips.
+  const multiSelected =
+    selectedIds.length +
+      selectedInkIds.length +
+      selectedPathIds.length +
+      selectedTableIds.length +
+      selectedArrowIds.length >
+    1;
+  // Read once: whether the primary pointer is a finger, which wants bigger grips.
+  const [coarsePointer] = useState(
+    () =>
+      typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true,
+  );
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0]! : null;
   const selectedNode = selectedNodeById(nodes, selectedId);
+  // The extend picker belongs to one shape. Selecting anything else — or more
+  // than it — puts the offer away rather than leaving it pointing elsewhere.
+  useEffect(() => {
+    if (!extendPicker) return;
+    if (selectedId !== extendPicker.sourceId || multiSelected) setExtendPicker(null);
+  }, [extendPicker, selectedId, multiSelected]);
   const selectedEdge = selectedEdgeByKey(edges, selectedEdgeKey);
-  const connectionSource = selectedNodeById(nodes, connectionSourceId);
-  const hoveredTarget = selectedNodeById(nodes, hoveredTargetId);
-  const connectionPreview = connectionSource
-    ? hoveredTarget
-      ? diagramEdgeGeometry(connectionSource, hoveredTarget)
-      : connectionPointer
-        ? diagramEdgeToPointGeometry(connectionSource, connectionPointer)
-        : null
-    : null;
   const isSubmitting = submissionStatus === 'submitting';
   // Controls grey out only for a send that is taking a while; see
   // `useSlowSubmission`. `isSubmitting` still refuses input from the start.
@@ -1587,21 +1742,30 @@ export function DiagramEditor() {
   const marqueeRect: DiagramRect | null = marquee
     ? normalizeRect(marquee.origin, marquee.current)
     : null;
-  // The ghost sits exactly where the element will, so what is previewed is what
-  // gets placed rather than something near it.
-  // What is being carried, if anything. Everything placed by pressing the canvas
-  // is previewed the same way, so the answer to "where will this land" is always
-  // the thing under the cursor.
-  // Only once the press has actually travelled: a plain click must still place
-  // the default size, which is what it has always done.
+  // The box a drag-out is asking for, once the press has actually travelled: a
+  // plain click must still place the default size, as it always has.
   const shapeDragRect =
     shapeDraft && shapeDraftRef.current?.moved
-      ? normalizeRect(shapeDraft.origin, shapeDraft.current)
+      ? canvasTool === 'text'
+        ? textRectFromDrag(shapeDraft.origin, shapeDraft.current)
+        : shapeRectFromDrag(shapeDraft.origin, shapeDraft.current, shapeDraftSquare)
       : null;
-  const shapeDragSquare = shapeDraftSquare;
+  // What is being carried, if anything. Everything placed by pressing the
+  // canvas is previewed the same way, and the ghost sits exactly where the
+  // element will land, so "where will this go" is always answered by the thing
+  // under the cursor rather than something near it.
   const ghost = ((): Ghost | null => {
-    if (canvasTool === 'text')
-      return { kind: 'node', shape: 'text', size: diagramNodeSize('text') };
+    // A drag from the palette previews exactly as a click-placed shape does.
+    if (paletteDrag) return { kind: 'node', shape: paletteDrag, size: newNodeSize(paletteDrag) };
+    if (canvasTool === 'text') {
+      return {
+        kind: 'node',
+        shape: 'text',
+        size: shapeDragRect
+          ? { width: shapeDragRect.width, height: shapeDragRect.height }
+          : DIAGRAM_NEW_TEXT_SIZE,
+      };
+    }
     if (canvasTool === 'shape') {
       // Mid drag-out the preview is the rectangle being dragged, so what grows
       // under the cursor is exactly what lands when the button comes up.
@@ -1609,7 +1773,7 @@ export function DiagramEditor() {
         kind: 'node',
         shape: pendingShape,
         size: shapeDragRect
-          ? shapeSizeFromDrag(shapeDragRect, shapeDragSquare)
+          ? { width: shapeDragRect.width, height: shapeDragRect.height }
           : diagramNodeSize(pendingShape),
       };
     }
@@ -1662,12 +1826,21 @@ export function DiagramEditor() {
    * Bubble phase, so an open popover still gets first refusal on the key and
    * closes itself before anything is put down.
    */
+  // An arrow has no ghost — its preview is the rubber band itself — but Escape
+  // has to put it down all the same. So does the offer at an arrow's loose end,
+  // which can be raised from a connection handle while the tool is back on
+  // Select: that left it dismissable only with focus in the form.
+  const somethingToPutDown =
+    ghost !== null ||
+    canvasTool === 'arrow' ||
+    shapePicker !== null ||
+    extendPicker !== null ||
+    arrowDraft !== null;
+  // Read through a ref so the listener is attached once per carry rather than
+  // on every render of the whole editor.
+  const cancelPlacementRef = useRef<() => void>(() => {});
   useEffect(() => {
-    // An arrow has no ghost — its preview is the rubber band itself — but
-    // Escape has to put it down all the same. So does the offer at an arrow's
-    // loose end, which can be raised from a connection handle while the tool is
-    // back on Select: that left it dismissable only with focus in the form.
-    if (!ghost && canvasTool !== 'arrow' && !shapePicker) return;
+    if (!somethingToPutDown) return;
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape') return;
@@ -1679,12 +1852,47 @@ export function DiagramEditor() {
       // Not while something is being typed into: Escape belongs to the field.
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
       event.preventDefault();
-      cancelPlacement();
+      cancelPlacementRef.current();
     }
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  });
+  }, [somethingToPutDown]);
+
+  /**
+   * Ctrl/Cmd with +, - or 0 zooms the canvas, not the page.
+   *
+   * These are the keys everyone already reaches for, and without this they
+   * zoomed the whole browser tab — rail, bar and all — around a canvas that
+   * stayed exactly as it was. On the document because focus is as often on the
+   * rail as on the canvas. The pinboard's own handler stands aside inside the
+   * studio dialog, so the two never both act on one key — and this one stands
+   * aside while the studio is tucked away: the editor stays mounted then, but
+   * its canvas is inert and the keys belong to the board.
+   */
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const canvas = canvasRef.current;
+      if (!canvas || canvas.closest('[inert]')) return;
+      const direction =
+        event.key === '=' || event.key === '+'
+          ? 'in'
+          : event.key === '-' || event.key === '_'
+            ? 'out'
+            : event.key === '0'
+              ? 'reset'
+              : null;
+      if (!direction) return;
+      event.preventDefault();
+      setView((current) =>
+        direction === 'reset' ? DIAGRAM_DEFAULT_VIEW : stepDiagramView(current, direction),
+      );
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     // Closing keeps the canvas now, so there is nothing to warn about: the
@@ -1723,6 +1931,17 @@ export function DiagramEditor() {
         { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
         viewRef.current,
       );
+      // A mouse wheel clicks: one notch is a line or page (Firefox) or a big
+      // pixel jump (about 100 elsewhere). Scaling by that jump made one notch
+      // about 1.65x. A notch now moves one zoom stop, the same step as the
+      // buttons and keys. A trackpad pinch sends a stream of small deltas and
+      // stays continuous, or it would stutter from stop to stop.
+      const notch = event.deltaMode !== 0 || Math.abs(event.deltaY) >= WHEEL_NOTCH_DELTA;
+      if (notch) {
+        if (event.deltaY === 0) return;
+        setView((current) => stepDiagramView(current, event.deltaY < 0 ? 'in' : 'out', anchor));
+        return;
+      }
       setView((current) => zoomDiagramView(current, Math.exp(-event.deltaY / 200), anchor));
     };
 
@@ -1820,15 +2039,10 @@ export function DiagramEditor() {
    * it and typing into it is one gesture, so it is one undo step — and one that
    * left no text behind is dropped entirely rather than leaving an empty box.
    */
-  function placeTextElement(at: DiagramPoint) {
+  function placeTextElement(at: DiagramPoint, size: DiagramNodeSize = DIAGRAM_NEW_TEXT_SIZE) {
     clearError();
     const before = history.snapshotRef.current;
-    const result = addNode(
-      before.nodes,
-      'text',
-      centredOnCursor(at, diagramNodeSize('text')),
-      snapEnabled,
-    );
+    const result = addNode(before.nodes, 'text', at, snapEnabled, size);
     if (!result.ok) {
       setValidationError(result.error);
       return;
@@ -1843,76 +2057,6 @@ export function DiagramEditor() {
     // Set before opening the editor, which only fills this in if it is empty.
     nodeLabelStartRef.current = before;
     beginInlineNodeEdit(placed);
-  }
-
-  function cancelConnection() {
-    setConnectionMode(false);
-    setConnectionSourceId(null);
-    setConnectionPointer(null);
-    setHoveredTargetId(null);
-  }
-
-  function startConnection(sourceId: string | null = selectedId) {
-    clearError();
-    setConnectionMode(true);
-    setConnectionSourceId(sourceId);
-    setConnectionPointer(null);
-    setHoveredTargetId(null);
-    setSelectedEdgeKey(null);
-  }
-
-  /**
-   * Join two shapes.
-   *
-   * This makes a standalone `arrow`, not an `edge`. An arrow is the connector
-   * the studio draws everywhere else now: it can be restyled, given caps, bent
-   * into an elbow, labelled and re-pointed, none of which an edge can do. Both
-   * ends bind to their shape, so it follows them exactly as an edge did.
-   *
-   * Edges themselves are untouched — every stored diagram still renders and
-   * still arranges by them. Nothing new is written as one.
-   */
-  function connectNode(node: DiagramNode) {
-    if (!connectionSourceId) {
-      setConnectionSourceId(node.id);
-      selectOnly(node.id);
-      return;
-    }
-    if (connectionSourceId === node.id) {
-      setValidationError('An arrow needs two different elements.');
-      return;
-    }
-
-    const graph = history.snapshotRef.current;
-    const from = graph.nodes.find((candidate) => candidate.id === connectionSourceId);
-    if (!from) {
-      cancelConnection();
-      return;
-    }
-
-    const centreOf = (target: DiagramNode) => {
-      const size = effectiveDiagramNodeSize(target);
-      return { x: target.x + size.width / 2, y: target.y + size.height / 2 };
-    };
-    const arrow: ArrowElement = {
-      id: createArrowId(),
-      // No attachment named on either end: the arrow aims at each centre and
-      // meets whichever face the other is on, sliding round as they move. That
-      // is exactly what an edge did.
-      from: { ...centreOf(from), elementId: from.id },
-      to: { ...centreOf(node), elementId: node.id },
-    };
-
-    clearError();
-    const order = paintOrderWithNewestOnTop(graph, arrow.id);
-    history.commit({
-      nodes: graph.nodes,
-      edges: graph.edges,
-      arrows: [...(graph.arrows ?? []), arrow],
-      ...(order ? { z: order } : {}),
-    });
-    cancelConnection();
-    applySelection({ ...EMPTY_STUDIO_SELECTION, arrowIds: [arrow.id] });
   }
 
   function removeSelectedNodes() {
@@ -1935,7 +2079,6 @@ export function DiagramEditor() {
     }
 
     history.commit(deleteNodesWithEdges(graph.nodes, graph.edges, selectedIds));
-    if (connectionSourceId && selectedIds.includes(connectionSourceId)) cancelConnection();
     setSelectedIds([]);
   }
 
@@ -1948,7 +2091,6 @@ export function DiagramEditor() {
         ? deleteContainerWithContents(graph.nodes, graph.edges, containerId)
         : ungroupContainer(graph.nodes, graph.edges, containerId),
     );
-    if (connectionSourceId === containerId) cancelConnection();
     setPendingContainerDelete(null);
     setSelectedIds([]);
   }
@@ -2460,13 +2602,19 @@ export function DiagramEditor() {
         // Whatever is selected has to answer this, or the control cannot show
         // which size is already chosen — an arrow fell through to the default
         // and so never lit up the size it was actually set to.
-        const size: DiagramFontSizePreset = selectedTable
+        //
+        // Nothing set means the older 11px, which is none of the presets, so no
+        // button lights up. Claiming Medium there showed a size that was not
+        // the one being drawn. A cell with no size of its own uses its table's.
+        const size: DiagramFontSizePreset | null = selectedTable
           ? (tableCellAt(
               selectedTable,
               cellStyleTarget?.focus.row ?? 0,
               cellStyleTarget?.focus.col ?? 0,
-            )?.fontSizePreset ?? 'medium')
-          : (selectedNode?.fontSizePreset ?? selectedArrow?.fontSizePreset ?? 'medium');
+            )?.fontSizePreset ??
+            selectedTable.fontSizePreset ??
+            null)
+          : (selectedNode?.fontSizePreset ?? selectedArrow?.fontSizePreset ?? null);
 
         return (
           <BarMenu
@@ -2617,12 +2765,12 @@ export function DiagramEditor() {
     const right = Math.max(...boxes.map((box) => box.x + box.width));
     const bottom = Math.max(...boxes.map((box) => box.y + box.height));
 
-    // A table draws its insert and remove badges outside its own grid, above
-    // the top edge and left of the first column. The bar is placed clear of
-    // whatever it is given, so it has to be given the space those occupy —
-    // in scene units, so the clearance holds at any zoom rather than only at
-    // the one a fixed pixel gap was chosen for.
-    const reach = selectedTableIds.length > 0 ? TABLE_INSERT_REACH : 0;
+    // The bar is placed clear of whatever it is given, so it is given the
+    // selection's frame and its grips rather than the bare elements: the frame
+    // sits outside them, and outside a table's insert and remove badges. In
+    // scene units, so the clearance holds at any zoom rather than only at the
+    // one a fixed pixel gap was chosen for.
+    const reach = selectedTableIds.length > 0 ? tableFrameOutset : frameOutset;
 
     return diagramRectToClientRect(
       {
@@ -2840,7 +2988,6 @@ export function DiagramEditor() {
   }
 
   function undoDiagram() {
-    cancelConnection();
     cancelNodeLabelEdit();
     cancelEdgeLabelEdit();
     // Undo can be what removes the very arrow the offer belongs to.
@@ -2849,7 +2996,6 @@ export function DiagramEditor() {
   }
 
   function redoDiagram() {
-    cancelConnection();
     cancelNodeLabelEdit();
     cancelEdgeLabelEdit();
     setShapePicker(null);
@@ -2857,7 +3003,6 @@ export function DiagramEditor() {
   }
 
   function beginInlineNodeEdit(node: DiagramNode) {
-    cancelConnection();
     selectOnly(node.id);
     setSelectedEdgeKey(null);
     nodeLabelStartRef.current ??= history.snapshotRef.current;
@@ -2912,8 +3057,8 @@ export function DiagramEditor() {
     canvasRef.current?.focus({ preventScroll: true });
   }
 
-  function zoomBy(factor: number) {
-    setView((current) => zoomDiagramView(current, factor));
+  function zoomStep(direction: 'in' | 'out') {
+    setView((current) => stepDiagramView(current, direction));
   }
 
   function resetView() {
@@ -2924,19 +3069,13 @@ export function DiagramEditor() {
     if (event.button !== 0 || dragRef.current || isSubmitting) return;
     // A press with a tool armed belongs to the tool. Left unhandled rather than
     // swallowed, so it reaches the canvas and starts the mark it was meant to.
-    if (canvasTool !== 'select' && !connectionMode) return;
+    if (canvasTool !== 'select') return;
     event.preventDefault();
     event.stopPropagation();
 
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.focus();
-    if (connectionMode) {
-      lastNodePressRef.current = null;
-      setSelectedEdgeKey(null);
-      connectNode(node);
-      return;
-    }
 
     const press: NodePress = {
       key: node.id,
@@ -3022,9 +3161,10 @@ export function DiagramEditor() {
   }
 
   function onResizePointerDown(
-    event: PointerEvent<SVGGElement>,
-    node: DiagramNode,
-    corner: DiagramResizeCorner,
+    event: PointerEvent<SVGElement>,
+    kind: ResizableKind,
+    id: string,
+    handle: DiagramResizeHandle,
   ) {
     if (event.button !== 0 || isSubmitting) return;
     event.preventDefault();
@@ -3034,14 +3174,28 @@ export function DiagramEditor() {
     canvas.focus({ preventScroll: true });
     lastNodePressRef.current = null;
 
-    const size = effectiveDiagramNodeSize(node);
+    const graph = history.snapshotRef.current;
+    const node = kind === 'node' ? graph.nodes.find((candidate) => candidate.id === id) : undefined;
+    const size = node ? effectiveDiagramNodeSize(node) : { width: 0, height: 0 };
+    // A table is scaled as a group of one: the group's rules for its tracks are
+    // the table's rules, and there is then only one way a table grows.
+    const selection =
+      kind === 'group'
+        ? currentSelection()
+        : { ...EMPTY_STUDIO_SELECTION, ...(kind === 'table' ? { tableIds: [id] } : {}) };
+    const frame = kind === 'group' || kind === 'table' ? groupFrame(graph, selection) : null;
+    if ((kind === 'group' || kind === 'table') && !frame) return;
     resizeRef.current = {
       pointerId: event.pointerId,
-      nodeId: node.id,
-      corner,
-      start: { x: node.x, y: node.y, width: size.width, height: size.height },
+      kind,
+      id,
+      handle,
+      start: { x: node?.x ?? 0, y: node?.y ?? 0, width: size.width, height: size.height },
+      frame: frame ?? { x: 0, y: 0, width: 0, height: 0 },
+      selection,
       origin: surfacePoint(event),
-      previous: history.snapshotRef.current,
+      previous: graph,
+      moved: false,
     };
     canvas.setPointerCapture(event.pointerId);
   }
@@ -3051,18 +3205,74 @@ export function DiagramEditor() {
     if (!resize || resize.pointerId !== event.pointerId) return false;
     event.preventDefault();
     const point = surfacePoint(event);
+    const delta = { x: point.x - resize.origin.x, y: point.y - resize.origin.y };
+    if (!resize.moved && delta.x === 0 && delta.y === 0) return true;
+    resize.moved = true;
+    const fromCentre = event.altKey;
     const graph = history.snapshotRef.current;
+    const before = resize.previous;
+
+    if (resize.kind === 'node') {
+      const node = before.nodes.find((candidate) => candidate.id === resize.id);
+      // A text box is as tall as its text: only its width is pulled, and the
+      // height follows the wrapping as it is dragged.
+      const heightFor =
+        node?.shape === 'text'
+          ? (width: number) => diagramTextBoxHeight({ ...node, width })
+          : undefined;
+      history.preview({
+        nodes: resizeNode(
+          graph.nodes,
+          resize.id,
+          resize.handle,
+          resize.start,
+          delta,
+          snapEnabled,
+          event.shiftKey,
+          { fromCentre, heightFor },
+        ),
+        edges: graph.edges,
+      });
+      return true;
+    }
+
+    if (resize.kind === 'group' || resize.kind === 'table') {
+      const scaled = scaleGroup(before, resize.selection, resize.handle, resize.frame, delta, {
+        lockAspect: event.shiftKey,
+        fromCentre,
+      });
+      history.preview({
+        nodes: scaled.nodes,
+        edges: graph.edges,
+        ink: scaled.ink,
+        paths: scaled.paths,
+        tables: scaled.tables,
+        arrows: scaled.arrows,
+      });
+      return true;
+    }
+
+    // A drawing is scaled from how it was at the press, every move, so a long
+    // drag is one scale rather than a pile of rounded ones.
+    if (resize.kind === 'ink') {
+      const source = (before.ink ?? []).find((stroke) => stroke.id === resize.id);
+      if (!source) return true;
+      const scaled = scaleInk(source, resize.handle, delta, fromCentre);
+      history.preview({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        ink: (graph.ink ?? []).map((stroke) => (stroke.id === resize.id ? scaled : stroke)),
+      });
+      return true;
+    }
+
+    const source = (before.paths ?? []).find((path) => path.id === resize.id);
+    if (!source) return true;
+    const scaled = scalePath(source, resize.handle, delta, fromCentre);
     history.preview({
-      nodes: resizeNode(
-        graph.nodes,
-        resize.nodeId,
-        resize.corner,
-        resize.start,
-        { x: point.x - resize.origin.x, y: point.y - resize.origin.y },
-        snapEnabled,
-        event.shiftKey,
-      ),
+      nodes: graph.nodes,
       edges: graph.edges,
+      paths: (graph.paths ?? []).map((path) => (path.id === resize.id ? scaled : path)),
     });
     return true;
   }
@@ -3071,17 +3281,134 @@ export function DiagramEditor() {
     const resize = resizeRef.current;
     if (!resize || resize.pointerId !== event.pointerId) return false;
     updateResize(event);
+    resizeRef.current = null;
+    releaseCapture(event);
+    if (!resize.moved) return true;
 
-    const graph = history.snapshotRef.current;
-    const clamped = clampNodesInsideContainer(graph.nodes, resize.nodeId);
-    if (clamped.some((node, index) => node !== graph.nodes[index])) {
-      history.preview({ nodes: clamped, edges: graph.edges });
+    if (resize.kind === 'node') {
+      const graph = history.snapshotRef.current;
+      const clamped = clampNodesInsideContainer(graph.nodes, resize.id);
+      if (clamped.some((node, index) => node !== graph.nodes[index])) {
+        history.preview({ nodes: clamped, edges: graph.edges });
+      }
     }
 
     history.recordPreview(resize.previous);
-    resizeRef.current = null;
-    releaseCapture(event);
     return true;
+  }
+
+  /**
+   * One frame around everything selected, with the same grips a single element
+   * has: pulling it scales the whole group (see `scaleGroup`).
+   *
+   * Only for a real group — two or more elements — and not while a gesture that
+   * owns the selection is under way, or the frame would chase the move.
+   */
+  function renderGroupFrame() {
+    if (!multiSelected || canvasTool !== 'select' || isSubmitting || marquee) return null;
+    const frame = groupFrame(history.snapshotRef.current, currentSelection());
+    if (!frame) return null;
+    // A selected table's add and remove targets sit around its edges; the
+    // group's grips keep clear of them the same way the table's own frame does.
+    const outset = selectedTableIds.length > 0 ? tableFrameOutset : frameOutset;
+    return (
+      <g data-testid="group-frame">
+        <SelectionFrame bounds={frame} pixel={pixel} inset={outset} />
+        {renderResizeChrome('group', 'group', frame, { outset })}
+      </g>
+    );
+  }
+
+  /**
+   * The grips that resize a selected element: a square on each corner of its
+   * frame and an invisible band along each edge, the way every drawing tool
+   * lets a box be pulled from its side as well as its corner.
+   *
+   * Drawn in the element's own frame, inside whatever turn it carries, so a
+   * turned element's grips sit on its turned frame; the cursor over each is
+   * turned to match. Sized in pixels, so they are the same to see and to hit at
+   * every zoom. Edge bands go first so a corner, drawn over the end of two of
+   * them, always wins where they meet.
+   */
+  function renderResizeChrome(
+    kind: ResizableKind,
+    id: string,
+    bounds: DiagramRect,
+    {
+      rotation = 0,
+      widthOnly = false,
+      outset = frameOutset,
+    }: { rotation?: number; widthOnly?: boolean; outset?: number } = {},
+  ) {
+    const frame = {
+      x: bounds.x - outset,
+      y: bounds.y - outset,
+      width: bounds.width + outset * 2,
+      height: bounds.height + outset * 2,
+    };
+    const band = (coarsePointer ? RESIZE_EDGE_COARSE_PX : RESIZE_EDGE_PX) * pixel;
+    const edges = RESIZE_EDGE_HANDLES.filter((handle) => {
+      // A text box's height follows its text, so its top and bottom are not
+      // grips. Nor is an edge of a mark with no extent across it: the top of a
+      // perfectly flat line has nothing to pull.
+      const vertical = handle === 'n' || handle === 's';
+      if (vertical) return !widthOnly && bounds.height >= 1;
+      return bounds.width >= 1;
+    });
+
+    return (
+      <g data-testid="resize-chrome">
+        {edges.map((handle) => {
+          const vertical = handle === 'n' || handle === 's';
+          const x = handle === 'e' ? frame.x + frame.width : frame.x;
+          const y = handle === 's' ? frame.y + frame.height : frame.y;
+          return (
+            <rect
+              key={handle}
+              role="button"
+              aria-label={RESIZE_HANDLE_LABELS[handle]}
+              tabIndex={-1}
+              data-testid={`resize-handle-${handle}`}
+              x={vertical ? frame.x : x - band / 2}
+              y={vertical ? y - band / 2 : frame.y}
+              width={vertical ? frame.width : band}
+              height={vertical ? band : frame.height}
+              fill="transparent"
+              style={{ cursor: resizeCursorFor(handle, rotation) }}
+              onPointerDown={(event) => onResizePointerDown(event, kind, id, handle)}
+            />
+          );
+        })}
+        {RESIZE_CORNER_HANDLES.map((handle) => {
+          const x = handle === 'nw' || handle === 'sw' ? frame.x : frame.x + frame.width;
+          const y = handle === 'nw' || handle === 'ne' ? frame.y : frame.y + frame.height;
+          const side = CHROME.gripSize * pixel;
+          return (
+            <g
+              key={handle}
+              role="button"
+              aria-label={RESIZE_HANDLE_LABELS[handle]}
+              tabIndex={-1}
+              data-testid={`resize-handle-${handle}`}
+              style={{ cursor: resizeCursorFor(handle, rotation) }}
+              onPointerDown={(event) => onResizePointerDown(event, kind, id, handle)}
+            >
+              <circle cx={x} cy={y} r={CHROME.gripReach * pixel} fill="transparent" />
+              <rect
+                x={x - side / 2}
+                y={y - side / 2}
+                width={side}
+                height={side}
+                fill="#FFFFFF"
+                stroke={STUDIO_ACCENT}
+                strokeWidth={CHROME.gripStroke * pixel}
+                pointerEvents="none"
+              />
+            </g>
+          );
+        })}
+      </g>
+    );
   }
 
   /**
@@ -3109,7 +3436,7 @@ export function DiagramEditor() {
     const top = bounds.y;
     const right = bounds.x + bounds.width;
     const bottom = bounds.y + bounds.height;
-    const reach = ROTATE_ZONE_REACH;
+    const reach = CHROME.rotateReach * pixel;
 
     const zones: { corner: string; x: number; y: number }[] = [
       { corner: 'nw', x: left - reach, y: top - reach },
@@ -3243,10 +3570,21 @@ export function DiagramEditor() {
     setGhostCursor(null);
     releaseCapture(event);
 
+    if (canvasTool === 'text') {
+      // Dragged, the width is the one asked for; a plain click keeps the
+      // default box centred under the cursor, as it always has.
+      if (dragged) {
+        const rect = textRectFromDrag(draft.origin, current);
+        placeTextElement(rect, { width: rect.width, height: rect.height });
+      } else {
+        placeTextElement(centredOnCursor(draft.origin, DIAGRAM_NEW_TEXT_SIZE));
+      }
+      return true;
+    }
+
     if (dragged) {
-      const rect = normalizeRect(draft.origin, current);
-      const size = shapeSizeFromDrag(rect, square);
-      addElement(pendingShape, rect, size);
+      const rect = shapeRectFromDrag(draft.origin, current, square);
+      addElement(pendingShape, rect, { width: rect.width, height: rect.height });
       return true;
     }
 
@@ -3682,7 +4020,16 @@ export function DiagramEditor() {
     if (!session || session.pointerId !== event.pointerId) return false;
     arrowEditRef.current = null;
     setArrowSnap(null);
-    if (session.moved) history.recordPreview(session.previous);
+    // A drag that left the arrow as it was — a leg that would not slide there, a
+    // label already in place — records nothing, so Undo never steps through a
+    // change nobody can see.
+    const before = session.previous.arrows?.find((arrow) => arrow.id === session.arrowId);
+    const after = history.snapshotRef.current.arrows?.find((arrow) => arrow.id === session.arrowId);
+    if (session.moved && JSON.stringify(before) !== JSON.stringify(after)) {
+      history.recordPreview(session.previous);
+    } else if (session.moved) {
+      history.restorePreview(session.previous);
+    }
     releaseCapture(event);
     return true;
   }
@@ -4094,10 +4441,7 @@ export function DiagramEditor() {
     shapeDraftRef.current = null;
     setShapeDraftSquare(false);
     setShapeDraft(null);
-    if (next !== 'select') {
-      clearAllSelection();
-      cancelConnection();
-    }
+    if (next !== 'select') clearAllSelection();
   }
 
   function renderFreehandOptions() {
@@ -4295,42 +4639,54 @@ export function DiagramEditor() {
     return (
       <div role="group" aria-label="Elements" className="flex flex-col items-center gap-1">
         {DIAGRAM_SHAPE_PALETTE_ORDER.map((shape) => {
-          const ShapeIcon = SHAPE_ICONS[shape];
+          // Lit while it is the shape being carried, as the line and arrow
+          // tiles below already are — a picked-up shape showed nothing.
+          const armed = canvasTool === 'shape' && pendingShape === shape;
           return (
-            <button
+            <Tooltip
               key={shape}
-              type="button"
-              draggable={!disabled}
-              onDragStart={(event) => {
-                event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
-                event.dataTransfer.effectAllowed = 'copy';
-              }}
-              onClick={() => {
-                setPendingShape(shape);
-                selectCanvasTool('shape');
-              }}
-              disabled={disabled}
-              aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
-              title={`Pick it up, then press the canvas to place it — or drag it there`}
-              className={TILE_BUTTON}
+              label={DIAGRAM_SHAPE_LABELS[shape]}
+              {...(shape === 'box' ? { shortcut: shortcutLabelFor('shape') } : {})}
             >
-              <ShapeIcon aria-hidden="true" size={14} />
-            </button>
+              <button
+                key={shape}
+                type="button"
+                draggable={!disabled}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData(DIAGRAM_SHAPE_MEDIA_TYPE, shape);
+                  event.dataTransfer.effectAllowed = 'copy';
+                  setPaletteDrag(shape);
+                }}
+                // Dropped anywhere, or abandoned with Escape: the preview goes.
+                onDragEnd={endPaletteDrag}
+                onClick={() => {
+                  setPendingShape(shape);
+                  selectCanvasTool('shape');
+                }}
+                disabled={disabled}
+                aria-label={`Add ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
+                aria-pressed={armed}
+                className={tileClass(armed)}
+              >
+                <ShapeThumbnail shape={shape} />
+              </button>
+            </Tooltip>
           );
         })}
         {/* A line makes a form, so it belongs with the shapes — but unlike them
             it is a tool you draw with, not a node you place. */}
-        <button
-          type="button"
-          aria-label="Line"
-          aria-pressed={canvasTool === 'line'}
-          disabled={showSubmitting}
-          onClick={() => selectCanvasTool('line')}
-          title="Draw a straight line; hold Shift to constrain the angle"
-          className={tileClass(canvasTool === 'line')}
-        >
-          <Minus aria-hidden="true" size={14} />
-        </button>
+        <Tooltip label="Line" shortcut={shortcutLabelFor('line')}>
+          <button
+            type="button"
+            aria-label="Line"
+            aria-pressed={canvasTool === 'line'}
+            disabled={showSubmitting}
+            onClick={() => selectCanvasTool('line')}
+            className={tileClass(canvasTool === 'line')}
+          >
+            <Minus aria-hidden="true" size={14} />
+          </button>
+        </Tooltip>
         {/* Arrows sit under the line for the same reason the line sits with the
             shapes: they are drawn rather than placed, but they make a form. */}
         {(
@@ -4339,26 +4695,22 @@ export function DiagramEditor() {
             ['elbow', 'Elbowed arrow', CornerDownRight],
           ] as const
         ).map(([route, arrowLabel, ArrowIcon]) => (
-          <button
-            key={route}
-            type="button"
-            aria-label={arrowLabel}
-            aria-pressed={canvasTool === 'arrow' && pendingArrowRoute === route}
-            disabled={showSubmitting}
-            onClick={() => {
-              setPendingArrowRoute(route);
-              setArrowDraft(null);
-              selectCanvasTool('arrow');
-            }}
-            title={
-              route === 'straight'
-                ? 'Press where the arrow starts, then drag to where it ends'
-                : 'The same, bent into right angles on the way'
-            }
-            className={tileClass(canvasTool === 'arrow' && pendingArrowRoute === route)}
-          >
-            <ArrowIcon aria-hidden="true" size={14} />
-          </button>
+          <Tooltip key={route} label={arrowLabel}>
+            <button
+              type="button"
+              aria-label={arrowLabel}
+              aria-pressed={canvasTool === 'arrow' && pendingArrowRoute === route}
+              disabled={showSubmitting}
+              onClick={() => {
+                setPendingArrowRoute(route);
+                setArrowDraft(null);
+                selectCanvasTool('arrow');
+              }}
+              className={tileClass(canvasTool === 'arrow' && pendingArrowRoute === route)}
+            >
+              <ArrowIcon aria-hidden="true" size={14} />
+            </button>
+          </Tooltip>
         ))}
       </div>
     );
@@ -4457,13 +4809,9 @@ export function DiagramEditor() {
   }
 
   /**
-   * Everything the selection can be done to that is not a styling property:
-   * its label, its size, the arrows out of it, the rows and columns inside
-   * it. These used to fill a permanent sidebar; they belong to whatever is
-   * selected, so they now live behind the properties bar's own button and the
-   * canvas keeps the width.
+   * The question a container's delete has to ask: take what is inside it too,
+   * or leave that on the canvas.
    */
-  /** A table's structure: the rows and columns themselves, and their fill. */
   function renderContainerDeletePrompt() {
     return (
       <div className="pointer-events-auto absolute bottom-4 left-1/2 z-30 w-72 -translate-x-1/2">
@@ -4532,8 +4880,8 @@ export function DiagramEditor() {
           aria-label="Arrange the diagram"
           disabled={nodes.length < 2 || showSubmitting}
           // Says "connections" rather than "arrows": it lays out by `edges`,
-          // and Connect has written standalone arrows since the studio gained
-          // them, so a diagram drawn here has connections this cannot see.
+          // and every connection made in the studio has been a standalone
+          // arrow since it gained them, so this cannot see those.
           title="Lay inherited connections out as a graph"
           onClick={() => {
             clearError();
@@ -4568,7 +4916,7 @@ export function DiagramEditor() {
                 close();
               }}
               aria-label={template.label}
-              className="flex w-16 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+              className="flex w-16 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
             >
               <TemplateIcon aria-hidden="true" size={14} className="shrink-0" />
               {template.label}
@@ -4600,6 +4948,11 @@ export function DiagramEditor() {
     if (bounds.width <= 0 || bounds.height <= 0) return;
     const next = bounds.width / bounds.height;
     setCanvasAspect((current) => (Math.abs(current - next) < 1e-3 ? current : next));
+    setCanvasPixels((current) =>
+      Math.abs(current.width - bounds.width) < 0.5 && Math.abs(current.height - bounds.height) < 0.5
+        ? current
+        : { width: bounds.width, height: bounds.height },
+    );
   }, []);
 
   useEffect(() => {
@@ -4611,6 +4964,12 @@ export function DiagramEditor() {
       if (bounds.width <= 0 || bounds.height <= 0) return;
       const next = bounds.width / bounds.height;
       setCanvasAspect((current) => (Math.abs(current - next) < 1e-3 ? current : next));
+      setCanvasPixels((current) =>
+        Math.abs(current.width - bounds.width) < 0.5 &&
+        Math.abs(current.height - bounds.height) < 0.5
+          ? current
+          : { width: bounds.width, height: bounds.height },
+      );
     };
 
     // The window is the other way the surface changes shape, and the one an
@@ -4658,7 +5017,6 @@ export function DiagramEditor() {
     if (!canvasHasContent) return;
     clearError();
     cancelPlacement();
-    cancelConnection();
     clearAllSelection();
     setPendingContainerDelete(null);
     setEditingNodeId(null);
@@ -4671,12 +5029,15 @@ export function DiagramEditor() {
   function cancelPlacement() {
     setPendingTable(null);
     setPendingTemplate(null);
+    setPaletteDrag(null);
     setGhostCursor(null);
     // The offer at an arrow's loose end is something being carried too. It
     // pointed at one arrow, so anything that puts work down has to put it down
     // as well — otherwise it hangs on the canvas naming an element that may
     // already be gone, swallowing presses where it sits.
     setShapePicker(null);
+    setExtendPicker(null);
+    extendPressRef.current = null;
     // A half-dragged shape is being carried too, and Escape puts down whatever
     // is being carried — without placing it.
     shapeDraftRef.current = null;
@@ -4687,6 +5048,7 @@ export function DiagramEditor() {
     arrowPressRef.current = null;
     setCanvasTool('select');
   }
+  cancelPlacementRef.current = cancelPlacement;
 
   function setArrowDraft(next: ArrowDraft | null) {
     arrowDraftRef.current = next;
@@ -4727,13 +5089,16 @@ export function DiagramEditor() {
    * the only one anybody wants. Select is one press away when it is time to
    * move something.
    */
-  function placeArrow(draft: ArrowDraft) {
-    const arrow = finishArrow(
-      draft,
-      { strokeColor: pathColor, strokeWidthPreset: pathWidth, strokeStyle: pathStyle },
-      travelSlop(),
-    );
-    if (!arrow) return false;
+  function placeArrow(
+    draft: ArrowDraft,
+    style: ArrowStyle = {
+      strokeColor: pathColor,
+      strokeWidthPreset: pathWidth,
+      strokeStyle: pathStyle,
+    },
+  ) {
+    const arrow = finishArrow(draft, style, travelSlop());
+    if (!arrow) return null;
 
     const graph = history.snapshotRef.current;
     history.commit({
@@ -4750,7 +5115,7 @@ export function DiagramEditor() {
     // Dropped on nothing: offer to put something there. The arrow stands on its
     // own either way — this is an offer, not a question that has to be answered.
     if (!arrow.to.elementId) setShapePicker({ arrowId: arrow.id, at: { ...arrow.to } });
-    return true;
+    return arrow;
   }
 
   /**
@@ -4776,7 +5141,7 @@ export function DiagramEditor() {
       return;
     }
 
-    const size = diagramNodeSize(shape);
+    const size = newNodeSize(shape);
     const placed = addNode(
       graph.nodes,
       shape,
@@ -4810,6 +5175,348 @@ export function DiagramEditor() {
     });
     setCanvasTool('select');
     selectOnly(placed.addedId);
+  }
+
+  /**
+   * A scene point in pixels within the canvas frame, for chrome drawn over the
+   * canvas in HTML rather than inside it.
+   */
+  function sceneToFramePoint(point: DiagramPoint): DiagramPoint {
+    const client = diagramRectToClientRect(
+      { x: point.x, y: point.y, width: 0, height: 0 },
+      surfaceBounds(),
+      renderedView,
+    );
+    const frame = canvasFrameRef.current?.getBoundingClientRect();
+    return { x: client.x - (frame?.left ?? 0), y: client.y - (frame?.top ?? 0) };
+  }
+
+  /** The canvas frame's size, which floating pickers are held inside. */
+  function frameSize() {
+    const frame = canvasFrameRef.current?.getBoundingClientRect();
+    return { width: frame?.width ?? 0, height: frame?.height ?? 0 };
+  }
+
+  /** The node the extend buttons belong to, when they should be showing. */
+  function extendSource(): DiagramNode | null {
+    if (!selectedNode || multiSelected || selectedNode.shape === 'text') return null;
+    if (canvasTool !== 'select' || editingNodeId || isSubmitting) return null;
+    return selectedNode;
+  }
+
+  /**
+   * Where each side's button sits, in pixels within the canvas frame.
+   *
+   * Outside the selection frame and past the resize band along it, so a press
+   * on the button never lands on the band and the band never hides under the
+   * button. Measured in pixels from the frame's edge, so the spacing is the
+   * same at every zoom; turned with the shape, so each button stays opposite
+   * its own side.
+   */
+  function extendHandlePositions(node: DiagramNode) {
+    const size = effectiveDiagramNodeSize(node);
+    const rotation = node.rotation ?? 0;
+    const centre = { x: node.x + size.width / 2, y: node.y + size.height / 2 };
+    const band = coarsePointer ? RESIZE_EDGE_COARSE_PX : RESIZE_EDGE_PX;
+    const offset = band / 2 + EXTEND_HANDLE_CLEARANCE_PX + EXTEND_HANDLE_RADIUS_PX;
+    return EXTEND_SIDES.map((side) => {
+      const normal = extendSideNormal(side, rotation);
+      const reach = (side === 'e' || side === 'w' ? size.width / 2 : size.height / 2) + frameOutset;
+      const onFrame = sceneToFramePoint({
+        x: centre.x + normal.x * reach,
+        y: centre.y + normal.y * reach,
+      });
+      return {
+        side,
+        x: onFrame.x + normal.x * offset,
+        y: onFrame.y + normal.y * offset,
+        angle: EXTEND_SIDE_ANGLE[side] + rotation,
+      };
+    });
+  }
+
+  /**
+   * Wakes the buttons the pointer is near.
+   *
+   * Written straight onto the buttons rather than through state: this runs on
+   * every pointer move over the canvas, and re-rendering the whole editor that
+   * often to fade a dot in would be the most expensive thing on the page.
+   */
+  function updateExtendProximity(clientX: number | null, clientY: number | null) {
+    for (const button of extendHandleRefs.current.values()) {
+      if (clientX === null || clientY === null) {
+        delete button.dataset.near;
+        continue;
+      }
+      const box = button.getBoundingClientRect();
+      const near =
+        Math.hypot(clientX - (box.left + box.width / 2), clientY - (box.top + box.height / 2)) <=
+        EXTEND_NEAR_PX;
+      if (near) button.dataset.near = 'true';
+      else delete button.dataset.near;
+    }
+  }
+
+  function onExtendPointerDown(
+    event: PointerEvent<HTMLButtonElement>,
+    node: DiagramNode,
+    side: ExtendSide,
+  ) {
+    if (event.button !== 0 || isSubmitting) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.focus({ preventScroll: true });
+    lastNodePressRef.current = null;
+    setExtendPicker(null);
+    extendPressRef.current = {
+      pointerId: event.pointerId,
+      sourceId: node.id,
+      side,
+      startClient: { x: event.clientX, y: event.clientY },
+      dragging: false,
+    };
+    // The canvas takes the rest of the gesture, as it does for every drag: the
+    // pointer will leave this small button long before it is let go.
+    canvas.setPointerCapture(event.pointerId);
+  }
+
+  /**
+   * A press on an extend button that travels becomes an arrow being drawn out
+   * of the shape: it binds to whatever it is let go over, exactly as the arrow
+   * tool does, and let go over nothing it offers a shape to end on.
+   */
+  function updateExtendPress(event: PointerEvent<SVGSVGElement>): boolean {
+    const press = extendPressRef.current;
+    if (!press || press.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    const point = surfacePoint(event);
+    if (!press.dragging) {
+      const travelled = Math.hypot(
+        event.clientX - press.startClient.x,
+        event.clientY - press.startClient.y,
+      );
+      if (travelled < POINTER_TRAVEL_SLOP) return true;
+      const source = history.snapshotRef.current.nodes.find((node) => node.id === press.sourceId);
+      if (!source) {
+        extendPressRef.current = null;
+        return true;
+      }
+      press.dragging = true;
+      const size = effectiveDiagramNodeSize(source);
+      setArrowDraft({
+        // Aimed at the centre, like a connection between two shapes, so it
+        // leaves from whichever face the far end ends up on.
+        from: { x: source.x + size.width / 2, y: source.y + size.height / 2, elementId: source.id },
+        to: arrowEndpointFor(point),
+        // Square, like every arrow grown out of a shape.
+        route: 'elbow',
+      });
+      return true;
+    }
+    const draft = arrowDraftRef.current;
+    if (draft) setArrowDraft({ ...draft, to: arrowEndpointFor(point) });
+    setArrowSnap(snapArrowPoint(point, arrowTargetMap.values(), arrowSnapTolerance()));
+    return true;
+  }
+
+  function endExtendPress(event: PointerEvent<SVGSVGElement>): boolean {
+    const press = extendPressRef.current;
+    if (!press || press.pointerId !== event.pointerId) return false;
+    extendPressRef.current = null;
+    releaseCapture(event);
+
+    // A click: offer the shapes to add on that side.
+    if (!press.dragging) {
+      setExtendPicker({ sourceId: press.sourceId, side: press.side });
+      return true;
+    }
+
+    const draft = arrowDraftRef.current;
+    setArrowSnap(null);
+    if (!draft) return true;
+    const to = arrowEndpointFor(surfacePoint(event));
+    // Dragged out and back onto the shape it came from: a loop, leaving from
+    // the side whose button was pulled and going round the shape to where it
+    // was let go. Aimed at the centre, the start would have no face to leave by.
+    const from =
+      to.elementId === press.sourceId
+        ? { ...draft.from, at: EXTEND_SIDE_ATTACH[press.side] }
+        : draft.from;
+    // Plain, like a connection made any other way: the pen's colours belong to
+    // lines drawn with the pen.
+    const placed = placeArrow({ ...draft, from, to }, {});
+    if (!placed) setArrowDraft(null);
+    // Joined to something, it is the thing just made, so it is what is selected
+    // — ready to be labelled or restyled. Left pointing at nothing, the offer at
+    // its loose end is what matters next, and the selection stays clear for it.
+    else if (placed.to.elementId) {
+      applySelection({ ...EMPTY_STUDIO_SELECTION, arrowIds: [placed.id] });
+    }
+    return true;
+  }
+
+  /** Puts the chosen shape beside the source, joined to it, as one step. */
+  function extendWith(shape: DiagramNodeShape) {
+    const request = extendPicker;
+    if (!request || isSubmitting) return;
+    const graph = history.snapshotRef.current;
+    const source = graph.nodes.find((node) => node.id === request.sourceId);
+    if (!source) {
+      setExtendPicker(null);
+      return;
+    }
+    if (graph.nodes.length >= DIAGRAM_NODE_LIMIT) {
+      // The picker stays up so the limit can be read.
+      setValidationError(`A diagram can hold ${DIAGRAM_NODE_LIMIT} elements at most.`);
+      return;
+    }
+
+    clearError();
+    const { node, arrow } = planExtension(graph.nodes, source, request.side, shape, {
+      nodeId: createNodeId(graph.nodes),
+      arrowId: createArrowId(),
+    });
+    const nodes = [...graph.nodes, node];
+    const arrows = [...(graph.arrows ?? []), arrow];
+    const withNode = paintOrderWithNewestOnTop({ ...graph, nodes }, node.id);
+    const order = paintOrderWithNewestOnTop(
+      { ...graph, nodes, arrows, ...(withNode ? { z: withNode } : {}) },
+      arrow.id,
+    );
+    history.commit({ nodes, edges: graph.edges, arrows, ...(order ? { z: order } : {}) });
+    setExtendPicker(null);
+    setCanvasTool('select');
+    // The new shape, so the next step in the flow is one more click away.
+    selectOnly(node.id);
+    canvasRef.current?.focus({ preventScroll: true });
+  }
+
+  /**
+   * The four buttons that grow the diagram from the selected shape.
+   *
+   * Quiet until the pointer comes near — a dot, not four buttons, round every
+   * shape that is selected — then an arrow pointing the way the new shape will
+   * go, and lit under the pointer. Real buttons, so Tab reaches them and Enter
+   * opens the same picker a click does.
+   */
+  function renderExtendHandles() {
+    const source = extendSource();
+    if (!source) return null;
+    // Positioned directly and centred on their point by transform. Wrapped in
+    // anything inline — a tooltip's span was — each one sat on a text baseline
+    // and was pushed down, so the bottom button was further out than the top
+    // and the side ones sat below the middle of their side.
+    return extendHandlePositions(source).map(({ side, x, y, angle }) => (
+      <button
+        key={side}
+        type="button"
+        ref={(element) => {
+          if (element) extendHandleRefs.current.set(side, element);
+          else extendHandleRefs.current.delete(side);
+        }}
+        data-testid="connection-handle"
+        aria-label={`Add a connected shape ${EXTEND_SIDE_LABELS[side]}`}
+        aria-haspopup="true"
+        aria-expanded={extendPicker?.side === side}
+        data-open={extendPicker?.side === side ? 'true' : undefined}
+        className={`rt-extend-handle absolute ${STUDIO_LAYER.chrome}`}
+        style={{ left: x, top: y }}
+        onPointerDown={(event) => onExtendPointerDown(event, source, side)}
+        onClick={(event) => {
+          // A pointer's click is handled on release, by the canvas, which has
+          // the gesture by then. This is the keyboard's Enter or Space.
+          if (event.detail !== 0) return;
+          setExtendPicker({ sourceId: source.id, side });
+        }}
+      >
+        <span aria-hidden="true" className="rt-extend-dot" />
+        <span aria-hidden="true" className="rt-extend-face">
+          <ArrowRight size={13} strokeWidth={2.25} style={{ transform: `rotate(${angle}deg)` }} />
+        </span>
+      </button>
+    ));
+  }
+
+  function renderExtendPicker() {
+    if (!extendPicker) return null;
+    const source = selectedNodeById(nodes, extendPicker.sourceId);
+    if (!source) return null;
+    const handle = extendHandlePositions(source).find(({ side }) => side === extendPicker.side);
+    if (!handle) return null;
+    // Opens on whichever side of the button faces away from the shape, as the
+    // shape is turned on screen.
+    const normal = extendSideNormal(extendPicker.side, source.rotation ?? 0);
+    const opens: ShapePickerSide =
+      Math.abs(normal.x) >= Math.abs(normal.y)
+        ? normal.x > 0
+          ? 'e'
+          : 'w'
+        : normal.y > 0
+          ? 's'
+          : 'n';
+    return (
+      <StudioShapePicker
+        key={`${source.id}-${extendPicker.side}`}
+        label="Add a connected shape"
+        testId="extend-shape-picker"
+        anchor={{ x: handle.x, y: handle.y }}
+        side={opens}
+        container={frameSize()}
+        shapes={extendShapeChoices(source.shape ?? 'box')}
+        nameFor={(shape) =>
+          shape === source.shape
+            ? `Connect another ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`
+            : `Connect a ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`
+        }
+        tooltipFor={(shape) =>
+          shape === source.shape
+            ? `Another ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`
+            : DIAGRAM_SHAPE_LABELS[shape]
+        }
+        renderIcon={(shape) => <ShapeThumbnail shape={shape} />}
+        tileClassName={TILE_BUTTON}
+        disabled={showSubmitting}
+        autoFocus
+        onPick={extendWith}
+        onDismiss={() => {
+          setExtendPicker(null);
+          // Focus was taken into the picker; give it back to the canvas so the
+          // tool keys and arrows work again straight away. A press elsewhere
+          // that closed it moves focus on its own afterwards.
+          canvasRef.current?.focus({ preventScroll: true });
+        }}
+      />
+    );
+  }
+
+  /**
+   * Offered at the loose end of an arrow that points at nothing. Hung below the
+   * end in HTML, so it is the same size at every zoom and follows the end as
+   * the canvas pans.
+   */
+  function renderArrowEndPicker() {
+    if (!shapePicker) return null;
+    const anchor = sceneToFramePoint(shapePicker.at);
+    return (
+      <StudioShapePicker
+        label="Add a shape at the end of this arrow"
+        testId="arrow-shape-picker"
+        anchor={anchor}
+        side="s"
+        container={frameSize()}
+        shapes={DIAGRAM_NODE_SHAPES.filter((shape) => shape !== 'container')}
+        nameFor={(shape) => `End with ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
+        tooltipFor={(shape) => DIAGRAM_SHAPE_LABELS[shape]}
+        renderIcon={(shape) => <ShapeThumbnail shape={shape} />}
+        tileClassName={TILE_BUTTON}
+        disabled={showSubmitting}
+        dismissLabel="Leave this arrow pointing at nothing"
+        onPick={attachShapeToArrowEnd}
+        onDismiss={() => setShapePicker(null)}
+      />
+    );
   }
 
   function surfaceBounds() {
@@ -4913,42 +5620,6 @@ export function DiagramEditor() {
 
     if (event.button !== 0) return;
 
-    if (connectionMode) {
-      // Pressing empty canvas used to do nothing at all, which is what made a
-      // connection need a second shape to exist first. It now lands the arrow
-      // where it was pressed and offers to put a shape there.
-      const source = history.snapshotRef.current.nodes.find(
-        (candidate) => candidate.id === connectionSourceId,
-      );
-      if (source) {
-        event.preventDefault();
-        const point = surfacePoint(event);
-        const size = effectiveDiagramNodeSize(source);
-        const graph = history.snapshotRef.current;
-        const arrow: ArrowElement = {
-          id: createArrowId(),
-          from: {
-            x: source.x + size.width / 2,
-            y: source.y + size.height / 2,
-            elementId: source.id,
-          },
-          to: { x: point.x, y: point.y },
-        };
-        history.commit({
-          nodes: graph.nodes,
-          edges: graph.edges,
-          arrows: [...(graph.arrows ?? []), arrow],
-          ...((order) => (order ? { z: order } : {}))(paintOrderWithNewestOnTop(graph, arrow.id)),
-        });
-        cancelConnection();
-        setShapePicker({ arrowId: arrow.id, at: point });
-        return;
-      }
-      setSelectedIds([]);
-      setSelectedEdgeKey(null);
-      return;
-    }
-
     if (canvasTool === 'arrow') {
       event.preventDefault();
       clearAllSelection();
@@ -4968,14 +5639,7 @@ export function DiagramEditor() {
       return;
     }
 
-    if (canvasTool === 'text') {
-      event.preventDefault();
-      clearAllSelection();
-      placeTextElement(surfacePoint(event));
-      return;
-    }
-
-    if (canvasTool === 'shape') {
+    if (canvasTool === 'shape' || canvasTool === 'text') {
       // Nothing is placed yet: the press opens a drag-out, and the release
       // decides whether that was a size or just a click.
       event.preventDefault();
@@ -4992,7 +5656,7 @@ export function DiagramEditor() {
       // Arming the tool is not enough — a press only lands a table once a size
       // has been picked up, so a stray click on the canvas does nothing.
       if (!pendingTable) return;
-      clearTableSelection();
+      clearAllSelection();
       event.preventDefault();
       const size = emptyTableSize(pendingTable);
       placeTable(centredOnCursor(surfacePoint(event), size), pendingTable.rows, pendingTable.cols);
@@ -5097,7 +5761,9 @@ export function DiagramEditor() {
   }
 
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
+    updateExtendProximity(event.clientX, event.clientY);
     if (updateArrowEdit(event)) return;
+    if (updateExtendPress(event)) return;
 
     if (canvasTool === 'arrow') {
       const point = surfacePoint(event);
@@ -5174,7 +5840,6 @@ export function DiagramEditor() {
       return;
     }
 
-    if (connectionMode) setConnectionPointer(surfacePoint(event));
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -5272,6 +5937,7 @@ export function DiagramEditor() {
 
   function onCanvasPointerUp(event: PointerEvent<SVGSVGElement>) {
     if (endArrowEdit(event)) return;
+    if (endExtendPress(event)) return;
 
     const arrowPress = arrowPressRef.current;
     if (arrowPress && arrowPress.pointerId === event.pointerId) {
@@ -5325,6 +5991,13 @@ export function DiagramEditor() {
   }
 
   function onLostPointerCapture(event: PointerEvent<SVGSVGElement>) {
+    // An arrow being drawn out of a shape is dropped, not placed: the release
+    // is what says where it ends, and there was none.
+    if (extendPressRef.current?.pointerId === event.pointerId) {
+      extendPressRef.current = null;
+      setArrowDraft(null);
+      setArrowSnap(null);
+    }
     if (panRef.current?.pointerId === event.pointerId) {
       panRef.current = null;
       setIsPanning(false);
@@ -5376,7 +6049,7 @@ export function DiagramEditor() {
     }
     const resize = resizeRef.current;
     if (resize?.pointerId === event.pointerId) {
-      history.recordPreview(resize.previous);
+      if (resize.moved) history.recordPreview(resize.previous);
       resizeRef.current = null;
     }
     if (marqueeRef.current?.pointerId === event.pointerId) {
@@ -5391,20 +6064,34 @@ export function DiagramEditor() {
     }
   }
 
+  function endPaletteDrag() {
+    setPaletteDrag(null);
+    setGhostCursor(null);
+  }
+
   function onCanvasDragOver(event: DragEvent<SVGSVGElement>) {
     if (isSubmitting) return;
     if (!event.dataTransfer?.types?.includes(DIAGRAM_SHAPE_MEDIA_TYPE)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
+    if (paletteDrag) setGhostCursor(surfacePoint(event));
+  }
+
+  function onCanvasDragLeave(event: DragEvent<SVGSVGElement>) {
+    // Leaving for one of the canvas's own children is still over the canvas.
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget.contains(next)) return;
+    if (paletteDrag) setGhostCursor(null);
   }
 
   function onCanvasDrop(event: DragEvent<SVGSVGElement>) {
     if (isSubmitting) return;
     const shape = event.dataTransfer?.getData(DIAGRAM_SHAPE_MEDIA_TYPE) as DiagramNodeShape | '';
+    endPaletteDrag();
     if (!shape || !DIAGRAM_NODE_SHAPES.includes(shape)) return;
     event.preventDefault();
     const point = surfacePoint(event);
-    const size = diagramNodeSize(shape);
+    const size = newNodeSize(shape);
     addElement(
       shape,
       { x: point.x - size.width / 2, y: point.y - size.height / 2 },
@@ -5532,6 +6219,15 @@ export function DiagramEditor() {
     if (shortcutTool) {
       event.preventDefault();
       if (shortcutTool === 'shape') setPendingShape('box');
+      // G picks up a table the size last chosen in its menu (3x3 at first), the
+      // way R picks up a box. Arming the tool alone left the rail lit with
+      // nothing to preview and presses that did nothing, and the size menu is
+      // on the rail, out of reach of the key. The button still arms without a
+      // size, so a click meant to deselect never drops a table.
+      if (shortcutTool === 'table') {
+        pickUpTable(tableRows, tableCols);
+        return;
+      }
       selectCanvasTool(shortcutTool);
       return;
     }
@@ -5726,13 +6422,6 @@ export function DiagramEditor() {
       return;
     }
 
-    if (event.key === 'Escape' && connectionMode) {
-      event.preventDefault();
-      event.stopPropagation();
-      cancelConnection();
-      return;
-    }
-
     const target = event.target;
     const isTextInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
     const withModifier = event.ctrlKey || event.metaKey;
@@ -5807,7 +6496,6 @@ export function DiagramEditor() {
     if (tableResizeRef.current) return 'Finish resizing the table before proposing.';
     if (shapeDraftRef.current) return 'Finish drawing the shape before proposing.';
     if (inkPointerRef.current !== null) return 'Finish the stroke before proposing.';
-    if (connectionMode) return 'Finish or cancel the arrow before proposing.';
     // Uncommitted work, rather than a half-applied change: proposing over it
     // would drop it without saying so, which a submit must never do.
     if (arrowDraftRef.current) return 'Finish the arrow with Esc before proposing.';
@@ -5868,11 +6556,21 @@ export function DiagramEditor() {
   const barSurface = surfaceBounds();
   const barFrame = canvasFrameRef.current?.getBoundingClientRect();
   const propertiesBar =
-    barTargets.length > 0 && barSelectionRect && canvasTool === 'select' && !editingNodeId ? (
+    // Not while the extend picker is open. It hangs on the same side of the
+    // shape the bar does, and the choice it offers is short: the bar steps away
+    // for it and comes back, for the new shape, the moment it is answered.
+    barTargets.length > 0 &&
+    barSelectionRect &&
+    canvasTool === 'select' &&
+    !editingNodeId &&
+    !extendPicker ? (
       <StudioPropertiesBar
         properties={barProperties}
         renderControl={renderPropertyControl}
         selection={barSelectionRect}
+        // Clear of the extend buttons too, which sit outside the frame in
+        // pixels, so the bar and the top button never overlap at any zoom.
+        selectionPadding={extendSource() ? EXTEND_HANDLE_REACH_PX : 0}
         viewport={{
           x: barSurface.left,
           y: barSurface.top,
@@ -5928,20 +6626,6 @@ export function DiagramEditor() {
                 </button>
               </Tooltip>
             ) : null}
-            {selectedNode && selectedIds.length === 1 ? (
-              <Tooltip label="Connect" placement="bottom">
-                <button
-                  type="button"
-                  aria-label="Connect"
-                  aria-pressed={connectionMode}
-                  disabled={showSubmitting}
-                  onClick={() => (connectionMode ? cancelConnection() : startConnection())}
-                  className={`${BAR_CONTROL} ${connectionMode ? 'bg-rt-primary-tint text-rt-ink' : ''}`}
-                >
-                  <Link2 aria-hidden="true" size={15} />
-                </button>
-              </Tooltip>
-            ) : null}
             <Tooltip label="Bring selection to front" placement="bottom">
               <button
                 type="button"
@@ -5980,15 +6664,29 @@ export function DiagramEditor() {
       />
     ) : null;
 
+  // Every tool that puts something down says so under the pointer. Only ink
+  // and the eraser used to, so with a shape or a pen armed the canvas looked
+  // exactly as it does in Select, and a press did something the cursor had not
+  // hinted at. A table or template shows it only once one is being carried —
+  // until then a press does nothing, and a crosshair would promise otherwise.
+  const placing =
+    canvasTool === 'shape' ||
+    canvasTool === 'pen' ||
+    canvasTool === 'line' ||
+    canvasTool === 'arrow' ||
+    (canvasTool === 'table' && pendingTable !== null) ||
+    (canvasTool === 'template' && pendingTemplate !== null);
   const canvasCursor = isPanning
     ? 'cursor-grabbing'
     : panReady
       ? 'cursor-grab'
-      : canvasTool === 'draw'
+      : canvasTool === 'draw' || placing
         ? 'cursor-crosshair'
-        : canvasTool === 'erase'
-          ? 'cursor-cell'
-          : 'cursor-default';
+        : canvasTool === 'text'
+          ? 'cursor-text'
+          : canvasTool === 'erase'
+            ? 'cursor-cell'
+            : 'cursor-default';
 
   function renderEdge(edge: DiagramEdge, index: number) {
     const from = nodes.find((node) => node.id === edge.from);
@@ -6011,7 +6709,6 @@ export function DiagramEditor() {
           event.stopPropagation();
           canvasRef.current?.focus();
           lastNodePressRef.current = null;
-          cancelConnection();
           // Every other kind goes too. This cleared only the nodes, so picking
           // an inherited edge left an arrow, a stroke, a path or a table still
           // lit up beside it — and a Delete would then take both. The edge key
@@ -6026,7 +6723,7 @@ export function DiagramEditor() {
         <path
           d={route.path}
           fill="none"
-          stroke={selected ? SELECTION_ACCENT : stroke}
+          stroke={selected ? STUDIO_ACCENT : stroke}
           strokeWidth={selected ? Math.max(3, strokeWidth + 1) : strokeWidth}
           markerEnd={`url(#${selected ? 'diagram-editor-arrow-selected' : edgeArrowId(stroke)})`}
           pointerEvents="none"
@@ -6063,7 +6760,6 @@ export function DiagramEditor() {
           if (canvasTool !== 'select' || event.button !== 0) return;
           event.stopPropagation();
           canvasRef.current?.focus();
-          cancelConnection();
           // A second press on an arrow already selected opens its label, the
           // same gesture that types into a shape.
           const press = {
@@ -6104,10 +6800,9 @@ export function DiagramEditor() {
           geometry={geometry}
           hideLabel={editingArrowId === arrow.id}
           {...(selected
-            ? { stroke: SELECTION_ACCENT, strokeWidth: Math.max(3, strokeWidth + 1) }
+            ? { stroke: STUDIO_ACCENT, strokeWidth: Math.max(3, strokeWidth + 1) }
             : {})}
         />
-        {selected && selectedArrowIds.length === 1 ? renderArrowHandles(arrow, geometry) : null}
         {selected && arrow.label && editingArrowId !== arrow.id ? (
           // A grab area over the label, so it can be slid along the line. Only
           // while the arrow is selected: otherwise it would swallow presses
@@ -6115,10 +6810,7 @@ export function DiagramEditor() {
           <rect
             role="button"
             aria-label="Move this arrow’s label along the line"
-            x={geometry.label.x - 26}
-            y={geometry.label.y - 9}
-            width={52}
-            height={18}
+            {...labelGrabBox(arrow, geometry.label)}
             fill="transparent"
             style={{ cursor: 'grab' }}
             onPointerDown={(event) => beginArrowEdit(event, arrow.id, 'label')}
@@ -6134,6 +6826,20 @@ export function DiagramEditor() {
         ) : null}
       </g>
     );
+  }
+
+  /**
+   * The area over an arrow's label that slides it along the line: the size the
+   * label is drawn at, lines and all, rather than a fixed patch that missed the
+   * ends of a long label and covered the line around a short one.
+   */
+  function labelGrabBox(arrow: ArrowElement, at: DiagramPoint) {
+    const fontSize = arrowFontSize(arrow);
+    const lines = arrowLabelLines(arrow.label ?? '');
+    const longest = Math.max(1, ...lines.map((line) => line.length));
+    const width = longest * fontSize * LABEL_GLYPH_ADVANCE + LABEL_GRAB_PADDING * 2;
+    const height = Math.max(1, lines.length) * fontSize * 1.2 + LABEL_GRAB_PADDING;
+    return { x: at.x - width / 2, y: at.y - height / 2, width, height };
   }
 
   /**
@@ -6153,21 +6859,45 @@ export function DiagramEditor() {
     const bendAt = arrowRoute(arrow) === 'elbow' ? elbowHandlePoint(arrow, arrowTargetsById) : null;
     if (bendAt) ends.push({ handle: 'bend', point: bendAt, label: 'Slide this arrow’s bend' });
 
+    // The same grip as every other point on the canvas, the same size at every
+    // zoom, with a wider ring round it that also takes the press.
     return ends.map(({ handle, point, label }) => (
-      <circle
+      <g
         key={handle}
-        role="button"
-        aria-label={label}
-        cx={point.x}
-        cy={point.y}
-        r={5}
-        fill="#FFFFFF"
-        stroke={SELECTION_ACCENT}
-        strokeWidth={2}
         style={{ cursor: 'grab' }}
         onPointerDown={(event) => beginArrowEdit(event, arrow.id, handle)}
-      />
+      >
+        <circle cx={point.x} cy={point.y} r={CHROME.pointReach * pixel} fill="transparent" />
+        <circle
+          role="button"
+          aria-label={label}
+          cx={point.x}
+          cy={point.y}
+          r={CHROME.pointRadius * pixel}
+          fill="#FFFFFF"
+          stroke={STUDIO_ACCENT}
+          strokeWidth={CHROME.gripStroke * pixel}
+        />
+      </g>
     ));
+  }
+
+  /**
+   * A single selected arrow's grips, drawn over everything else.
+   *
+   * They used to be drawn with the arrow, at its place in the paint order — so
+   * a shape painted later covered them, and the end handle sitting on a shape's
+   * outline was half hidden under the very shape it was attached to.
+   */
+  function renderSelectedArrowHandles() {
+    if (selectedArrowIds.length !== 1 || multiSelected || canvasTool !== 'select') return null;
+    const arrow = arrows.find((candidate) => candidate.id === selectedArrowIds[0]);
+    if (!arrow) return null;
+    return (
+      <g data-testid="arrow-handles">
+        {renderArrowHandles(arrow, arrowGeometry(arrow, arrowTargetsById))}
+      </g>
+    );
   }
 
   function renderPath(path: PathElement, key?: string, isDraft = false) {
@@ -6177,6 +6907,9 @@ export function DiagramEditor() {
     // rather than a local one — there is no translate underneath it to undo.
     const local = pathLocalBounds(path);
     const turn = local ? rotationTransform(local, path.rotation) : undefined;
+    // The frame goes round what the path paints, bulges and all; the turn above
+    // stays about the anchors, which is where a path has always pivoted.
+    const frame = pathFrameBounds(path);
 
     return (
       <g key={key ?? path.id} transform={turn}>
@@ -6253,9 +6986,9 @@ export function DiagramEditor() {
           <path
             d={pathSvgData(path)}
             fill="none"
-            stroke={SELECTION_ACCENT}
-            strokeWidth={Math.max(strokeWidth + 3, 5)}
-            strokeOpacity={0.28}
+            stroke={STUDIO_ACCENT}
+            strokeWidth={strokeWidth + SELECTION_HALO_GROW}
+            strokeOpacity={SELECTION_HALO_OPACITY}
             strokeLinecap="round"
             strokeLinejoin="round"
             pointerEvents="none"
@@ -6263,9 +6996,20 @@ export function DiagramEditor() {
         ) : null}
         {/* Not while the path is open for point editing: the anchors are the
             subject then, and a box round them is only clutter. */}
-        {selected && !pathEditing && local ? <SelectionFrame bounds={local} /> : null}
-        {selected && !pathEditing && local && selectionSize(currentSelection()) === 1
-          ? renderRotateZones('path', path.id, local)
+        {selected && !pathEditing && frame ? (
+          <SelectionFrame bounds={frame} pixel={pixel} member={multiSelected} />
+        ) : null}
+        {selected && !pathEditing && frame && selectionSize(currentSelection()) === 1
+          ? renderRotateZones('path', path.id, frame)
+          : null}
+        {/* Not while its points are open for editing: then a press near the
+            frame is aimed at an anchor or a handle, not at the whole path. */}
+        {selected &&
+        !pathEditing &&
+        frame &&
+        selectionSize(currentSelection()) === 1 &&
+        canvasTool === 'select'
+          ? renderResizeChrome('path', path.id, frame, { rotation: path.rotation ?? 0 })
           : null}
         {selected && pathEditing
           ? path.anchors.map((anchor, index) => (
@@ -6280,8 +7024,8 @@ export function DiagramEditor() {
                         y1={anchor.y}
                         x2={handle.x}
                         y2={handle.y}
-                        stroke={SELECTION_ACCENT}
-                        strokeWidth={1}
+                        stroke={STUDIO_ACCENT}
+                        strokeWidth={CHROME.handleLine * pixel}
                         pointerEvents="none"
                       />
                       <circle
@@ -6289,7 +7033,7 @@ export function DiagramEditor() {
                         aria-label={`Curve handle ${side} of point ${index + 1}`}
                         cx={handle.x}
                         cy={handle.y}
-                        r={9}
+                        r={CHROME.pointReach * pixel}
                         fill="transparent"
                         className="cursor-grab"
                         onPointerDown={(event) => beginPathEdit(event, path, index, side)}
@@ -6297,8 +7041,8 @@ export function DiagramEditor() {
                       <circle
                         cx={handle.x}
                         cy={handle.y}
-                        r={3}
-                        fill={SELECTION_ACCENT}
+                        r={CHROME.handleDot * pixel}
+                        fill={STUDIO_ACCENT}
                         pointerEvents="none"
                       />
                     </g>
@@ -6309,7 +7053,7 @@ export function DiagramEditor() {
                   aria-label={`Point ${index + 1} of ${path.anchors.length}`}
                   cx={anchor.x}
                   cy={anchor.y}
-                  r={9}
+                  r={CHROME.pointReach * pixel}
                   fill="transparent"
                   className="cursor-move"
                   onPointerDown={(event) => {
@@ -6336,10 +7080,10 @@ export function DiagramEditor() {
                 <circle
                   cx={anchor.x}
                   cy={anchor.y}
-                  r={4}
-                  fill={selectedAnchor === index ? SELECTION_ACCENT : '#FFFFFF'}
-                  stroke={SELECTION_ACCENT}
-                  strokeWidth={1.5}
+                  r={CHROME.pointRadius * pixel}
+                  fill={selectedAnchor === index ? STUDIO_ACCENT : '#FFFFFF'}
+                  stroke={STUDIO_ACCENT}
+                  strokeWidth={CHROME.gripStroke * pixel}
                   pointerEvents="none"
                 />
               </g>
@@ -6399,7 +7143,7 @@ export function DiagramEditor() {
                   y={y}
                   width={width}
                   height={height}
-                  fill="rgba(224,163,60,0.16)"
+                  fill={STUDIO_ACCENT_WASH}
                   pointerEvents="none"
                 />
               ) : null}
@@ -6582,14 +7326,25 @@ export function DiagramEditor() {
 
         {selected ? (
           <>
-            {/* The same frame every other kind shows, but no rotate grip and no
-                corner handles: a turned table's cells would no longer line up
-                with the rows and columns people read them by, and its own
-                column and row grips already resize it from the inside. */}
+            {/* The same frame every other kind shows, but no rotate grip: a
+                turned table's cells would no longer line up with the rows and
+                columns people read them by. It sits outside the strip where
+                rows and columns are added and removed, so pulling the frame and
+                adding a row are never the same press. */}
             <SelectionFrame
               bounds={{ x: 0, y: 0, width: size.width, height: size.height }}
-              inset={1}
+              pixel={pixel}
+              inset={tableFrameOutset}
+              member={multiSelected}
             />
+            {!multiSelected && canvasTool === 'select'
+              ? renderResizeChrome(
+                  'table',
+                  table.id,
+                  { x: 0, y: 0, width: size.width, height: size.height },
+                  { outset: tableFrameOutset },
+                )
+              : null}
             {/* Resizing is an inside-the-table gesture, like editing a cell. */}
             {tableEditing
               ? table.colWidths.map((_, col) => (
@@ -6720,7 +7475,7 @@ export function DiagramEditor() {
                 cx={badge.x}
                 cy={badge.y}
                 r={7}
-                fill={action === 'insert' ? SELECTION_ACCENT : '#8A5B14'}
+                fill={action === 'insert' ? STUDIO_ACCENT : STUDIO_ACCENT_DEEP}
                 pointerEvents="none"
               />
               <path
@@ -6823,9 +7578,9 @@ export function DiagramEditor() {
           <path
             d={strokePathData(stroke.points)}
             fill="none"
-            stroke={SELECTION_ACCENT}
-            strokeWidth={inkStrokeWidth(stroke) + 5}
-            strokeOpacity={0.3}
+            stroke={STUDIO_ACCENT}
+            strokeWidth={inkStrokeWidth(stroke) + SELECTION_HALO_GROW}
+            strokeOpacity={SELECTION_HALO_OPACITY}
             strokeLinecap="round"
             strokeLinejoin="round"
             pointerEvents="none"
@@ -6833,7 +7588,9 @@ export function DiagramEditor() {
         ) : null}
         {/* The halo says which mark is selected when several overlap; the frame
             gives it the same box, and the same grip, as every other kind. */}
-        {selected && local ? <SelectionFrame bounds={local} /> : null}
+        {selected && local ? (
+          <SelectionFrame bounds={local} pixel={pixel} member={multiSelected} />
+        ) : null}
         {selected && local && selectionSize(currentSelection()) === 1
           ? renderRotateZones('ink', stroke.id, local)
           : null}
@@ -6873,6 +7630,9 @@ export function DiagramEditor() {
             }}
           />
         ) : null}
+        {selected && local && selectionSize(currentSelection()) === 1 && canvasTool === 'select'
+          ? renderResizeChrome('ink', stroke.id, local, { rotation: stroke.rotation ?? 0 })
+          : null}
       </g>
     );
   }
@@ -6890,10 +7650,9 @@ export function DiagramEditor() {
       label: hasLabel ? node.label : NODE_LABEL_PLACEHOLDER,
     });
     const selected = selectedIds.includes(node.id);
-    const isOnlySelection = selectedId === node.id;
-    const isConnectionSource = connectionSourceId === node.id;
-    const isConnectionTarget =
-      connectionMode && hoveredTargetId === node.id && connectionSourceId !== node.id;
+    // The only thing selected, of any kind: with more, the group's frame is the
+    // one that resizes, and each member's own grips would compete with it.
+    const isOnlySelection = selectedId === node.id && !multiSelected;
     const isEditing = editingNodeId === node.id;
     // The editor is as tall as the text in it, even when that is taller than
     // the shape. A `foreignObject` clips, and the field inside it does not
@@ -6914,58 +7673,25 @@ export function DiagramEditor() {
         aria-pressed={selected}
         tabIndex={-1}
         transform={placementTransform(node.x, node.y, size, node.rotation)}
-        className={connectionMode ? 'cursor-crosshair' : 'cursor-move'}
+        // With a tool armed a press here belongs to the tool, so the canvas's
+        // cursor shows through rather than promising a move.
+        className={canvasTool === 'select' ? 'cursor-move' : undefined}
         onPointerDown={(event) => onNodePointerDown(event, node)}
-        onPointerEnter={() => {
-          if (connectionMode && connectionSourceId !== node.id) setHoveredTargetId(node.id);
-        }}
-        onPointerLeave={() => {
-          if (hoveredTargetId === node.id) setHoveredTargetId(null);
-        }}
         onDoubleClick={() => beginInlineNodeEdit(node)}
       >
         {selected ? (
           <SelectionFrame
             bounds={{ x: 0, y: 0, width: size.width, height: size.height }}
-            accent={isConnectionSource ? '#4D6A74' : SELECTION_ACCENT}
-          />
-        ) : null}
-        {isConnectionSource && !selected ? (
-          <rect
-            x={-5}
-            y={-5}
-            width={size.width + 10}
-            height={size.height + 10}
-            rx={7}
-            fill="none"
-            stroke="#4D6A74"
-            strokeWidth={2}
-            strokeDasharray="4 3"
+            pixel={pixel}
+            member={multiSelected}
           />
         ) : null}
         {dropTargetId === node.id ? (
-          <rect
-            data-testid="container-drop-target"
-            x={-3}
-            y={-3}
-            width={size.width + 6}
-            height={size.height + 6}
-            rx={5}
-            fill="none"
-            stroke="#4D6A74"
-            strokeWidth={2.5}
-          />
-        ) : null}
-        {isConnectionTarget ? (
-          <rect
-            x={-7}
-            y={-7}
-            width={size.width + 14}
-            height={size.height + 14}
-            rx={9}
-            fill="none"
-            stroke="#E0A33C"
-            strokeWidth={3}
+          <SelectionFrame
+            bounds={{ x: 0, y: 0, width: size.width, height: size.height }}
+            pixel={pixel}
+            target
+            testId="container-drop-target"
           />
         ) : null}
         <DiagramShapeOutline
@@ -7059,39 +7785,6 @@ export function DiagramEditor() {
             ))}
           </text>
         )}
-        {isOnlySelection && !connectionMode && !isEditing ? (
-          <g aria-hidden="true" className="cursor-crosshair">
-            {[
-              [size.width / 2, 0],
-              [size.width, size.height / 2],
-              [size.width / 2, size.height],
-              [0, size.height / 2],
-            ].map(([x, y]) => (
-              <g
-                key={`${x}-${y}`}
-                data-testid="connection-handle"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  canvasRef.current?.focus({ preventScroll: true });
-                  lastNodePressRef.current = null;
-                  startConnection(node.id);
-                }}
-              >
-                <circle cx={x} cy={y} r={14} fill="transparent" />
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={6}
-                  fill="#FFFFFF"
-                  stroke="#4D6A74"
-                  strokeWidth={2}
-                  pointerEvents="none"
-                />
-              </g>
-            ))}
-          </g>
-        ) : null}
         {/* A container does not turn, for the same reason a table does not: it
             is a group, and turning the frame without the shapes inside it reads
             as broken rather than as rotated. Turning them with it is a much
@@ -7099,7 +7792,7 @@ export function DiagramEditor() {
             and not one this offers. Leaving it out also means the drop test and
             the inside-the-container clamp keep the axis-aligned box they both
             assume. */}
-        {isOnlySelection && !connectionMode && !isEditing && !diagramCanParent(node.shape)
+        {isOnlySelection && !isEditing && !diagramCanParent(node.shape)
           ? renderRotateZones('node', node.id, {
               x: 0,
               y: 0,
@@ -7107,36 +7800,13 @@ export function DiagramEditor() {
               height: size.height,
             })
           : null}
-        {isOnlySelection && !connectionMode && !isEditing
-          ? RESIZE_CORNERS.map(({ corner, label, cursor }) => {
-              // Sit on the selection outline so the corners stay clear of
-              // the connection handles on the node's own edge midpoints.
-              const x = corner === 'nw' || corner === 'sw' ? -5 : size.width + 5;
-              const y = corner === 'nw' || corner === 'ne' ? -5 : size.height + 5;
-              return (
-                <g
-                  key={corner}
-                  role="button"
-                  aria-label={label}
-                  tabIndex={-1}
-                  data-testid={`resize-handle-${corner}`}
-                  style={{ cursor }}
-                  onPointerDown={(event) => onResizePointerDown(event, node, corner)}
-                >
-                  <circle cx={x} cy={y} r={10} fill="transparent" />
-                  <rect
-                    x={x - 3.5}
-                    y={y - 3.5}
-                    width={7}
-                    height={7}
-                    fill="#FFFFFF"
-                    stroke={SELECTION_ACCENT}
-                    strokeWidth={2}
-                    pointerEvents="none"
-                  />
-                </g>
-              );
-            })
+        {isOnlySelection && !isEditing
+          ? renderResizeChrome(
+              'node',
+              node.id,
+              { x: 0, y: 0, width: size.width, height: size.height },
+              { rotation: node.rotation ?? 0, widthOnly: node.shape === 'text' },
+            )
           : null}
       </g>
     );
@@ -7162,7 +7832,7 @@ export function DiagramEditor() {
         {extensionSource ? (
           <div
             role="status"
-            className="rt-studio-rise pointer-events-none absolute top-3 left-1/2 z-20 flex max-w-[min(88%,28rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-rt-secondary bg-rt-surface px-3.5 py-1.5 text-[12px] text-rt-secondary-deep shadow-[0_4px_18px_rgba(8,12,21,0.12)] sm:top-4"
+            className="rt-studio-rise pointer-events-none absolute top-3 left-1/2 z-20 flex max-w-[min(88%,28rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-rt-secondary bg-rt-surface px-3.5 py-1.5 text-[12px] text-rt-secondary-deep shadow-[0_6px_24px_rgba(8,12,21,0.14)] sm:top-4"
           >
             <GitBranch aria-hidden="true" size={13} className="shrink-0 text-rt-secondary" />
             <span className="min-w-0">
@@ -7185,18 +7855,9 @@ export function DiagramEditor() {
 
         {containerAwaitingDelete ? renderContainerDeletePrompt() : null}
 
-        {connectionMode ? (
-          <p
-            role="status"
-            className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-rt-secondary bg-rt-secondary-wash px-3 py-1.5 text-[12px] text-rt-secondary-deep"
-          >
-            {connectionSourceId
-              ? `Choose a destination for ${
-                  selectedNodeById(nodes, connectionSourceId)?.label || 'this element'
-                }.`
-              : 'Choose the element the arrow starts from.'}
-          </p>
-        ) : null}
+        {renderExtendHandles()}
+        {renderExtendPicker()}
+        {renderArrowEndPicker()}
 
         {propertiesBar}
 
@@ -7225,11 +7886,11 @@ export function DiagramEditor() {
         {/* Navigation and help, top right: out of the way of the tools on the
             left and of the docked strip along the bottom of a small screen. */}
         <div className="pointer-events-none absolute top-3 right-3 z-20 flex items-center gap-1.5 select-none sm:top-4 sm:right-4">
-          <div className="rt-studio-rise pointer-events-auto flex items-center gap-0.5 rounded-full border border-rt-tertiary bg-rt-surface p-0.5 shadow-[0_4px_18px_rgba(8,12,21,0.12)]">
+          <div className="rt-studio-rise pointer-events-auto flex items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.14)]">
             {(
               [
-                ['Zoom out', ZoomOut, () => zoomBy(1 / DIAGRAM_ZOOM_STEP), zoomPercent <= 100],
-                ['Zoom in', ZoomIn, () => zoomBy(DIAGRAM_ZOOM_STEP), zoomPercent >= 400],
+                ['Zoom out', ZoomOut, () => zoomStep('out'), zoomPercent <= DIAGRAM_MIN_ZOOM * 100],
+                ['Zoom in', ZoomIn, () => zoomStep('in'), zoomPercent >= DIAGRAM_MAX_ZOOM * 100],
                 ['Reset view', RotateCcw, resetView, isDefaultDiagramView(view)],
               ] as const
             ).map(([label, Icon, onClick, isDisabled]) => (
@@ -7256,7 +7917,7 @@ export function DiagramEditor() {
                 aria-label="Keyboard shortcuts"
                 aria-expanded={shortcutSheetOpen}
                 onClick={() => setShortcutSheetOpen((current) => !current)}
-                className="rt-studio-rise pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-rt-tertiary bg-rt-surface text-[12px] font-semibold text-rt-ink-muted shadow-[0_4px_18px_rgba(8,12,21,0.12)] transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none max-sm:h-10 max-sm:w-10"
+                className="rt-studio-rise pointer-events-auto flex h-8 w-8 items-center justify-center rounded-xl border border-rt-tertiary bg-rt-surface text-[12px] font-semibold text-rt-ink-muted shadow-[0_6px_24px_rgba(8,12,21,0.14)] transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none max-sm:h-10 max-sm:w-10"
               >
                 ?
               </button>
@@ -7281,17 +7942,21 @@ export function DiagramEditor() {
           // No browser outline, whatever brought focus here. Every press on the
           // canvas focuses it so its keys work, and the browser outlined the
           // whole canvas in black each time it did.
-          className={`h-full w-full touch-none bg-white outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-primary ${canvasCursor}`}
+          className={`h-full w-full touch-none bg-white outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-rt-secondary-deep ${canvasCursor}`}
           onPointerDown={onCanvasPointerDown}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
           onPointerCancel={onCanvasPointerUp}
-          onPointerLeave={() => setGhostCursor(null)}
+          onPointerLeave={() => {
+            setGhostCursor(null);
+            updateExtendProximity(null, null);
+          }}
           onLostPointerCapture={onLostPointerCapture}
           onKeyDown={onCanvasKeyDown}
           onKeyUp={onCanvasKeyUp}
           onBlur={() => setPanReady(false)}
           onDragOver={onCanvasDragOver}
+          onDragLeave={onCanvasDragLeave}
           onDrop={onCanvasDrop}
         >
           <defs>
@@ -7323,7 +7988,7 @@ export function DiagramEditor() {
               orient="auto"
               markerUnits="strokeWidth"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill={SELECTION_ACCENT} />
+              <path d="M0,0 L8,4 L0,8 Z" fill={STUDIO_ACCENT} />
             </marker>
             {edgeArrowColors.map((color) => (
               <marker
@@ -7490,82 +8155,59 @@ export function DiagramEditor() {
               })()
             : null}
 
-          {/* Offered at the loose end of an arrow that points at nothing.
-              Drawn inside the canvas so it pans and zooms with the arrow it
-              belongs to, rather than floating over a board it has lost track of. */}
-          {shapePicker ? (
-            <foreignObject
-              x={shapePicker.at.x - SHAPE_PICKER_WIDTH / 2}
-              y={shapePicker.at.y + 14}
-              width={SHAPE_PICKER_WIDTH}
-              height={SHAPE_PICKER_HEIGHT}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <div
-                role="group"
-                aria-label="Add a shape at the end of this arrow"
-                data-testid="arrow-shape-picker"
-                className="rt-studio-rise flex items-center gap-0.5 rounded-full border border-rt-tertiary bg-rt-surface p-1 shadow-[0_4px_18px_rgba(8,12,21,0.12)]"
-              >
-                {DIAGRAM_NODE_SHAPES.filter((shape) => shape !== 'container').map((shape) => {
-                  const ShapeIcon = SHAPE_ICONS[shape];
-                  return (
-                    <button
-                      key={shape}
-                      type="button"
-                      aria-label={`End with ${DIAGRAM_SHAPE_LABELS[shape].toLowerCase()}`}
-                      title={DIAGRAM_SHAPE_LABELS[shape]}
-                      className={TILE_BUTTON}
-                      disabled={showSubmitting}
-                      onClick={() => attachShapeToArrowEnd(shape)}
-                    >
-                      <ShapeIcon aria-hidden="true" size={14} />
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  aria-label="Leave this arrow pointing at nothing"
-                  title="Leave it pointing at nothing"
-                  className={TILE_BUTTON}
-                  onClick={() => setShapePicker(null)}
-                >
-                  <X aria-hidden="true" size={13} />
-                </button>
-              </div>
-            </foreignObject>
-          ) : null}
-
           {arrowDraft ? (
             <g data-testid="arrow-draft" opacity={0.85}>
-              <StudioArrowView
-                arrow={draftArrow(arrowDraft, {
-                  strokeColor: pathColor,
-                  strokeWidthPreset: pathWidth,
-                  strokeStyle: pathStyle,
-                })}
-                geometry={arrowGeometry(
-                  draftArrow(arrowDraft, {
-                    strokeColor: pathColor,
-                    strokeWidthPreset: pathWidth,
-                    strokeStyle: pathStyle,
-                  }),
-                  arrowTargetsById,
-                )}
-              />
+              {(() => {
+                // Drawn out of a shape, it lands plain, like any connection;
+                // drawn with the arrow tool, it lands in the pen's style.
+                const style = extendPressRef.current?.dragging
+                  ? {}
+                  : {
+                      strokeColor: pathColor,
+                      strokeWidthPreset: pathWidth,
+                      strokeStyle: pathStyle,
+                    };
+                const drafted = draftArrow(arrowDraft, style);
+                return (
+                  <StudioArrowView
+                    arrow={drafted}
+                    geometry={arrowGeometry(drafted, arrowTargetsById)}
+                  />
+                );
+              })()}
             </g>
           ) : null}
           {arrowSnap ? (
-            <circle
-              data-testid="arrow-snap"
-              cx={arrowSnap.point.x}
-              cy={arrowSnap.point.y}
-              r={4}
-              fill={SELECTION_ACCENT}
-              stroke="#FFFFFF"
-              strokeWidth={1.5}
-              pointerEvents="none"
-            />
+            <>
+              {/* The element a release will bind to, outlined the way a
+                  container is when something is about to be dropped into it —
+                  the dot alone said where, not what. */}
+              {(() => {
+                const target = arrowSnap.elementId
+                  ? arrowTargetMap.get(arrowSnap.elementId)
+                  : undefined;
+                if (!target) return null;
+                const { box, rotation } = target;
+                const turn = rotation
+                  ? `rotate(${rotation} ${box.x + box.width / 2} ${box.y + box.height / 2})`
+                  : undefined;
+                return (
+                  <g transform={turn}>
+                    <SelectionFrame bounds={box} pixel={pixel} target testId="arrow-snap-target" />
+                  </g>
+                );
+              })()}
+              <circle
+                data-testid="arrow-snap"
+                cx={arrowSnap.point.x}
+                cy={arrowSnap.point.y}
+                r={CHROME.pointRadius * pixel}
+                fill={STUDIO_ACCENT}
+                stroke="#FFFFFF"
+                strokeWidth={CHROME.gripStroke * pixel}
+                pointerEvents="none"
+              />
+            </>
           ) : null}
 
           {activeStroke ? renderInk(activeStroke) : null}
@@ -7598,20 +8240,20 @@ export function DiagramEditor() {
                               data-testid="path-close-target"
                               cx={anchor.x}
                               cy={anchor.y}
-                              r={9}
+                              r={CHROME.pointReach * pixel}
                               fill="none"
-                              stroke={SELECTION_ACCENT}
-                              strokeWidth={2}
+                              stroke={STUDIO_ACCENT}
+                              strokeWidth={CHROME.targetStroke * pixel}
                               pointerEvents="none"
                             />
                           ) : null}
                           <circle
                             cx={anchor.x}
                             cy={anchor.y}
-                            r={closing ? 5 : 3.5}
-                            fill={index === 0 ? SELECTION_ACCENT : '#FFFFFF'}
-                            stroke={SELECTION_ACCENT}
-                            strokeWidth={1.5}
+                            r={(closing ? CHROME.pointRadius + 1 : CHROME.pointRadius) * pixel}
+                            fill={index === 0 ? STUDIO_ACCENT : '#FFFFFF'}
+                            stroke={STUDIO_ACCENT}
+                            strokeWidth={CHROME.gripStroke * pixel}
                             pointerEvents="none"
                           />
                         </g>
@@ -7621,24 +8263,6 @@ export function DiagramEditor() {
                 );
               })()
             : null}
-
-          {/* Drawn last so the in-flight arrow stays visible over whatever it
-              is being dragged across. */}
-          {connectionPreview ? (
-            <line
-              aria-hidden="true"
-              data-testid="connection-preview"
-              x1={connectionPreview.x1}
-              y1={connectionPreview.y1}
-              x2={connectionPreview.x2}
-              y2={connectionPreview.y2}
-              stroke="#4D6A74"
-              strokeWidth={2}
-              strokeDasharray="6 4"
-              markerEnd="url(#diagram-editor-arrow)"
-              pointerEvents="none"
-            />
-          ) : null}
 
           {ghost ? (
             <>
@@ -7661,28 +8285,34 @@ export function DiagramEditor() {
                   data-testid="placement-ghost"
                   pointerEvents="none"
                   transform={`translate(${ghostAt.x}, ${ghostAt.y})`}
-                  opacity={0.55}
+                  opacity={CHROME.ghostOpacity}
                 >
+                  {/* Every preview of something about to be placed is the same
+                      dashed outline in the same colour: a shape's own outline
+                      where it has one, the footprint where it does not. Drafts
+                      being drawn — a stroke, a path, an arrow — show their real
+                      style instead, because they are the thing itself. */}
                   {ghost.kind === 'node' && ghost.shape !== 'text' ? (
                     <DiagramShapeOutline
                       shape={ghost.shape}
                       size={ghost.size}
                       fill="none"
-                      stroke="#4D6A74"
-                      strokeWidth={1.5}
+                      stroke={STUDIO_COOL}
+                      strokeWidth={CHROME.ghostStroke * pixel}
                       containerDashArray={LEGACY_CONTAINER_DASH}
+                      strokeDasharray={chromeDash(CHROME.ghostDash, pixel)}
                     />
                   ) : (
                     // Text, a table and a starter frame have no single outline
-                    // of their own, so the ghost draws the footprint instead.
+                    // of their own, so the ghost draws the footprint instead —
+                    // square, as a table and a text box are.
                     <rect
                       width={ghost.size.width}
                       height={ghost.size.height}
-                      rx={4}
                       fill="none"
-                      stroke="#4D6A74"
-                      strokeWidth={1.5}
-                      strokeDasharray="4 3"
+                      stroke={STUDIO_COOL}
+                      strokeWidth={CHROME.ghostStroke * pixel}
+                      strokeDasharray={chromeDash(CHROME.ghostDash, pixel)}
                     />
                   )}
                   {ghost.kind === 'table'
@@ -7694,9 +8324,9 @@ export function DiagramEditor() {
                             y1={0}
                             x2={(index + 1) * TABLE_DEFAULT_COL_WIDTH}
                             y2={ghost.size.height}
-                            stroke="#4D6A74"
-                            strokeWidth={1}
-                            strokeDasharray="4 3"
+                            stroke={STUDIO_COOL}
+                            strokeWidth={pixel}
+                            strokeDasharray={chromeDash(CHROME.ghostDash, pixel)}
                           />
                         )),
                         ...Array.from({ length: ghost.rows - 1 }, (_, index) => (
@@ -7706,28 +8336,48 @@ export function DiagramEditor() {
                             y1={(index + 1) * TABLE_DEFAULT_ROW_HEIGHT}
                             x2={ghost.size.width}
                             y2={(index + 1) * TABLE_DEFAULT_ROW_HEIGHT}
-                            stroke="#4D6A74"
-                            strokeWidth={1}
-                            strokeDasharray="4 3"
+                            stroke={STUDIO_COOL}
+                            strokeWidth={pixel}
+                            strokeDasharray={chromeDash(CHROME.ghostDash, pixel)}
                           />
                         )),
                       ]
                     : null}
-                  {ghost.kind === 'node' && ghost.shape === 'text' ? (
-                    <text
-                      x={ghost.size.width / 2}
-                      y={ghost.size.height / 2 + 4}
-                      textAnchor="middle"
-                      fill={DIAGRAM_LABEL_INK}
-                      style={{ fontSize: '11px', fontFamily: 'Inter, system-ui, sans-serif' }}
-                    >
-                      {NODE_LABEL_PLACEHOLDER}
-                    </text>
-                  ) : null}
+                  {ghost.kind === 'node' && ghost.shape === 'text'
+                    ? (() => {
+                        // Laid out exactly as the placed box will be, so the
+                        // preview's text is the size the typing will be.
+                        const layout = diagramNodeLabelLayout({
+                          label: NODE_LABEL_PLACEHOLDER,
+                          shape: 'text',
+                          width: ghost.size.width,
+                          height: ghost.size.height,
+                          fontSizePreset: DIAGRAM_NEW_NODE_FONT_SIZE,
+                        });
+                        return (
+                          <text
+                            x={ghost.size.width / 2}
+                            y={layout.firstBaselineY}
+                            textAnchor="middle"
+                            fill={DIAGRAM_LABEL_INK}
+                            style={{
+                              fontSize: `${layout.fontSize}px`,
+                              fontWeight: 600,
+                              fontFamily: 'Inter, system-ui, sans-serif',
+                            }}
+                          >
+                            {NODE_LABEL_PLACEHOLDER}
+                          </text>
+                        );
+                      })()
+                    : null}
                 </g>
               ) : null}
             </>
           ) : null}
+
+          {renderSelectedArrowHandles()}
+          {renderGroupFrame()}
 
           {marqueeRect ? (
             <rect
@@ -7737,10 +8387,10 @@ export function DiagramEditor() {
               y={marqueeRect.y}
               width={marqueeRect.width}
               height={marqueeRect.height}
-              fill="rgba(224,163,60,0.12)"
-              stroke="#E0A33C"
-              strokeWidth={1.5}
-              strokeDasharray="5 3"
+              fill={STUDIO_ACCENT_WASH}
+              stroke={STUDIO_ACCENT}
+              strokeWidth={CHROME.marqueeStroke * pixel}
+              strokeDasharray={chromeDash(CHROME.marqueeDash, pixel)}
               pointerEvents="none"
             />
           ) : null}

@@ -11,12 +11,14 @@ import {
   expandViewToAspect,
   DIAGRAM_MAX_ZOOM,
   DIAGRAM_MIN_ZOOM,
+  DIAGRAM_ZOOM_STOPS,
   clampDiagramView,
   diagramViewBoxAttribute,
   diagramViewZoom,
   fitDiagramView,
   isDefaultDiagramView,
   panDiagramView,
+  stepDiagramView,
   zoomDiagramView,
 } from './diagramView';
 
@@ -44,6 +46,48 @@ describe('diagram view', () => {
     const ratioY = (anchor.y - zoomed.y) / zoomed.height;
     expect(ratioX).toBeCloseTo(anchor.x / DIAGRAM_CANVAS_WIDTH, 5);
     expect(ratioY).toBeCloseTo(anchor.y / DIAGRAM_CANVAS_HEIGHT, 5);
+  });
+
+  it('steps through every zoom stop in turn, and back', () => {
+    let view = DIAGRAM_DEFAULT_VIEW;
+    const seen = [diagramViewZoom(view)];
+    for (let step = 1; step < DIAGRAM_ZOOM_STOPS.length; step += 1) {
+      view = stepDiagramView(view, 'in', CENTER);
+      seen.push(diagramViewZoom(view));
+    }
+    seen.forEach((zoom, index) => expect(zoom).toBeCloseTo(DIAGRAM_ZOOM_STOPS[index]!, 6));
+
+    // Past the last stop it holds, rather than overshooting or wrapping.
+    expect(diagramViewZoom(stepDiagramView(view, 'in'))).toBeCloseTo(DIAGRAM_MAX_ZOOM, 6);
+
+    for (let step = 1; step < DIAGRAM_ZOOM_STOPS.length; step += 1) {
+      view = stepDiagramView(view, 'out', CENTER);
+    }
+    expect(diagramViewZoom(view)).toBeCloseTo(DIAGRAM_MIN_ZOOM, 6);
+    expect(diagramViewZoom(stepDiagramView(view, 'out'))).toBeCloseTo(DIAGRAM_MIN_ZOOM, 6);
+  });
+
+  it('takes the first step up from 100% as a small one', () => {
+    // One click used to be 125% at best and ~165% from a mouse wheel.
+    expect(diagramViewZoom(stepDiagramView(DIAGRAM_DEFAULT_VIEW, 'in'))).toBeCloseTo(1.1, 6);
+  });
+
+  it('moves from between two stops to the nearer one in that direction', () => {
+    // A pinch can leave the zoom at 1.3; the next click lands on a stop
+    // rather than jumping a whole step past it.
+    const pinched = zoomDiagramView(DIAGRAM_DEFAULT_VIEW, 1.3, CENTER);
+    expect(diagramViewZoom(stepDiagramView(pinched, 'in'))).toBeCloseTo(1.5, 6);
+    expect(diagramViewZoom(stepDiagramView(pinched, 'out'))).toBeCloseTo(1.25, 6);
+  });
+
+  it('keeps the anchor pinned while stepping', () => {
+    const anchor = { x: 720, y: 450 };
+    const stepped = stepDiagramView(DIAGRAM_DEFAULT_VIEW, 'in', anchor);
+    expect((anchor.x - stepped.x) / stepped.width).toBeCloseTo(anchor.x / DIAGRAM_CANVAS_WIDTH, 5);
+    expect((anchor.y - stepped.y) / stepped.height).toBeCloseTo(
+      anchor.y / DIAGRAM_CANVAS_HEIGHT,
+      5,
+    );
   });
 
   it('never zooms past the bounds in either direction', () => {

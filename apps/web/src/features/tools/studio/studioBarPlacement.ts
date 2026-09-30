@@ -34,11 +34,22 @@ export interface BarPlacement {
 export const BAR_GAP = 22;
 
 export function placePropertiesBar(
-  selection: PlacementRect,
+  rawSelection: PlacementRect,
   bar: { width: number; height: number },
   viewport: PlacementRect,
   gap = BAR_GAP,
+  /**
+   * Room around the selection for what is drawn outside it in pixels — the
+   * extend buttons beside a shape — so the gap is measured from those instead.
+   */
+  padding = 0,
 ): BarPlacement {
+  const selection = {
+    x: rawSelection.x - padding,
+    y: rawSelection.y - padding,
+    width: rawSelection.width + padding * 2,
+    height: rawSelection.height + padding * 2,
+  };
   // Centred on the selection, then pulled back inside the canvas. Clamping the
   // low edge last means a bar wider than the canvas is left-aligned rather than
   // pushed off to the right.

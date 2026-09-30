@@ -536,6 +536,96 @@ a.rt-sticky-link:focus-visible {
 }
 
 /*
+ * The buttons that grow the diagram from a selected shape.
+ *
+ * Three states. Idle, a small muted dot: four buttons round every selected shape
+ * would crowd the very thing being worked on. Near the pointer (`data-near`, set
+ * from the canvas's own pointer tracking) or focused from the keyboard, a round
+ * button with an arrow showing which way the new shape will go. Under the
+ * pointer, or with its picker open, lit in the accent so it is plain what a
+ * press will do. The whole button is always the hit target, so a quick press on
+ * the dot works before it has finished waking.
+ */
+.rt-extend-handle {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  /* Centred on the point it is placed at, whatever its size. */
+  transform: translate(-50%, -50%);
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-rt-cool-deep);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.rt-extend-handle:focus-visible {
+  outline: 2px solid var(--color-rt-secondary-deep);
+  outline-offset: 2px;
+}
+
+.rt-extend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--color-rt-cool-deep);
+  opacity: 0.45;
+  transition: opacity 120ms ease-out;
+}
+
+.rt-extend-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--color-rt-cool-deep);
+  border-radius: 9999px;
+  background: var(--color-rt-surface);
+  box-shadow: 0 2px 8px rgba(8, 12, 21, 0.14);
+  opacity: 0;
+  transform: scale(0.4);
+  transition:
+    opacity 120ms ease-out,
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.rt-extend-handle[data-near='true'] .rt-extend-dot,
+.rt-extend-handle:hover .rt-extend-dot,
+.rt-extend-handle:focus-visible .rt-extend-dot,
+.rt-extend-handle[data-open='true'] .rt-extend-dot {
+  opacity: 0;
+}
+
+.rt-extend-handle[data-near='true'] .rt-extend-face,
+.rt-extend-handle:hover .rt-extend-face,
+.rt-extend-handle:focus-visible .rt-extend-face,
+.rt-extend-handle[data-open='true'] .rt-extend-face {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.rt-extend-handle:hover .rt-extend-face,
+.rt-extend-handle[data-open='true'] .rt-extend-face {
+  border-color: var(--color-rt-secondary);
+  background: var(--color-rt-secondary);
+  color: #fff;
+  transform: scale(1.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-extend-dot,
+  .rt-extend-face {
+    transition: none;
+  }
+}
+
+/*
  * The studio stepping aside for the board, and coming back.
  *
  * Peeking slides the studio down until only its header and the first of its
