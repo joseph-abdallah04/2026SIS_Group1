@@ -636,6 +636,37 @@ export interface QuestionVoteOutcome {
   votedCount: number;
 }
 
+/**
+ * Shortlists and closed-vote results for an ended session.
+ *
+ * Ids only — no proposal bodies, no voter identities. The archive board uses
+ * them to mark cards. A live session is refused: this lists every question,
+ * and during a session the room only sees the question in front of it.
+ */
+export async function listEndedVoteOutcomes(sessionId: string): Promise<
+  Pick<QuestionVoteOutcome, 'questionId' | 'proposalIds' | 'winnerProposalId' | 'tiedProposalIds'>[]
+> {
+  const session = await getSession(sessionId);
+  if (!session) {
+    throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+  }
+  if (session.status !== 'ended') {
+    throw new ApiError(
+      409,
+      'Vote results are available once the session has ended',
+      'SESSION_NOT_ENDED',
+    );
+  }
+
+  const outcomes = await getSessionVoteOutcomes(sessionId);
+  return outcomes.map(({ questionId, proposalIds, winnerProposalId, tiedProposalIds }) => ({
+    questionId,
+    proposalIds,
+    winnerProposalId,
+    tiedProposalIds,
+  }));
+}
+
 export async function getSessionVoteOutcomes(sessionId: string): Promise<QuestionVoteOutcome[]> {
   const rounds = await prisma.votingRound.findMany({
     where: { sessionId },

@@ -65,6 +65,7 @@ const {
   continueAfterVote,
   pickWinningProposalId,
   getSessionVoteOutcomes,
+  listEndedVoteOutcomes,
   expireOpenVotingIfDue,
 } = await import('./service.js');
 const { scheduleVotingDeadline, cancelVotingDeadline } = await import('./deadlines.js');
@@ -625,6 +626,61 @@ describe('getSessionVoteOutcomes', () => {
         tiedProposalIds: ['p1', 'p2'],
       },
     ]);
+  });
+});
+
+describe('listEndedVoteOutcomes', () => {
+  it('returns shortlist ids and the winner, without tallies or voter ids', async () => {
+    getSession.mockResolvedValue({ ...SESSION, status: 'ended' });
+    roundFindMany.mockResolvedValue([
+      {
+        questionId: 'q1',
+        status: 'closed',
+        items: [{ proposalId: 'p2' }, { proposalId: 'p1' }],
+        votes: [
+          { voterId: LEADER, proposalId: 'p1' },
+          { voterId: 'u2', proposalId: 'p1' },
+        ],
+      },
+    ]);
+
+    await expect(listEndedVoteOutcomes('s1')).resolves.toEqual([
+      {
+        questionId: 'q1',
+        proposalIds: ['p1', 'p2'],
+        winnerProposalId: 'p1',
+        tiedProposalIds: [],
+      },
+    ]);
+  });
+
+  it('keeps a shortlist that never reached a winner', async () => {
+    getSession.mockResolvedValue({ ...SESSION, status: 'ended' });
+    roundFindMany.mockResolvedValue([
+      {
+        questionId: 'q1',
+        status: 'shortlisting',
+        items: [{ proposalId: 'p1' }],
+        votes: [],
+      },
+    ]);
+
+    await expect(listEndedVoteOutcomes('s1')).resolves.toEqual([
+      {
+        questionId: 'q1',
+        proposalIds: ['p1'],
+        winnerProposalId: null,
+        tiedProposalIds: [],
+      },
+    ]);
+  });
+
+  it('refuses a session that is still live', async () => {
+    await expect(listEndedVoteOutcomes('s1')).rejects.toMatchObject({
+      status: 409,
+      code: 'SESSION_NOT_ENDED',
+    });
+    expect(roundFindMany).not.toHaveBeenCalled();
   });
 });
 

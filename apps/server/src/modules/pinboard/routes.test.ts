@@ -118,7 +118,42 @@ describe('GET /api/sessions/:sessionId/proposals membership', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual(BOARD);
     expect(assertSessionMember).toHaveBeenCalledWith('s1', 'u1');
-    expect(getBoardForSession).toHaveBeenCalledWith('s1');
+    expect(getBoardForSession).toHaveBeenCalledWith('s1', undefined);
+  });
+
+  it('passes a single questionId through for an ended-session board', async () => {
+    const res = await request({ path: '/api/sessions/s1/proposals?questionId=q2' });
+    expect(res.status).toBe(200);
+    expect(getBoardForSession).toHaveBeenCalledWith('s1', 'q2');
+  });
+
+  it('400s a repeated questionId and does not read a board', async () => {
+    const res = await request({
+      path: '/api/sessions/s1/proposals?questionId=q2&questionId=q3',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ code: 'INVALID_QUESTION' });
+    expect(getBoardForSession).not.toHaveBeenCalled();
+  });
+
+  it('400s an empty questionId', async () => {
+    const res = await request({ path: '/api/sessions/s1/proposals?questionId=' });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ code: 'INVALID_QUESTION' });
+    expect(getBoardForSession).not.toHaveBeenCalled();
+  });
+
+  it('403s a stranger asking for a question before any board is read', async () => {
+    assertSessionMember.mockRejectedValue(
+      new ApiError(403, 'You are not a member of this session', 'NOT_SESSION_MEMBER'),
+    );
+    const res = await request({
+      userId: 'stranger',
+      path: '/api/sessions/s1/proposals?questionId=q2',
+    });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: 'NOT_SESSION_MEMBER' });
+    expect(getBoardForSession).not.toHaveBeenCalled();
   });
 });
 

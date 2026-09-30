@@ -18,6 +18,7 @@ export {
   getActiveQuestion,
   getDiscussionTimer,
   getQuestion,
+  getQuestionInSession,
   getSession,
   getSessionMemberIdentity,
   getSessionWithQuestions,

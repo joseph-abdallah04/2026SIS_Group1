@@ -1,7 +1,11 @@
 import { Router } from 'express';
 
 import { requireAuth } from '../../middleware/auth.js';
-import { getShortlistForSession, getVotingStateForSession } from './service.js';
+import {
+  getShortlistForSession,
+  getVotingStateForSession,
+  listEndedVoteOutcomes,
+} from './service.js';
 import { assertSessionMember } from './sessionsAdapter.js';
 
 export const votingRoutes = Router();
@@ -18,6 +22,22 @@ votingRoutes.get<{ sessionId: string }>(
       await assertSessionMember(req.params.sessionId, userId);
       const voting = await getVotingStateForSession(req.params.sessionId, userId);
       res.json(voting);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Ended sessions only. Members reviewing an old board need each question's
+// shortlist and winner, and nothing else this read returns (no ballots, no
+// proposal bodies).
+votingRoutes.get<{ sessionId: string }>(
+  '/:sessionId/outcomes',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      await assertSessionMember(req.params.sessionId, req.userId!);
+      res.json(await listEndedVoteOutcomes(req.params.sessionId));
     } catch (err) {
       next(err);
     }
