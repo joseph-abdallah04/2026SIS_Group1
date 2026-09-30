@@ -1,3 +1,4 @@
+import { rateLimit } from 'express-rate-limit';
 import { Router } from 'express';
 
 import { requireAuth } from '../../middleware/auth.js';
@@ -9,6 +10,19 @@ import {
 import { assertSessionMember } from './sessionsAdapter.js';
 
 export const votingRoutes = Router();
+
+// One member reviewing an ended board loads this once. Keyed by user, not IP:
+// a room behind one campus address must not share a single budget, and the
+// deploy sits behind a proxy that would otherwise look like one client.
+const outcomesLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
+  keyGenerator: (req) => req.userId ?? 'anonymous',
+  validate: { keyGeneratorIpFallback: false },
+});
 
 // Read-only: the live write path is the socket (docs/02 §5). This exists so a
 // client that already has the board (REST) and then advances the agenda can
@@ -34,6 +48,7 @@ votingRoutes.get<{ sessionId: string }>(
 votingRoutes.get<{ sessionId: string }>(
   '/:sessionId/outcomes',
   requireAuth,
+  outcomesLimiter,
   async (req, res, next) => {
     try {
       await assertSessionMember(req.params.sessionId, req.userId!);

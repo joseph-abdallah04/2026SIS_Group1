@@ -96,4 +96,34 @@ describe('GET /api/sessions/:sessionId/outcomes', () => {
     expect(assertSessionMember).toHaveBeenCalledWith('s1', 'u1');
     expect(listEndedVoteOutcomes).toHaveBeenCalledWith('s1');
   });
+
+  it('stops one member from reading outcomes more than 60 times a minute', async () => {
+    const server = http.createServer(createApp());
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 61; i += 1) {
+        const res = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
+          headers: { 'x-test-user-id': 'flood' },
+        });
+        statuses.push(res.status);
+        await res.arrayBuffer();
+      }
+      expect(statuses[0]).toBe(200);
+      expect(statuses[59]).toBe(200);
+      expect(statuses[60]).toBe(429);
+
+      const other = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
+        headers: { 'x-test-user-id': 'other' },
+      });
+      expect(other.status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
 });
