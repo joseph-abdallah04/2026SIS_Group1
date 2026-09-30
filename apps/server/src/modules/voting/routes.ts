@@ -1,9 +1,7 @@
-import { createHash } from 'node:crypto';
-
 import { Router, type Request } from 'express';
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
 import {
   getShortlistForSession,
   getVotingStateForSession,
@@ -13,16 +11,14 @@ import { assertSessionMember } from './sessionsAdapter.js';
 
 export const votingRoutes = Router();
 
-// Has to run before `requireAuth`. A member is identified by their token, so a
-// shared campus address does not share one budget. Requests with no token share
-// an address bucket instead of one bucket per forged header.
+// Has to run before `requireAuth`. CodeQL wants the limiter ahead of that
+// check. The key is the verified user id, so a second login does not open a
+// new budget and a forged token does not get its own. Unverified requests
+// share one address bucket.
 function outcomesClientKey(req: Request): string {
-  const header = req.headers.authorization;
-  if (typeof header === 'string' && header.startsWith('Bearer ') && header.length > 'Bearer '.length) {
-    return createHash('sha256').update(header).digest('hex');
-  }
-  const ip = req.ip;
-  return ip ? `anon:${ipKeyGenerator(ip)}` : 'anon';
+  const userId = verifiedUserId(req);
+  if (userId) return `user:${userId}`;
+  return req.ip ? `anon:${ipKeyGenerator(req.ip)}` : 'anon';
 }
 
 const outcomesLimiter = rateLimit({

@@ -115,8 +115,12 @@ describe('SessionArchive', () => {
     expect(await screen.findByText('Ship the pinboard')).toBeInTheDocument();
     expect(screen.getByText(/board is read-only/i)).toBeInTheDocument();
     expect(screen.getByText('Session ended')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'What ships first?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'What next?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What ships first?' })).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+    expect(screen.getByRole('button', { name: 'What next?' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('Not voted on')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Leave session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start discussion' })).not.toBeInTheDocument();

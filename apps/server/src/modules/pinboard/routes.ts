@@ -25,7 +25,7 @@ function questionIdFromQuery(query: Request['query']): string | undefined {
 
   const questionId = raw.trim();
   if (questionId.length === 0 || questionId.length > QUESTION_ID_MAX) {
-    throw new ApiError(400, 'questionId must be a single value', 'INVALID_QUESTION');
+    throw new ApiError(400, 'questionId must be a valid question id', 'INVALID_QUESTION');
   }
   return questionId;
 }

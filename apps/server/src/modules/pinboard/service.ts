@@ -157,18 +157,6 @@ export interface CreateProposalArgs {
 }
 
 /**
- * Persist a proposal and return it in board shape.
- *
- * Deliberately knows nothing about sockets: the caller broadcasts. That keeps
- * this the single write path for every producer — the tool editors (F19–F21)
- * and propose-from-chat (F37) all land here, so validation and ownership work
- * the same way regardless of who proposed (docs/02 §8.8).
- *
- * Every rule that decides whether a write is *allowed* lives here rather than
- * in the socket handler, so a server-side caller (the assistant proposing on a
- * user's behalf) cannot bypass them by not going through a socket.
- */
-/**
  * Writes belong to a live session only.
  *
  * Ending a session leaves each question's status where it was, so a question
@@ -188,6 +176,18 @@ function requireLiveSession(session: SessionRef | null): asserts session is Sess
   }
 }
 
+/**
+ * Persist a proposal and return it in board shape.
+ *
+ * Deliberately knows nothing about sockets: the caller broadcasts. That keeps
+ * this the single write path for every producer — the tool editors (F19–F21)
+ * and propose-from-chat (F37) all land here, so validation and ownership work
+ * the same way regardless of who proposed (docs/02 §8.8).
+ *
+ * Every rule that decides whether a write is *allowed* lives here rather than
+ * in the socket handler, so a server-side caller (the assistant proposing on a
+ * user's behalf) cannot bypass them by not going through a socket.
+ */
 export async function createProposal({
   questionId,
   authorId,

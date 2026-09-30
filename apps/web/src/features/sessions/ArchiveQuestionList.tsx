@@ -5,7 +5,7 @@ import { BoardRail } from '../../components/BoardRail';
 
 const STATUS_LABEL: Record<QuestionStatus, string | null> = {
   pending: null,
-  discussion: 'Discussing',
+  discussion: 'Not voted on',
   voting: 'Voting',
   answered: 'Answered',
   skipped: 'Skipped',
@@ -49,7 +49,6 @@ export function ArchiveQuestionList({
             return (
               <li
                 key={question.id}
-                aria-current={isFocused ? 'step' : undefined}
                 className={`rounded-2xl border px-2.5 py-2 ${
                   isFocused
                     ? 'border-rt-secondary bg-white shadow-sm'
@@ -67,6 +66,7 @@ export function ArchiveQuestionList({
                   </span>
                   <button
                     type="button"
+                    aria-current={isFocused ? 'step' : undefined}
                     onClick={() => {
                       if (!isFocused) onSelect(question.id);
                     }}

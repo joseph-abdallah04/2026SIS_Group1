@@ -670,52 +670,53 @@ export function PinboardCanvas({
     Array.from(event.dataTransfer.types).includes('Files');
   // Read-only still takes the drop, so the browser does not open the file in
   // this tab, but it never imports: `canDropImage` is false while `readOnly`.
-  const dropHandlers = readOnly || imageImport
-    ? {
-        onDragEnter: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          dragDepth.current += 1;
-          setDroppingFiles(true);
-        },
-        onDragOver: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = canDropImage ? 'copy' : 'none';
-        },
-        onDragLeave: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          dragDepth.current = Math.max(0, dragDepth.current - 1);
-          if (dragDepth.current === 0) setDroppingFiles(false);
-        },
-        onDrop: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          dragDepth.current = 0;
-          setDroppingFiles(false);
-          if (!canDropImage || !imageImport) {
-            showNotice(boardOpen ? 'Wait a moment, then drop it again' : closedMessage);
-            return;
-          }
-          const file = Array.from(event.dataTransfer.files).find(isImageFile);
-          if (!file) {
-            showNotice('Only images can be added to the board');
-            return;
-          }
-          // The board point under the pointer: the scene transform, undone.
-          const frame = viewportRef.current?.getBoundingClientRect();
-          imageImport.importFile(
-            file,
-            frame
-              ? {
-                  x: (event.clientX - frame.left - DESK_MARGIN - restX + pan.x) / scale,
-                  y: (event.clientY - frame.top - DESK_MARGIN - restY + pan.y) / scale,
-                }
-              : undefined,
-          );
-        },
-      }
-    : {};
+  const dropHandlers =
+    readOnly || imageImport
+      ? {
+          onDragEnter: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            event.preventDefault();
+            dragDepth.current += 1;
+            setDroppingFiles(true);
+          },
+          onDragOver: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = canDropImage ? 'copy' : 'none';
+          },
+          onDragLeave: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setDroppingFiles(false);
+          },
+          onDrop: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            event.preventDefault();
+            dragDepth.current = 0;
+            setDroppingFiles(false);
+            if (!canDropImage || !imageImport) {
+              showNotice(boardOpen ? 'Wait a moment, then drop it again' : closedMessage);
+              return;
+            }
+            const file = Array.from(event.dataTransfer.files).find(isImageFile);
+            if (!file) {
+              showNotice('Only images can be added to the board');
+              return;
+            }
+            // The board point under the pointer: the scene transform, undone.
+            const frame = viewportRef.current?.getBoundingClientRect();
+            imageImport.importFile(
+              file,
+              frame
+                ? {
+                    x: (event.clientX - frame.left - DESK_MARGIN - restX + pan.x) / scale,
+                    y: (event.clientY - frame.top - DESK_MARGIN - restY + pan.y) / scale,
+                  }
+                : undefined,
+            );
+          },
+        }
+      : {};
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">

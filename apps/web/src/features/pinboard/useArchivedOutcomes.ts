@@ -13,8 +13,23 @@ function isAbort(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError';
 }
 
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isOutcome(value: unknown): value is ArchivedVoteOutcome {
+  if (typeof value !== 'object' || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.questionId === 'string' &&
+    isStringList(row.proposalIds) &&
+    (typeof row.winnerProposalId === 'string' || row.winnerProposalId === null) &&
+    isStringList(row.tiedProposalIds)
+  );
+}
+
 function isOutcomeList(value: unknown): value is ArchivedVoteOutcome[] {
-  return Array.isArray(value);
+  return Array.isArray(value) && value.every(isOutcome);
 }
 
 /**

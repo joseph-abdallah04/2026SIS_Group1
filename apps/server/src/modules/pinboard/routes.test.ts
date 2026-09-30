@@ -139,7 +139,10 @@ describe('GET /api/sessions/:sessionId/proposals membership', () => {
   it('400s an empty questionId', async () => {
     const res = await request({ path: '/api/sessions/s1/proposals?questionId=' });
     expect(res.status).toBe(400);
-    expect(res.body).toMatchObject({ code: 'INVALID_QUESTION' });
+    expect(res.body).toMatchObject({
+      error: 'questionId must be a valid question id',
+      code: 'INVALID_QUESTION',
+    });
     expect(getBoardForSession).not.toHaveBeenCalled();
   });
 

@@ -2,8 +2,11 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { env } from '../../env.js';
+import { signToken } from '../auth/jwt.js';
 import { ApiError, errorHandler } from '../../middleware/error.js';
 
 const assertSessionMember = vi.fn();
@@ -11,17 +14,23 @@ const listEndedVoteOutcomes = vi.fn();
 const getVotingStateForSession = vi.fn();
 const getShortlistForSession = vi.fn();
 
-vi.mock('../../middleware/auth.js', () => ({
-  requireAuth: (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const userId = req.headers['x-test-user-id'];
-    if (typeof userId !== 'string' || !userId) {
-      res.status(401).json({ error: 'Missing authentication token', code: 'MISSING_TOKEN' });
-      return;
-    }
-    req.userId = userId;
-    next();
-  },
-}));
+vi.mock('../../middleware/auth.js', async () => {
+  const actual = await vi.importActual<typeof import('../../middleware/auth.js')>(
+    '../../middleware/auth.js',
+  );
+  return {
+    ...actual,
+    requireAuth: (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const userId = req.headers['x-test-user-id'];
+      if (typeof userId !== 'string' || !userId) {
+        res.status(401).json({ error: 'Missing authentication token', code: 'MISSING_TOKEN' });
+        return;
+      }
+      req.userId = userId;
+      next();
+    },
+  };
+});
 
 vi.mock('./sessionsAdapter.js', () => ({ assertSessionMember }));
 vi.mock('./service.js', () => ({
@@ -61,9 +70,12 @@ async function request({
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-      headers: userId ? { 'x-test-user-id': userId } : {},
-    });
+    const headers: Record<string, string> = {};
+    if (userId) {
+      headers['x-test-user-id'] = userId;
+      headers.authorization = `Bearer ${signToken({ userId })}`;
+    }
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
     const text = await res.text();
     return { status: res.status, body: text ? JSON.parse(text) : null };
   } finally {
@@ -97,7 +109,51 @@ describe('GET /api/sessions/:sessionId/outcomes', () => {
     expect(listEndedVoteOutcomes).toHaveBeenCalledWith('s1');
   });
 
-  it('stops one member from reading outcomes more than 60 times a minute', async () => {
+  it('shares one member budget across logins, and leaves other members alone', async () => {
+    const firstLogin = jwt.sign({ userId: 'flood' }, env.JWT_SECRET, {
+      expiresIn: '7d',
+      jwtid: 'login-1',
+    });
+    const secondLogin = jwt.sign({ userId: 'flood' }, env.JWT_SECRET, {
+      expiresIn: '7d',
+      jwtid: 'login-2',
+    });
+    expect(firstLogin).not.toBe(secondLogin);
+    const server = http.createServer(createApp());
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 60; i += 1) {
+        const res = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
+          headers: { 'x-test-user-id': 'flood', authorization: `Bearer ${firstLogin}` },
+        });
+        statuses.push(res.status);
+        await res.arrayBuffer();
+      }
+      expect(statuses[0]).toBe(200);
+      expect(statuses[59]).toBe(200);
+
+      const again = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
+        headers: { 'x-test-user-id': 'flood', authorization: `Bearer ${secondLogin}` },
+      });
+      expect(again.status).toBe(429);
+
+      const otherToken = signToken({ userId: 'other' });
+      const other = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
+        headers: { 'x-test-user-id': 'other', authorization: `Bearer ${otherToken}` },
+      });
+      expect(other.status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  it('puts forged tokens in one address bucket', async () => {
     const server = http.createServer(createApp());
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', resolve);
@@ -107,19 +163,13 @@ describe('GET /api/sessions/:sessionId/outcomes', () => {
       const statuses: number[] = [];
       for (let i = 0; i < 61; i += 1) {
         const res = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
-          headers: { 'x-test-user-id': 'flood', authorization: 'Bearer flood' },
+          headers: { authorization: `Bearer forged-${i}` },
         });
         statuses.push(res.status);
         await res.arrayBuffer();
       }
-      expect(statuses[0]).toBe(200);
-      expect(statuses[59]).toBe(200);
+      expect(statuses.filter((status) => status === 401)).toHaveLength(60);
       expect(statuses[60]).toBe(429);
-
-      const other = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
-        headers: { 'x-test-user-id': 'other', authorization: 'Bearer other' },
-      });
-      expect(other.status).toBe(200);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));

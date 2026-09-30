@@ -643,7 +643,9 @@ export interface QuestionVoteOutcome {
  * them to mark cards. A live session is refused: this lists every question,
  * and during a session the room only sees the question in front of it.
  */
-export async function listEndedVoteOutcomes(sessionId: string): Promise<
+export async function listEndedVoteOutcomes(
+  sessionId: string,
+): Promise<
   Pick<QuestionVoteOutcome, 'questionId' | 'proposalIds' | 'winnerProposalId' | 'tiedProposalIds'>[]
 > {
   const session = await getSession(sessionId);
