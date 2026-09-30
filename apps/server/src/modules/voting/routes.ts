@@ -1,5 +1,7 @@
-import { rateLimit } from 'express-rate-limit';
-import { Router } from 'express';
+import { createHash } from 'node:crypto';
+
+import { Router, type Request } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 
 import { requireAuth } from '../../middleware/auth.js';
 import {
@@ -11,16 +13,25 @@ import { assertSessionMember } from './sessionsAdapter.js';
 
 export const votingRoutes = Router();
 
-// One member reviewing an ended board loads this once. Keyed by user, not IP:
-// a room behind one campus address must not share a single budget, and the
-// deploy sits behind a proxy that would otherwise look like one client.
+// Has to run before `requireAuth`. A member is identified by their token, so a
+// shared campus address does not share one budget. Requests with no token share
+// an address bucket instead of one bucket per forged header.
+function outcomesClientKey(req: Request): string {
+  const header = req.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ') && header.length > 'Bearer '.length) {
+    return createHash('sha256').update(header).digest('hex');
+  }
+  const ip = req.ip;
+  return ip ? `anon:${ipKeyGenerator(ip)}` : 'anon';
+}
+
 const outcomesLimiter = rateLimit({
   windowMs: 60_000,
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
-  keyGenerator: (req) => req.userId ?? 'anonymous',
+  keyGenerator: outcomesClientKey,
   validate: { keyGeneratorIpFallback: false },
 });
 
@@ -47,8 +58,8 @@ votingRoutes.get<{ sessionId: string }>(
 // proposal bodies).
 votingRoutes.get<{ sessionId: string }>(
   '/:sessionId/outcomes',
-  requireAuth,
   outcomesLimiter,
+  requireAuth,
   async (req, res, next) => {
     try {
       await assertSessionMember(req.params.sessionId, req.userId!);

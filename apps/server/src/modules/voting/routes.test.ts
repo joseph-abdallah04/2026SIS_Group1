@@ -107,7 +107,7 @@ describe('GET /api/sessions/:sessionId/outcomes', () => {
       const statuses: number[] = [];
       for (let i = 0; i < 61; i += 1) {
         const res = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
-          headers: { 'x-test-user-id': 'flood' },
+          headers: { 'x-test-user-id': 'flood', authorization: 'Bearer flood' },
         });
         statuses.push(res.status);
         await res.arrayBuffer();
@@ -117,7 +117,7 @@ describe('GET /api/sessions/:sessionId/outcomes', () => {
       expect(statuses[60]).toBe(429);
 
       const other = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/outcomes`, {
-        headers: { 'x-test-user-id': 'other' },
+        headers: { 'x-test-user-id': 'other', authorization: 'Bearer other' },
       });
       expect(other.status).toBe(200);
     } finally {
