@@ -37,14 +37,15 @@ Features are numbered (`F##`) so tickets on the Kanban board can reference them.
 
 ## 5. Shared Pinboard — module: `pinboard` (+ `realtime`)
 
-| ID  | Feature                                                   | Notes                                                                    |
-| --- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| F14 | Shared pinboard visible identically to all participants   | Single source of truth on server; state synced via WebSocket             |
-| F15 | Proposals appear for everyone in real time when submitted | Sub-second propagation                                                   |
-| F16 | Author CRUD over own proposals (move, edit, delete)       | Only the author can modify/delete their proposal; changes broadcast live |
-| F17 | Leader can remove any proposal (moderation)               | Optional safeguard                                                       |
-| F18 | Reactions on proposals (emoji-style)                      | One per person per proposal; counts visible to all                       |
-| F38 | Reuse your own earlier proposal on a later question       | Copies rather than moves; recorded like an extension (F23)               |
+| ID  | Feature                                                   | Notes                                                                                                                                                                                                                          |
+| --- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F14 | Shared pinboard visible identically to all participants   | Single source of truth on server; state synced via WebSocket                                                                                                                                                                   |
+| F15 | Proposals appear for everyone in real time when submitted | Sub-second propagation. The server places each new card clear of every card already there, so two proposed at once never land on each other                                                                                    |
+| F16 | Author CRUD over own proposals (move, edit, delete)       | Only the author can modify/delete their proposal; changes broadcast live. Moving waits for the leader to unlock the board (F40)                                                                                                |
+| F17 | Leader can remove any proposal (moderation)               | Optional safeguard                                                                                                                                                                                                             |
+| F18 | Reactions on proposals (emoji-style)                      | One per person per proposal; counts visible to all                                                                                                                                                                             |
+| F38 | Reuse your own earlier proposal on a later question       | Copies rather than moves; recorded like an extension (F23)                                                                                                                                                                     |
+| F40 | Board lock: the leader decides who may move proposals     | Per question, set under it in the agenda; every question starts locked, so only the leader moves proposals. Unlocked, members may also move their own. Positions only: proposing, editing, deleting and reacting are unchanged |
 
 ## 6. Proposal Tools — module: `tools` (UI) + `pinboard` (persistence)
 

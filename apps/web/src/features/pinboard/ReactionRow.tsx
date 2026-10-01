@@ -25,8 +25,14 @@ interface ReactionRowProps {
   reactions: readonly ReactionGroup[];
   /** Who the server says this client is, or null before the board is joined. */
   viewerId: string | null;
-  /** Toggle one reaction. Rejections surface on the canvas, not on the chip. */
-  onReact: (emoji: string) => Promise<void>;
+  /**
+   * Toggle one reaction. Rejections surface on the canvas, not on the chip.
+   *
+   * Absent once the board has closed for the question, from voting on: what
+   * people said stays on the card for the room to read while it votes, but
+   * nothing more can be said.
+   */
+  onReact?: (emoji: string) => Promise<void>;
   /** The card's width, so the row wraps within it rather than past its edge. */
   width: number;
 }
@@ -73,6 +79,7 @@ function ReactionChip({
   busy,
   disabled,
   dim,
+  readOnly,
   onClick,
 }: {
   emoji: string;
@@ -87,6 +94,11 @@ function ReactionChip({
   disabled: boolean;
   /** Nothing has been said with this one yet, so it waits until hovered. */
   dim: boolean;
+  /**
+   * Shown but not pressable: the board has closed. Still a button, rather than
+   * a disabled one, so hovering it and reading it out still say who reacted.
+   */
+  readOnly: boolean;
   onClick: () => void;
 }) {
   const label = reactionButtonLabel(emoji);
@@ -142,11 +154,12 @@ function ReactionChip({
       // A toggle, so the button reports its state rather than pretending each
       // press is a fresh action.
       aria-pressed={mine}
+      aria-disabled={readOnly || undefined}
       // The names are part of what the chip says, not only what it shows on
       // hover: a tooltip is nothing to a screen reader.
       aria-label={count === 0 ? label : `${label} (${count}) — ${who}`}
       disabled={busy || disabled}
-      onClick={onClick}
+      onClick={readOnly ? undefined : onClick}
       {...names.anchor}
       // Its own edge and shadow, like the controls on the opposite corner: the
       // chip straddles the card's border, so half of it is over the board and
@@ -175,8 +188,10 @@ function ReactionChip({
       className={`pointer-events-auto inline-flex h-[20px] min-w-[20px] items-center justify-center gap-[2px] rounded-full border px-[4px] shadow-sm transition-[background-color,border-color,opacity,transform] select-none [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
         mine
           ? 'text-rt-ink'
-          : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'
-      } ${
+          : readOnly
+            ? 'border-rt-tertiary bg-white'
+            : 'border-rt-tertiary bg-white hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover)'
+      } ${readOnly ? 'cursor-default' : ''} ${
         dim ? 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100' : 'opacity-100'
       } ${busy ? 'scale-95' : ''}`}
     >
@@ -225,6 +240,11 @@ function ReactionChip({
  * the row is anchored by its top: extra lines hang below the card instead of
  * climbing over the byline.
  *
+ * Once the board closes, from voting on, the chips people used stay where
+ * they are, always shown, and still say who is in them. They are what the
+ * room said about each idea, and that is worth reading while choosing between
+ * them. The untouched chips and the picker go, since nothing more can be said.
+ *
  * Nothing is counted locally. The chip goes busy, the server decides whether
  * the press added or removed a reaction, and the count arrives on the
  * broadcast every other participant is reading too, so this card cannot end up
@@ -245,7 +265,10 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
     .filter((group) => hasReacted(reactions, group.emoji, viewerId))
     .map((group) => group.emoji);
 
+  const readOnly = onReact === undefined;
+
   const toggle = (emoji: string) => {
+    if (!onReact) return;
     setPending(emoji);
     void onReact(emoji).finally(() => setPending(null));
   };
@@ -264,6 +287,7 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
       // server would refuse the write anyway.
       disabled={viewerId === null}
       dim={dim}
+      readOnly={readOnly}
       onClick={() => toggle(emoji)}
     />
   );
@@ -286,35 +310,37 @@ export function ReactionRow({ reactions, viewerId, onReact, width }: ReactionRow
       style={{ maxWidth: width - 24 }}
     >
       {used.map((group) => chipFor(group.emoji, false))}
-      {untouched.map((emoji) => chipFor(emoji, true))}
+      {readOnly ? null : untouched.map((emoji) => chipFor(emoji, true))}
 
-      <button
-        ref={pickerButton}
-        type="button"
-        aria-label="More reactions"
-        aria-haspopup="dialog"
-        aria-expanded={pickerAnchor !== null}
-        title="More reactions"
-        disabled={viewerId === null}
-        onClick={() =>
-          setPickerAnchor((open) =>
-            open ? null : (pickerButton.current?.getBoundingClientRect() ?? null),
-          )
-        }
-        style={
-          {
-            '--rt-chip-hover': REACTION_HOVER_FILL,
-            '--rt-chip-edge': REACTION_ON_BORDER,
-          } as React.CSSProperties
-        }
-        className={`pointer-events-auto inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,border-color,opacity] hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover) hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
-          pickerAnchor
-            ? 'opacity-100'
-            : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-        }`}
-      >
-        <SmilePlus aria-hidden="true" size={11} strokeWidth={2} />
-      </button>
+      {readOnly ? null : (
+        <button
+          ref={pickerButton}
+          type="button"
+          aria-label="More reactions"
+          aria-haspopup="dialog"
+          aria-expanded={pickerAnchor !== null}
+          title="More reactions"
+          disabled={viewerId === null}
+          onClick={() =>
+            setPickerAnchor((open) =>
+              open ? null : (pickerButton.current?.getBoundingClientRect() ?? null),
+            )
+          }
+          style={
+            {
+              '--rt-chip-hover': REACTION_HOVER_FILL,
+              '--rt-chip-edge': REACTION_ON_BORDER,
+            } as React.CSSProperties
+          }
+          className={`pointer-events-auto inline-flex h-[20px] w-[20px] items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-[background-color,border-color,opacity] hover:border-(--rt-chip-edge) hover:bg-(--rt-chip-hover) hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary disabled:cursor-default ${
+            pickerAnchor
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+          }`}
+        >
+          <SmilePlus aria-hidden="true" size={11} strokeWidth={2} />
+        </button>
+      )}
 
       {pickerAnchor ? (
         <EmojiPicker

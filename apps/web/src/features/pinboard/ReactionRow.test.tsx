@@ -506,4 +506,43 @@ describe('reaction row', () => {
       });
     });
   });
+
+  // Once voting opens nothing more can be said, but what was said is what the
+  // room weighs while it votes, so it stays on the card.
+  describe('once the board has closed', () => {
+    function renderClosed(reactions: ReactionGroup[]) {
+      render(<ReactionRow reactions={reactions} viewerId="viewer" width={210} />);
+    }
+
+    it('keeps the reactions people left, shown without a hover', () => {
+      renderClosed([{ emoji: THUMB, people: [person('ana'), person('viewer')] }]);
+
+      const thumb = chip(THUMB, 2);
+      expect(thumb).toBeVisible();
+      expect(thumb).not.toHaveClass('opacity-0');
+      expect(thumb).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('offers nothing new to react with', () => {
+      renderClosed([{ emoji: THUMB, people: [person('ana')] }]);
+
+      expect(screen.queryByRole('button', { name: 'More reactions' })).toBeNull();
+      expect(
+        screen.queryByRole('button', {
+          name: (name) => name.startsWith(reactionButtonLabel(HEART)),
+        }),
+      ).toBeNull();
+    });
+
+    it('cannot be pressed, but still says who reacted', async () => {
+      const user = userEvent.setup();
+      renderClosed([{ emoji: THUMB, people: [person('ana')] }]);
+
+      const thumb = chip(THUMB, 1);
+      expect(thumb).toHaveAttribute('aria-disabled', 'true');
+      expect(thumb).toHaveAccessibleName(expect.stringContaining('ANA'));
+      await user.click(thumb);
+      expect(thumb).toHaveAttribute('aria-pressed', 'false');
+    });
+  });
 });

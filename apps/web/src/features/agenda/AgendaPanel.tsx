@@ -3,6 +3,7 @@ import { SHORTLIST_MIN, type Question, type QuestionStatus, type VotingPhase } f
 import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/shared/schemas';
 
 import { BoardRail } from '../../components/BoardRail';
+import { BoardLock } from '../pinboard/BoardLock';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
@@ -23,6 +24,12 @@ interface AgendaPanelProps {
    * gate.
    */
   hasProposals?: boolean;
+  /**
+   * The board lock for the question on screen: whether only the leader may
+   * move proposals. Shown under it while it is being discussed, the only time
+   * anything on it can move. `onToggle` is the leader's alone.
+   */
+  boardLock?: { locked: boolean; onToggle?: () => Promise<void> };
 }
 
 /**
@@ -76,8 +83,13 @@ export function AgendaPanel({
   isLeader,
   votingPhase,
   hasProposals,
+  boardLock,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
+  // Held while the leader's lock change is on its way; the lock itself only
+  // changes when the room hears about it.
+  const [lockBusy, setLockBusy] = useState(false);
+  const [lockError, setLockError] = useState<string | null>(null);
   const [confirmingSkip, setConfirmingSkip] = useState<string | null>(null);
   const {
     setPhase,
@@ -95,7 +107,20 @@ export function AgendaPanel({
     (question) => question.status === 'discussion' || question.status === 'voting',
   );
   const firstPending = questions.find((question) => question.status === 'pending');
-  const error = phaseError ?? focusError ?? addError;
+  const error = phaseError ?? focusError ?? addError ?? lockError;
+
+  const onToggleLock = boardLock?.onToggle
+    ? () => {
+        setLockBusy(true);
+        setLockError(null);
+        boardLock
+          .onToggle?.()
+          .catch((err: unknown) =>
+            setLockError(err instanceof Error ? err.message : 'Could not change the board lock'),
+          )
+          .finally(() => setLockBusy(false));
+      }
+    : undefined;
   const title = `Agenda ${position ?? ''}`;
   const canAdd = isLeader && questions.length < SESSION_QUESTION_LIMIT;
 
@@ -201,6 +226,16 @@ export function AgendaPanel({
                     {label}
                   </span>
                 )}
+
+                {boardLock && isFocused && question.status === 'discussion' ? (
+                  <div className="mt-2 ml-[18px] flex flex-col">
+                    <BoardLock
+                      locked={boardLock.locked}
+                      onToggle={onToggleLock}
+                      busy={lockBusy}
+                    />
+                  </div>
+                ) : null}
 
                 {showControls && (
                   <div className="mt-2 ml-[18px] flex flex-col gap-1.5">

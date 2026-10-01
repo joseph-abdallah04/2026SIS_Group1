@@ -13,6 +13,7 @@ vi.mock('../../db.js', () => {
       update: vi.fn(),
       updateMany: vi.fn(),
       aggregate: vi.fn(),
+      findMany: vi.fn(),
     },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(async (run: (tx: unknown) => unknown) => run(prisma)),
@@ -30,6 +31,7 @@ vi.mock('./sessionsAdapter.js', () => ({
 const { prisma } = await import('../../db.js');
 const { getActiveQuestion, getQuestion, getSession } = await import('./sessionsAdapter.js');
 const { createProposal } = await import('./service.js');
+const { cardFootprint, findClearSpot, STICKY_MAX_WIDTH } = await import('@roundtable/shared');
 const { registerPinboardSocketHandlers } = await import('./socket.js');
 
 const create = vi.mocked(prisma.proposal.create);
@@ -38,6 +40,7 @@ const findUnique = vi.mocked(prisma.proposal.findUnique);
 const update = vi.mocked(prisma.proposal.update);
 const aggregate = vi.mocked(prisma.proposal.aggregate);
 const updateMany = vi.mocked(prisma.proposal.updateMany);
+const onBoard = vi.mocked(prisma.proposal.findMany);
 const queryRaw = vi.mocked(prisma.$queryRaw);
 const question = vi.mocked(getQuestion);
 const activeQuestion = vi.mocked(getActiveQuestion);
@@ -51,7 +54,7 @@ const STICKY = {
 } as Parameters<typeof createProposal>[0]['input'];
 
 function questionRef(status: QuestionStatus = 'discussion') {
-  return { id: 'q1', sessionId: 's1', text: 'Q', position: 0, status };
+  return { id: 'q1', sessionId: 's1', text: 'Q', position: 0, status, boardLocked: false };
 }
 
 function createdRow(overrides: Record<string, unknown> = {}) {
@@ -86,9 +89,119 @@ beforeEach(() => {
   });
   create.mockResolvedValue(createdRow() as never);
   aggregate.mockResolvedValue({ _max: { z: null }, _min: { z: null } } as never);
+  onBoard.mockResolvedValue([]);
 });
 
 describe('createProposal', () => {
+  // Two people proposing at the same moment both see the same gap. The server,
+  // holding the board's lock, sees whichever landed first.
+  describe('where it lands', () => {
+    const IMAGE = {
+      type: 'image',
+      artifactJson: { type: 'image', src: 'x', width: 1, height: 1 },
+      x: 1000,
+      y: 800,
+    } as Parameters<typeof createProposal>[0]['input'];
+    const landedAt = () => {
+      const data = create.mock.calls[0]?.[0].data as { x: number; y: number };
+      return { x: data.x, y: data.y };
+    };
+
+    it('keeps the spot it was sent when that spot is clear', async () => {
+      onBoard.mockResolvedValue([{ x: 100, y: 100, type: 'image', cardWidth: null }] as never);
+      await createProposal({ questionId: 'q1', authorId: 'u1', input: IMAGE });
+      expect(landedAt()).toEqual({ x: 1000, y: 800 });
+    });
+
+    it('moves off a card that landed there first, to a spot clear of it', async () => {
+      const first = { x: 1000, y: 800, type: 'image', cardWidth: null };
+      onBoard.mockResolvedValue([first] as never);
+
+      await createProposal({ questionId: 'q1', authorId: 'u1', input: IMAGE });
+
+      const spot = { ...landedAt(), ...cardFootprint('image') };
+      const other = { x: first.x, y: first.y, ...cardFootprint('image') };
+      expect(spot).not.toMatchObject({ x: 1000, y: 800 });
+      expect(findClearSpot([other], cardFootprint('image'), spot)).toEqual(landedAt());
+    });
+
+    // A big sticky reaches further than the smallest: its stored width counts.
+    it('keeps clear of a sticky as wide as its note made it', async () => {
+      onBoard.mockResolvedValue([{ x: 1000, y: 460, type: 'sticky', cardWidth: 339 }] as never);
+      await createProposal({ questionId: 'q1', authorId: 'u1', input: IMAGE });
+      expect(landedAt()).not.toEqual({ x: 1000, y: 800 });
+    });
+
+    // A note that fits no square stays the largest width and grows taller.
+    // Taken as square, the card placed under it covered its overflow.
+    it('keeps clear of a sticky taller than it is wide', async () => {
+      onBoard.mockResolvedValue([
+        { x: 1000, y: 300, type: 'sticky', cardWidth: 339, cardHeight: 480 },
+      ] as never);
+      // Clear of a 339 square (bottom 639, plus the gap), not of 480.
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...IMAGE, y: 680 } as typeof IMAGE,
+      });
+      expect(landedAt()).not.toEqual({ x: 1000, y: 680 });
+    });
+
+    it('reads the board only once it holds the board’s lock', async () => {
+      const steps: string[] = [];
+      queryRaw.mockImplementation((async () => {
+        steps.push('lock');
+        return [];
+      }) as never);
+      onBoard.mockImplementation((async () => {
+        steps.push('read board');
+        return [];
+      }) as never);
+      create.mockImplementation((async () => {
+        steps.push('create');
+        return createdRow();
+      }) as never);
+
+      await createProposal({ questionId: 'q1', authorId: 'u1', input: IMAGE });
+      expect(steps).toEqual(['lock', 'read board', 'create']);
+    });
+
+    it('keeps a sticky’s width, held to the sizes a sticky can be', async () => {
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...STICKY, cardWidth: 9000 } as typeof STICKY,
+      });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: STICKY_MAX_WIDTH });
+    });
+
+    it('keeps a long note’s height, and never less than its width', async () => {
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...STICKY, cardWidth: 339, cardHeight: 480 } as typeof STICKY,
+      });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 339, cardHeight: 480 });
+
+      create.mockClear();
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...STICKY, cardWidth: 278, cardHeight: 10 } as typeof STICKY,
+      });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 278, cardHeight: 278 });
+    });
+
+    it('keeps no width for a card that is always the same width', async () => {
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...IMAGE, cardWidth: 900 } as typeof IMAGE,
+      });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: null, cardHeight: null });
+    });
+  });
+
   it('writes the proposal and returns it in board shape', async () => {
     const proposal = await createProposal({ questionId: 'q1', authorId: 'u1', input: STICKY });
     expect(proposal.id).toBe('p-new');

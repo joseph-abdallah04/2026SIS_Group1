@@ -1,14 +1,16 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import {
   addSessionQuestionSchema,
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
+  setBoardLockSchema,
   setQuestionPhaseSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
 
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
 import {
@@ -16,6 +18,7 @@ import {
   addSessionQuestion,
   createSession,
   deleteSession,
+  emitBoardLock,
   emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
@@ -31,10 +34,31 @@ import {
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setBoardLock,
   setQuestionPhase,
   startSession,
   updateSessionDraft,
 } from './service.js';
+
+// Has to run before `requireAuth`, as on the voting outcomes read: CodeQL
+// wants the limiter ahead of that check. Keyed by the verified user, so a
+// second login does not open a new budget; unverified requests share one
+// address bucket. Far above anything a leader clicking a toggle would reach.
+function boardLockClientKey(req: Request): string {
+  const userId = verifiedUserId(req);
+  if (userId) return `user:${userId}`;
+  return req.ip ? `anon:${ipKeyGenerator(req.ip)}` : 'anon';
+}
+
+const boardLockLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
+  keyGenerator: boardLockClientKey,
+  validate: { keyGeneratorIpFallback: false },
+});
 
 /**
  * A factory, not a module-level Router, because F09's POST /:id/start
@@ -172,6 +196,36 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       next(err);
     }
   });
+
+  // Lock or unlock the board: whether only the leader may move proposals.
+  sessionsRoutes.post<{ id: string }>(
+    '/:id/board-lock',
+    boardLockLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = setBoardLockSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid board lock',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const locked = await setBoardLock({
+          sessionId: req.params.id,
+          questionId: parsed.data.questionId,
+          leaderId: req.userId!,
+          locked: parsed.data.locked,
+        });
+        emitBoardLock(io, req.params.id, parsed.data.questionId, locked);
+        res.json({ questionId: parsed.data.questionId, locked });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
 
   // Focus question
   sessionsRoutes.post<{ id: string }>('/:id/focus', requireAuth, async (req, res, next) => {

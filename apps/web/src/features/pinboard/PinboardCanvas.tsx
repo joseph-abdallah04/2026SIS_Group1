@@ -19,6 +19,7 @@ import { FirstProposalHint } from './FirstProposalHint';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
 import { useProposalDrag } from './useProposalDrag';
+import { canMoveProposal } from './movePermission';
 import {
   DESK_MARGIN,
   BOARD_SIZE,
@@ -889,9 +890,15 @@ export function PinboardCanvas({
                     onExtend={
                       boardOpen && toolsFree && canReopen(item) ? openEditorForExtend : undefined
                     }
-                    canMove={
-                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
-                    }
+                    // The leader may move anything. Anyone else may move their
+                    // own, unless the leader has locked the board.
+                    canMove={canMoveProposal({
+                      boardOpen,
+                      isLeader,
+                      boardLocked: board.boardLocked,
+                      viewerId,
+                      authorId: item.authorId,
+                    })}
                     canDelete={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }

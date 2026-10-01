@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
-import { findOpenProposalPosition } from './proposalPlacement';
+import { cardSize, findOpenProposalPosition } from './proposalPlacement';
 import { proposalErrorMessage } from './proposeErrors';
 import type {
   ProposalSubmissionStatus,
@@ -20,6 +20,16 @@ interface UseProposalSubmissionOptions {
   proposals: readonly BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
+}
+
+/**
+ * The card's size as this browser lays it out, sent so the server can keep
+ * later cards clear of it. Only a sticky's is ever kept; the server knows the
+ * size of every other kind.
+ */
+function measuredSize(artifactJson: ArtifactJson) {
+  const { width, height } = cardSize({ type: artifactJson.type, artifactJson });
+  return { cardWidth: width, cardHeight: height };
 }
 
 export function useProposalSubmission({
@@ -62,7 +72,13 @@ export function useProposalSubmission({
         // An edit changes what the proposal says and nothing else: it keeps its
         // id, its author and the place on the board it was dragged to, so no
         // position is computed or sent.
-        await editProposal({ id: editSource.id, artifactJson });
+        await editProposal({
+          id: editSource.id,
+          artifactJson,
+          // A longer note can need a bigger sticky; the server keeps later
+          // cards clear of the size it is now.
+          ...measuredSize(artifactJson),
+        });
       } else {
         // An extension lands beside the card it builds on, so the two read as
         // related at a glance. Looked up on the board as it is now: the
@@ -75,6 +91,7 @@ export function useProposalSubmission({
           type: artifactJson.type,
           artifactJson,
           ...findOpenProposalPosition(proposals, artifactJson, original),
+          ...measuredSize(artifactJson),
           ...(extensionSource ? { extendsProposalId: extensionSource.id } : {}),
         });
       }
@@ -118,6 +135,7 @@ export function useProposalSubmission({
         type: artifactJson.type,
         artifactJson,
         ...findOpenProposalPosition(proposals, artifactJson, undefined, options.at),
+        ...measuredSize(artifactJson),
         ...(options.extendsProposalId ? { extendsProposalId: options.extendsProposalId } : {}),
       });
       return { ok: true };
