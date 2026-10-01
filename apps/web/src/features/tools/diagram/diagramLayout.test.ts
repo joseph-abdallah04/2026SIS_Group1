@@ -1,5 +1,10 @@
 import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
-import { diagramEdgeRoutes, effectiveDiagramNodeSize } from '@roundtable/shared';
+import {
+  DIAGRAM_MAX_NODE_HEIGHT,
+  DIAGRAM_MAX_NODE_WIDTH,
+  diagramEdgeRoutes,
+  effectiveDiagramNodeSize,
+} from '@roundtable/shared';
 import { describe, expect, it } from 'vitest';
 
 import { DIAGRAM_CANVAS_HEIGHT, DIAGRAM_CANVAS_WIDTH, prepareDiagram } from './diagramModel';
@@ -355,8 +360,8 @@ describe('graph-aware arrange', () => {
       const laid = layoutDiagram(nodes, [], 'TB');
 
       const size = effectiveDiagramNodeSize(at(laid, 'g'));
-      expect(size.width).toBeLessThanOrEqual(480);
-      expect(size.height).toBeLessThanOrEqual(320);
+      expect(size.width).toBeLessThanOrEqual(DIAGRAM_MAX_NODE_WIDTH);
+      expect(size.height).toBeLessThanOrEqual(DIAGRAM_MAX_NODE_HEIGHT);
       expect(prepareDiagram(laid, []).ok).toBe(true);
     });
   });

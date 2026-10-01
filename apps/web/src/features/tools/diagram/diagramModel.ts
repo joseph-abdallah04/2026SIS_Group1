@@ -3,6 +3,7 @@ import type {
   ArrowEndpoint,
   DiagramArtifact,
   DiagramEdge,
+  DiagramFontSizePreset,
   DiagramNode,
   DiagramNodeShape,
   DiagramNodeSize,
@@ -10,6 +11,8 @@ import type {
   TableElement,
 } from '@roundtable/shared';
 import {
+  DIAGRAM_CANVAS_HEIGHT,
+  DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_NODE_SHAPE_KEYS,
   DIAGRAM_MAX_NODE_HEIGHT,
   DIAGRAM_MAX_NODE_WIDTH,
@@ -20,11 +23,12 @@ import {
   diagramEdgeKey,
   diagramIsAncestor,
   diagramNodeSize,
+  diagramTextBoxHeight,
   effectiveDiagramNodeSize,
   offsetArrow,
   boxCentre,
   rotatePoint,
-  pathLocalBounds,
+  pathPaintedBounds,
   pointsBounds,
   rotatedBounds,
   tableSize,
@@ -39,6 +43,7 @@ import {
   type ArrangeOffset,
 } from '../studio/studioArrange';
 import { inkToData, type StudioInkStroke } from '../studio/studioInk';
+import { handleAxes, type ResizeHandle } from '../studio/studioScale';
 
 export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
 
@@ -74,8 +79,7 @@ export const DIAGRAM_SHAPE_PALETTE_ORDER = [
 
 export const DIAGRAM_NODE_WIDTH = diagramNodeSize('box').width;
 export const DIAGRAM_NODE_HEIGHT = diagramNodeSize('box').height;
-export const DIAGRAM_CANVAS_WIDTH = 960;
-export const DIAGRAM_CANVAS_HEIGHT = 600;
+export { DIAGRAM_CANVAS_HEIGHT, DIAGRAM_CANVAS_WIDTH };
 
 // Eight units keeps hand-placed nodes tidy without feeling magnetic.
 export const DIAGRAM_GRID = 8;
@@ -140,7 +144,20 @@ export const DIAGRAM_FULL_VIEW_BOX: DiagramRect = {
 
 export type DiagramAlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
 export type DiagramDistributeAxis = 'horizontal' | 'vertical';
-export type DiagramResizeCorner = 'nw' | 'ne' | 'se' | 'sw';
+/** Any of the eight grips on a selection frame: four corners, four edges. */
+export type DiagramResizeHandle = ResizeHandle;
+export type DiagramResizeCorner = Extract<ResizeHandle, 'nw' | 'ne' | 'se' | 'sw'>;
+
+export interface ResizeNodeOptions {
+  /** Alt: both sides move, and the centre is what stays put. */
+  fromCentre?: boolean;
+  /**
+   * The height the node must be for a given width. A text box is as tall as its
+   * text, so only its width is ever pulled; the height follows the wrapping,
+   * and the top edge stays where it is.
+   */
+  heightFor?: (width: number) => number;
+}
 
 export type DiagramNodeStyle = Partial<
   Pick<DiagramNode, 'fillColor' | 'strokeColor' | 'strokeWidthPreset' | 'fontSizePreset'>
@@ -433,6 +450,41 @@ export function findFreeNodePosition(
   return snapPositionForSize({ x: NODE_GAP, y: NODE_GAP }, diagramNodeSize(shape));
 }
 
+/**
+ * The text size everything a person places starts at.
+ *
+ * The size picker has always offered Small to Extra large, but an element with
+ * no preset is drawn at the older 11px, which is none of them — so a new shape
+ * showed "Medium" in the picker while being drawn smaller than Small. Writing
+ * the preset down makes what is drawn and what is offered the same thing.
+ * Templates and the assistant keep choosing their own.
+ */
+export const DIAGRAM_NEW_NODE_FONT_SIZE: DiagramFontSizePreset = 'medium';
+
+/**
+ * A new text box: the usual width, and exactly the height one line of its
+ * starting size needs. The shape default (40) is taller than that, so the box
+ * visibly shrank the first time its text was committed and refitted.
+ */
+export const DIAGRAM_NEW_TEXT_SIZE: DiagramNodeSize = (() => {
+  const width = diagramNodeSize('text').width;
+  return {
+    width,
+    height: diagramTextBoxHeight({
+      label: '',
+      shape: 'text',
+      width,
+      height: diagramNodeSize('text').height,
+      fontSizePreset: DIAGRAM_NEW_NODE_FONT_SIZE,
+    }),
+  };
+})();
+
+/** The size a newly placed element of this shape lands at. */
+export function newNodeSize(shape: DiagramNodeShape): DiagramNodeSize {
+  return shape === 'text' ? DIAGRAM_NEW_TEXT_SIZE : diagramNodeSize(shape);
+}
+
 export function addNode(
   nodes: readonly DiagramNode[],
   shape: DiagramNodeShape,
@@ -449,7 +501,10 @@ export function addNode(
   }
 
   const id = createNodeId(nodes);
-  const footprint = size ?? diagramNodeSize(shape);
+  // A text box is always written with its size: the shape default is not the
+  // size it is drawn at (see DIAGRAM_NEW_TEXT_SIZE).
+  const stored = size ?? (shape === 'text' ? DIAGRAM_NEW_TEXT_SIZE : undefined);
+  const footprint = stored ?? diagramNodeSize(shape);
   const position = at ? placeNodePosition(at, footprint, snap) : findFreeNodePosition(nodes, shape);
   const node: DiagramNode = {
     id,
@@ -459,9 +514,10 @@ export function addNode(
     x: position.x,
     y: position.y,
     shape,
+    fontSizePreset: DIAGRAM_NEW_NODE_FONT_SIZE,
     // Only written when it was actually chosen: a default-sized shape carries no
     // width/height, exactly as every shape did before drag-to-size existed.
-    ...(size ? { width: size.width, height: size.height } : {}),
+    ...(stored ? { width: stored.width, height: stored.height } : {}),
   };
 
   return { ok: true, nodes: [...nodes, node], addedId: id };
@@ -759,14 +815,17 @@ function clampNumber(value: number, min: number, max: number): number {
 export function resizeNode(
   nodes: readonly DiagramNode[],
   id: string,
-  corner: DiagramResizeCorner,
+  handle: DiagramResizeHandle,
   start: DiagramRect,
   delta: DiagramPoint,
   snap = true,
   lockAspect = false,
+  { fromCentre = false, heightFor }: ResizeNodeOptions = {},
 ): DiagramNode[] {
-  const movesLeftEdge = corner === 'nw' || corner === 'sw';
-  const movesTopEdge = corner === 'nw' || corner === 'ne';
+  // A width-only resize takes the horizontal half of whatever was pulled: the
+  // corners of a text box are still there to grab, and they set its width.
+  const { hx, hy: pulledHy } = handleAxes(handle);
+  const hy = heightFor ? 0 : pulledHy;
 
   const rotation = nodes.find((node) => node.id === id)?.rotation ?? 0;
   // The handles are drawn inside the element's own turn, so a drag "outward"
@@ -777,41 +836,67 @@ export function resizeNode(
   // an anchor, and resize was simply missed.
   const pull = rotation ? rotatePoint(delta, { x: 0, y: 0 }, -rotation) : delta;
 
+  // How far each side can go before it meets the sheet. From the centre, or
+  // along an axis an edge handle scales symmetrically, both sides move, so the
+  // nearer edge is the limit on each.
+  const room = (h: number, lo: number, extent: number, limit: number) => {
+    if (fromCentre || h === 0) {
+      const middle = lo + extent / 2;
+      return 2 * Math.min(middle, limit - middle);
+    }
+    return h > 0 ? limit - lo : lo + extent;
+  };
   const maxWidth = Math.max(
     DIAGRAM_MIN_NODE_WIDTH,
-    Math.min(
-      DIAGRAM_MAX_NODE_WIDTH,
-      movesLeftEdge ? start.x + start.width : DIAGRAM_CANVAS_WIDTH - start.x,
-    ),
+    Math.min(DIAGRAM_MAX_NODE_WIDTH, room(hx, start.x, start.width, DIAGRAM_CANVAS_WIDTH)),
   );
   const maxHeight = Math.max(
     DIAGRAM_MIN_NODE_HEIGHT,
-    Math.min(
-      DIAGRAM_MAX_NODE_HEIGHT,
-      movesTopEdge ? start.y + start.height : DIAGRAM_CANVAS_HEIGHT - start.y,
-    ),
+    Math.min(DIAGRAM_MAX_NODE_HEIGHT, room(hy, start.y, start.height, DIAGRAM_CANVAS_HEIGHT)),
   );
 
-  let width = start.width + (movesLeftEdge ? -pull.x : pull.x);
-  let height = start.height + (movesTopEdge ? -pull.y : pull.y);
+  // From the centre both sides follow the pointer, so the size changes twice as
+  // fast as the pull.
+  const reach = fromCentre ? 2 : 1;
+  let width = hx === 0 ? start.width : start.width + hx * pull.x * reach;
+  let height = hy === 0 ? start.height : start.height + hy * pull.y * reach;
 
-  if (lockAspect) {
+  if (lockAspect && !heightFor) {
+    // A corner follows whichever axis was pulled further; an edge, its own.
+    const ratio =
+      hx !== 0 && hy !== 0
+        ? Math.max(width / start.width, height / start.height)
+        : hx !== 0
+          ? width / start.width
+          : height / start.height;
     const scale = clampNumber(
-      Math.max(width / start.width, height / start.height),
+      ratio,
       Math.max(DIAGRAM_MIN_NODE_WIDTH / start.width, DIAGRAM_MIN_NODE_HEIGHT / start.height),
       Math.min(maxWidth / start.width, maxHeight / start.height),
     );
     width = start.width * scale;
     height = start.height * scale;
   } else {
-    width = clampNumber(snap ? snapToGrid(width) : width, DIAGRAM_MIN_NODE_WIDTH, maxWidth);
-    height = clampNumber(snap ? snapToGrid(height) : height, DIAGRAM_MIN_NODE_HEIGHT, maxHeight);
+    if (hx !== 0) {
+      width = clampNumber(snap ? snapToGrid(width) : width, DIAGRAM_MIN_NODE_WIDTH, maxWidth);
+    }
+    if (hy !== 0) {
+      height = clampNumber(snap ? snapToGrid(height) : height, DIAGRAM_MIN_NODE_HEIGHT, maxHeight);
+    }
   }
 
   width = Math.round(width);
-  height = Math.round(height);
-  let x = Math.round(movesLeftEdge ? start.x + start.width - width : start.x);
-  let y = Math.round(movesTopEdge ? start.y + start.height - height : start.y);
+  height = Math.round(heightFor ? heightFor(width) : height);
+
+  // Where the box goes, and which of its points stayed put: the far side of
+  // each pulled axis, the middle of an axis that was not, the centre when
+  // resizing from it — and the top of a box whose height follows its width.
+  const place = (h: number, lo: number, extent: number, size: number) =>
+    fromCentre || h === 0 ? lo + (extent - size) / 2 : h > 0 ? lo : lo + extent - size;
+  const hold = (h: number, lo: number, extent: number) =>
+    fromCentre || h === 0 ? lo + extent / 2 : h > 0 ? lo : lo + extent;
+  let x = Math.round(place(hx, start.x, start.width, width));
+  let y = Math.round(heightFor ? start.y : place(hy, start.y, start.height, height));
 
   if (rotation) {
     // Holding the far corner still in the element's own frame is not enough:
@@ -821,8 +906,8 @@ export function resizeNode(
     // corner lands back where it was drawn fixes it in the frame the user is
     // actually looking at.
     const held = {
-      x: movesLeftEdge ? start.x + start.width : start.x,
-      y: movesTopEdge ? start.y + start.height : start.y,
+      x: hold(hx, start.x, start.width),
+      y: heightFor ? start.y : hold(hy, start.y, start.height),
     };
     const before = rotatePoint(held, boxCentre(start), rotation);
     const after = rotatePoint(held, { x: x + width / 2, y: y + height / 2 }, rotation);
@@ -1114,8 +1199,10 @@ export function diagramContentBounds(
     if (local) addBox(rotatedBounds(local, stroke.rotation));
   }
   for (const path of paths) {
-    const local = pathLocalBounds(path);
-    if (local) addBox(rotatedBounds(local, path.rotation));
+    // The curve, not just its anchors: a bulge past the last anchor is still
+    // drawn, and framing by the anchors cropped it off the board card.
+    const painted = pathPaintedBounds(path);
+    if (painted) addBox(painted);
   }
   for (const table of tables) {
     const size = tableSize(table);

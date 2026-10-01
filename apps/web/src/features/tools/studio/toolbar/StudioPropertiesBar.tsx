@@ -40,6 +40,8 @@ interface StudioPropertiesBarProps {
   renderControl: (property: StudioPropertyDescriptor) => ReactNode;
   /** Selection bounds and the canvas they sit in, both in client coordinates. */
   selection: PlacementRect;
+  /** Pixels round the selection that are also taken, and that the bar keeps clear of. */
+  selectionPadding?: number;
   viewport: PlacementRect;
   /**
    * Client origin of the box the bar is positioned inside. The canvas is
@@ -56,7 +58,7 @@ interface StudioPropertiesBarProps {
 }
 
 const BAR_BUTTON =
-  'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
+  'flex h-8 w-8 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-lg border border-transparent text-rt-ink-muted transition-colors hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45';
 
 function Divider() {
   return <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-rt-tertiary" />;
@@ -82,6 +84,7 @@ export function StudioPropertiesBar({
   properties,
   renderControl,
   selection,
+  selectionPadding = 0,
   viewport,
   origin = { x: 0, y: 0 },
   selectionSize,
@@ -150,7 +153,7 @@ export function StudioPropertiesBar({
   const groups = groupProperties(properties);
   const showAlignment = selectionSize > 1;
   const showDistribute = selectionSize > 2;
-  const placed = placePropertiesBar(selection, size, viewport);
+  const placed = placePropertiesBar(selection, size, viewport, undefined, selectionPadding);
   const dockedStyle = { left: '0.5rem', right: '0.5rem', bottom: '3.75rem' };
 
   return (
@@ -161,7 +164,7 @@ export function StudioPropertiesBar({
       aria-orientation="horizontal"
       aria-label="Selection properties"
       data-side={docked ? 'docked' : placed.side}
-      className={`rt-studio-rise pointer-events-auto absolute ${alignOpen ? STUDIO_LAYER.open : STUDIO_LAYER.selection} flex items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.16)] ${
+      className={`rt-studio-rise pointer-events-auto absolute ${alignOpen ? STUDIO_LAYER.open : STUDIO_LAYER.selection} flex items-center gap-0.5 rounded-xl border border-rt-tertiary bg-rt-surface p-1 shadow-[0_6px_24px_rgba(8,12,21,0.14)] ${
         docked ? 'overflow-x-auto' : 'w-max'
       }`}
       style={{

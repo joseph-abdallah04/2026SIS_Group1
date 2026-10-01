@@ -7,6 +7,7 @@
 // what dragging an elbow's middle leg means — are testable without a canvas.
 
 import {
+  ARROW_MAX_BEND,
   arrowGeometry,
   diagramBoundaryScale,
   type ArrowAttach,
@@ -22,6 +23,8 @@ import {
   intoTargetFrame,
   outOfTargetFrame,
 } from '@roundtable/shared';
+
+import { scenePerPixel } from '../diagram/diagramView';
 
 export function createArrowId(): string {
   return `arrow-${globalThis.crypto.randomUUID()}`;
@@ -40,8 +43,7 @@ interface ViewExtent {
 }
 
 export function arrowSnapToleranceForView(view: ViewExtent, bounds: ViewExtent): number {
-  if (bounds.width <= 0 || bounds.height <= 0) return ARROW_SNAP_TOLERANCE;
-  return ARROW_SNAP_TOLERANCE * Math.max(view.width / bounds.width, view.height / bounds.height);
+  return ARROW_SNAP_TOLERANCE * scenePerPixel(view, bounds);
 }
 
 /**
@@ -58,8 +60,7 @@ export function arrowSnapToleranceForView(view: ViewExtent, bounds: ViewExtent):
 export const POINTER_TRAVEL_SLOP = 12;
 
 export function pointerTravelSlopForView(view: ViewExtent, bounds: ViewExtent): number {
-  if (bounds.width <= 0 || bounds.height <= 0) return POINTER_TRAVEL_SLOP;
-  return POINTER_TRAVEL_SLOP * Math.max(view.width / bounds.width, view.height / bounds.height);
+  return POINTER_TRAVEL_SLOP * scenePerPixel(view, bounds);
 }
 
 export interface ArrowStyle {
@@ -261,32 +262,35 @@ export function finishArrow(
  * What dragging an elbow's middle leg to this point means, as a `bend`.
  *
  * The leg runs along one axis and slides along the other, so only one of the
- * pointer's coordinates matters — which one depends on the axis the route led
- * with, and that is decided by the endpoints rather than stored.
+ * pointer's coordinates matters. Which one, and where "no bend" is, come from
+ * the route itself (`geometry.elbow`) rather than being guessed from its first
+ * corner — on an arrow bound to a shape that corner is the end of a stub, and
+ * a bend measured from it put the leg somewhere other than under the pointer.
+ *
+ * Held to the range the write path accepts, so a long drag cannot produce an
+ * arrow that is then refused on propose.
  */
 export function bendForPointer(
   arrow: ArrowElement,
   pointer: ArrowPoint,
   lookup?: ArrowTargetLookup,
 ): number {
-  const geometry = arrowGeometry({ ...arrow, bend: 0 }, lookup);
-  const [start, corner] = geometry.points;
-  if (!start || !corner || geometry.points.length < 4) return arrow.bend ?? 0;
-
-  // A route that leads horizontally turns at a shared x, so its middle leg is
-  // the vertical one and slides sideways.
-  const vertical = Math.abs(corner.x - start.x) > Math.abs(corner.y - start.y);
-  return Math.round(vertical ? pointer.x - corner.x : pointer.y - corner.y);
+  const leg =
+    arrowGeometry(arrow, lookup).elbow ?? arrowGeometry({ ...arrow, bend: 0 }, lookup).elbow;
+  if (!leg) return arrow.bend ?? 0;
+  const bend = Math.round(pointer[leg.axis] - leg.base);
+  return Math.max(-ARROW_MAX_BEND, Math.min(ARROW_MAX_BEND, bend));
 }
 
-/** Where the handle for that middle leg sits. */
+/**
+ * Where the handle for that middle leg sits, or nothing when the route has no
+ * single leg to slide — a handle there used to be draggable and do nothing.
+ */
 export function elbowHandlePoint(
   arrow: ArrowElement,
   lookup?: ArrowTargetLookup,
 ): ArrowPoint | null {
-  const geometry = arrowGeometry(arrow, lookup);
-  if (geometry.points.length < 4) return null;
-  const [, first, second] = geometry.points;
-  if (!first || !second) return null;
-  return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+  const leg = arrowGeometry(arrow, lookup).elbow;
+  if (!leg) return null;
+  return { x: (leg.from.x + leg.to.x) / 2, y: (leg.from.y + leg.to.y) / 2 };
 }

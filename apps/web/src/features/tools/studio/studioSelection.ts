@@ -8,6 +8,8 @@
 import {
   arrowBounds,
   arrowGeometry,
+  pathCurveLocalBounds,
+  pathPaintedBounds,
   rotatedBounds,
   tableSize,
   type ArrowElement,
@@ -74,16 +76,18 @@ function boundsOfPoints(points: readonly { x: number; y: number }[]): DiagramRec
 }
 
 /**
- * A path's extent, from its anchors alone.
+ * The area a path paints on the canvas, bulges included, once it is turned.
  *
- * A curve can bow slightly outside the box its anchors describe. That is
- * deliberate: computing exact bezier extrema would make a sweep catch a shape
- * whose visible line the sweep never crossed, which reads as a bug rather than
- * as precision.
+ * A curve can swing well outside its anchors, and a box around the anchors
+ * alone left the frame cutting through it, let the bulge be dragged off the
+ * sheet, and meant sweeping across the part you could see caught nothing. The
+ * turn is still about the anchors' centre — that is where the path pivots — so
+ * the curve's box is turned about that point rather than its own middle.
  */
-export function pathBounds(path: Pick<PathElement, 'anchors' | 'rotation'>): DiagramRect | null {
-  const local = boundsOfPoints(path.anchors);
-  return local && rotatedBounds(local, path.rotation);
+export function pathBounds(
+  path: Pick<PathElement, 'anchors' | 'closed' | 'rotation'>,
+): DiagramRect | null {
+  return pathPaintedBounds(path);
 }
 
 export function inkBounds(
@@ -103,6 +107,14 @@ export function inkBounds(
  */
 export function pathLocalBounds(path: Pick<PathElement, 'anchors'>): DiagramRect | null {
   return boundsOfPoints(path.anchors);
+}
+
+/**
+ * What a path paints, before rotation — the box its selection frame is drawn
+ * around. Not the pivot: that stays `pathLocalBounds`, for the reason above.
+ */
+export function pathFrameBounds(path: Pick<PathElement, 'anchors' | 'closed'>): DiagramRect | null {
+  return pathCurveLocalBounds(path);
 }
 
 export function inkLocalBounds(stroke: Pick<StudioInkStroke, 'points'>): DiagramRect | null {

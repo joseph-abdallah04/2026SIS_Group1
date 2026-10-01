@@ -220,4 +220,36 @@ describe('sliding an elbow’s middle leg', () => {
     const straight: ArrowElement = { id: 'a1', from: { x: 0, y: 0 }, to: { x: 80, y: 0 } };
     expect(bendForPointer(straight, { x: 40, y: 90 })).toBe(0);
   });
+
+  it('never reports a bend the write path would refuse', () => {
+    expect(bendForPointer(elbow({ x: 500, y: 200 }), { x: 99_999, y: 0 })).toBe(2000);
+    expect(bendForPointer(elbow({ x: 500, y: 200 }), { x: -99_999, y: 0 })).toBe(-2000);
+  });
+
+  describe('on an arrow bound to two shapes', () => {
+    const a = target('a', 0, 0, 120, 60);
+    const b = target('b', 400, 220, 120, 60);
+    const lookup = (id: string) => (id === 'a' ? a : id === 'b' ? b : undefined);
+    const joined: ArrowElement = {
+      id: 'j',
+      from: { x: 60, y: 30, elementId: 'a' },
+      to: { x: 460, y: 250, elementId: 'b' },
+      route: 'elbow',
+    };
+
+    it('puts the handle on the leg that slides, not on the run out of the stub', () => {
+      // An L: out of A's right face along y=30, then down at x=378 into B.
+      const handle = elbowHandlePoint(joined, lookup)!;
+      expect(handle.x).toBeCloseTo(378);
+      expect(handle.y).toBeCloseTo(140);
+    });
+
+    it('moves the leg to under the pointer, with no jump on the first move', () => {
+      // Grabbed where it already is, it stays there.
+      expect(bendForPointer(joined, { x: 378, y: 140 }, lookup)).toBe(118);
+      const bend = bendForPointer(joined, { x: 250, y: 999 }, lookup);
+      const moved = arrowGeometry({ ...joined, bend }, lookup);
+      expect(moved.elbow!.from.x).toBeCloseTo(250);
+    });
+  });
 });

@@ -25,8 +25,11 @@ import {
   getActiveQuestion,
   getDiscussionTimer,
   getQuestion,
+  getQuestionInSession,
   getSession,
   getSessionWithQuestions,
+  type QuestionRef,
+  type SessionRef,
 } from './sessionsAdapter.js';
 
 // The pinboard's read side (F14: the board every participant loads, in one
@@ -157,6 +160,26 @@ export interface CreateProposalArgs {
 }
 
 /**
+ * Writes belong to a live session only.
+ *
+ * Ending a session leaves each question's status where it was, so a question
+ * still in `discussion` cannot be the thing that decides this. `active` is
+ * also the only status where a board is on screen for proposing — a `lobby`
+ * session is still in the waiting room.
+ */
+function requireLiveSession(session: SessionRef | null): asserts session is SessionRef {
+  if (!session || session.status !== 'active') {
+    throw new ApiError(
+      409,
+      session?.status === 'ended'
+        ? 'This session has ended — the board is read-only'
+        : 'This session is not live',
+      'SESSION_NOT_ACTIVE',
+    );
+  }
+}
+
+/**
  * Persist a proposal and return it in board shape.
  *
  * Deliberately knows nothing about sockets: the caller broadcasts. That keeps
@@ -180,18 +203,9 @@ export async function createProposal({
   // The session gate, checked before the question's own: an ended session
   // (F32) leaves its questions' statuses untouched, so a question left in
   // `discussion` would otherwise keep accepting proposals after the leader
-  // wrapped up. `active` is also the only status where a board is on screen —
-  // a `lobby` session is still in the waiting room.
+  // wrapped up.
   const session = await getSession(question.sessionId);
-  if (!session || session.status !== 'active') {
-    throw new ApiError(
-      409,
-      session?.status === 'ended'
-        ? 'This session has ended — the board is read-only'
-        : 'This session is not live',
-      'SESSION_NOT_ACTIVE',
-    );
-  }
+  requireLiveSession(session);
   // Proposals belong to the ideation phase. Once a question moves to voting or
   // is answered the board is the thing being voted on, so it must stop moving.
   if (question.status !== 'discussion') {
@@ -354,6 +368,16 @@ async function loadForMutation(proposalId: string, actor: Actor, mutation: Propo
   const isLeader = session?.leaderId === actor.id;
   // A question that could not be read is taken as locked: the stricter answer.
   const boardLocked = question?.boardLocked ?? true;
+
+  // Missing, deleted, or on a session this actor did not join: the same 404
+  // `requireMutableProposal` would give. It has to come before the live-session
+  // check. Otherwise a proposal id from an ended session the actor is not in
+  // would answer "the board is read-only" and confirm that the id exists.
+  if (!row || row.deletedAt !== null || !question || question.sessionId !== actor.sessionId) {
+    throw new ApiError(404, 'Proposal not found', 'PROPOSAL_NOT_FOUND');
+  }
+
+  requireLiveSession(session);
 
   return {
     row: requireMutableProposal(row, question, actor, { mutation, isLeader, boardLocked }),
@@ -681,13 +705,46 @@ export async function listAuthoredProposals({
   return { sessionId, currentQuestionId: active?.id ?? null, groups };
 }
 
-export async function getBoardForSession(sessionId: string): Promise<BoardResponse> {
+/**
+ * Which question this read is for.
+ *
+ * No `questionId` keeps the live board: the question the room is focused on.
+ * Naming one is only for an ended session, where each person browses on their
+ * own and nothing is written back to `currentQuestionId`. On a live session
+ * the same parameter is refused rather than ignored, so a client cannot skip
+ * the leader's focus and quietly receive a different board.
+ */
+async function resolveBoardQuestion(
+  session: SessionRef,
+  questionId: string | undefined,
+): Promise<QuestionRef | null> {
+  if (questionId === undefined) return getActiveQuestion(session.id);
+
+  if (session.status !== 'ended') {
+    throw new ApiError(
+      409,
+      "A specific question's board is available once the session has ended",
+      'SESSION_NOT_ENDED',
+    );
+  }
+
+  const question = await getQuestionInSession(session.id, questionId);
+  if (!question) {
+    throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+  }
+  return question;
+}
+
+export async function getBoardForSession(
+  sessionId: string,
+  questionId?: string,
+): Promise<BoardResponse> {
   const session = await getSession(sessionId);
   if (!session) {
     throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
   }
 
-  const question = await getActiveQuestion(sessionId);
+  const question = await resolveBoardQuestion(session, questionId);
   const discussionTimer = await getDiscussionTimer(sessionId);
 
   if (!question) {

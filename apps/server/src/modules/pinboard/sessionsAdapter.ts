@@ -9,6 +9,7 @@ export {
   getActiveQuestion,
   getDiscussionTimer,
   getQuestion,
+  getQuestionInSession,
   getSession,
   getSessionWithQuestions,
 } from '../sessions/index.js';

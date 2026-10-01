@@ -140,6 +140,23 @@ describe('who may react', () => {
 });
 
 describe('toggleReaction', () => {
+  it('refuses a reaction once the session has ended, even while the question is in discussion', async () => {
+    session.mockResolvedValue({
+      id: 's1',
+      title: 'Demo',
+      status: 'ended',
+      leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
+    });
+
+    await expect(
+      toggleReaction({ proposalId: 'p1', actor: OTHER, emoji: THUMB }),
+    ).rejects.toMatchObject({ status: 409, code: 'SESSION_NOT_ACTIVE' });
+    expect(upsert).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+
   it('leaves a reaction when this person has none', async () => {
     findMany.mockResolvedValue([reactionRow(THUMB, 'u2')] as never);
 

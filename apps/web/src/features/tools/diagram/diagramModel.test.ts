@@ -590,6 +590,36 @@ describe('resizeNode', () => {
   const start = { x: 100, y: 100, width: 120, height: 56 };
   const node: DiagramNode = { id: 'n1', label: 'A', x: 100, y: 100, shape: 'box' };
 
+  it('moves one axis from an edge, leaving the other alone', () => {
+    const [wider] = resizeNode([node], 'n1', 'e', start, { x: 40, y: 300 });
+    expect(wider).toMatchObject({ x: 100, y: 100, width: 160, height: 56 });
+
+    const [taller] = resizeNode([node], 'n1', 'n', start, { x: 300, y: -24 });
+    // The bottom edge stays at 156.
+    expect(taller).toMatchObject({ x: 100, y: 76, width: 120, height: 80 });
+  });
+
+  it('keeps the proportions from an edge with Shift, about that edge', () => {
+    // 1.5x wider, so 1.5x taller, centred on the left edge's middle (128).
+    const [scaled] = resizeNode([node], 'n1', 'e', start, { x: 60, y: 0 }, false, true);
+    expect(scaled).toMatchObject({ x: 100, width: 180, height: 84, y: 86 });
+  });
+
+  it('grows about the centre with Alt, both sides at once', () => {
+    const [grown] = resizeNode([node], 'n1', 'se', start, { x: 20, y: 10 }, false, false, {
+      fromCentre: true,
+    });
+    // Centre (160, 128) stays put; each side moves by the pull.
+    expect(grown).toMatchObject({ x: 80, y: 90, width: 160, height: 76 });
+  });
+
+  it('sets only the width of a box whose height follows it, holding its top', () => {
+    const [text] = resizeNode([node], 'n1', 'sw', start, { x: -40, y: 200 }, false, false, {
+      heightFor: (width) => (width > 140 ? 36 : 72),
+    });
+    expect(text).toMatchObject({ x: 60, y: 100, width: 160, height: 36 });
+  });
+
   it('grows from the bottom-right without moving the origin', () => {
     const [resized] = resizeNode([node], 'n1', 'se', start, { x: 40, y: 24 });
     expect(resized).toMatchObject({ x: 100, y: 100, width: 160, height: 80 });
@@ -608,9 +638,10 @@ describe('resizeNode', () => {
     expect(resized).toMatchObject({ width: 56, height: 32 });
   });
 
-  it('never grows past the maximum or off the sheet', () => {
+  it('grows as far as the sheet edge, and no further', () => {
+    // The only upper limit is the sheet: from (100, 100) that is 860 x 500.
     const [huge] = resizeNode([node], 'n1', 'se', start, { x: 5_000, y: 5_000 });
-    expect(huge).toMatchObject({ width: 480, height: 320 });
+    expect(huge).toMatchObject({ width: 860, height: 500 });
 
     const atEdge = { x: 900, y: 560, width: 56, height: 32 };
     const [clamped] = resizeNode(

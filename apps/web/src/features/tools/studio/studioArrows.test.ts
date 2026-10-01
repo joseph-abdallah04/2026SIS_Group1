@@ -257,11 +257,22 @@ describe('an arrow that points at its own element', () => {
     }
   });
 
-  it('leaves a straight self-arrow straight', () => {
-    // Asked for straight, it stays the line between its two ends rather than
-    // becoming a loop.
+  it('loops a straight self-arrow round the element too, rounded rather than square', () => {
+    // It used to be the chord between its two ends, which cut straight across
+    // the element it was pointing back at.
     const straight = arrowGeometry({ ...loop, route: 'straight' }, () => box);
-    expect(straight.points).toHaveLength(2);
+    const elbowed = arrowGeometry(loop, () => box);
+    expect(straight.points).toEqual(elbowed.points);
+    for (const point of straight.points) {
+      const inside =
+        point.x > box.box.x + 0.5 &&
+        point.x < box.box.x + box.box.width - 0.5 &&
+        point.y > box.box.y + 0.5 &&
+        point.y < box.box.y + box.box.height - 0.5;
+      expect(inside).toBe(false);
+    }
+    // Same corners, drawn with a much wider radius.
+    expect(straight.d).not.toBe(elbowed.d);
   });
 
   it('honours attachments when they are given', () => {
@@ -543,6 +554,76 @@ describe('an elbow goes around what it joins', () => {
       (id) => (id === 'a' ? from : to),
     );
     expect(bendsIn(geometry.points)).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("sliding an elbow's middle leg", () => {
+  const a: ArrowTarget = { id: 'a', box: { x: 0, y: 0, width: 120, height: 60 } };
+  const b: ArrowTarget = { id: 'b', box: { x: 400, y: 220, width: 120, height: 60 } };
+  const lookup = (id: string) => (id === 'a' ? a : id === 'b' ? b : undefined);
+  // Joined centre to centre, as a connection between two shapes is.
+  const joined: ArrowElement = {
+    id: 'j',
+    from: { x: 60, y: 30, elementId: 'a' },
+    to: { x: 460, y: 250, elementId: 'b' },
+    route: 'elbow',
+  };
+
+  it('names the one leg that can be slid, and halfway between the stubs as its origin', () => {
+    // Out of A's right face and into B's left: an L whose second leg is the one
+    // that runs across the way it set off.
+    const geometry = arrowGeometry(joined, lookup);
+    expect(geometry.elbow).toMatchObject({ axis: 'x', base: 260 });
+    expect(geometry.elbow!.from.x).toBeCloseTo(geometry.elbow!.to.x);
+  });
+
+  it('puts the leg where the bend says on an arrow bound at both ends', () => {
+    // This bend used to be stored and then thrown away: the route was an L,
+    // and only a Z was ever bent.
+    const geometry = arrowGeometry({ ...joined, bend: -60 }, lookup);
+    expect(geometry.elbow!.from.x).toBeCloseTo(200);
+    expect(geometry.points.some((point) => Math.abs(point.x - 200) < 0.5)).toBe(true);
+  });
+
+  it('stops a leg pulled into an element beside it instead', () => {
+    const geometry = arrowGeometry({ ...joined, bend: -250 }, lookup);
+    const x = geometry.elbow!.from.x;
+    // Clear of A's right edge (120) by the half-stub margin, and no further back.
+    expect(x).toBeGreaterThan(130);
+    expect(x).toBeLessThan(145);
+    for (const point of geometry.points) {
+      const insideA = point.x > 0.5 && point.x < 119.5 && point.y > 0.5 && point.y < 59.5;
+      expect(insideA).toBe(false);
+    }
+  });
+
+  it('measures a free elbow the way it always has', () => {
+    const free: ArrowElement = {
+      id: 'f',
+      from: { x: 0, y: 0 },
+      to: { x: 200, y: 100 },
+      route: 'elbow',
+      bend: 30,
+    };
+    const geometry = arrowGeometry(free);
+    expect(geometry.elbow).toMatchObject({ axis: 'x', base: 100 });
+    expect(geometry.elbow!.from.x).toBe(130);
+  });
+
+  it('offers nothing to slide on a straight arrow or a loop', () => {
+    expect(arrowGeometry({ ...joined, route: 'straight' }, lookup).elbow).toBeUndefined();
+    const loop: ArrowElement = {
+      id: 'l',
+      from: { x: 0, y: 0, elementId: 'a' },
+      to: { x: 0, y: 0, elementId: 'a' },
+      route: 'elbow',
+    };
+    expect(arrowGeometry(loop, lookup).elbow).toBeUndefined();
+  });
+
+  it('leaves an unbent route exactly as it was', () => {
+    const before = arrowGeometry(joined, lookup).points;
+    expect(arrowGeometry({ ...joined, bend: 0 }, lookup).points).toEqual(before);
   });
 });
 

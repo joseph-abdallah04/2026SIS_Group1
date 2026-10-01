@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
 import { signToken } from '../modules/auth/jwt.js';
-import { requireAuth } from './auth.js';
+import { requireAuth, verifiedUserId } from './auth.js';
 
 function mockReqRes(authorization?: string, query: Request['query'] = {}) {
   const req = { headers: { authorization }, query } as Request;
@@ -47,5 +47,18 @@ describe('requireAuth', () => {
     expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MISSING_TOKEN' }));
     expect(next).not.toHaveBeenCalled();
     expect(req.userId).toBeUndefined();
+  });
+});
+
+describe('verifiedUserId', () => {
+  it('returns the user id from a token that verifies', () => {
+    const token = signToken({ userId: 'user-42' });
+    const { req } = mockReqRes(`Bearer ${token}`);
+    expect(verifiedUserId(req)).toBe('user-42');
+  });
+
+  it('returns null for a missing or forged token', () => {
+    expect(verifiedUserId(mockReqRes(undefined).req)).toBeNull();
+    expect(verifiedUserId(mockReqRes('Bearer not-a-real-token').req)).toBeNull();
   });
 });
