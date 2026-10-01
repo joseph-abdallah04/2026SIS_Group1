@@ -145,7 +145,9 @@ function describeAgenda(agenda: Agenda): string[] {
 
   for (const question of shown) {
     const here = question.isCurrent ? ' ← the team is on this one now' : '';
-    lines.push(`  ${question.number}. [${question.status}] ${quoteUntrusted(question.text)}${here}`);
+    // A brainstorm question (F41) is tagged so the model never expects a vote on it.
+    const tag = question.votingEnabled ? question.status : `${question.status}, brainstorm only`;
+    lines.push(`  ${question.number}. [${tag}] ${quoteUntrusted(question.text)}${here}`);
   }
 
   if (omitted > 0) lines.push(`  …and ${omitted} more. Use look_up_session to read them.`);

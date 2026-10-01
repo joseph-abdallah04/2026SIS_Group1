@@ -35,6 +35,7 @@ function question(id: string, status: 'discussion' | 'answered' = 'answered') {
     position: id === 'q1' ? 0 : 1,
     status,
     boardLocked: true,
+    votingEnabled: true,
   };
 }
 

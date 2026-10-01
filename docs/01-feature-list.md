@@ -60,11 +60,12 @@ Features are numbered (`F##`) so tickets on the Kanban board can reference them.
 
 ## 7. Agenda & Phase Progression — module: `sessions` (+ `realtime`)
 
-| ID  | Feature                                                                                   | Notes                                                                   |
-| --- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| F24 | Collapsible agenda side panel listing focus + all questions, current question highlighted | Same view for everyone                                                  |
-| F25 | Leader controls phases: start discussion → start voting → show results → next question    | Button(s) only rendered/enforced for leader; server validates authority |
-| F26 | Leader skips a question                                                                   | Recorded as `skipped` in summary                                        |
+| ID  | Feature                                                                                            | Notes                                                                                       |
+| --- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| F24 | Collapsible agenda side panel listing focus + all questions, current question highlighted          | Same view for everyone                                                                      |
+| F25 | Leader controls phases: start discussion → start voting → show results → next question             | Button(s) only rendered/enforced for leader; server validates authority                     |
+| F26 | Leader skips a question                                                                            | Recorded as `skipped` in summary                                                            |
+| F41 | Brainstorm-only questions: leader turns a question's vote off, at setup or live until voting opens | Runs discussion → answered with no vote; recorded as "Discussed" in summary with every idea |
 
 ## 8. Voting — module: `voting` (+ `realtime`)
 

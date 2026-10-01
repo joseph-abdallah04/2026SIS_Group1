@@ -39,6 +39,7 @@ const RECAP: SessionRecap = {
       position: 0,
       text: 'What ships first?',
       status: 'answered',
+      votingEnabled: true,
       proposals: [sticky('p1', 'The API'), sticky('p2', 'The UI', 'Bea')],
       winnerProposalId: 'p1',
       tiedProposalIds: [],
@@ -53,6 +54,7 @@ const RECAP: SessionRecap = {
       position: 1,
       text: 'What can wait?',
       status: 'skipped',
+      votingEnabled: true,
       proposals: [],
       winnerProposalId: null,
       tiedProposalIds: [],
@@ -124,5 +126,40 @@ describe('renderSessionRecapPdf', () => {
     expect(body).toContain('Bea');
     expect(body).not.toContain('Winner');
     expect(imageXObjectCount(pdf)).toBeGreaterThan(1);
+  });
+
+  // F41: no vote, so nothing is crowned — every idea is pictured instead.
+  it('pictures every idea on a brainstorm question without a winner or tally', async () => {
+    const ideas = [sticky('p1', 'The API'), sticky('p2', 'The UI', 'Bea'), sticky('p3', 'Docs')];
+    const pdf = await renderSessionRecapPdf({
+      ...RECAP,
+      questions: [
+        {
+          ...RECAP.questions[0]!,
+          votingEnabled: false,
+          proposals: ideas,
+          winnerProposalId: null,
+          tallies: [],
+          votedCount: 0,
+        },
+      ],
+    });
+    const body = pdfText(pdf);
+    expect(body).toContain('Discussed');
+    expect(body).toContain('3 ideas');
+    expect(body).not.toContain('Winner');
+    expect(body).not.toContain('votes cast');
+    expect(body).not.toContain('Nothing was decided');
+    expect(imageXObjectCount(pdf)).toBeGreaterThanOrEqual(ideas.length);
+  });
+
+  it('says so when a discussed brainstorm question got no ideas', async () => {
+    const pdf = await renderSessionRecapPdf({
+      ...RECAP,
+      questions: [{ ...RECAP.questions[0]!, votingEnabled: false, proposals: [], votedCount: 0 }],
+    });
+    const body = pdfText(pdf);
+    expect(body).toContain('No ideas were added.');
+    expect(body).not.toContain('Nothing was decided');
   });
 });

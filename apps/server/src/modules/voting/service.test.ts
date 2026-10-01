@@ -85,6 +85,7 @@ const VOTING_QUESTION = {
   text: 'What ships first?',
   position: 0,
   status: 'voting' as const,
+  votingEnabled: true,
 };
 const MEMBERS = [
   { userId: LEADER, displayName: 'Leader', joinedAt: new Date() },
@@ -138,6 +139,20 @@ describe('toggleShortlist', () => {
     await expect(
       toggleShortlist({ sessionId: 's1', actorId: LEADER, proposalId: 'p1' }),
     ).rejects.toMatchObject({ code: 'QUESTION_NOT_VOTING' });
+  });
+
+  // F41: a brainstorm question never reaches `voting`, so the existing
+  // status gate is what keeps every voting intent off it.
+  it('refuses a brainstorm-only question mid-discussion', async () => {
+    getActiveQuestion.mockResolvedValue({
+      ...VOTING_QUESTION,
+      status: 'discussion',
+      votingEnabled: false,
+    });
+    await expect(
+      toggleShortlist({ sessionId: 's1', actorId: LEADER, proposalId: 'p1' }),
+    ).rejects.toMatchObject({ code: 'QUESTION_NOT_VOTING' });
+    expect(roundCreate).not.toHaveBeenCalled();
   });
 
   it('refuses a proposal that is not on this question', async () => {

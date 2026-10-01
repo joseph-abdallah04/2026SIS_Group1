@@ -54,7 +54,15 @@ const STICKY = {
 } as Parameters<typeof createProposal>[0]['input'];
 
 function questionRef(status: QuestionStatus = 'discussion') {
-  return { id: 'q1', sessionId: 's1', text: 'Q', position: 0, status, boardLocked: false };
+  return {
+    id: 'q1',
+    sessionId: 's1',
+    text: 'Q',
+    position: 0,
+    status,
+    boardLocked: false,
+    votingEnabled: true,
+  };
 }
 
 function createdRow(overrides: Record<string, unknown> = {}) {

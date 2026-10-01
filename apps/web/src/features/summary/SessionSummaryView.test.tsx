@@ -41,6 +41,7 @@ const RECAP: SessionRecap = {
       position: 0,
       text: 'What ships first?',
       status: 'answered',
+      votingEnabled: true,
       proposals: [sticky('p1', 'The API'), sticky('p2', 'The UI')],
       winnerProposalId: 'p1',
       tiedProposalIds: [],
@@ -55,6 +56,7 @@ const RECAP: SessionRecap = {
       position: 1,
       text: 'What can wait?',
       status: 'skipped',
+      votingEnabled: true,
       proposals: [],
       winnerProposalId: null,
       tiedProposalIds: [],
@@ -128,5 +130,53 @@ describe('SessionSummaryView', () => {
 
     expect(screen.getAllByText('Tied')).toHaveLength(2);
     expect(screen.queryByText('Winner')).not.toBeInTheDocument();
+  });
+
+  // F41: no vote, so every idea is shown and none is crowned.
+  it('shows every idea on a brainstorm-only question, labelled Discussed', () => {
+    render(
+      <SessionSummaryView
+        summary={{
+          ...RECAP,
+          questions: [
+            {
+              ...RECAP.questions[0]!,
+              votingEnabled: false,
+              proposals: [sticky('p1', 'The API'), sticky('p2', 'The UI'), sticky('p3', 'Docs')],
+              winnerProposalId: null,
+              tallies: [],
+              votedCount: 0,
+            },
+          ],
+        }}
+        viewerId="u2"
+      />,
+    );
+
+    expect(screen.getByText('Discussed')).toBeInTheDocument();
+    expect(screen.getByText('3 ideas')).toBeInTheDocument();
+    expect(screen.getByText('Docs')).toBeInTheDocument();
+    expect(screen.queryByText('Winner')).not.toBeInTheDocument();
+    expect(screen.queryByText(/votes? cast/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/% ·/)).not.toBeInTheDocument();
+  });
+
+  it('says a discussed brainstorm got no ideas, not that nothing was shortlisted', () => {
+    render(
+      <SessionSummaryView
+        summary={{
+          ...RECAP,
+          questions: [
+            { ...RECAP.questions[0]!, votingEnabled: false, proposals: [], votedCount: 0 },
+          ],
+        }}
+        viewerId="u2"
+      />,
+    );
+
+    expect(screen.getByText('No ideas were added.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Nothing was shortlisted for this question.'),
+    ).not.toBeInTheDocument();
   });
 });

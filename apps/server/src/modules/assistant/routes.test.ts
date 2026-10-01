@@ -181,9 +181,9 @@ function sessionWithQuestions(overrides: Record<string, unknown> = {}) {
     id: 's1',
     title: 'Pick a database',
     questions: [
-      { id: 'q0', text: 'What slowed us down?', position: 0, status: 'answered' },
-      { id: 'q1', text: 'Which database?', position: 1, status: 'discussion' },
-      { id: 'q2', text: 'Who owns the migration?', position: 2, status: 'pending' },
+      { id: 'q0', text: 'What slowed us down?', position: 0, status: 'answered', votingEnabled: true },
+      { id: 'q1', text: 'Which database?', position: 1, status: 'discussion', votingEnabled: true },
+      { id: 'q2', text: 'Who owns the migration?', position: 2, status: 'pending', votingEnabled: true },
     ],
     ...overrides,
   };
@@ -547,8 +547,8 @@ describe('prompt context is server-authoritative (F35)', () => {
     getSessionWithQuestions.mockResolvedValue(
       sessionWithQuestions({
         questions: [
-          { id: 'q0', text: 'What slowed us down?', position: 0, status: 'skipped' },
-          { id: 'q1', text: 'Which database?', position: 1, status: 'discussion' },
+          { id: 'q0', text: 'What slowed us down?', position: 0, status: 'skipped', votingEnabled: true },
+          { id: 'q1', text: 'Which database?', position: 1, status: 'discussion', votingEnabled: true },
         ],
       }),
     );

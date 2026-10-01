@@ -49,6 +49,24 @@ export function useSessionDetail(sessionId: string) {
     });
   }, []);
 
+  /**
+   * F41: take a question's vote choice from `questionUpdated`. Only that
+   * field — status belongs to `sessionPhase`, and an older copy of the row
+   * arriving after a phase change must not put the question back a step.
+   */
+  const applyUpdatedQuestion = useCallback((question: Question) => {
+    setSession((prev) =>
+      prev
+        ? {
+            ...prev,
+            questions: prev.questions.map((row) =>
+              row.id === question.id ? { ...row, votingEnabled: question.votingEnabled } : row,
+            ),
+          }
+        : prev,
+    );
+  }, []);
+
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
@@ -68,5 +86,13 @@ export function useSessionDetail(sessionId: string) {
     };
   }, [sessionId, reloadToken]);
 
-  return { session, loading, error, reload, applyQuestionPhase, applyAddedQuestion };
+  return {
+    session,
+    loading,
+    error,
+    reload,
+    applyQuestionPhase,
+    applyAddedQuestion,
+    applyUpdatedQuestion,
+  };
 }

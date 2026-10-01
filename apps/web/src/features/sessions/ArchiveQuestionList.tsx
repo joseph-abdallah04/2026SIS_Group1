@@ -19,6 +19,19 @@ const STATUS_CHIP: Record<QuestionStatus, { label: string; tone: AgendaChipTone 
   skipped: { label: 'Skipped', tone: 'neutral' },
 };
 
+/**
+ * F41: a brainstorm-only question was never going to be voted on, so
+ * "Answered" or "Not voted on" would misdescribe it. Finished, or left
+ * mid-discussion when the session ended, the team discussed it.
+ */
+function statusChip(question: Question): { label: string; tone: AgendaChipTone } {
+  if (!question.votingEnabled) {
+    if (question.status === 'answered') return { label: 'Discussed', tone: 'warm' };
+    if (question.status === 'discussion') return { label: 'Discussed', tone: 'neutral' };
+  }
+  return STATUS_CHIP[question.status];
+}
+
 /** The live agenda's storage key, so the rail keeps one width across both. */
 const QUESTIONS_RESIZE = { storageKey: 'agenda', label: 'Resize questions' };
 
@@ -71,7 +84,7 @@ export function ArchiveQuestionList({
                   onSelect={() => {
                     if (!isFocused) onSelect(question.id);
                   }}
-                  status={STATUS_CHIP[question.status]}
+                  status={statusChip(question)}
                 />
               );
             })}

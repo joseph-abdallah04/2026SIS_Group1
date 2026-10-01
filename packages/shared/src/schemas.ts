@@ -186,13 +186,24 @@ export const SESSION_QUESTION_LIMIT = 50;
 
 export const questionTextSchema = z.string().trim().min(1).max(SESSION_QUESTION_TEXT_MAX);
 
+// One agenda item as the leader writes it. `votingEnabled: false` (F41) makes
+// it brainstorm-only: discussed, never voted on. Omitted means a vote, which
+// is what every question was before the choice existed.
+export const sessionQuestionInputSchema = z.object({
+  text: questionTextSchema,
+  votingEnabled: z.boolean().default(true),
+});
+
+export type SessionQuestionInput = z.infer<typeof sessionQuestionInputSchema>;
+
 // F04: title + an ordered list of questions. Order is exactly the array
 // order — the server assigns `position` from array index, so reordering
-// client-side and resubmitting is how a question list gets reordered.
+// client-side and resubmitting is how a question list gets reordered. Each
+// question carries its own vote/brainstorm choice, so it moves with its row.
 // Timer seconds are optional: omit or `null` means that clock is off.
 export const createSessionSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  questions: z.array(questionTextSchema).min(1).max(SESSION_QUESTION_LIMIT),
+  questions: z.array(sessionQuestionInputSchema).min(1).max(SESSION_QUESTION_LIMIT),
   discussionTimerSeconds: optionalTimerSeconds(DISCUSSION_TIMER_MAX_SECONDS),
   votingTimerSeconds: optionalTimerSeconds(VOTING_TIMER_MAX_SECONDS),
 });
@@ -254,12 +265,20 @@ export const focusQuestionSchema = z.object({
 export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
 
 // Leader appending one pending question to a live agenda. Position and
-// status are assigned server-side — the body is only the text.
-export const addSessionQuestionSchema = z.object({
-  text: questionTextSchema,
-});
+// status are assigned server-side — the body is the text and whether it
+// goes to a vote.
+export const addSessionQuestionSchema = sessionQuestionInputSchema;
 
 export type AddSessionQuestionInput = z.infer<typeof addSessionQuestionSchema>;
+
+// F41: the leader turning one question's vote on or off mid-session. Only
+// the flag — which statuses still allow the change is the server's call
+// (`setQuestionVoting`): once voting has opened, it is locked.
+export const setQuestionVotingSchema = z.object({
+  votingEnabled: z.boolean(),
+});
+
+export type SetQuestionVotingInput = z.infer<typeof setQuestionVotingSchema>;
 
 // === pinboard module ===
 

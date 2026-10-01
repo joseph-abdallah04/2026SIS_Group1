@@ -114,6 +114,10 @@ model Question {
   // move their own. Only positions: what a proposal says, and who may edit,
   // remove or react to it, are unaffected.
   boardLocked         Boolean   @default(true) @map("board_locked")
+  // F41: false makes this a brainstorm-only question — it runs
+  // discussion -> answered and never opens a vote. The leader sets it per
+  // question and may flip it until voting opens (`setQuestionVoting`).
+  votingEnabled       Boolean   @default(true) @map("voting_enabled")
 
   proposals   Proposal[]
   votingRound VotingRound?

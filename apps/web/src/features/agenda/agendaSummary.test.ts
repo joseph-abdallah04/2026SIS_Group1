@@ -10,6 +10,7 @@ function questions(...statuses: QuestionStatus[]): Question[] {
     text: `Question ${position + 1}`,
     position,
     status,
+    votingEnabled: true,
     createdAt: new Date(0),
   }));
 }

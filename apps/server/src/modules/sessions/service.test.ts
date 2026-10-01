@@ -107,6 +107,7 @@ const {
   emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
+  emitQuestionUpdated,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
@@ -115,6 +116,7 @@ const {
   getActiveQuestion,
   getQuestionInSession,
   setQuestionPhase,
+  setQuestionVoting,
   joinSessionByCode,
   leaveSession,
   listSessionsForUser,
@@ -142,8 +144,16 @@ beforeEach(() => {
   });
 });
 
+/** One agenda item as the create/edit form submits it (F41: a vote unless told otherwise). */
+function q(text: string, votingEnabled = true) {
+  return { text, votingEnabled };
+}
+
 describe('createSession', () => {
-  const input = { title: 'Roadmap planning', questions: ['What ships first?', 'Who owns it?'] };
+  const input = {
+    title: 'Roadmap planning',
+    questions: [q('What ships first?'), q('Who owns it?')],
+  };
 
   it('always writes a new session as draft with no code, regardless of what the caller passed', async () => {
     await createSession({ leaderId: 'u1', input });
@@ -155,15 +165,27 @@ describe('createSession', () => {
   it('assigns question position from array order, so reordering client-side is the whole reorder UI', async () => {
     await createSession({ leaderId: 'u1', input });
     expect(questionCreateMany.mock.calls[0]?.[0].data).toEqual([
-      { sessionId: 's1', text: 'What ships first?', position: 0 },
-      { sessionId: 's1', text: 'Who owns it?', position: 1 },
+      { sessionId: 's1', text: 'What ships first?', position: 0, votingEnabled: true },
+      { sessionId: 's1', text: 'Who owns it?', position: 1, votingEnabled: true },
     ]);
+  });
+
+  it('stores each question\'s vote choice with its row (F41)', async () => {
+    await createSession({
+      leaderId: 'u1',
+      input: { title: 'X', questions: [q('Vote on this'), q('Just ideas', false)] },
+    });
+    expect(
+      questionCreateMany.mock.calls[0]?.[0].data.map(
+        (row: { votingEnabled: boolean }) => row.votingEnabled,
+      ),
+    ).toEqual([true, false]);
   });
 
   it('preserves order exactly as submitted, even when reversed', async () => {
     await createSession({
       leaderId: 'u1',
-      input: { title: 'X', questions: ['Third', 'Second', 'First'] },
+      input: { title: 'X', questions: [q('Third'), q('Second'), q('First')] },
     });
     const texts = questionCreateMany.mock.calls[0]?.[0].data.map((q: { text: string }) => q.text);
     expect(texts).toEqual(['Third', 'Second', 'First']);
@@ -184,7 +206,7 @@ describe('createSession', () => {
   it('stores optional timer durations as seconds, and leaves them null when omitted', async () => {
     await createSession({
       leaderId: 'u1',
-      input: { title: 'X', questions: ['Q'], discussionTimerSeconds: 615, votingTimerSeconds: 75 },
+      input: { title: 'X', questions: [q('Q')], discussionTimerSeconds: 615, votingTimerSeconds: 75 },
     });
     expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({
       discussionTimerSeconds: 615,
@@ -192,7 +214,7 @@ describe('createSession', () => {
     });
 
     sessionCreate.mockClear();
-    await createSession({ leaderId: 'u1', input: { title: 'X', questions: ['Q'] } });
+    await createSession({ leaderId: 'u1', input: { title: 'X', questions: [q('Q')] } });
     expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({
       discussionTimerSeconds: null,
       votingTimerSeconds: null,
@@ -203,16 +225,16 @@ describe('createSession', () => {
 describe('createSessionSchema', () => {
   it('accepts a title and at least one question', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: ['Scope?'] }).success,
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('Scope?')] }).success,
     ).toBe(true);
   });
 
   it('rejects an empty title', () => {
-    expect(createSessionSchema.safeParse({ title: '', questions: ['Scope?'] }).success).toBe(false);
+    expect(createSessionSchema.safeParse({ title: '', questions: [q('Scope?')] }).success).toBe(false);
   });
 
   it('rejects a title that is only whitespace', () => {
-    expect(createSessionSchema.safeParse({ title: '   ', questions: ['Scope?'] }).success).toBe(
+    expect(createSessionSchema.safeParse({ title: '   ', questions: [q('Scope?')] }).success).toBe(
       false,
     );
   });
@@ -225,19 +247,19 @@ describe('createSessionSchema', () => {
 
   it('rejects a blank question', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [''] }).success,
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('')] }).success,
     ).toBe(false);
   });
 
   it('rejects a title over 120 characters', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'x'.repeat(121), questions: ['Scope?'] }).success,
+      createSessionSchema.safeParse({ title: 'x'.repeat(121), questions: [q('Scope?')] }).success,
     ).toBe(false);
   });
 
   it('rejects a question over 500 characters', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: ['x'.repeat(501)] })
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(501))] })
         .success,
     ).toBe(false);
   });
@@ -246,14 +268,31 @@ describe('createSessionSchema', () => {
     expect(
       createSessionSchema.safeParse({
         title: 'Sprint kickoff',
-        questions: Array.from({ length: 51 }, (_, i) => `Q${i}`),
+        questions: Array.from({ length: 51 }, (_, i) => q(`Q${i}`)),
       }).success,
+    ).toBe(false);
+  });
+
+  it('treats a question with no vote choice as a voting question (F41)', () => {
+    const parsed = createSessionSchema.safeParse({
+      title: 'Sprint kickoff',
+      questions: [{ text: 'Scope?' }, { text: 'Ideas?', votingEnabled: false }],
+    });
+    expect(parsed.data?.questions).toEqual([
+      { text: 'Scope?', votingEnabled: true },
+      { text: 'Ideas?', votingEnabled: false },
+    ]);
+  });
+
+  it('rejects a bare string question — each row carries its vote choice', () => {
+    expect(
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: ['Scope?'] }).success,
     ).toBe(false);
   });
 
   it('accepts omitted timers so a session can be created without them', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: ['Scope?'] }).success,
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('Scope?')] }).success,
     ).toBe(true);
   });
 
@@ -261,7 +300,7 @@ describe('createSessionSchema', () => {
     expect(
       createSessionSchema.safeParse({
         title: 'Sprint kickoff',
-        questions: ['Scope?'],
+        questions: [q('Scope?')],
         discussionTimerSeconds: 615,
         votingTimerSeconds: 75,
       }).success,
@@ -269,14 +308,14 @@ describe('createSessionSchema', () => {
     expect(
       createSessionSchema.safeParse({
         title: 'Sprint kickoff',
-        questions: ['Scope?'],
+        questions: [q('Scope?')],
         discussionTimerSeconds: 0,
       }).success,
     ).toBe(false);
     expect(
       createSessionSchema.safeParse({
         title: 'Sprint kickoff',
-        questions: ['Scope?'],
+        questions: [q('Scope?')],
         votingTimerSeconds: 10,
       }).success,
     ).toBe(false);
@@ -287,7 +326,11 @@ describe('addSessionQuestionSchema', () => {
   it('trims and accepts a non-empty question', () => {
     expect(addSessionQuestionSchema.safeParse({ text: '  What next?  ' }).data).toEqual({
       text: 'What next?',
+      votingEnabled: true,
     });
+    expect(
+      addSessionQuestionSchema.safeParse({ text: 'Ideas?', votingEnabled: false }).data,
+    ).toEqual({ text: 'Ideas?', votingEnabled: false });
   });
 
   it('rejects an empty or whitespace-only question', () => {
@@ -467,7 +510,7 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
       updateSessionDraft({
         sessionId: 's1',
         leaderId: 'not-the-leader',
-        input: { title: 'New title', questions: ['Q1'] },
+        input: { title: 'New title', questions: [q('Q1')] },
       }),
     ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
     expect(sessionUpdateInTx).not.toHaveBeenCalled();
@@ -479,7 +522,7 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
       updateSessionDraft({
         sessionId: 's1',
         leaderId: 'leader-1',
-        input: { title: 'New title', questions: ['Q1'] },
+        input: { title: 'New title', questions: [q('Q1')] },
       }),
     ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
     expect(sessionUpdateInTx).not.toHaveBeenCalled();
@@ -496,7 +539,7 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
     const result = await updateSessionDraft({
       sessionId: 's1',
       leaderId: 'leader-1',
-      input: { title: 'New title', questions: ['First', 'Second'] },
+      input: { title: 'New title', questions: [q('First'), q('Second', false)] },
     });
 
     expect(sessionUpdateInTx).toHaveBeenCalledWith({
@@ -509,8 +552,8 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
     });
     expect(questionDeleteMany).toHaveBeenCalledWith({ where: { sessionId: 's1' } });
     expect(questionCreateMany.mock.calls[0]?.[0].data).toEqual([
-      { sessionId: 's1', text: 'First', position: 0 },
-      { sessionId: 's1', text: 'Second', position: 1 },
+      { sessionId: 's1', text: 'First', position: 0, votingEnabled: true },
+      { sessionId: 's1', text: 'Second', position: 1, votingEnabled: false },
     ]);
     expect(result.title).toBe('New title');
     expect(result.questions).toHaveLength(2);
@@ -599,6 +642,7 @@ describe('addSessionQuestion', () => {
     text: 'What did we miss?',
     position: 2,
     status: 'pending' as const,
+    votingEnabled: true,
     createdAt: new Date('2026-09-10T00:00:00.000Z'),
   };
 
@@ -609,6 +653,7 @@ describe('addSessionQuestion', () => {
         sessionId: 's1',
         leaderId: 'someone-else',
         text: 'What did we miss?',
+        votingEnabled: true,
       }),
     ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
     expect(questionCreate).not.toHaveBeenCalled();
@@ -617,7 +662,12 @@ describe('addSessionQuestion', () => {
   it.each(['draft', 'ended'] as const)('refuses to add a question while the session is %s', async (status) => {
     sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
     await expect(
-      addSessionQuestion({ sessionId: 's1', leaderId: 'leader-1', text: 'What did we miss?' }),
+      addSessionQuestion({
+        sessionId: 's1',
+        leaderId: 'leader-1',
+        text: 'What did we miss?',
+        votingEnabled: true,
+      }),
     ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
     expect(questionCreate).not.toHaveBeenCalled();
   });
@@ -628,7 +678,12 @@ describe('addSessionQuestion', () => {
     questionCreate.mockResolvedValueOnce(created);
 
     await expect(
-      addSessionQuestion({ sessionId: 's1', leaderId: 'leader-1', text: 'What did we miss?' }),
+      addSessionQuestion({
+        sessionId: 's1',
+        leaderId: 'leader-1',
+        text: 'What did we miss?',
+        votingEnabled: true,
+      }),
     ).resolves.toMatchObject({ id: 'q3', position: 2, status: 'pending' });
 
     expect(questionCreate).toHaveBeenCalledWith(
@@ -638,9 +693,25 @@ describe('addSessionQuestion', () => {
           text: 'What did we miss?',
           position: 2,
           status: 'pending',
+          votingEnabled: true,
         },
       }),
     );
+  });
+
+  it('appends a brainstorm-only question when the leader turns its vote off (F41)', async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
+    questionFindFirst.mockResolvedValueOnce({ position: 1 });
+    questionCreate.mockResolvedValueOnce({ ...created, votingEnabled: false });
+
+    await addSessionQuestion({
+      sessionId: 's1',
+      leaderId: 'leader-1',
+      text: 'What did we miss?',
+      votingEnabled: false,
+    });
+
+    expect(questionCreate.mock.calls[0]?.[0].data).toMatchObject({ votingEnabled: false });
   });
 
   it('also appends while the session is still in the lobby', async () => {
@@ -649,7 +720,12 @@ describe('addSessionQuestion', () => {
     questionCreate.mockResolvedValueOnce(created);
 
     await expect(
-      addSessionQuestion({ sessionId: 's1', leaderId: 'leader-1', text: 'What did we miss?' }),
+      addSessionQuestion({
+        sessionId: 's1',
+        leaderId: 'leader-1',
+        text: 'What did we miss?',
+        votingEnabled: true,
+      }),
     ).resolves.toMatchObject({ id: 'q3' });
     expect(questionCreate).toHaveBeenCalled();
   });
@@ -657,7 +733,12 @@ describe('addSessionQuestion', () => {
   it('refuses a 51st question', async () => {
     sessionFindUnique.mockResolvedValueOnce({ ...liveSession, _count: { questions: 50 } });
     await expect(
-      addSessionQuestion({ sessionId: 's1', leaderId: 'leader-1', text: 'One more' }),
+      addSessionQuestion({
+        sessionId: 's1',
+        leaderId: 'leader-1',
+        text: 'One more',
+        votingEnabled: true,
+      }),
     ).rejects.toMatchObject({ code: 'AGENDA_FULL' });
     expect(questionCreate).not.toHaveBeenCalled();
   });
@@ -674,6 +755,112 @@ describe('addSessionQuestion', () => {
       sessionId: 's1',
       question: created,
     });
+  });
+});
+
+describe('setQuestionVoting (F41)', () => {
+  const liveSession = { leaderId: 'leader-1', status: 'active' };
+
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'q2',
+      sessionId: 's1',
+      text: 'What else?',
+      position: 1,
+      status: 'pending' as const,
+      votingEnabled: true,
+      createdAt: new Date('2026-09-10T00:00:00.000Z'),
+      ...overrides,
+    };
+  }
+
+  function turnOff(overrides: Partial<Parameters<typeof setQuestionVoting>[0]> = {}) {
+    return setQuestionVoting({
+      sessionId: 's1',
+      questionId: 'q2',
+      leaderId: 'leader-1',
+      votingEnabled: false,
+      ...overrides,
+    });
+  }
+
+  it('turns a pending question into a brainstorm', async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
+    questionFindUnique.mockResolvedValueOnce(row());
+    questionUpdate.mockResolvedValueOnce(row({ votingEnabled: false }));
+
+    await expect(turnOff()).resolves.toMatchObject({ id: 'q2', votingEnabled: false });
+    expect(questionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'q2' }, data: { votingEnabled: false } }),
+    );
+  });
+
+  it('can turn the vote back on while the question is in discussion', async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
+    questionFindUnique.mockResolvedValueOnce(row({ status: 'discussion', votingEnabled: false }));
+    questionUpdate.mockResolvedValueOnce(row({ status: 'discussion' }));
+
+    await expect(turnOff({ votingEnabled: true })).resolves.toMatchObject({ votingEnabled: true });
+    expect(questionUpdate).toHaveBeenCalled();
+  });
+
+  it('also works in the lobby, before the session starts', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status: 'lobby' });
+    questionFindUnique.mockResolvedValueOnce(row());
+    questionUpdate.mockResolvedValueOnce(row({ votingEnabled: false }));
+
+    await expect(turnOff()).resolves.toMatchObject({ votingEnabled: false });
+  });
+
+  it('is a no-op when the question already has that setting', async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
+    questionFindUnique.mockResolvedValueOnce(row({ status: 'answered', votingEnabled: false }));
+
+    await expect(turnOff()).resolves.toMatchObject({ votingEnabled: false });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a caller who is not the leader', async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
+    await expect(turnOff({ leaderId: 'someone-else' })).rejects.toMatchObject({
+      code: 'NOT_SESSION_LEADER',
+    });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'ended'] as const)('refuses while the session is %s', async (status) => {
+    sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
+    await expect(turnOff()).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a question from another session", async () => {
+    sessionFindUnique.mockResolvedValueOnce(liveSession);
+    questionFindUnique.mockResolvedValueOnce(row({ sessionId: 'other' }));
+    await expect(turnOff()).rejects.toMatchObject({ code: 'QUESTION_NOT_FOUND' });
+    expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['voting', 'answered', 'skipped'] as const)(
+    'locks the choice once the question is %s',
+    async (status) => {
+      sessionFindUnique.mockResolvedValueOnce(liveSession);
+      questionFindUnique.mockResolvedValueOnce(row({ status }));
+      await expect(turnOff()).rejects.toMatchObject({ code: 'QUESTION_VOTING_LOCKED' });
+      expect(questionUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('emitQuestionUpdated broadcasts the row to the session room', () => {
+    const emit = vi.fn();
+    const to = vi.fn(() => ({ emit }));
+    const io = { to } as unknown as Parameters<typeof emitQuestionUpdated>[0];
+    const question = row({ votingEnabled: false });
+
+    emitQuestionUpdated(io, question);
+
+    expect(to).toHaveBeenCalledWith('session:s1');
+    expect(emit).toHaveBeenCalledWith('questionUpdated', { sessionId: 's1', question });
   });
 });
 
@@ -992,7 +1179,7 @@ describe('leaveSession (F07)', () => {
 
 describe('leftAt semantics', () => {
   it('the one-live-session guard ignores sessions the user has left', async () => {
-    await createSession({ leaderId: 'u1', input: { title: 'X', questions: ['Q'] } });
+    await createSession({ leaderId: 'u1', input: { title: 'X', questions: [q('Q')] } });
     expect(sessionFindFirst.mock.calls[0]?.[0]).toMatchObject({
       where: { members: { some: { userId: 'u1', leftAt: null } } },
     });
@@ -1082,6 +1269,7 @@ describe('setQuestionPhase (F25/F26)', () => {
       position: 0,
       status: 'pending',
       boardLocked: true,
+      votingEnabled: true,
       ...overrides,
     };
   }
@@ -1093,6 +1281,7 @@ describe('setQuestionPhase (F25/F26)', () => {
     position: number;
     status: 'pending' | 'discussion' | 'voting' | 'answered' | 'skipped';
     boardLocked: boolean;
+    votingEnabled: boolean;
   }
 
   function advance(status: QuestionRow['status'], leaderId = 'leader-1') {
@@ -1167,6 +1356,53 @@ describe('setQuestionPhase (F25/F26)', () => {
     questionFindUnique.mockResolvedValue(question({ status: from }));
     await expect(advance(to)).rejects.toMatchObject({ code: 'INVALID_PHASE_TRANSITION' });
     expect(questionUpdate).not.toHaveBeenCalled();
+  });
+
+  describe('a brainstorm-only question (F41)', () => {
+    const brainstorm = (status: QuestionRow['status']) =>
+      question({ status, votingEnabled: false });
+
+    it.each([
+      ['pending', 'discussion'],
+      ['pending', 'skipped'],
+      // The board is the answer: finishing the discussion is how it closes.
+      ['discussion', 'answered'],
+      ['discussion', 'skipped'],
+    ] as const)('allows %s -> %s', async (from, to) => {
+      questionFindUnique.mockResolvedValue(brainstorm(from));
+      await expect(advance(to)).resolves.toMatchObject({ status: to });
+    });
+
+    it('refuses to open voting, with a code the leader can act on', async () => {
+      questionFindUnique.mockResolvedValue(brainstorm('discussion'));
+      await expect(advance('voting')).rejects.toMatchObject({ code: 'VOTING_DISABLED' });
+      expect(questionUpdate).not.toHaveBeenCalled();
+    });
+
+    it('needs no minimum number of ideas to finish', async () => {
+      proposalCount.mockResolvedValue(0);
+      questionFindUnique.mockResolvedValue(brainstorm('discussion'));
+      await expect(advance('answered')).resolves.toMatchObject({ status: 'answered' });
+    });
+
+    it.each([
+      ['pending', 'answered'],
+      ['answered', 'discussion'],
+      ['skipped', 'discussion'],
+    ] as const)('refuses %s -> %s', async (from, to) => {
+      questionFindUnique.mockResolvedValue(brainstorm(from));
+      await expect(advance(to)).rejects.toMatchObject({ code: 'INVALID_PHASE_TRANSITION' });
+      expect(questionUpdate).not.toHaveBeenCalled();
+    });
+
+    it('moves the board on to the next pending question when finished', async () => {
+      questionFindUnique.mockResolvedValue(brainstorm('discussion'));
+      questionFindFirst.mockResolvedValue({ id: 'q2' });
+      await advance('answered');
+      expect(sessionUpdateInTx).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { currentQuestionId: 'q2' } }),
+      );
+    });
   });
 
   it('treats setting the status a question already has as a no-op, so a double-click is not an error', async () => {
@@ -1334,6 +1570,7 @@ describe('getQuestionInSession', () => {
         position: true,
         status: true,
         boardLocked: true,
+        votingEnabled: true,
       },
     });
   });

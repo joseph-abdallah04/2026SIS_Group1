@@ -87,6 +87,7 @@ const session: SessionDetail = {
       text: 'Question 1',
       position: 0,
       status: 'pending',
+      votingEnabled: true,
       createdAt: new Date('2026-09-05T00:00:00.000Z'),
     },
   ],

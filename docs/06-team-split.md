@@ -23,15 +23,15 @@
 
 ## Quick Reference
 
-| #   | Module                | Owner Focus                    | Features         | Primary Files          | Database Tables                        |
-| --- | --------------------- | ------------------------------ | ---------------- | ---------------------- | -------------------------------------- |
-| 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33     | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
-| 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
-| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18, F38     | `pinboard/`            | `Proposal`, `Reaction`                 |
-| 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23     | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
-| 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32          | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
-| 6   | **Voice**             | LiveKit integration            | F11–F13          | `voice/`               | _(none — LiveKit-managed)_             |
-| 7   | **AI Assistant**      | LLM chat + tool-calling        | F34–F37          | `assistant/`           | _(none — config in Auth)_              |
+| #   | Module                | Owner Focus                    | Features              | Primary Files          | Database Tables                        |
+| --- | --------------------- | ------------------------------ | --------------------- | ---------------------- | -------------------------------------- |
+| 1   | **Auth + Profile**    | User identity, LLM settings    | F01–F03, F33          | `auth/`, `settings/`   | `User`, `UserLLMConfig`                |
+| 2   | **Session Lifecycle** | Create/join/phase progression  | F04–F10, F24–F26, F41 | `sessions/`, `agenda/` | `Session`, `Question`, `SessionMember` |
+| 3   | **Pinboard Core**     | Proposal CRUD, reactions       | F14–F18, F38          | `pinboard/`            | `Proposal`, `Reaction`                 |
+| 4   | **Creative Tools**    | Sticky/drawing/diagram editors | F19–F22, F23          | `tools/`, `toolbar/`   | _(none — artifacts in JSON)_           |
+| 5   | **Voting + Summary**  | Vote rounds, winner tally      | F27–F32               | `voting/`, `summary/`  | `VotingRound`, `Vote`, `Answer`        |
+| 6   | **Voice**             | LiveKit integration            | F11–F13               | `voice/`               | _(none — LiveKit-managed)_             |
+| 7   | **AI Assistant**      | LLM chat + tool-calling        | F34–F37               | `assistant/`           | _(none — config in Auth)_              |
 
 ---
 
@@ -110,7 +110,7 @@ Setup decided how security works but deliberately did not build it — implement
 
 ## Session Lifecycle Owner
 
-**Features:** F04–F10, F24–F26  
+**Features:** F04–F10, F24–F26, F41  
 **Responsibility:** Create sessions, invite members, phase state machine (lobby → discussion → voting → results)
 
 ### Code ownership
@@ -807,7 +807,7 @@ Examples:
 ### Epic structure (mirrors 7 modules)
 
 1. **Auth + Profile** — F01–F03, F33
-2. **Session Lifecycle** — F04–F10, F24–F26
+2. **Session Lifecycle** — F04–F10, F24–F26, F41
 3. **Pinboard Core** — F14–F18, F38
 4. **Creative Tools** — F19–F22, F23
 5. **Voting + Summary** — F27–F32
