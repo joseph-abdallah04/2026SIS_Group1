@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
+import { cardWidth } from '../pinboard/cardMetrics';
 import { findOpenProposalPosition } from './proposalPlacement';
 import { proposalErrorMessage } from './proposeErrors';
 import type {
@@ -62,7 +63,13 @@ export function useProposalSubmission({
         // An edit changes what the proposal says and nothing else: it keeps its
         // id, its author and the place on the board it was dragged to, so no
         // position is computed or sent.
-        await editProposal({ id: editSource.id, artifactJson });
+        await editProposal({
+          id: editSource.id,
+          artifactJson,
+          // A longer note can need a bigger sticky; the server keeps later
+          // cards clear of the size it is now.
+          cardWidth: cardWidth({ type: artifactJson.type, artifactJson }),
+        });
       } else {
         // An extension lands beside the card it builds on, so the two read as
         // related at a glance. Looked up on the board as it is now: the
@@ -75,6 +82,7 @@ export function useProposalSubmission({
           type: artifactJson.type,
           artifactJson,
           ...findOpenProposalPosition(proposals, artifactJson, original),
+          cardWidth: cardWidth({ type: artifactJson.type, artifactJson }),
           ...(extensionSource ? { extendsProposalId: extensionSource.id } : {}),
         });
       }
@@ -118,6 +126,7 @@ export function useProposalSubmission({
         type: artifactJson.type,
         artifactJson,
         ...findOpenProposalPosition(proposals, artifactJson, undefined, options.at),
+        cardWidth: cardWidth({ type: artifactJson.type, artifactJson }),
         ...(options.extendsProposalId ? { extendsProposalId: options.extendsProposalId } : {}),
       });
       return { ok: true };

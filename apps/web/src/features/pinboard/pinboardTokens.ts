@@ -1,6 +1,10 @@
 /** F14 pinboard tokens — RoundTable soft style, project palette only. */
 
-import type { StickyColor } from '@roundtable/shared';
+import {
+  BOARD_SIZE as SHARED_BOARD_SIZE,
+  CARD_WIDTH as SHARED_CARD_WIDTH,
+  type StickyColor,
+} from '@roundtable/shared';
 
 /**
  * Zoom stops, largest first. Above 100% for reading a dense corner of the
@@ -171,18 +175,17 @@ export const cornerPoint = (radius: number, spread = 0) =>
 export const STICKY_SHADOW =
   '0 7px 10px -5px rgba(8,12,21,0.30), 0 2px 3px -1px rgba(8,12,21,0.16)';
 
-/** Intrinsic widths — types differ on purpose. */
-export const CARD_WIDTH: Record<'sticky' | 'drawing' | 'diagram' | 'image', number> = {
-  // The smallest sticky, eight lines square. A sticky grows past this with its
-  // note, so read `cardWidth` for a real one; this is only its floor, and a
-  // test holds it to the size the sticky ladder starts at.
-  sticky: 217,
-  drawing: 250,
-  diagram: 300,
-  // Between the two: a photo or a screenshot is denser than a sketch, but a
-  // card is still a glance at it, and Enlarge is how it is read.
-  image: 280,
-};
+/**
+ * Intrinsic widths — types differ on purpose. From the shared contract, since
+ * the server places new cards by them too.
+ *
+ * A sticky's is the smallest sticky, eight lines square. A sticky grows past
+ * this with its note, so read `cardWidth` for a real one; this is only its
+ * floor, and a test holds it to the size the sticky ladder starts at. An image
+ * sits between a drawing and a diagram: a photo or a screenshot is denser than
+ * a sketch, but a card is still a glance at it, and Enlarge is how it is read.
+ */
+export const CARD_WIDTH = SHARED_CARD_WIDTH;
 
 /**
  * Zoom is a property of the view, not of the cards: the board is drawn once at
@@ -206,9 +209,10 @@ export const ZOOM_SCALE = Object.fromEntries(
  *
  * Big enough that a session never runs out of room — roughly nineteen sticky
  * notes across — and every card is clamped inside it, so the board a viewer
- * sees at 25% is all the board there is.
+ * sees at 25% is all the board there is. From the shared contract, since the
+ * server keeps new cards on it too.
  */
-export const BOARD_SIZE = { width: 4000, height: 2500 } as const;
+export const BOARD_SIZE = SHARED_BOARD_SIZE;
 
 /**
  * Desk showing around the board, in *screen* pixels rather than board units.

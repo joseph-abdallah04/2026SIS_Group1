@@ -1,5 +1,8 @@
 import {
+  cardFootprint,
+  clampStickyWidth,
   DELETED_USER_DISPLAY_NAME,
+  findClearSpot,
   isEmoji,
   type AuthoredProposalGroup,
   type AuthoredProposalsResponse,
@@ -251,14 +254,35 @@ export async function createProposal({
       _max: { z: true },
     });
 
+    // Where it lands is decided here, under the same lock, rather than taken
+    // as sent. The author's browser chose a spot clear of the board as it last
+    // saw it, and two people proposing at the same moment both see the same
+    // gap. Holding the lock, this sees every card that landed first, and moves
+    // this one to the nearest clear spot only if it has to.
+    const stickyWidth =
+      input.type === 'sticky' && input.cardWidth !== undefined
+        ? clampStickyWidth(input.cardWidth)
+        : null;
+    const size = cardFootprint(input.type, stickyWidth);
+    const onBoard = await tx.proposal.findMany({
+      where: { questionId, deletedAt: null },
+      select: { x: true, y: true, type: true, cardWidth: true },
+    });
+    const spot = findClearSpot(
+      onBoard.map((card) => ({ x: card.x, y: card.y, ...cardFootprint(card.type, card.cardWidth) })),
+      size,
+      { x: input.x, y: input.y },
+    );
+
     const row = await tx.proposal.create({
       data: {
         questionId,
         authorId,
         type: input.type,
         artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
-        x: input.x,
-        y: input.y,
+        x: spot.x,
+        y: spot.y,
+        cardWidth: stickyWidth,
         z: (top._max.z ?? 0) + 1,
         extendsProposalId: input.extendsProposalId ?? null,
       },
@@ -394,6 +418,10 @@ export async function updateProposal({
         ? {
             artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
             editedAt: new Date(),
+            // A rewritten note can need a different size of sticky.
+            ...(row.type === 'sticky' && input.cardWidth !== undefined
+              ? { cardWidth: clampStickyWidth(input.cardWidth) }
+              : {}),
           }
         : {}),
       ...(input.x === undefined ? {} : { x: input.x }),

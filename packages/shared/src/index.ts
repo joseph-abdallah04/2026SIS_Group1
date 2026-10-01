@@ -157,6 +157,7 @@ export * from './drawingContract.js';
 export * from './imageContract.js';
 export * from './reactionContract.js';
 export * from './stickyContract.js';
+export * from './boardPlacement.js';
 import type { DiagramArtifact } from './diagramContract.js';
 import type { DrawingStrokeData } from './drawingContract.js';
 import type { ReactionGroup } from './reactionContract.js';

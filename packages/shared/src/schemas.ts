@@ -1057,8 +1057,17 @@ export const proposalCreateSchema = z
   .object({
     type: proposalTypeSchema,
     artifactJson: artifactWriteJsonSchema,
+    // Where the author's browser would like it. The server keeps it if it is
+    // clear of every card on the board, and moves it to the nearest clear spot
+    // if not.
     x: z.number(),
     y: z.number(),
+    /**
+     * A sticky's width as the author's browser laid it out, so the server can
+     * keep later cards clear of it. Held to the sizes a sticky can be, and
+     * ignored for every other kind, which is always the same width.
+     */
+    cardWidth: z.number().min(0).max(10_000).optional(),
     extendsProposalId: z.string().optional(),
   })
   .superRefine((value, context) => {
@@ -1114,6 +1123,8 @@ export const proposalUpdateSchema = z
     artifactJson: artifactWriteJsonSchema.optional(),
     x: z.number().min(0).max(100_000).optional(),
     y: z.number().min(0).max(100_000).optional(),
+    /** A rewritten sticky's new width, as for `proposalCreate`. */
+    cardWidth: z.number().min(0).max(10_000).optional(),
   })
   .superRefine((value, context) => {
     if (value.artifactJson === undefined && value.x === undefined && value.y === undefined) {

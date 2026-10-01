@@ -187,6 +187,11 @@ model Proposal {
   // Stacking order on the board, higher above lower, creation order breaking
   // ties. Shared like x/y, and only the leader rearranges it.
   z                 Int       @default(0)
+  // A sticky's width as its author's browser measured it, so the server can
+  // place new cards clear of it: a sticky grows with its note, and only a
+  // browser can lay the note out. Null for every other kind, which is always
+  // the same width, and for stickies stored before this was kept.
+  cardWidth         Int?      @map("card_width")
   extendsProposalId String?
   extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
   extensions        Proposal[] @relation("ProposalExtends")

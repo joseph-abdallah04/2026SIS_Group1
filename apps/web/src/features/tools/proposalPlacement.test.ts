@@ -1,4 +1,4 @@
-import type { ArtifactJson, BoardItem } from '@roundtable/shared';
+import { cardFootprint, type ArtifactJson, type BoardItem } from '@roundtable/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { cardWidth } from '../pinboard/cardMetrics';
@@ -43,7 +43,8 @@ describe('findOpenProposalPosition', () => {
       // Rounded: positions are whole pixels, and a sticky's width can be odd.
       expect(findOpenProposalPosition([], STICKY)).toEqual({
         x: Math.round(1000 - STICKY_WIDTH / 2),
-        y: 800 - 260 / 2,
+        // A sticky is square, so it is as tall as it is wide.
+        y: Math.round(800 - STICKY_WIDTH / 2),
       });
     });
 
@@ -85,9 +86,46 @@ describe('findOpenProposalPosition', () => {
       const clears =
         position.x >= long.x + longWidth + 28 ||
         position.x + STICKY_WIDTH + 28 <= long.x ||
-        Math.abs(position.y - long.y) >= 260 + 28;
+        position.y >= long.y + longWidth + 28 ||
+        position.y + STICKY_WIDTH + 28 <= long.y;
       expect(longWidth).toBeGreaterThan(CARD_WIDTH.sticky);
       expect(clears).toBe(true);
+    });
+
+    // Every card used to be taken as 260 tall. The largest stickies are 339,
+    // so a card placed just below one landed over its bottom edge.
+    it('keeps clear of the whole height of a tall sticky above', () => {
+      setBoardCentre({ x: 1000, y: 800 });
+      const tall = stickyAt(0, 0, 'a'.repeat(420));
+      const tallSize = cardWidth(tall);
+      tall.x = Math.round(1000 - STICKY_WIDTH / 2);
+      // Close enough above to reach the new card, far enough that a 260-tall
+      // card would have cleared it.
+      tall.y = Math.round(800 - STICKY_WIDTH / 2) - 300;
+
+      const position = findOpenProposalPosition([tall], STICKY);
+
+      const clears =
+        position.x >= tall.x + tallSize + 28 ||
+        position.x + STICKY_WIDTH + 28 <= tall.x ||
+        position.y >= tall.y + tallSize + 28 ||
+        position.y + STICKY_WIDTH + 28 <= tall.y;
+      expect(tallSize).toBeGreaterThan(260);
+      expect(clears).toBe(true);
+    });
+
+    // Stepping by the largest kind of card spread small stickies out as if
+    // each were a diagram, and the board grew away from the view far faster
+    // than it filled.
+    it('packs a sticky beside another with only the gap between them', () => {
+      setBoardCentre({ x: 1000, y: 800 });
+      const first = findOpenProposalPosition([], STICKY);
+      const second = findOpenProposalPosition([stickyAt(first.x, first.y)], STICKY);
+
+      const across = Math.abs(second.x - first.x);
+      const down = Math.abs(second.y - first.y);
+      expect(Math.max(across, down)).toBe(STICKY_WIDTH + 28);
+      expect(Math.min(across, down)).toBe(0);
     });
 
     it('never proposes above or left of the board origin', () => {
@@ -140,7 +178,7 @@ describe('findOpenProposalPosition around a point', () => {
 
     expect(findOpenProposalPosition([], image, undefined, { x: 900, y: 700 })).toEqual({
       x: 900 - width / 2,
-      y: 700 - 130,
+      y: Math.round(700 - cardFootprint('image').height / 2),
     });
   });
 

@@ -218,6 +218,26 @@ describe('updateProposal', () => {
     expect(update.mock.calls[0]?.[0].data.editedAt).toBeInstanceOf(Date);
   });
 
+  // A longer note can need a bigger sticky, and later cards are placed clear
+  // of the size it is now.
+  it('keeps the new width of a rewritten sticky', async () => {
+    await updateProposal({
+      proposalId: 'p1',
+      actor: AUTHOR,
+      input: { ...REWORD, cardWidth: 278 },
+    });
+    expect(update.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 278 });
+  });
+
+  it('keeps the width it had when only the position changes', async () => {
+    await updateProposal({
+      proposalId: 'p1',
+      actor: AUTHOR,
+      input: { id: 'p1', x: 40, y: 60, cardWidth: 339 },
+    });
+    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty('cardWidth');
+  });
+
   // Dragging a card is not editing it. Marking a move as an edit would put
   // "edited" on a card whose words nobody touched.
   it('leaves editedAt alone when only the position changes', async () => {
