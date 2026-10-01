@@ -1,8 +1,14 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { VoiceNotice } from './VoiceNotice';
+import { NOTICE_AUTO_HIDE_MS, VoiceNotice } from './VoiceNotice';
+
+function advance(ms: number) {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+}
 
 /** A healthy call: connected, publishing, nothing for the banner to say. */
 function healthyProps() {
@@ -111,5 +117,164 @@ describe('VoiceNotice', () => {
     );
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  describe('stepping aside', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Voice has given up — the banner the ticket was about. */
+    function failedProps() {
+      return {
+        ...healthyProps(),
+        status: 'failed' as const,
+        error: 'Lost the voice connection. Reconnect to rejoin.',
+      };
+    }
+
+    it('lets "Voice offline" go after a few seconds — the header keeps its Reconnect', () => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...failedProps()} />);
+
+      advance(NOTICE_AUTO_HIDE_MS - 1);
+      expect(screen.getByRole('status')).toHaveTextContent('Lost the voice connection');
+
+      advance(1);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('shows nothing once it has gone, not the stale mic banner beneath it', () => {
+      vi.useFakeTimers();
+      // A `blocked` left over from before the drop. Falling through to it would
+      // raise "Mic blocked" about a room you are no longer in.
+      render(<VoiceNotice {...failedProps()} micStatus="blocked" />);
+
+      advance(NOTICE_AUTO_HIDE_MS);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('keeps counting through a re-render of the same failure', () => {
+      vi.useFakeTimers();
+      const { rerender } = render(<VoiceNotice {...failedProps()} />);
+
+      advance(NOTICE_AUTO_HIDE_MS / 2);
+      // The page re-rendering — a roster update, say — is not a new failure.
+      rerender(<VoiceNotice {...failedProps()} />);
+      advance(NOTICE_AUTO_HIDE_MS / 2);
+
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('comes back, timer and all, when a Reconnect fails again', () => {
+      vi.useFakeTimers();
+      const { rerender } = render(<VoiceNotice {...failedProps()} />);
+      advance(NOTICE_AUTO_HIDE_MS);
+
+      // Reconnect pressed: the attempt runs, and fails.
+      rerender(<VoiceNotice {...failedProps()} status="connecting" />);
+      rerender(<VoiceNotice {...failedProps()} />);
+      expect(screen.getByRole('status')).toHaveTextContent('Lost the voice connection');
+
+      advance(NOTICE_AUTO_HIDE_MS);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('holds while the pointer is on it, and starts over when it leaves', () => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...failedProps()} />);
+
+      fireEvent.pointerEnter(screen.getByRole('status'));
+      advance(NOTICE_AUTO_HIDE_MS * 2);
+      expect(screen.getByRole('status')).toBeInTheDocument();
+
+      // From the top, not from where it was: whoever went to it was reading.
+      fireEvent.pointerLeave(screen.getByRole('status'));
+      advance(NOTICE_AUTO_HIDE_MS - 1);
+      expect(screen.getByRole('status')).toBeInTheDocument();
+
+      advance(1);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('holds while its button has focus', () => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...failedProps()} />);
+
+      const reconnect = screen.getByRole('button', { name: 'Reconnect' });
+      act(() => reconnect.focus());
+      advance(NOTICE_AUTO_HIDE_MS * 2);
+      // Hiding it now would drop keyboard focus onto the page body.
+      expect(reconnect).toHaveFocus();
+
+      act(() => reconnect.blur());
+      advance(NOTICE_AUTO_HIDE_MS);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { what: 'a refused mic', overrides: { micStatus: 'blocked' as const } },
+      {
+        what: 'a mic blocked for good',
+        overrides: { micStatus: 'blocked' as const, micPermissionDenied: true },
+      },
+      { what: 'a missing mic', overrides: { micStatus: 'no-device' as const } },
+    ])('lets $what go too — the mic toggle keeps its mark and its retry', ({ overrides }) => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...healthyProps()} {...overrides} />);
+
+      expect(screen.getByRole('status')).toBeInTheDocument();
+      advance(NOTICE_AUTO_HIDE_MS);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('raises the mic banner again when asking again is refused again', () => {
+      vi.useFakeTimers();
+      const { rerender } = render(<VoiceNotice {...healthyProps()} micStatus="blocked" />);
+      advance(NOTICE_AUTO_HIDE_MS);
+
+      // Pressing the mic asks again (`requesting`), and is refused again.
+      rerender(<VoiceNotice {...healthyProps()} micStatus="requesting" />);
+      rerender(<VoiceNotice {...healthyProps()} micStatus="blocked" />);
+      expect(screen.getByRole('status')).toHaveTextContent('nobody can hear you');
+    });
+
+    it('does not start over when the Permissions API only sharpens the wording', () => {
+      vi.useFakeTimers();
+      const { rerender } = render(<VoiceNotice {...healthyProps()} micStatus="blocked" />);
+
+      advance(NOTICE_AUTO_HIDE_MS / 2);
+      // Same problem, better words: not a new occurrence.
+      rerender(<VoiceNotice {...healthyProps()} micStatus="blocked" micPermissionDenied />);
+      expect(screen.getByRole('status')).toHaveTextContent('site settings');
+
+      advance(NOTICE_AUTO_HIDE_MS / 2);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('keeps "Sound blocked" up — nothing else says why the room is silent', () => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...healthyProps()} audioBlocked />);
+
+      advance(NOTICE_AUTO_HIDE_MS * 3);
+      expect(screen.getByRole('button', { name: 'Enable sound' })).toBeInTheDocument();
+    });
+
+    it('keeps "Reconnecting" up for as long as it is true', () => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...healthyProps()} status="reconnecting" />);
+
+      advance(NOTICE_AUTO_HIDE_MS * 3);
+      expect(screen.getByRole('status')).toHaveTextContent('Reconnecting to the room');
+    });
+
+    it('lets go of its timer when the view does', () => {
+      vi.useFakeTimers();
+      const { unmount } = render(<VoiceNotice {...failedProps()} />);
+
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });
