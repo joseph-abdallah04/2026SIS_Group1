@@ -1314,6 +1314,25 @@ export async function getQuestion(questionId: string): Promise<QuestionRef | nul
 }
 
 /**
+ * One question, only if it belongs to this session.
+ *
+ * Both columns are in the same query on purpose. Looking the id up first and
+ * then comparing `sessionId` would still be correct, but a later change could
+ * return the row before that comparison. A miss and a question from another
+ * session are the same result: nothing. Callers answer both with 404, so the
+ * id cannot be used to ask whether some other board exists.
+ */
+export async function getQuestionInSession(
+  sessionId: string,
+  questionId: string,
+): Promise<QuestionRef | null> {
+  return prisma.question.findFirst({
+    where: { id: questionId, sessionId },
+    select: QUESTION_REF_SELECT,
+  });
+}
+
+/**
  * The question the board is currently showing.
  *
  * Prefers `Session.currentQuestionId` when it is set, so the leader can look

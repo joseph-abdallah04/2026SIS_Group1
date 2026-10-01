@@ -1,7 +1,7 @@
 import type { SessionRecap } from '@roundtable/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionDetail } from './useSessionDetail';
@@ -65,6 +65,11 @@ const SESSION: SessionDetail = {
   ],
 };
 
+function SearchProbe() {
+  const [params] = useSearchParams();
+  return <span>{`view:${params.get('view') ?? ''} question:${params.get('question') ?? ''}`}</span>;
+}
+
 describe('SessionEndedPage', () => {
   it('renders the recap instead of the placeholder', () => {
     render(
@@ -79,6 +84,10 @@ describe('SessionEndedPage', () => {
       screen.queryByText(/auto-generated summary of what was decided/i),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to dashboard' })).toBeInTheDocument();
+    const reviewBoards = screen.getByRole('button', { name: 'Review boards' });
+    expect(reviewBoards).toBeInTheDocument();
+    expect(reviewBoards).toHaveClass('bg-rt-secondary');
+    expect(screen.getByRole('link', { name: 'Back to dashboard' })).not.toHaveClass('bg-rt-secondary');
     expect(
       screen.getByRole('button', { name: /Download Session Summary/ }),
     ).toBeInTheDocument();
@@ -113,7 +122,21 @@ describe('SessionEndedPage', () => {
       </MemoryRouter>,
     );
 
-    const footer = screen.getByRole('link', { name: 'Back to dashboard' }).parentElement;
+    const footer = screen.getByRole('link', { name: 'Back to dashboard' }).parentElement
+      ?.parentElement;
     expect(footer?.className).toMatch(/justify-between/);
+  });
+
+  it('opens the boards on the first question', async () => {
+    render(
+      <MemoryRouter>
+        <SessionEndedPage session={SESSION} />
+        <SearchProbe />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Review boards' }));
+
+    expect(screen.getByText('view:boards question:q1')).toBeInTheDocument();
   });
 });

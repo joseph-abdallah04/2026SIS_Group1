@@ -186,6 +186,55 @@ describe('leader moderation', () => {
 });
 
 describe('updateProposal', () => {
+  it('refuses an edit once the session has ended, even while the question is in discussion', async () => {
+    session.mockResolvedValue({
+      id: 's1',
+      title: 'Demo',
+      status: 'ended',
+      leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
+    });
+
+    await expect(
+      updateProposal({ proposalId: 'p1', actor: AUTHOR, input: REWORD }),
+    ).rejects.toMatchObject({ status: 409, code: 'SESSION_NOT_ACTIVE' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a move once the session has ended, even while the question is in discussion', async () => {
+    session.mockResolvedValue({
+      id: 's1',
+      title: 'Demo',
+      status: 'ended',
+      leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
+    });
+
+    await expect(
+      updateProposal({ proposalId: 'p1', actor: AUTHOR, input: { id: 'p1', x: 40, y: 60 } }),
+    ).rejects.toMatchObject({ status: 409, code: 'SESSION_NOT_ACTIVE' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('still hides a proposal on another session after that session has ended', async () => {
+    question.mockResolvedValue(questionRef('discussion', 'other'));
+    session.mockResolvedValue({
+      id: 'other',
+      title: 'Elsewhere',
+      status: 'ended',
+      leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
+    });
+
+    await expect(
+      updateProposal({ proposalId: 'p1', actor: AUTHOR, input: REWORD }),
+    ).rejects.toMatchObject({ status: 404, code: 'PROPOSAL_NOT_FOUND' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('rewords a proposal for its author', async () => {
     await updateProposal({ proposalId: 'p1', actor: AUTHOR, input: REWORD });
     expect(update.mock.calls[0]?.[0].data).toMatchObject({
@@ -287,6 +336,23 @@ describe('updateProposal', () => {
 });
 
 describe('deleteProposal', () => {
+  it('refuses a delete once the session has ended, even while the question is in discussion', async () => {
+    session.mockResolvedValue({
+      id: 's1',
+      title: 'Demo',
+      status: 'ended',
+      leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
+    });
+
+    await expect(deleteProposal({ proposalId: 'p1', actor: AUTHOR })).rejects.toMatchObject({
+      status: 409,
+      code: 'SESSION_NOT_ACTIVE',
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('soft-deletes, so reactions, votes and extend-children keep their target', async () => {
     await deleteProposal({ proposalId: 'p1', actor: AUTHOR });
     const data = update.mock.calls[0]?.[0].data as { deletedAt: Date };
@@ -515,6 +581,24 @@ describe('arranging the stack', () => {
       const item = await arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'front' });
       expect(item?.z).toBe(8);
     });
+  });
+
+  it('refuses every stack change once the session has ended, even while the question is in discussion', async () => {
+    session.mockResolvedValue({
+      id: 's1',
+      title: 'Demo',
+      status: 'ended',
+      leaderId: 'leader-1',
+      discussionTimerSeconds: null,
+      votingTimerSeconds: null,
+    });
+
+    await expect(
+      arrangeProposal({ proposalId: 'p1', actor: LEADER, to: 'front' }),
+    ).rejects.toMatchObject({ status: 409, code: 'SESSION_NOT_ACTIVE' });
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(aggregate).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it('refuses the author before touching the stack', async () => {

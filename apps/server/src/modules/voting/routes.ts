@@ -1,10 +1,35 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 
-import { requireAuth } from '../../middleware/auth.js';
-import { getShortlistForSession, getVotingStateForSession } from './service.js';
+import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
+import {
+  getShortlistForSession,
+  getVotingStateForSession,
+  listEndedVoteOutcomes,
+} from './service.js';
 import { assertSessionMember } from './sessionsAdapter.js';
 
 export const votingRoutes = Router();
+
+// Has to run before `requireAuth`. CodeQL wants the limiter ahead of that
+// check. The key is the verified user id, so a second login does not open a
+// new budget and a forged token does not get its own. Unverified requests
+// share one address bucket.
+function outcomesClientKey(req: Request): string {
+  const userId = verifiedUserId(req);
+  if (userId) return `user:${userId}`;
+  return req.ip ? `anon:${ipKeyGenerator(req.ip)}` : 'anon';
+}
+
+const outcomesLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
+  keyGenerator: outcomesClientKey,
+  validate: { keyGeneratorIpFallback: false },
+});
 
 // Read-only: the live write path is the socket (docs/02 §5). This exists so a
 // client that already has the board (REST) and then advances the agenda can
@@ -18,6 +43,23 @@ votingRoutes.get<{ sessionId: string }>(
       await assertSessionMember(req.params.sessionId, userId);
       const voting = await getVotingStateForSession(req.params.sessionId, userId);
       res.json(voting);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Ended sessions only. Members reviewing an old board need each question's
+// shortlist and winner, and nothing else this read returns (no ballots, no
+// proposal bodies).
+votingRoutes.get<{ sessionId: string }>(
+  '/:sessionId/outcomes',
+  outcomesLimiter,
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      await assertSessionMember(req.params.sessionId, req.userId!);
+      res.json(await listEndedVoteOutcomes(req.params.sessionId));
     } catch (err) {
       next(err);
     }
