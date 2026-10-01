@@ -21,6 +21,7 @@ import {
 import { EnlargeIcon } from './ProposalEnlarge';
 import { hasArtwork, ProposalCard } from './ProposalCard';
 import { ReactionRow } from './ReactionRow';
+import { VoteResultBadge } from '../voting/VoteResultBadge';
 import {
   CARD_INK,
   CARD_RADIUS,
@@ -86,7 +87,8 @@ interface PositionedProposalProps {
   /** How many cards are stacked, so a raised card can clear every one of them. */
   stackSize: number;
   isDragging: boolean;
-  dragHandlers: DragHandlers;
+  /** Omitted on a read-only board, where a card cannot be dragged. */
+  dragHandlers?: DragHandlers;
   onDelete: (item: BoardItem) => Promise<void>;
   /** Restack this card. Settles on its own: the canvas reports a refusal. */
   onArrange: (item: BoardItem, to: ProposalArrangeInput['to']) => void;
@@ -101,6 +103,11 @@ interface PositionedProposalProps {
   onReact?: (item: BoardItem, emoji: string) => Promise<void>;
   /** Whether this proposal is on the leader's voting shortlist (F27). */
   isShortlisted: boolean;
+  /**
+   * Closed-vote mark on an ended board. A winner or a tie replaces the
+   * shortlist ring; absent means this card is only shortlisted, or neither.
+   */
+  resultKind?: 'winner' | 'tied' | null;
   /** Leader may add/remove this card while the shortlist is still open. */
   canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
@@ -200,6 +207,7 @@ export function PositionedProposal({
   viewerId,
   onReact,
   isShortlisted,
+  resultKind = null,
   canToggleShortlist,
   onToggleShortlist,
   onSelectProposal,
@@ -218,7 +226,7 @@ export function PositionedProposal({
   // written rather than flattening it in a plain box on the card. The canvas
   // only passes `onOpenEditor` while the board is open.
   const canEdit = isOwn && boardOpen && onOpenEditor !== undefined;
-  const draggable = canMove;
+  const draggable = canMove && dragHandlers !== undefined;
 
   // Where the actions menu is open from, or null while it is shut. Opening it
   // from either the ⋯ or a right-click is the same menu.
@@ -350,7 +358,13 @@ export function PositionedProposal({
     <div
       ref={cardRef}
       className={`group absolute ${
-        isShortlisted ? 'ring-2 ring-rt-secondary bg-rt-secondary-wash' : ''
+        resultKind === 'winner'
+          ? 'ring-2 ring-rt-secondary ring-offset-2 ring-offset-rt-surface'
+          : resultKind === 'tied'
+            ? 'ring-2 ring-rt-cool ring-offset-2 ring-offset-rt-surface'
+            : isShortlisted
+              ? 'ring-2 ring-rt-secondary bg-rt-secondary-wash'
+              : ''
       } ${
         // Which card the open menu belongs to. An outline rather than another
         // ring, so it can sit outside the shortlist's ring without replacing it.
@@ -436,6 +450,12 @@ export function PositionedProposal({
         setEnlargedOpen(true);
       }}
     >
+      {resultKind ? <VoteResultBadge kind={resultKind} /> : null}
+      {isShortlisted && !resultKind ? (
+        <span className="absolute -top-2 left-2 z-10 rounded-full border border-rt-secondary bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-rt-secondary-deep">
+          Shortlisted
+        </span>
+      ) : null}
       {canToggleShortlist ? (
         <button
           type="button"

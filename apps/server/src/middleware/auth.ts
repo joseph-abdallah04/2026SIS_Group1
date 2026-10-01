@@ -12,6 +12,14 @@ declare module 'express-serve-static-core' {
 
 const BEARER_PREFIX = 'Bearer ';
 
+/** The caller's user id when the bearer token verifies; null otherwise. Never throws. */
+export function verifiedUserId(req: Request): string | null {
+  const header = req.headers.authorization;
+  if (!header?.startsWith(BEARER_PREFIX)) return null;
+  const result = verifyToken(header.slice(BEARER_PREFIX.length));
+  return result.ok ? result.userId : null;
+}
+
 // The bearer header is the only accepted proof of identity. There is
 // deliberately no `?token=` fallback for file downloads: a query token is a
 // full seven-day credential written into browser history and every access log
