@@ -17,6 +17,7 @@ import {
   pathStrokeColor,
   pathStrokeWidth,
   inkRotationTransform,
+  pathPaintedBounds,
   pathRotationTransform,
   pathSvgData,
   strokePathData,
@@ -368,7 +369,11 @@ export function diagramExtent(artifact: DiagramArtifact): { width: number; heigh
   const tables = artifact.tables ?? [];
   const arrows = artifact.arrows ?? [];
   const points = (artifact.ink ?? []).flatMap((stroke) => inkPoints(stroke));
-  const anchors = paths.flatMap((path) => path.anchors);
+  // What each path paints, not where its anchors sit: a curve can bulge past
+  // its last anchor, and the card used to crop that bulge off.
+  const pathBoxes = paths
+    .map((path) => pathPaintedBounds(path))
+    .filter((box): box is NonNullable<typeof box> => box !== null);
   const corners = tables.map((table) => ({ table, size: tableSize(table) }));
   const arrowTargets = arrowTargetLookup({
     nodes,
@@ -382,7 +387,7 @@ export function diagramExtent(artifact: DiagramArtifact): { width: number; heigh
       Math.max(
         ...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width),
         ...points.map((point) => point.x),
-        ...anchors.map((anchor) => anchor.x),
+        ...pathBoxes.map((box) => box.x + box.width),
         ...corners.map(({ table, size }) => table.x + size.width),
         ...routes.map((point) => point.x),
         72,
@@ -391,7 +396,7 @@ export function diagramExtent(artifact: DiagramArtifact): { width: number; heigh
       Math.max(
         ...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height),
         ...points.map((point) => point.y),
-        ...anchors.map((anchor) => anchor.y),
+        ...pathBoxes.map((box) => box.y + box.height),
         ...corners.map(({ table, size }) => table.y + size.height),
         ...routes.map((point) => point.y),
         32,

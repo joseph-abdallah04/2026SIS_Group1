@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { useCurrentUserId } from '../../lib/currentUser';
@@ -12,13 +12,23 @@ import type { SessionDetail } from './useSessionDetail';
  * when the leader ends the session, and what an ended session shows if
  * someone opens its URL later from the dashboard.
  *
- * The session is read-only from here — the server refuses proposals once
- * status is `ended` (SESSION_NOT_ACTIVE), so there is deliberately no way
- * back to the board.
+ * The session is read-only from here. The recap is the landing view; Review
+ * boards opens each question's pinboard without writing anything back.
  */
 export function SessionEndedPage({ session }: { session: SessionDetail }) {
   const { summary, loading, error } = useSessionSummary(session.id);
   const viewerId = useCurrentUserId();
+  const [, setParams] = useSearchParams();
+
+  function openBoards() {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('view', 'boards');
+      const first = [...session.questions].sort((a, b) => a.position - b.position)[0];
+      if (first) next.set('question', first.id);
+      return next;
+    });
+  }
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
@@ -38,12 +48,21 @@ export function SessionEndedPage({ session }: { session: SessionDetail }) {
         {summary ? <SessionSummaryView summary={summary} viewerId={viewerId} /> : null}
 
         <div className="mt-auto flex items-center justify-between gap-4 pt-4">
-          <Link
-            to="/dashboard"
-            className="text-[13px] font-semibold text-rt-primary-deep hover:underline"
-          >
-            Back to dashboard
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              to="/dashboard"
+              className="text-[13px] font-semibold text-rt-primary-deep hover:underline"
+            >
+              Back to dashboard
+            </Link>
+            <button
+              type="button"
+              onClick={openBoards}
+              className="inline-flex min-h-10 items-center justify-center rounded-full bg-rt-secondary px-4 text-[13px] font-semibold text-rt-ink shadow-sm transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              Review boards
+            </button>
+          </div>
           {summary ? <DownloadRecapButton sessionId={session.id} /> : null}
         </div>
       </div>

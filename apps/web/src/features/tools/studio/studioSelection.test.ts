@@ -8,6 +8,8 @@ import {
   isSelectionEmpty,
   mergeSelections,
   pathBounds,
+  pathFrameBounds,
+  pathLocalBounds,
   rectsIntersect,
   selectionSize,
   studioElementsInRect,
@@ -56,6 +58,56 @@ describe('element bounds', () => {
   it('boxes a table from its origin and its tracks', () => {
     // A 2x2 default table is 192 x 64.
     expect(tableBounds(table)).toEqual({ x: 700, y: 400, width: 192, height: 64 });
+  });
+
+  describe('a curved path', () => {
+    // Both handles pull 60 units up, so the curve peaks 45 units above its
+    // anchors at its midpoint (a cubic reaches 3/4 of a shared handle offset).
+    const arch: PathElement = {
+      id: 'arch',
+      anchors: [
+        { x: 100, y: 200, out: { x: 0, y: -60 } },
+        { x: 200, y: 200, in: { x: 0, y: -60 } },
+      ],
+    };
+
+    it('boxes the bulge, not just the anchors', () => {
+      expect(pathBounds(arch)).toEqual({ x: 100, y: 155, width: 100, height: 45 });
+      expect(pathFrameBounds(arch)).toEqual({ x: 100, y: 155, width: 100, height: 45 });
+    });
+
+    it('keeps the anchor box as the pivot and the attach box', () => {
+      expect(pathLocalBounds(arch)).toEqual({ x: 100, y: 200, width: 100, height: 0 });
+    });
+
+    it('turns the curve about the anchors, not about its own middle', () => {
+      // Half a turn about (150, 200) swings the bulge below the anchors.
+      const turned = pathBounds({ ...arch, rotation: 180 });
+      expect(turned?.x).toBeCloseTo(100);
+      expect(turned?.y).toBeCloseTo(200);
+      expect(turned?.width).toBeCloseTo(100);
+      expect(turned?.height).toBeCloseTo(45);
+    });
+
+    it('counts the closing segment of a closed path', () => {
+      const loop: PathElement = {
+        id: 'loop',
+        closed: true,
+        anchors: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+          { x: 100, y: 100, out: { x: -40, y: 80 } },
+          { x: 0, y: 100, in: { x: 40, y: 80 } },
+        ],
+      };
+      // The 3→4 segment bows 60 units below the bottom edge.
+      expect(pathBounds(loop)?.height).toBeCloseTo(160);
+    });
+
+    it('is caught by a sweep over the bulge alone', () => {
+      const sweep = { x: 140, y: 160, width: 20, height: 10 };
+      expect(studioElementsInRect({ nodes: [], paths: [arch] }, sweep).pathIds).toEqual(['arch']);
+    });
   });
 
   it('reports nothing for an element with no geometry', () => {

@@ -14,7 +14,19 @@ import {
 // empty margin. Zoom therefore only ever magnifies.
 export const DIAGRAM_MIN_ZOOM = 1;
 export const DIAGRAM_MAX_ZOOM = 4;
-export const DIAGRAM_ZOOM_STEP = 1.25;
+
+/**
+ * The levels a zoom button, Ctrl/Cmd +/-, or one click of a mouse wheel moves
+ * between.
+ *
+ * A ladder rather than one fixed factor, for two reasons. A factor large enough
+ * to get from 100% to 400% in a handful of clicks felt like a lurch at the low
+ * end, where most work happens; a small one took a dozen clicks to get across.
+ * Finer steps low down and coarser ones high up fixes both. And every stop is
+ * a round percentage, so stepping back and forth lands on the same levels
+ * instead of drifting through 156%, 195%, 244%.
+ */
+export const DIAGRAM_ZOOM_STOPS: readonly number[] = [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
 
 // Breathing room around the content when fitting, in sheet units.
 const FIT_PADDING = 24;
@@ -73,6 +85,44 @@ export function zoomDiagramView(
     width,
     height,
   });
+}
+
+/**
+ * One stop in or out along `DIAGRAM_ZOOM_STOPS`, keeping `anchor` pinned as
+ * `zoomDiagramView` does. A zoom that sits between stops — after a trackpad
+ * pinch — moves to the next stop in that direction rather than a full step
+ * past it, so the first click after a pinch never skips a level.
+ */
+export function stepDiagramView(
+  view: DiagramView,
+  direction: 'in' | 'out',
+  anchor?: DiagramPoint,
+): DiagramView {
+  const current = diagramViewZoom(view);
+  // Tolerant of the float error a view width carries, so sitting on a stop
+  // counts as being on it.
+  const epsilon = 1e-6;
+  const target =
+    direction === 'in'
+      ? (DIAGRAM_ZOOM_STOPS.find((stop) => stop > current + epsilon) ?? DIAGRAM_MAX_ZOOM)
+      : ([...DIAGRAM_ZOOM_STOPS].reverse().find((stop) => stop < current - epsilon) ??
+        DIAGRAM_MIN_ZOOM);
+  return zoomDiagramView(view, target / current, anchor);
+}
+
+/**
+ * Scene units per CSS pixel, for a view drawn into a surface this size.
+ *
+ * Anything that should look and feel the same size at every zoom — a handle, a
+ * grab band, a snap catchment — is written in pixels and converted with this.
+ * Before the surface has been measured it answers 1, which is right at 100%.
+ */
+export function scenePerPixel(
+  view: { width: number; height: number },
+  surface: { width: number; height: number },
+): number {
+  if (surface.width <= 0 || surface.height <= 0) return 1;
+  return Math.max(view.width / surface.width, view.height / surface.height);
 }
 
 /** `delta` is how far the pointer moved in sheet units; the content follows it. */

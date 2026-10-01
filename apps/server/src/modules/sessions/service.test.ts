@@ -85,7 +85,11 @@ vi.mock('../../db.js', () => ({
       findUnique: sessionMemberFindUnique,
       update: sessionMemberUpdate,
     },
-    question: { findMany: questionFindManyTopLevel, findUnique: questionFindUnique },
+    question: {
+      findMany: questionFindManyTopLevel,
+      findUnique: questionFindUnique,
+      findFirst: questionFindFirst,
+    },
     votingRound: { findUnique: votingRoundFindUnique, deleteMany: votingRoundDeleteMany },
   },
 }));
@@ -108,6 +112,7 @@ const {
   focusQuestion,
   generateSessionCode,
   getActiveQuestion,
+  getQuestionInSession,
   setQuestionPhase,
   joinSessionByCode,
   leaveSession,
@@ -1307,6 +1312,24 @@ describe('getActiveQuestion', () => {
   it('returns null for a session with no questions', async () => {
     questionFindManyTopLevel.mockResolvedValueOnce([]);
     await expect(getActiveQuestion('s1')).resolves.toBeNull();
+  });
+});
+
+describe('getQuestionInSession', () => {
+  it('asks for the id and the session together, so another session’s question is a miss', async () => {
+    questionFindFirst.mockResolvedValue(null);
+
+    await expect(getQuestionInSession('s1', 'q-other')).resolves.toBeNull();
+    expect(questionFindFirst).toHaveBeenCalledWith({
+      where: { id: 'q-other', sessionId: 's1' },
+      select: {
+        id: true,
+        sessionId: true,
+        text: true,
+        position: true,
+        status: true,
+      },
+    });
   });
 });
 

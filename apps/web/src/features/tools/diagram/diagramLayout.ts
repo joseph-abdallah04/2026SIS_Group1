@@ -1,5 +1,10 @@
 import type { DiagramEdge, DiagramNode } from '@roundtable/shared';
-import { diagramCanParent, effectiveDiagramNodeSize } from '@roundtable/shared';
+import {
+  DIAGRAM_MAX_NODE_HEIGHT,
+  DIAGRAM_MAX_NODE_WIDTH,
+  diagramCanParent,
+  effectiveDiagramNodeSize,
+} from '@roundtable/shared';
 
 import {
   DIAGRAM_CANVAS_HEIGHT,
@@ -430,8 +435,8 @@ export function layoutDiagram(
     const width = snapToGrid(Math.max(existing.width, needed.width));
     const height = snapToGrid(Math.max(existing.height, needed.height));
     if (width !== existing.width || height !== existing.height) {
-      current.width = Math.min(width, 480);
-      current.height = Math.min(height, 320);
+      current.width = Math.min(width, DIAGRAM_MAX_NODE_WIDTH);
+      current.height = Math.min(height, DIAGRAM_MAX_NODE_HEIGHT);
     }
 
     const bounds: DiagramRect = {

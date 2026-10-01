@@ -1,6 +1,7 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 
 import { SessionPinboard } from '../pinboard/SessionPinboard';
+import { SessionArchive } from './SessionArchive';
 import { useCurrentUserId } from '../../lib/currentUser';
 import { SessionDraftPage } from './SessionDraftPage';
 import { SessionEndedPage } from './SessionEndedPage';
@@ -21,6 +22,7 @@ import { WaitingRoom } from './WaitingRoom';
 export function SessionRouter() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
+  const [params] = useSearchParams();
   const { session, loading, error, reload, applyQuestionPhase, applyAddedQuestion } =
     useSessionDetail(sessionId);
   const currentUserId = useCurrentUserId();
@@ -94,6 +96,10 @@ export function SessionRouter() {
         </>
       );
     case 'ended':
-      return <SessionEndedPage session={session} />;
+      return params.get('view') === 'boards' ? (
+        <SessionArchive session={session} />
+      ) : (
+        <SessionEndedPage session={session} />
+      );
   }
 }

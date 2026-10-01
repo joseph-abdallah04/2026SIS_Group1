@@ -96,6 +96,11 @@ interface PinboardCanvasProps {
   reactToProposal: (proposalId: string, emoji: string) => Promise<void>;
   /** Ids currently on the F27 shortlist — rings on those cards. */
   shortlist: string[];
+  /**
+   * Closed-vote marks on an ended board. A winner or a tie takes the place of
+   * the shortlist ring on that card. Omit it on the live board.
+   */
+  resultMarks?: Readonly<Record<string, 'winner' | 'tied'>>;
   /** Leader, voting phase, round not yet locked — checkboxes on cards. */
   canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
@@ -109,6 +114,14 @@ interface PinboardCanvasProps {
   headerTimer?: ReactNode;
   /** Last card the viewer interacted with, so the assistant can resolve "this one". */
   onSelectProposal?: (id: string) => void;
+  /**
+   * An ended session's board. Closes every write affordance even when the
+   * question was left in discussion, and replaces the live exit with
+   * `archiveActions`. Presentation only — the server refuses the writes.
+   */
+  readOnly?: boolean;
+  /** The way back to the recap, in the header slot End/Leave uses live. */
+  archiveActions?: ReactNode;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -204,6 +217,7 @@ export function PinboardCanvas({
   deleteProposal,
   reactToProposal,
   shortlist,
+  resultMarks,
   canToggleShortlist,
   onToggleShortlist,
   shortlistControl,
@@ -211,6 +225,8 @@ export function PinboardCanvas({
   ballot,
   headerTimer,
   onSelectProposal,
+  readOnly = false,
+  archiveActions,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   // A message for the pill over the toolbar. The id makes the same words said
@@ -252,7 +268,7 @@ export function PinboardCanvas({
   // Opening a tool waits while a proposal is on its way, so the menu offers
   // nothing that would open one — the same way the toolbar goes dim.
   const toolsFree = submissionStatus !== 'submitting';
-  const boardOpen = board.questionStatus === 'discussion';
+  const boardOpen = !readOnly && board.questionStatus === 'discussion';
 
   /**
    * Whether a proposal can be reopened in the tool that made it.
@@ -629,8 +645,9 @@ export function PinboardCanvas({
         // skipped, so the agenda is done and the leader's move is to end it.
         'Agenda complete';
 
-  const closedMessage =
-    board.questionStatus === 'voting'
+  const closedMessage = readOnly
+    ? 'This session has ended — the board is read-only'
+    : board.questionStatus === 'voting'
       ? 'Proposals are locked while this question is in voting'
       : 'This question is closed to new proposals';
 
@@ -651,52 +668,55 @@ export function PinboardCanvas({
   const dragDepth = useRef(0);
   const carriesFiles = (event: React.DragEvent) =>
     Array.from(event.dataTransfer.types).includes('Files');
-  const dropHandlers = imageImport
-    ? {
-        onDragEnter: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          dragDepth.current += 1;
-          setDroppingFiles(true);
-        },
-        onDragOver: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = canDropImage ? 'copy' : 'none';
-        },
-        onDragLeave: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          dragDepth.current = Math.max(0, dragDepth.current - 1);
-          if (dragDepth.current === 0) setDroppingFiles(false);
-        },
-        onDrop: (event: React.DragEvent) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          dragDepth.current = 0;
-          setDroppingFiles(false);
-          if (!canDropImage) {
-            showNotice(boardOpen ? 'Wait a moment, then drop it again' : closedMessage);
-            return;
-          }
-          const file = Array.from(event.dataTransfer.files).find(isImageFile);
-          if (!file) {
-            showNotice('Only images can be added to the board');
-            return;
-          }
-          // The board point under the pointer: the scene transform, undone.
-          const frame = viewportRef.current?.getBoundingClientRect();
-          imageImport.importFile(
-            file,
-            frame
-              ? {
-                  x: (event.clientX - frame.left - DESK_MARGIN - restX + pan.x) / scale,
-                  y: (event.clientY - frame.top - DESK_MARGIN - restY + pan.y) / scale,
-                }
-              : undefined,
-          );
-        },
-      }
-    : {};
+  // Read-only still takes the drop, so the browser does not open the file in
+  // this tab, but it never imports: `canDropImage` is false while `readOnly`.
+  const dropHandlers =
+    readOnly || imageImport
+      ? {
+          onDragEnter: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            event.preventDefault();
+            dragDepth.current += 1;
+            setDroppingFiles(true);
+          },
+          onDragOver: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = canDropImage ? 'copy' : 'none';
+          },
+          onDragLeave: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setDroppingFiles(false);
+          },
+          onDrop: (event: React.DragEvent) => {
+            if (!carriesFiles(event)) return;
+            event.preventDefault();
+            dragDepth.current = 0;
+            setDroppingFiles(false);
+            if (!canDropImage || !imageImport) {
+              showNotice(boardOpen ? 'Wait a moment, then drop it again' : closedMessage);
+              return;
+            }
+            const file = Array.from(event.dataTransfer.files).find(isImageFile);
+            if (!file) {
+              showNotice('Only images can be added to the board');
+              return;
+            }
+            // The board point under the pointer: the scene transform, undone.
+            const frame = viewportRef.current?.getBoundingClientRect();
+            imageImport.importFile(
+              file,
+              frame
+                ? {
+                    x: (event.clientX - frame.left - DESK_MARGIN - restX + pan.x) / scale,
+                    y: (event.clientY - frame.top - DESK_MARGIN - restY + pan.y) / scale,
+                  }
+                : undefined,
+            );
+          },
+        }
+      : {};
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
@@ -748,25 +768,33 @@ export function PinboardCanvas({
               <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2.5 text-[10px] font-semibold text-rt-secondary-deep shadow-sm">
                 {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
               </span>
-              <div
-                className="flex h-4.5 items-center gap-1.5 rounded-full border border-rt-secondary/25 bg-white px-2 shadow-sm"
-                title={
-                  isLive
-                    ? 'Connected: new proposals appear here as they are made'
-                    : 'Not receiving live updates; reconnecting'
-                }
-              >
-                <div
-                  className={`size-1.5 rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
-                />
-                <span className="text-[10px] font-medium text-rt-secondary-deep">
-                  {isLive ? 'live' : 'offline'}
+              {readOnly ? (
+                <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2 text-[10px] font-medium text-rt-secondary-deep shadow-sm">
+                  Session ended
                 </span>
-              </div>
+              ) : (
+                <div
+                  className="flex h-4.5 items-center gap-1.5 rounded-full border border-rt-secondary/25 bg-white px-2 shadow-sm"
+                  title={
+                    isLive
+                      ? 'Connected: new proposals appear here as they are made'
+                      : 'Not receiving live updates; reconnecting'
+                  }
+                >
+                  <div
+                    className={`size-1.5 rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
+                  />
+                  <span className="text-[10px] font-medium text-rt-secondary-deep">
+                    {isLive ? 'live' : 'offline'}
+                  </span>
+                </div>
+              )}
             </div>
             {joinCode}
           </div>
-          {isLeader ? (
+          {readOnly ? (
+            archiveActions
+          ) : isLeader ? (
             <EndSessionControl sessionId={board.sessionId} />
           ) : (
             <LeaveSessionControl sessionId={board.sessionId} />
@@ -871,13 +899,14 @@ export function PinboardCanvas({
                     stackIndex={stackIndexById.get(item.id) ?? 0}
                     stackSize={board.items.length}
                     isDragging={draggingId === item.id}
-                    dragHandlers={dragHandlers}
+                    dragHandlers={readOnly ? undefined : dragHandlers}
                     onDelete={onDelete}
                     onArrange={onArrange}
                     onCopyText={onCopyText}
                     viewerId={viewerId}
                     onReact={boardOpen ? onReact : undefined}
                     isShortlisted={shortlist.includes(item.id)}
+                    resultKind={resultMarks?.[item.id] ?? null}
                     canToggleShortlist={canToggleShortlist}
                     onToggleShortlist={onToggleShortlist}
                     onSelectProposal={onSelectProposal}

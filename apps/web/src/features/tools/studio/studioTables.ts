@@ -342,3 +342,49 @@ export function clampCellRef(
     col: clamp(ref.col, 0, tableColCount(table) - 1),
   };
 }
+
+// --- Scaling the whole table ------------------------------------------------
+
+/**
+ * How far a table can be scaled along each axis before one of its tracks hits
+ * a limit.
+ *
+ * Every column scales by the same factor, so the narrowest column sets how far
+ * the table can shrink and the widest how far it can grow. Stopping there keeps
+ * the proportions the columns were given, rather than flattening them all onto
+ * the minimum one by one.
+ */
+export function tableScaleLimits(table: TableElement): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+} {
+  const range = (tracks: readonly number[], min: number, max: number) => ({
+    low: Math.max(...tracks.map((track) => min / track)),
+    high: Math.min(...tracks.map((track) => max / track)),
+  });
+  const x = range(table.colWidths, TABLE_MIN_COL_WIDTH, TABLE_MAX_COL_WIDTH);
+  const y = range(table.rowHeights, TABLE_MIN_ROW_HEIGHT, TABLE_MAX_ROW_HEIGHT);
+  return { minX: x.low, maxX: x.high, minY: y.low, maxY: y.high };
+}
+
+/**
+ * Every column widened by `scaleX` and every row by `scaleY`, as a table's
+ * outer edge is pulled. Held to the limits above; the text keeps its size and
+ * simply has more or less room, as it does when one column is dragged.
+ */
+export function scaleTable(table: TableElement, scaleX: number, scaleY: number): TableElement {
+  const limits = tableScaleLimits(table);
+  const sx = Math.min(limits.maxX, Math.max(limits.minX, scaleX));
+  const sy = Math.min(limits.maxY, Math.max(limits.minY, scaleY));
+  return {
+    ...table,
+    colWidths: table.colWidths.map((width) =>
+      Math.round(clamp(width * sx, TABLE_MIN_COL_WIDTH, TABLE_MAX_COL_WIDTH)),
+    ),
+    rowHeights: table.rowHeights.map((height) =>
+      Math.round(clamp(height * sy, TABLE_MIN_ROW_HEIGHT, TABLE_MAX_ROW_HEIGHT)),
+    ),
+  };
+}
