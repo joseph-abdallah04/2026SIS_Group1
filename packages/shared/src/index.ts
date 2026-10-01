@@ -157,6 +157,7 @@ export * from './drawingContract.js';
 export * from './imageContract.js';
 export * from './reactionContract.js';
 export * from './stickyContract.js';
+export * from './boardPlacement.js';
 import type { DiagramArtifact } from './diagramContract.js';
 import type { DrawingStrokeData } from './drawingContract.js';
 import type { ReactionGroup } from './reactionContract.js';
@@ -286,6 +287,12 @@ export interface BoardResponse {
   questionText: string | null;
   questionPosition: number | null;
   questionStatus: QuestionStatus | null;
+  /**
+   * Whether only the leader may move proposals on this question's board.
+   * Unlocked, members may also move their own. Every question starts locked;
+   * changes arrive live on `boardLock`. True when there is no question.
+   */
+  boardLocked: boolean;
   items: BoardItem[];
   /**
    * Discussion clock for the open question. Present during discussion and

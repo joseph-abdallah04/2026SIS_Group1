@@ -38,12 +38,14 @@ function renderPanel({
   isLeader = true,
   votingPhase,
   hasProposals,
+  boardLock,
 }: {
   questions: Question[];
   activeQuestionId: string | null;
   isLeader?: boolean;
   votingPhase?: VotingPhase;
   hasProposals?: boolean;
+  boardLock?: { locked: boolean; onToggle?: () => Promise<void> };
 }) {
   return render(
     <AgendaPanel
@@ -53,6 +55,7 @@ function renderPanel({
       isLeader={isLeader}
       votingPhase={votingPhase}
       hasProposals={hasProposals}
+      boardLock={boardLock}
     />,
   );
 }
@@ -317,5 +320,65 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+// Each question has its own board lock, so the control sits with the question,
+// and only while it is being discussed: the only time anything on it can move.
+describe('AgendaPanel board lock', () => {
+  it('offers the leader the lock under the question being discussed', async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn(async () => {});
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending')],
+      activeQuestionId: 'q1',
+      boardLock: { locked: true, onToggle },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Board locked' }));
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it('shows a member the state, with nothing to press', () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      isLeader: false,
+      boardLock: { locked: true },
+    });
+
+    expect(screen.queryByRole('button', { name: /board (un)?locked/i })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Only the leader can move proposals');
+  });
+
+  it.each(['voting', 'answered'] as const)(
+    'is not offered once the question is %s and nothing on it can move',
+    (status) => {
+      renderPanel({
+        questions: [question(0, status)],
+        activeQuestionId: 'q1',
+        votingPhase: 'shortlisting',
+        boardLock: { locked: true, onToggle: vi.fn(async () => {}) },
+      });
+
+      expect(screen.queryByRole('button', { name: /board (un)?locked/i })).toBeNull();
+    },
+  );
+
+  it('says why, when the lock could not be changed', async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      boardLock: {
+        locked: true,
+        onToggle: vi.fn(async () => {
+          throw new Error('Only the session leader can lock the board');
+        }),
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Board locked' }));
+    expect(await screen.findByText('Only the session leader can lock the board')).toBeInTheDocument();
   });
 });

@@ -109,6 +109,11 @@ model Question {
   // When this question last entered `discussion`. The discussion clock
   // counts from here; it is not a deadline — overtime is display-only.
   discussionStartedAt DateTime? @map("discussion_started_at")
+  // Whether only the leader may move proposals around this question's board.
+  // Per question, so every question starts locked; unlocked, members may also
+  // move their own. Only positions: what a proposal says, and who may edit,
+  // remove or react to it, are unaffected.
+  boardLocked         Boolean   @default(true) @map("board_locked")
 
   proposals   Proposal[]
   votingRound VotingRound?
@@ -182,6 +187,13 @@ model Proposal {
   // Stacking order on the board, higher above lower, creation order breaking
   // ties. Shared like x/y, and only the leader rearranges it.
   z                 Int       @default(0)
+  // A sticky's size as its author's browser laid it out, so the server can
+  // place new cards clear of it: a sticky grows with its note, and only a
+  // browser can lay the note out. Square unless the note fits no square, when
+  // it grows taller. Null for every other kind, which is always the same size,
+  // and for stickies stored before this was kept.
+  cardWidth         Int?      @map("card_width")
+  cardHeight        Int?      @map("card_height")
   extendsProposalId String?
   extendsProposal   Proposal? @relation("ProposalExtends", fields: [extendsProposalId], references: [id])
   extensions        Proposal[] @relation("ProposalExtends")

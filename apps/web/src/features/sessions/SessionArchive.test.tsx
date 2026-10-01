@@ -53,6 +53,7 @@ function board(questionId: string, text: string, note: string): BoardResponse {
     questionText: text,
     questionPosition: questionId === 'q1' ? 0 : 1,
     questionStatus: 'discussion',
+    boardLocked: true,
     items: [sticky(questionId === 'q1' ? 'p1' : 'p2', questionId, note)],
     discussionTimer: null,
   };

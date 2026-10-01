@@ -27,6 +27,8 @@ const listSessionsForUser = vi.fn();
 const openSessionForJoining = vi.fn();
 const resolveSessionByCode = vi.fn();
 const setQuestionPhase = vi.fn();
+const setBoardLock = vi.fn();
+const emitBoardLock = vi.fn();
 const startSession = vi.fn();
 const updateSessionDraft = vi.fn();
 
@@ -46,6 +48,9 @@ vi.mock('../../middleware/auth.js', () => ({
     req.userId = userId;
     next();
   },
+  // The rate limiter keys by this. No token is sent here, so every request
+  // shares the one address bucket, which is what the limit test relies on.
+  verifiedUserId: () => null,
 }));
 
 vi.mock('./service.js', () => ({
@@ -68,6 +73,8 @@ vi.mock('./service.js', () => ({
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setBoardLock,
+  emitBoardLock,
   setQuestionPhase,
   startSession,
   updateSessionDraft,
@@ -601,5 +608,50 @@ describe('draft edit, delete, open, create, join', () => {
       expect(res.status).toBe(200);
       expect(listSessionsForUser).toHaveBeenCalledWith('u1');
     });
+  });
+});
+
+describe('POST /api/sessions/:id/board-lock', () => {
+  it('sets the lock for the question and tells the room', async () => {
+    setBoardLock.mockResolvedValue(false);
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'POST',
+        path: '/api/sessions/s1/board-lock',
+        userId: 'leader-1',
+        body: { questionId: 'q1', locked: false },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ questionId: 'q1', locked: false });
+    });
+    expect(setBoardLock).toHaveBeenCalledWith({
+      sessionId: 's1',
+      questionId: 'q1',
+      leaderId: 'leader-1',
+      locked: false,
+    });
+    expect(emitBoardLock).toHaveBeenCalledWith(io, 's1', 'q1', false);
+  });
+
+  // Like the voting outcomes read: limited before the auth check, so a flood
+  // of requests is turned away before any of them reaches the database.
+  it('turns a flood of requests away before they reach the service', async () => {
+    setBoardLock.mockResolvedValue(true);
+    const { io } = createFakeIo();
+    const statuses: number[] = [];
+    await withServer(io, async (request) => {
+      for (let i = 0; i < 31; i += 1) {
+        const res = await request({
+          method: 'POST',
+          path: '/api/sessions/s1/board-lock',
+          userId: 'leader-1',
+          body: { questionId: 'q1', locked: true },
+        });
+        statuses.push(res.status);
+      }
+    });
+    expect(statuses.at(-1)).toBe(429);
+    expect(setBoardLock.mock.calls.length).toBeLessThanOrEqual(30);
   });
 });

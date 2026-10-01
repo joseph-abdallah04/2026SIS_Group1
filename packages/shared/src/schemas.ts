@@ -237,6 +237,14 @@ export const setQuestionPhaseSchema = z.object({
 
 export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
 
+/** The leader locking or unlocking one question's board: whether only they may move proposals. */
+export const setBoardLockSchema = z.object({
+  questionId: z.string().min(1),
+  locked: z.boolean(),
+});
+
+export type SetBoardLockInput = z.infer<typeof setBoardLockSchema>;
+
 // Leader pointing the board at a question without changing its status — so
 // an answered question's pinboard can be shown again without reopening it.
 export const focusQuestionSchema = z.object({
@@ -1131,8 +1139,19 @@ export const proposalCreateSchema = z
   .object({
     type: proposalTypeSchema,
     artifactJson: artifactWriteJsonSchema,
+    // Where the author's browser would like it. The server keeps it if it is
+    // clear of every card on the board, and moves it to the nearest clear spot
+    // if not.
     x: z.number(),
     y: z.number(),
+    /**
+     * A sticky's width as the author's browser laid it out, so the server can
+     * keep later cards clear of it. Held to the sizes a sticky can be, and
+     * ignored for every other kind, which is always the same width.
+     */
+    cardWidth: z.number().min(0).max(10_000).optional(),
+    /** Likewise its height, which is more than its width for a note too long for any square. */
+    cardHeight: z.number().min(0).max(10_000).optional(),
     extendsProposalId: z.string().optional(),
   })
   .superRefine((value, context) => {
@@ -1188,6 +1207,9 @@ export const proposalUpdateSchema = z
     artifactJson: artifactWriteJsonSchema.optional(),
     x: z.number().min(0).max(100_000).optional(),
     y: z.number().min(0).max(100_000).optional(),
+    /** A rewritten sticky's new size, as for `proposalCreate`. */
+    cardWidth: z.number().min(0).max(10_000).optional(),
+    cardHeight: z.number().min(0).max(10_000).optional(),
   })
   .superRefine((value, context) => {
     if (value.artifactJson === undefined && value.x === undefined && value.y === undefined) {

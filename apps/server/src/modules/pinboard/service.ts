@@ -1,5 +1,9 @@
 import {
+  cardFootprint,
+  clampStickyHeight,
+  clampStickyWidth,
   DELETED_USER_DISPLAY_NAME,
+  findClearSpot,
   isEmoji,
   type AuthoredProposalGroup,
   type AuthoredProposalsResponse,
@@ -265,14 +269,36 @@ export async function createProposal({
       _max: { z: true },
     });
 
+    // Where it lands is decided here, under the same lock, rather than taken
+    // as sent. The author's browser chose a spot clear of the board as it last
+    // saw it, and two people proposing at the same moment both see the same
+    // gap. Holding the lock, this sees every card that landed first, and moves
+    // this one to the nearest clear spot only if it has to.
+    const sticky = stickySizeFrom(input);
+    const size = cardFootprint(input.type, sticky.cardWidth, sticky.cardHeight);
+    const onBoard = await tx.proposal.findMany({
+      where: { questionId, deletedAt: null },
+      select: { x: true, y: true, type: true, cardWidth: true, cardHeight: true },
+    });
+    const spot = findClearSpot(
+      onBoard.map((card) => ({
+        x: card.x,
+        y: card.y,
+        ...cardFootprint(card.type, card.cardWidth, card.cardHeight),
+      })),
+      size,
+      { x: input.x, y: input.y },
+    );
+
     const row = await tx.proposal.create({
       data: {
         questionId,
         authorId,
         type: input.type,
         artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
-        x: input.x,
-        y: input.y,
+        x: spot.x,
+        y: spot.y,
+        ...sticky,
         z: (top._max.z ?? 0) + 1,
         extendsProposalId: input.extendsProposalId ?? null,
       },
@@ -281,6 +307,24 @@ export async function createProposal({
 
     return toBoardItem(row);
   });
+}
+
+/**
+ * The size to keep for a sticky, from what its author's browser measured:
+ * held to the sizes a sticky can be, and never shorter than it is wide. Null
+ * for any other kind, which is always the same size, and for a sticky whose
+ * browser did not say.
+ */
+function stickySizeFrom(input: {
+  type: string;
+  cardWidth?: number;
+  cardHeight?: number;
+}): { cardWidth: number | null; cardHeight: number | null } {
+  if (input.type !== 'sticky' || input.cardWidth === undefined) {
+    return { cardWidth: null, cardHeight: null };
+  }
+  const cardWidth = clampStickyWidth(input.cardWidth);
+  return { cardWidth, cardHeight: clampStickyHeight(input.cardHeight ?? cardWidth, cardWidth) };
 }
 
 /**
@@ -342,6 +386,8 @@ async function loadForMutation(proposalId: string, actor: Actor, mutation: Propo
   const question = row ? await getQuestion(row.questionId) : null;
   const session = question ? await getSession(question.sessionId) : null;
   const isLeader = session?.leaderId === actor.id;
+  // A question that could not be read is taken as locked: the stricter answer.
+  const boardLocked = question?.boardLocked ?? true;
 
   // Missing, deleted, or on a session this actor did not join: the same 404
   // `requireMutableProposal` would give. It has to come before the live-session
@@ -353,7 +399,10 @@ async function loadForMutation(proposalId: string, actor: Actor, mutation: Propo
 
   requireLiveSession(session);
 
-  return { row: requireMutableProposal(row, question, actor, { mutation, isLeader }), question };
+  return {
+    row: requireMutableProposal(row, question, actor, { mutation, isLeader, boardLocked }),
+    question,
+  };
 }
 
 /**
@@ -413,6 +462,10 @@ export async function updateProposal({
         ? {
             artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
             editedAt: new Date(),
+            // A rewritten note can need a different size of sticky.
+            ...(row.type === 'sticky' && input.cardWidth !== undefined
+              ? stickySizeFrom({ type: 'sticky', ...input })
+              : {}),
           }
         : {}),
       ...(input.x === undefined ? {} : { x: input.x }),
@@ -723,6 +776,7 @@ export async function getBoardForSession(
       questionText: null,
       questionPosition: null,
       questionStatus: null,
+      boardLocked: true,
       items: [],
       discussionTimer,
     };
@@ -736,6 +790,7 @@ export async function getBoardForSession(
     questionText: question.text,
     questionPosition: question.position,
     questionStatus: question.status,
+    boardLocked: question.boardLocked,
     items: await listProposals(question.id),
     discussionTimer,
   };

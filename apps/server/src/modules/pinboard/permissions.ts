@@ -35,6 +35,11 @@ export interface MutationIntent {
   mutation: ProposalMutation;
   /** Whether this actor leads the session the proposal belongs to. */
   isLeader: boolean;
+  /**
+   * Whether the leader has locked the board, so only they may move proposals.
+   * Moves only: editing, removing and reacting are not the lock's business.
+   */
+  boardLocked: boolean;
 }
 
 /**
@@ -116,6 +121,18 @@ export function requireMutableProposal<T extends MutableProposal>(
       409,
       `This question is ${question.status} — the board is closed`,
       'QUESTION_CLOSED',
+    );
+  }
+
+  // A locked board is the leader's to arrange. An author keeps every other
+  // right over their own proposal, but moving it waits for the leader to
+  // unlock. After the phase check: on a closed board nothing moves for anyone,
+  // and that is the reason worth giving.
+  if (intent.mutation === 'move' && intent.boardLocked && !intent.isLeader) {
+    throw new ApiError(
+      403,
+      'The leader has locked the board, so only they can move proposals',
+      'BOARD_LOCKED',
     );
   }
 
