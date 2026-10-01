@@ -147,6 +147,38 @@ describe('MicToggle', () => {
     expect(button).toHaveAttribute('title', expect.stringContaining('site settings'));
   });
 
+  it('marks a blocked mic, so it cannot pass for one you muted', () => {
+    // Same red either way. Once the banner steps aside, this is the only place
+    // left that knows the difference.
+    render(<MicToggle {...liveProps()} micEnabled={false} micStatus="blocked" />);
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveAccessibleName(/Ada — microphone blocked by your browser/);
+    expect(button.querySelector('[data-mic-warning]')).not.toBeNull();
+  });
+
+  it('marks a missing mic the same way', () => {
+    render(<MicToggle {...liveProps()} micEnabled={false} micStatus="no-device" />);
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveAccessibleName(/Ada — microphone not found/);
+    expect(button.querySelector('[data-mic-warning]')).not.toBeNull();
+  });
+
+  it('leaves a mic you muted yourself unmarked', () => {
+    render(<MicToggle {...liveProps()} micEnabled={false} />);
+
+    expect(screen.getByRole('button').querySelector('[data-mic-warning]')).toBeNull();
+  });
+
+  it('steps aside once voice has given up, for the Reconnect that takes its place', () => {
+    // Greyed out, it would say "muted" when what happened is that the room
+    // dropped you — `VoiceReconnect` says that instead.
+    const { container } = render(<MicToggle {...liveProps()} micEnabled={false} status="failed" />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('renders nothing when the server has no voice', () => {
     // A permanently greyed button explains nothing; there is no microphone to
     // offer on a deployment without LiveKit credentials.

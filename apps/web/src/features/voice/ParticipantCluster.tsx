@@ -40,11 +40,11 @@ function emptyMessage(status: VoiceStatus): string {
       return 'Joining the room…';
     case 'reconnecting':
       return 'Reconnecting…';
+    // Unreachable while the component returns null for these statuses, but
+    // the union should not quietly fall through to "not connected", which
+    // reads as a problem you could fix.
     case 'failed':
       return 'Voice is offline, so nobody can be listed here.';
-    // Unreachable while the component returns null for this status, but the
-    // union should not quietly fall through to "not connected", which reads
-    // as a problem you could fix.
     case 'unavailable':
       return 'Voice is not available on this server.';
     default:
@@ -102,8 +102,11 @@ export function ParticipantCluster({ participants, status }: ParticipantClusterP
   }, []);
 
   // Same reasoning as `MicToggle`: with no room to be in, an empty roster chip
-  // explaining its own emptiness is worse than no chip.
-  if (status === 'unavailable') return null;
+  // explaining its own emptiness is worse than no chip. `failed` as well, now
+  // that `VoiceReconnect` says so in the same header with a way back — and two
+  // chips saying "offline" would spend width a header that cannot wrap does
+  // not have.
+  if (status === 'unavailable' || status === 'failed') return null;
 
   if (seats.length === 0) {
     return (
