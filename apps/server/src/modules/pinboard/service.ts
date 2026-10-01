@@ -1,5 +1,6 @@
 import {
   cardFootprint,
+  clampStickyHeight,
   clampStickyWidth,
   DELETED_USER_DISPLAY_NAME,
   findClearSpot,
@@ -273,17 +274,18 @@ export async function createProposal({
     // saw it, and two people proposing at the same moment both see the same
     // gap. Holding the lock, this sees every card that landed first, and moves
     // this one to the nearest clear spot only if it has to.
-    const stickyWidth =
-      input.type === 'sticky' && input.cardWidth !== undefined
-        ? clampStickyWidth(input.cardWidth)
-        : null;
-    const size = cardFootprint(input.type, stickyWidth);
+    const sticky = stickySizeFrom(input);
+    const size = cardFootprint(input.type, sticky.cardWidth, sticky.cardHeight);
     const onBoard = await tx.proposal.findMany({
       where: { questionId, deletedAt: null },
-      select: { x: true, y: true, type: true, cardWidth: true },
+      select: { x: true, y: true, type: true, cardWidth: true, cardHeight: true },
     });
     const spot = findClearSpot(
-      onBoard.map((card) => ({ x: card.x, y: card.y, ...cardFootprint(card.type, card.cardWidth) })),
+      onBoard.map((card) => ({
+        x: card.x,
+        y: card.y,
+        ...cardFootprint(card.type, card.cardWidth, card.cardHeight),
+      })),
       size,
       { x: input.x, y: input.y },
     );
@@ -296,7 +298,7 @@ export async function createProposal({
         artifactJson: input.artifactJson as unknown as Prisma.InputJsonValue,
         x: spot.x,
         y: spot.y,
-        cardWidth: stickyWidth,
+        ...sticky,
         z: (top._max.z ?? 0) + 1,
         extendsProposalId: input.extendsProposalId ?? null,
       },
@@ -305,6 +307,24 @@ export async function createProposal({
 
     return toBoardItem(row);
   });
+}
+
+/**
+ * The size to keep for a sticky, from what its author's browser measured:
+ * held to the sizes a sticky can be, and never shorter than it is wide. Null
+ * for any other kind, which is always the same size, and for a sticky whose
+ * browser did not say.
+ */
+function stickySizeFrom(input: {
+  type: string;
+  cardWidth?: number;
+  cardHeight?: number;
+}): { cardWidth: number | null; cardHeight: number | null } {
+  if (input.type !== 'sticky' || input.cardWidth === undefined) {
+    return { cardWidth: null, cardHeight: null };
+  }
+  const cardWidth = clampStickyWidth(input.cardWidth);
+  return { cardWidth, cardHeight: clampStickyHeight(input.cardHeight ?? cardWidth, cardWidth) };
 }
 
 /**
@@ -444,7 +464,7 @@ export async function updateProposal({
             editedAt: new Date(),
             // A rewritten note can need a different size of sticky.
             ...(row.type === 'sticky' && input.cardWidth !== undefined
-              ? { cardWidth: clampStickyWidth(input.cardWidth) }
+              ? stickySizeFrom({ type: 'sticky', ...input })
               : {}),
           }
         : {}),

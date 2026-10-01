@@ -132,6 +132,21 @@ describe('createProposal', () => {
       expect(landedAt()).not.toEqual({ x: 1000, y: 800 });
     });
 
+    // A note that fits no square stays the largest width and grows taller.
+    // Taken as square, the card placed under it covered its overflow.
+    it('keeps clear of a sticky taller than it is wide', async () => {
+      onBoard.mockResolvedValue([
+        { x: 1000, y: 300, type: 'sticky', cardWidth: 339, cardHeight: 480 },
+      ] as never);
+      // Clear of a 339 square (bottom 639, plus the gap), not of 480.
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...IMAGE, y: 680 } as typeof IMAGE,
+      });
+      expect(landedAt()).not.toEqual({ x: 1000, y: 680 });
+    });
+
     it('reads the board only once it holds the board’s lock', async () => {
       const steps: string[] = [];
       queryRaw.mockImplementation((async () => {
@@ -160,13 +175,30 @@ describe('createProposal', () => {
       expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: STICKY_MAX_WIDTH });
     });
 
+    it('keeps a long note’s height, and never less than its width', async () => {
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...STICKY, cardWidth: 339, cardHeight: 480 } as typeof STICKY,
+      });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 339, cardHeight: 480 });
+
+      create.mockClear();
+      await createProposal({
+        questionId: 'q1',
+        authorId: 'u1',
+        input: { ...STICKY, cardWidth: 278, cardHeight: 10 } as typeof STICKY,
+      });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 278, cardHeight: 278 });
+    });
+
     it('keeps no width for a card that is always the same width', async () => {
       await createProposal({
         questionId: 'q1',
         authorId: 'u1',
         input: { ...IMAGE, cardWidth: 900 } as typeof IMAGE,
       });
-      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: null });
+      expect(create.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: null, cardHeight: null });
     });
   });
 

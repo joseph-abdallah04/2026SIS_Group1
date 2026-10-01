@@ -1068,6 +1068,8 @@ export const proposalCreateSchema = z
      * ignored for every other kind, which is always the same width.
      */
     cardWidth: z.number().min(0).max(10_000).optional(),
+    /** Likewise its height, which is more than its width for a note too long for any square. */
+    cardHeight: z.number().min(0).max(10_000).optional(),
     extendsProposalId: z.string().optional(),
   })
   .superRefine((value, context) => {
@@ -1123,8 +1125,9 @@ export const proposalUpdateSchema = z
     artifactJson: artifactWriteJsonSchema.optional(),
     x: z.number().min(0).max(100_000).optional(),
     y: z.number().min(0).max(100_000).optional(),
-    /** A rewritten sticky's new width, as for `proposalCreate`. */
+    /** A rewritten sticky's new size, as for `proposalCreate`. */
     cardWidth: z.number().min(0).max(10_000).optional(),
+    cardHeight: z.number().min(0).max(10_000).optional(),
   })
   .superRefine((value, context) => {
     if (value.artifactJson === undefined && value.x === undefined && value.y === undefined) {

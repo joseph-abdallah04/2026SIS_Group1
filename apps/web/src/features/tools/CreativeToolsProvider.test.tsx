@@ -167,6 +167,7 @@ describe('creative sticky flow', () => {
       y: 32,
       // Sent so the server can keep later cards clear of this one.
       cardWidth: 217,
+      cardHeight: 217,
     });
     // The sticky is on the board behind it, so the popup gets out of the way
     // instead of confirming what the board is already showing.

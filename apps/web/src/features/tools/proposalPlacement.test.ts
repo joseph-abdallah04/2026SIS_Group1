@@ -1,10 +1,17 @@
-import { cardFootprint, type ArtifactJson, type BoardItem } from '@roundtable/shared';
+import {
+  BOARD_SIZE,
+  cardFootprint,
+  findClearSpot,
+  type ArtifactJson,
+  type BoardItem,
+  type CardRect,
+} from '@roundtable/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { cardWidth } from '../pinboard/cardMetrics';
 import { CARD_WIDTH } from '../pinboard/pinboardTokens';
 import { clearBoardCentre, setBoardCentre } from '../pinboard/boardView';
-import { findOpenProposalPosition } from './proposalPlacement';
+import { cardSize, findOpenProposalPosition } from './proposalPlacement';
 
 /** Matches the module's own constants; a card plus its gap. */
 const CELL_WIDTH = CARD_WIDTH.diagram + 28;
@@ -128,6 +135,29 @@ describe('findOpenProposalPosition', () => {
       expect(Math.min(across, down)).toBe(0);
     });
 
+    // A note that fits no square stays the largest width and grows taller.
+    // Taken as square, a card placed under it landed over the overflow.
+    it('keeps clear of a note too long for any square', () => {
+      setBoardCentre({ x: 1000, y: 800 });
+      // Twenty short lines: the editor's most, and more than any square holds.
+      const lines = Array.from({ length: 20 }, () => 'a').join(String.fromCharCode(10));
+      const long = stickyAt(0, 0, lines);
+      const size = cardSize(long);
+      expect(size.height).toBeGreaterThan(size.width);
+      long.x = Math.round(1000 - STICKY_WIDTH / 2);
+      // Below a square of its width, inside its real height.
+      long.y = Math.round(800 - STICKY_WIDTH / 2) - size.width - 40;
+
+      const position = findOpenProposalPosition([long], STICKY);
+
+      const clears =
+        position.x >= long.x + size.width + 28 ||
+        position.x + STICKY_WIDTH + 28 <= long.x ||
+        position.y >= long.y + size.height + 28 ||
+        position.y + STICKY_WIDTH + 28 <= long.y;
+      expect(clears).toBe(true);
+    });
+
     it('never proposes above or left of the board origin', () => {
       // Viewer parked in the far top-left corner: half the ring around them is
       // off the board entirely.
@@ -189,5 +219,26 @@ describe('findOpenProposalPosition around a point', () => {
       y: 700,
     });
     expect(landed).not.toEqual({ x: 900 - 140, y: 570 });
+  });
+});
+
+// After eight rings out, the card went below everything without checking that
+// spot. Held back by the bottom of the sheet, it could sit on a card there.
+describe('findClearSpot on a full board', () => {
+  it('finds the one gap left rather than landing on a card', () => {
+    const size = cardFootprint('sticky', 217);
+    const step = 217 + 28;
+    const cards: CardRect[] = [];
+    for (let y = 0; y + size.height <= BOARD_SIZE.height; y += step) {
+      for (let x = 0; x + size.width <= BOARD_SIZE.width; x += step) {
+        if (x === 0 && y === 0) continue;
+        cards.push({ x, y, ...size });
+      }
+    }
+
+    // From the far corner, more than eight rings from the gap.
+    const spot = findClearSpot(cards, size, { x: BOARD_SIZE.width, y: BOARD_SIZE.height });
+
+    expect(spot).toEqual({ x: 0, y: 0 });
   });
 });

@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, BoardItem } from '@roundtable/shared';
 import type { ProposalCreateInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 
-import { cardWidth } from '../pinboard/cardMetrics';
-import { findOpenProposalPosition } from './proposalPlacement';
+import { cardSize, findOpenProposalPosition } from './proposalPlacement';
 import { proposalErrorMessage } from './proposeErrors';
 import type {
   ProposalSubmissionStatus,
@@ -21,6 +20,16 @@ interface UseProposalSubmissionOptions {
   proposals: readonly BoardItem[];
   propose: (input: ProposalCreateInput) => Promise<void>;
   editProposal: (input: ProposalUpdateInput) => Promise<void>;
+}
+
+/**
+ * The card's size as this browser lays it out, sent so the server can keep
+ * later cards clear of it. Only a sticky's is ever kept; the server knows the
+ * size of every other kind.
+ */
+function measuredSize(artifactJson: ArtifactJson) {
+  const { width, height } = cardSize({ type: artifactJson.type, artifactJson });
+  return { cardWidth: width, cardHeight: height };
 }
 
 export function useProposalSubmission({
@@ -68,7 +77,7 @@ export function useProposalSubmission({
           artifactJson,
           // A longer note can need a bigger sticky; the server keeps later
           // cards clear of the size it is now.
-          cardWidth: cardWidth({ type: artifactJson.type, artifactJson }),
+          ...measuredSize(artifactJson),
         });
       } else {
         // An extension lands beside the card it builds on, so the two read as
@@ -82,7 +91,7 @@ export function useProposalSubmission({
           type: artifactJson.type,
           artifactJson,
           ...findOpenProposalPosition(proposals, artifactJson, original),
-          cardWidth: cardWidth({ type: artifactJson.type, artifactJson }),
+          ...measuredSize(artifactJson),
           ...(extensionSource ? { extendsProposalId: extensionSource.id } : {}),
         });
       }
@@ -126,7 +135,7 @@ export function useProposalSubmission({
         type: artifactJson.type,
         artifactJson,
         ...findOpenProposalPosition(proposals, artifactJson, undefined, options.at),
-        cardWidth: cardWidth({ type: artifactJson.type, artifactJson }),
+        ...measuredSize(artifactJson),
         ...(options.extendsProposalId ? { extendsProposalId: options.extendsProposalId } : {}),
       });
       return { ok: true };

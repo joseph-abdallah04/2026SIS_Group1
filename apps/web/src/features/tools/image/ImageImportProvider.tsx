@@ -114,7 +114,9 @@ export function ImageImportProvider({ children }: { children: ReactNode }) {
       const file = pastedImage(event.clipboardData);
       if (!file) return;
       const typing = typingInto(event.target) || typingInto(document.activeElement);
-      if (typing && event.clipboardData?.types.includes('text/plain')) return;
+      // Words, not just a text entry: some apps copy a picture with an empty
+      // one beside it, and that is no reason to keep the picture out.
+      if (typing && (event.clipboardData?.getData('text/plain') ?? '').trim() !== '') return;
       event.preventDefault();
       importFile(file);
     };

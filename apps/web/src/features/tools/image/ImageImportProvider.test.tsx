@@ -23,12 +23,16 @@ const screenshot = new File(['png'], 'screenshot.png', { type: 'image/png' });
 function clipboard({
   files = [] as File[],
   items = [] as File[],
-  text = false,
+  text = null as string | null,
 } = {}): DataTransfer {
   return {
     files,
     items: items.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
-    types: [...(files.length || items.length ? ['Files'] : []), ...(text ? ['text/plain'] : [])],
+    types: [
+      ...(files.length || items.length ? ['Files'] : []),
+      ...(text === null ? [] : ['text/plain']),
+    ],
+    getData: (type: string) => (type === 'text/plain' ? (text ?? '') : ''),
   } as unknown as DataTransfer;
 }
 
@@ -88,10 +92,26 @@ describe('pasting a picture onto the board', () => {
     const field = screen.getByRole('textbox', { name: 'Add a question' });
     field.focus();
 
-    const event = paste(clipboard({ files: [screenshot], text: true }), field);
+    const event = paste(clipboard({ files: [screenshot], text: 'Our wall' }), field);
 
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  // Some apps copy a picture with an empty text entry beside it. No words,
+  // so nothing for the field: the picture still goes to the importer.
+  it('takes a picture that comes with an empty text entry', () => {
+    render(
+      <ImageImportProvider>
+        <input aria-label="Add a question" />
+      </ImageImportProvider>,
+    );
+    const field = screen.getByRole('textbox', { name: 'Add a question' });
+    field.focus();
+
+    paste(clipboard({ files: [screenshot], text: '  ' }), field);
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   // An open editor has its own idea of what a paste means.
@@ -107,7 +127,7 @@ describe('pasting a picture onto the board', () => {
   it('ignores a paste with no picture in it', () => {
     render(<ImageImportProvider>{null}</ImageImportProvider>);
 
-    const event = paste(clipboard({ text: true }));
+    const event = paste(clipboard({ text: 'Just words' }));
 
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(event.defaultPrevented).toBe(false);

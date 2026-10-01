@@ -9,6 +9,7 @@ import {
 
 import { getBoardCentre } from '../pinboard/boardView';
 import { cardWidth } from '../pinboard/cardMetrics';
+import { stickyHeight } from './sticky/stickyPresentation';
 
 type PositionedProposal = Pick<BoardItem, 'type' | 'artifactJson' | 'x' | 'y'>;
 
@@ -18,11 +19,13 @@ interface ProposalPosition {
 }
 
 /**
- * How much of the board a card covers, from its real width: a sticky is as
- * wide as this browser lays its note out, which the server cannot do.
+ * How much of the board a card covers, from its real size: a sticky is as
+ * wide, and as tall, as this browser lays its note out, which the server
+ * cannot do. Taller than wide for a note that fits no square.
  */
 export function cardSize(item: Pick<BoardItem, 'type' | 'artifactJson'>) {
-  return cardFootprint(item.type, item.type === 'sticky' ? cardWidth(item) : undefined);
+  if (item.artifactJson.type !== 'sticky') return cardFootprint(item.type);
+  return cardFootprint('sticky', cardWidth(item), stickyHeight(item.artifactJson));
 }
 
 /**

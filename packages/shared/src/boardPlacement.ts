@@ -29,6 +29,12 @@ export const CARD_WIDTH: Record<ProposalType, number> = {
 
 /** The largest sticky: fourteen lines of note. */
 export const STICKY_MAX_WIDTH = 339;
+/**
+ * The tallest a sticky is taken to be. A note that fits no square stays as
+ * wide as the largest and grows taller; this is well past any note the editor
+ * allows, so a height sent in cannot claim more of the board than a real one.
+ */
+export const STICKY_MAX_HEIGHT = 1200;
 
 /**
  * What an artwork card is under its four-by-three plate: the byline strip and
@@ -59,18 +65,30 @@ export function clampStickyWidth(width: number): number {
   return Math.round(Math.min(Math.max(width, CARD_WIDTH.sticky), STICKY_MAX_WIDTH));
 }
 
+/** A sticky's height: never shorter than it is wide, never past the tallest. */
+export function clampStickyHeight(height: number, width: number): number {
+  return Math.round(Math.min(Math.max(height, width), STICKY_MAX_HEIGHT));
+}
+
 /**
  * How much of the board a card of this kind covers.
  *
- * A sticky is square, as wide as its note needs; with no width to go on — a
- * card stored before widths were — it is taken as the largest, so nothing is
- * placed where a big one might reach. Artwork cards are their plate, a
- * four-by-three area the card's width across, over the byline.
+ * A sticky is as wide as its note needs, and square unless the note fits no
+ * square, when it stays as wide as the largest and grows taller: the card
+ * holds every word rather than cutting any off. With no width to go on — a
+ * card stored before sizes were — it is taken as the largest square, so
+ * nothing is placed where a big one might reach. Artwork cards are their
+ * plate, a four-by-three area the card's width across, over the byline.
  */
-export function cardFootprint(type: ProposalType, stickyWidth?: number | null): CardSize {
+export function cardFootprint(
+  type: ProposalType,
+  stickyWidth?: number | null,
+  stickyHeight?: number | null,
+): CardSize {
   if (type === 'sticky') {
     const width = clampStickyWidth(stickyWidth ?? STICKY_MAX_WIDTH);
-    return { width, height: width };
+    const height = stickyHeight == null ? width : clampStickyHeight(stickyHeight, width);
+    return { width, height };
   }
   const width = CARD_WIDTH[type];
   return { width, height: Math.round(((width - CARD_BORDER_PX) * 3) / 4) + ARTWORK_FOOT_PX };
@@ -147,9 +165,22 @@ export function findClearSpot(
     }
   }
 
+  // Crowded all round: below everything, which is clear unless the bottom of
+  // the sheet holds it back on top of something there.
   const lowest = cards.reduce(
     (bottom, card) => Math.max(bottom, card.y + card.height),
     BOARD_INSET - CARD_GAP,
   );
-  return { x: onSheet(origin.x, maxX), y: onSheet(lowest + CARD_GAP, maxY) };
+  const below = { x: onSheet(origin.x, maxX), y: onSheet(lowest + CARD_GAP, maxY), ...size };
+  if (cards.every((card) => !crowds(below, card))) return { x: below.x, y: below.y };
+
+  // Then anywhere on the sheet, row by row. Only a board with no room left at
+  // all gets the spot below everything regardless.
+  for (let y = 0; y <= maxY; y += stepY) {
+    for (let x = 0; x <= maxX; x += stepX) {
+      const candidate = { x, y, ...size };
+      if (cards.every((card) => !crowds(candidate, card))) return { x, y };
+    }
+  }
+  return { x: below.x, y: below.y };
 }

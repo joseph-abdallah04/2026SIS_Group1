@@ -273,9 +273,9 @@ describe('updateProposal', () => {
     await updateProposal({
       proposalId: 'p1',
       actor: AUTHOR,
-      input: { ...REWORD, cardWidth: 278 },
+      input: { ...REWORD, cardWidth: 278, cardHeight: 278 },
     });
-    expect(update.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 278 });
+    expect(update.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 278, cardHeight: 278 });
   });
 
   it('keeps the width it had when only the position changes', async () => {
@@ -689,6 +689,17 @@ describe('board lock', () => {
         boardLocked: true,
       }),
     ).toBe(mine);
+  });
+
+  // On a closed board nothing moves for anyone, which is the reason to give.
+  it('says the question is closed before it says the board is locked', () => {
+    expect(() =>
+      requireMutableProposal(mine, questionRef('voting'), AUTHOR, {
+        mutation: 'move',
+        isLeader: false,
+        boardLocked: true,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'QUESTION_CLOSED' }));
   });
 
   it.each(['edit', 'delete', 'react'] as const)(
