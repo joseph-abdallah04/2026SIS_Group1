@@ -10,6 +10,8 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import {
   assistantChatRequestSchema,
+  assistantErrorMessage,
+  isAssistantErrorCode,
   llmConfigUpsertSchema,
   type AssistantStreamEvent,
   type AssistantUsage,
@@ -198,11 +200,7 @@ async function streamAssistantTurn(
         cause instanceof ApiError
           ? cause
           : describeProviderError(cause, credentials?.baseUrl ?? '');
-      stream.send({
-        type: 'error',
-        message: apiError.message,
-        ...(apiError.code ? { code: apiError.code } : {}),
-      });
+      stream.send(errorFrame(apiError));
       // Every stream terminates with `done`, including on error (docs/06 acceptance criteria).
       stream.send({ type: 'done', reason: 'error' });
     }
@@ -225,9 +223,32 @@ async function streamAssistantTurn(
   }
 }
 
+/**
+ * The `error` frame for a failed turn.
+ *
+ * `detail` is what the provider or the check actually said. Errors from `describeProviderError`
+ * carry it explicitly; for the rest, a message that says more than its code's standard
+ * sentence (a host name, an invalid URL) is kept as the detail rather than lost.
+ */
+export function errorFrame(error: ApiError): Extract<AssistantStreamEvent, { type: 'error' }> {
+  const explicit = typeof error.details === 'string' ? error.details : undefined;
+  const specific =
+    isAssistantErrorCode(error.code) && error.message !== assistantErrorMessage(error.code)
+      ? error.message
+      : undefined;
+  const detail = explicit ?? specific;
+
+  return {
+    type: 'error',
+    message: error.message,
+    ...(error.code ? { code: error.code } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
 function validationError(issues: Array<{ path: PropertyKey[]; message: string }>): ApiError {
   const detail = issues
     .map((issue) => `${issue.path.map(String).join('.') || 'body'}: ${issue.message}`)
     .join('; ');
-  return new ApiError(400, `Invalid request: ${detail}`, 'VALIDATION_FAILED');
+  return new ApiError(400, `Invalid request: ${detail}`, 'VALIDATION_FAILED', detail);
 }

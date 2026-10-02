@@ -48,7 +48,18 @@ export type ChatEntry =
        */
       seenOnBoard?: boolean;
     }
-  | { kind: 'error'; id: string; message: string };
+  | {
+      kind: 'error';
+      id: string;
+      /** A complete sentence — what shows when the code is one this build does not know. */
+      message: string;
+      /** One of `ASSISTANT_ERRORS`; absent only in transcripts saved by older builds. */
+      code?: string;
+      /** What the provider or server actually said, for the Details toggle. */
+      detail?: string;
+      /** Cards this turn produced before it failed. They are finished, and still usable. */
+      cardsAbove?: number;
+    };
 
 /** Turns sent back to the model as context. Tool chatter and artifacts stay client-side. */
 const HISTORY_LIMIT = 20;
@@ -280,7 +291,18 @@ export function applyEvent(
     }
 
     case 'error': {
-      return [...entries, { kind: 'error', id: newId, message: event.message }];
+      const cardsAbove = cardsThisTurn(entries);
+      return [
+        ...entries,
+        {
+          kind: 'error',
+          id: newId,
+          message: event.message,
+          ...(event.code ? { code: event.code } : {}),
+          ...(event.detail ? { detail: event.detail } : {}),
+          ...(cardsAbove > 0 ? { cardsAbove } : {}),
+        },
+      ];
     }
 
     case 'status':
@@ -290,6 +312,22 @@ export function applyEvent(
     case 'done':
       return settleTurn(entries, event.reason === 'aborted', newId);
   }
+}
+
+/**
+ * Cards the current turn has put in the transcript so far.
+ *
+ * A turn can fail after its tool already worked — the diagram is on screen, and only the
+ * model's closing line died. An error that does not say so reads as if the card were broken.
+ */
+function cardsThisTurn(entries: readonly ChatEntry[]): number {
+  let cards = 0;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.kind === 'user') break;
+    if (entry?.kind === 'artifact') cards += 1;
+  }
+  return cards;
 }
 
 /**
