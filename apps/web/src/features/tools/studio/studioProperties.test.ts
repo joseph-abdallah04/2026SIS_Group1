@@ -84,6 +84,23 @@ describe('what one element supports', () => {
     expect(ids(table(true))).not.toContain('fillColor');
   });
 
+  it('offers rows and columns inside a table, and only the one picked whole', () => {
+    expect(ids(table(true))).toEqual(expect.arrayContaining(['tableRows', 'tableColumns']));
+    expect(ids(table(false))).not.toContain('tableRows');
+    const wholeRows: StudioTarget = { ...table(true), wholeTracks: 'row' } as StudioTarget;
+    expect(ids(wholeRows)).toContain('tableRows');
+    expect(ids(wholeRows)).not.toContain('tableColumns');
+  });
+
+  it('offers merging only when the cells in hand can be merged or split', () => {
+    expect(ids(table(true))).not.toContain('tableMerge');
+    const mergeable: StudioTarget = { ...table(true), mergeAction: 'merge' } as StudioTarget;
+    expect(ids(mergeable)).toContain('tableMerge');
+    expect(ids({ ...table(false), mergeAction: 'merge' } as StudioTarget)).not.toContain(
+      'tableMerge',
+    );
+  });
+
   it('offers a table its text settings before any cell has been filled in', () => {
     // They apply to every cell, so they are as useful before typing as after.
     expect(ids(table(false))).toContain('textFormat');

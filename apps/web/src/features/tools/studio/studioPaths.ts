@@ -32,8 +32,8 @@ export function createPathId(): string {
 /**
  * How close the pointer must come to the first anchor to close the path.
  *
- * In scene units at 1:1. The editor scales it by the current zoom so the target
- * stays the same size on screen however far in you are.
+ * In CSS pixels. The editor converts it to scene units for the current zoom and
+ * window, so the target stays the same size on screen however far in you are.
  */
 export const PATH_CLOSE_TOLERANCE = 10;
 

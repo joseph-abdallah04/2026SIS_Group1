@@ -33,6 +33,9 @@ export type StudioPropertyId =
   | 'textFormat'
   | 'addText'
   | 'cellFill'
+  | 'tableRows'
+  | 'tableColumns'
+  | 'tableMerge'
   | 'startCap'
   | 'arrowRoute'
   | 'endCap';
@@ -49,6 +52,7 @@ export type StudioPropertyControl =
   | 'textButton'
   | 'capPanel'
   | 'routePreset'
+  | 'structureMenu'
   | 'toggle';
 
 export interface StudioPropertyDescriptor {
@@ -70,6 +74,12 @@ export interface StudioPropertyDescriptor {
 const PROPERTY_ORDER: StudioPropertyDescriptor[] = [
   { id: 'fillColor', label: 'Fill', group: 'fill', control: 'fillSwatch' },
   { id: 'cellFill', label: 'Cell fill', group: 'table', control: 'fillSwatch' },
+  // Adding and taking away rows and columns around the cells in hand. The add
+  // buttons on the table itself say *where*; these also say how many to take.
+  { id: 'tableRows', label: 'Rows', group: 'table', control: 'structureMenu' },
+  { id: 'tableColumns', label: 'Columns', group: 'table', control: 'structureMenu' },
+  // Whichever of merging and splitting the cells in hand allow; the label says which.
+  { id: 'tableMerge', label: 'Merge cells', group: 'table', control: 'textButton' },
   { id: 'strokeColor', label: 'Line colour', group: 'stroke', control: 'strokeSwatch' },
   { id: 'strokeWidth', label: 'Line width', group: 'stroke', control: 'widthPreset' },
   { id: 'strokeStyle', label: 'Line style', group: 'stroke', control: 'stylePreset' },
@@ -106,7 +116,16 @@ export type StudioTarget =
   | { kind: 'edge'; element: DiagramEdge }
   | { kind: 'ink'; element: StudioInkStroke }
   | { kind: 'path'; element: PathElement }
-  | { kind: 'table'; element: TableElement; inCellMode: boolean; cellsHaveText: boolean };
+  | {
+      kind: 'table';
+      element: TableElement;
+      inCellMode: boolean;
+      cellsHaveText: boolean;
+      /** Whole rows or columns picked by their handles, which only one menu acts on. */
+      wholeTracks?: 'row' | 'col' | null;
+      /** What the merge control would do to the cells in hand, if anything. */
+      mergeAction?: 'merge' | 'unmerge' | null;
+    };
 
 function hasText(value: string | undefined): boolean {
   return Boolean(value && value.trim() !== '');
@@ -157,9 +176,17 @@ export function propertiesFor(target: StudioTarget): StudioPropertyId[] {
       // Out of cell mode a fill is the whole grid, which is the same thing
       // `fillColor` means everywhere else. Inside it, `cellFill` paints only
       // the cells in hand, so the two never appear together.
-      return target.inCellMode
-        ? ['cellFill', 'strokeColor', 'strokeWidth', 'textFormat']
-        : ['fillColor', 'strokeColor', 'strokeWidth', 'textFormat'];
+      if (!target.inCellMode) return ['fillColor', 'strokeColor', 'strokeWidth', 'textFormat'];
+      // Whole rows are worked on as rows, so the columns menu steps aside.
+      return [
+        'cellFill',
+        ...(target.wholeTracks === 'col' ? [] : (['tableRows'] as const)),
+        ...(target.wholeTracks === 'row' ? [] : (['tableColumns'] as const)),
+        ...(target.mergeAction ? (['tableMerge'] as const) : []),
+        'strokeColor',
+        'strokeWidth',
+        'textFormat',
+      ];
   }
 }
 

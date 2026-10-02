@@ -1029,6 +1029,54 @@ describe('proposalCreate handler', () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    it('accepts merged cells that fit the grid (v4.6)', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const merged = table('table-1', { merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }] });
+      expect(await propose(studio({ tables: [merged] }))).toMatchObject({ ok: true });
+    });
+
+    it.each([
+      ['off the grid', { row: 1, col: 1, rowSpan: 2, colSpan: 1 }],
+      ['a single cell', { row: 0, col: 0, rowSpan: 1, colSpan: 1 }],
+      ['no cells at all', { row: 0, col: 0, rowSpan: 0, colSpan: 2 }],
+      ['half a cell', { row: 0, col: 0, rowSpan: 1.5, colSpan: 2 }],
+    ])('rejects a merge that is %s', async (_, merge) => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      expect(
+        await propose(studio({ tables: [table('table-1', { merges: [merge] })] })),
+      ).toMatchObject({ ok: false, code: 'INVALID_PROPOSAL' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects content stored in a cell a merge covers', async () => {
+      // Never drawn, so it could only surface — unasked for — when the merge is split.
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const stray = table('table-1', {
+        cells: [{ text: 'kept' }, { text: 'hidden' }, {}, {}],
+        merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+      });
+      expect(await propose(studio({ tables: [stray] }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('rejects merges that overlap', async () => {
+      const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
+      const overlapping = table('table-1', {
+        merges: [
+          { row: 0, col: 0, rowSpan: 2, colSpan: 1 },
+          { row: 1, col: 0, rowSpan: 1, colSpan: 2 },
+        ],
+      });
+      expect(await propose(studio({ tables: [overlapping] }))).toMatchObject({
+        ok: false,
+        code: 'INVALID_PROPOSAL',
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
     it('rejects a grid with more columns than the contract allows', async () => {
       const { propose } = register({ user: { id: 'u1' }, sessionId: 's1' });
       const wide = table('table-1', {

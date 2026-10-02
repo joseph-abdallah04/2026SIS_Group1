@@ -626,6 +626,155 @@ a.rt-sticky-link:focus-visible {
 }
 
 /*
+ * A selected table's controls (see TableChrome.tsx), in the extend buttons'
+ * three steps. Asleep, nothing, and not pressable: a stray press in the margin
+ * round a table must never add a row. Awake — the pointer is over that row or
+ * column — a small muted dot. Near, the "+" it will add. Under the pointer,
+ * lit in the accent. Drawn in SVG, so the colours are set here rather than as
+ * attributes, where they could not read the theme.
+ */
+.rt-table-dot {
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.rt-table-dot[data-hot='true'],
+.rt-table-dot[data-near='true'] {
+  pointer-events: auto;
+}
+
+.rt-table-dot-idle {
+  fill: var(--color-rt-cool-deep);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.rt-table-dot[data-hot='true'] .rt-table-dot-idle {
+  opacity: 0.45;
+}
+
+.rt-table-dot-face {
+  opacity: 0;
+  transform: scale(0.4);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 120ms ease-out,
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rt-table-dot-disc {
+  fill: var(--color-rt-surface);
+  stroke: var(--color-rt-cool-deep);
+  transition:
+    fill 120ms ease-out,
+    stroke 120ms ease-out;
+}
+
+.rt-table-dot-plus {
+  stroke: var(--color-rt-cool-deep);
+  fill: none;
+  transition: stroke 120ms ease-out;
+}
+
+.rt-table-dot[data-near='true'] .rt-table-dot-idle,
+.rt-table-dot:hover .rt-table-dot-idle {
+  opacity: 0;
+}
+
+.rt-table-dot[data-near='true'] .rt-table-dot-face,
+.rt-table-dot:hover .rt-table-dot-face {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.rt-table-dot:hover .rt-table-dot-face {
+  transform: scale(1.12);
+}
+
+.rt-table-dot:hover .rt-table-dot-disc {
+  fill: var(--color-rt-secondary);
+  stroke: var(--color-rt-secondary);
+}
+
+.rt-table-dot:hover .rt-table-dot-plus {
+  stroke: #fff;
+}
+
+/* Where the row or column a "+" would add goes: shown with the "+" itself. */
+.rt-table-dot-line {
+  stroke: var(--color-rt-secondary);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.rt-table-dot[data-near='true'] .rt-table-dot-line,
+.rt-table-dot:hover .rt-table-dot-line {
+  opacity: 1;
+}
+
+/*
+ * A row's or column's handle: asleep until the pointer is over that track, a
+ * quiet pill when it is, darker under the pointer, and lit in the accent while
+ * its row or column is the one selected.
+ */
+.rt-table-handle {
+  cursor: grab;
+  pointer-events: none;
+}
+
+.rt-table-handle[data-hot='true'],
+.rt-table-handle[data-selected='true'] {
+  pointer-events: auto;
+}
+
+.rt-table-handle-pill {
+  fill: var(--color-rt-cool-deep);
+  opacity: 0;
+  transition:
+    opacity 120ms ease-out,
+    fill 120ms ease-out;
+}
+
+.rt-table-handle[data-hot='true'] .rt-table-handle-pill {
+  opacity: 0.45;
+}
+
+.rt-table-handle:hover .rt-table-handle-pill {
+  opacity: 0.9;
+}
+
+.rt-table-handle[data-selected='true'] .rt-table-handle-pill {
+  fill: var(--color-rt-secondary);
+  opacity: 1;
+}
+
+/* The line between two rows or columns, shown while it can be pulled. */
+.rt-table-grip-line {
+  stroke: var(--color-rt-secondary);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.rt-table-grip:hover .rt-table-grip-line {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-table-dot-idle,
+  .rt-table-dot-face,
+  .rt-table-dot-disc,
+  .rt-table-dot-plus,
+  .rt-table-grip-line,
+  .rt-table-handle-pill,
+  .rt-table-dot-line {
+    transition: none;
+  }
+}
+
+/*
  * The studio stepping aside for the board, and coming back.
  *
  * Peeking slides the studio down until only its header and the first of its

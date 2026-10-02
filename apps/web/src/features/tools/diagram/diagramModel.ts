@@ -11,6 +11,7 @@ import type {
   TableElement,
 } from '@roundtable/shared';
 import {
+  clearCoveredCells,
   DIAGRAM_CANVAS_HEIGHT,
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_NODE_SHAPE_KEYS,
@@ -43,6 +44,7 @@ import {
   type ArrangeOffset,
 } from '../studio/studioArrange';
 import { inkToData, type StudioInkStroke } from '../studio/studioInk';
+import { studioLimitError } from '../studio/studioLimits';
 import { handleAxes, type ResizeHandle } from '../studio/studioScale';
 
 export const DIAGRAM_NODE_SHAPES = DIAGRAM_NODE_SHAPE_KEYS;
@@ -877,11 +879,32 @@ export function resizeNode(
     width = start.width * scale;
     height = start.height * scale;
   } else {
+    // The *pulled edge* lands on the grid, not the size: a shape left off the
+    // grid (by a group scale, or placed with snapping off) would otherwise keep
+    // its edge off the grid however it was resized. On the grid to begin with,
+    // the two are the same thing. A turned shape's edges are not horizontal or
+    // vertical, so there only the size can be snapped.
+    const snapExtent = (h: number, lo: number, extent: number, size: number) => {
+      if (!snap) return size;
+      if (rotation) return snapToGrid(size);
+      const heldAt = fromCentre ? lo + extent / 2 : h > 0 ? lo : lo + extent;
+      const edge = heldAt + h * (fromCentre ? size / 2 : size);
+      const snapped = (snapToGrid(edge) - heldAt) * h;
+      return fromCentre ? snapped * 2 : snapped;
+    };
     if (hx !== 0) {
-      width = clampNumber(snap ? snapToGrid(width) : width, DIAGRAM_MIN_NODE_WIDTH, maxWidth);
+      width = clampNumber(
+        snapExtent(hx, start.x, start.width, width),
+        DIAGRAM_MIN_NODE_WIDTH,
+        maxWidth,
+      );
     }
     if (hy !== 0) {
-      height = clampNumber(snap ? snapToGrid(height) : height, DIAGRAM_MIN_NODE_HEIGHT, maxHeight);
+      height = clampNumber(
+        snapExtent(hy, start.y, start.height, height),
+        DIAGRAM_MIN_NODE_HEIGHT,
+        maxHeight,
+      );
     }
   }
 
@@ -1407,6 +1430,18 @@ export function prepareDiagram(
     return { ok: false, error: 'Add an element or draw something before proposing.' };
   }
 
+  // Said plainly, rather than as the "could not be prepared" the write
+  // contract's own refusal would come back as.
+  const over = studioLimitError({
+    nodes: nodes.length,
+    edges: edges.length,
+    ink: ink.length,
+    paths: paths.length,
+    tables: tables.length,
+    arrows: arrows.length,
+  });
+  if (over) return { ok: false, error: over };
+
   const normalizedNodes = nodes.map((node) => ({
     ...node,
     label: prepareNodeLabel(node.label),
@@ -1535,12 +1570,20 @@ export function prepareDiagram(
     edges: normalizedEdges,
     ...(shiftedInk.length > 0 ? { ink: shiftedInk } : {}),
     ...(shiftedPaths.length > 0 ? { paths: shiftedPaths } : {}),
-    ...(shiftedTables.length > 0 ? { tables: shiftedTables } : {}),
+    // A merge's covered cells are empty by contract; whatever an edit left in
+    // one is never drawn, so it is dropped here rather than refused.
+    ...(shiftedTables.length > 0 ? { tables: shiftedTables.map(clearCoveredCells) } : {}),
     ...(shiftedArrows.length > 0 ? { arrows: shiftedArrows } : {}),
     ...(prunedOrder.length > 0 ? { z: prunedOrder } : {}),
   });
   if (!parsed.success) {
-    return { ok: false, error: 'This diagram could not be prepared. Simplify it and try again.' };
+    // The contract's own sentences — "Every element … must be unique" and the
+    // like — are written to be read; a type error is not.
+    const custom = parsed.error.issues.find((issue) => issue.code === 'custom');
+    return {
+      ok: false,
+      error: custom?.message ?? 'This diagram could not be prepared. Simplify it and try again.',
+    };
   }
 
   return { ok: true, artifact: parsed.data };

@@ -446,6 +446,20 @@ export interface TableCell {
   fontSizePreset?: DiagramFontSizePreset;
 }
 
+/**
+ * Cells merged into one (contract v4.6). The top-left cell — the anchor — is the
+ * merged cell: its content and styling are what shows, across every row and
+ * column the merge spans. The cells it covers stay in `cells`, empty, so the
+ * grid stays one cell per column per row and nothing that indexes it by row and
+ * column has to know merges exist.
+ */
+export interface TableMerge {
+  row: number;
+  col: number;
+  rowSpan: number;
+  colSpan: number;
+}
+
 export interface TableElement {
   id: string;
   x: number;
@@ -460,6 +474,8 @@ export interface TableElement {
   strokeColor?: DiagramStrokeKey;
   strokeWidthPreset?: DiagramStrokeWidthPreset;
   fontSizePreset?: DiagramFontSizePreset;
+  /** Absent means nothing is merged, which is every table before v4.6. */
+  merges?: TableMerge[];
 }
 
 export const TABLE_DEFAULT_COL_WIDTH = 96;
@@ -476,6 +492,8 @@ export const TABLE_MAX_ROW_HEIGHT = 200;
 export const TABLE_MAX_ROWS = 20;
 export const TABLE_MAX_COLS = 12;
 export const TABLE_CELL_TEXT_LIMIT = 200;
+/** No more merges than a full table has pairs of cells. */
+export const TABLE_MERGE_LIMIT = (TABLE_MAX_ROWS * TABLE_MAX_COLS) / 2;
 export const DIAGRAM_TABLE_LIMIT = 20;
 
 export const TABLE_DEFAULT_STROKE_COLOR: DiagramStrokeKey = 'grey';
@@ -508,6 +526,116 @@ export function tableCellAt(
 ): TableCell | null {
   const index = tableCellIndex(table, row, col);
   return index === -1 ? null : (table.cells[index] ?? null);
+}
+
+function mergesOverlap(a: TableMerge, b: TableMerge): boolean {
+  return (
+    a.row < b.row + b.rowSpan &&
+    b.row < a.row + a.rowSpan &&
+    a.col < b.col + b.colSpan &&
+    b.col < a.col + a.colSpan
+  );
+}
+
+/**
+ * The merges a grid of `rows` by `cols` can actually hold, in reading order.
+ *
+ * Kept: whole-number corners and spans, inside the grid, bigger than one cell,
+ * and not overlapping one kept before it. The write path refuses a list this
+ * would change; the read path keeps what it returns. One rule, so the two can
+ * never disagree about what a merge is.
+ */
+export function normalizeTableMerges(
+  rows: number,
+  cols: number,
+  merges: readonly TableMerge[],
+): TableMerge[] {
+  const kept: TableMerge[] = [];
+  for (const { row, col, rowSpan, colSpan } of merges) {
+    if (kept.length >= TABLE_MERGE_LIMIT) break;
+    if (![row, col, rowSpan, colSpan].every(Number.isInteger)) continue;
+    if (row < 0 || col < 0 || rowSpan < 1 || colSpan < 1) continue;
+    if (rowSpan === 1 && colSpan === 1) continue;
+    if (row + rowSpan > rows || col + colSpan > cols) continue;
+    const merge = { row, col, rowSpan, colSpan };
+    if (kept.some((other) => mergesOverlap(other, merge))) continue;
+    kept.push(merge);
+  }
+  return kept.sort((a, b) => a.row - b.row || a.col - b.col);
+}
+
+/** The merge a cell is part of, anchor or covered, if any. */
+export function tableMergeAt(
+  table: Pick<TableElement, 'merges'>,
+  row: number,
+  col: number,
+): TableMerge | null {
+  for (const merge of table.merges ?? []) {
+    if (
+      row >= merge.row &&
+      row < merge.row + merge.rowSpan &&
+      col >= merge.col &&
+      col < merge.col + merge.colSpan
+    ) {
+      return merge;
+    }
+  }
+  return null;
+}
+
+/** The area a cell stands for: its merge, or just itself. */
+export function tableCellArea(
+  table: Pick<TableElement, 'merges'>,
+  row: number,
+  col: number,
+): TableMerge {
+  return tableMergeAt(table, row, col) ?? { row, col, rowSpan: 1, colSpan: 1 };
+}
+
+/** Inside a merge but not its anchor: part of a bigger cell, with nothing of its own. */
+export function tableCellIsCovered(
+  table: Pick<TableElement, 'merges'>,
+  row: number,
+  col: number,
+): boolean {
+  const merge = tableMergeAt(table, row, col);
+  return merge !== null && (merge.row !== row || merge.col !== col);
+}
+
+/**
+ * Every cell a merge covers emptied, as v4.6 stores them: the top-left cell
+ * alone holds a merged cell's content and look. The same table back when
+ * nothing needed clearing, so callers can tell an edit from none.
+ */
+export function clearCoveredCells<
+  T extends Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'merges'>,
+>(table: T): T {
+  if (!table.merges?.length) return table;
+  const cols = table.colWidths.length;
+  let changed = false;
+  const cells = table.cells.map((cell, index) => {
+    if (!tableCellIsCovered(table, Math.floor(index / cols), index % cols)) return cell;
+    if (Object.keys(cell).length === 0) return cell;
+    changed = true;
+    return {};
+  });
+  return changed ? { ...table, cells } : table;
+}
+
+/** How big an area is: the rows and columns it spans, added up. */
+export function tableAreaSize(
+  table: Pick<TableElement, 'colWidths' | 'rowHeights'>,
+  area: TableMerge,
+): DiagramNodeSize {
+  let width = 0;
+  let height = 0;
+  for (let col = area.col; col < area.col + area.colSpan; col += 1) {
+    width += table.colWidths[col] ?? 0;
+  }
+  for (let row = area.row; row < area.row + area.rowSpan; row += 1) {
+    height += table.rowHeights[row] ?? 0;
+  }
+  return { width, height };
 }
 
 /** Running offsets down each axis, with a final entry for the far edge. */
@@ -589,15 +717,18 @@ export const TABLE_CELL_PADDING = 6;
  * all break text the same way and at the same measured-free glyph ratio.
  */
 export function tableCellLines(
-  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'fontSizePreset'>,
+  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'fontSizePreset' | 'merges'>,
   cell: TableCell | null,
   col: number,
   row: number,
 ): string[] {
   const text = cell?.text?.trim();
   if (!text) return [];
-  const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
-  const height = table.rowHeights[row] ?? TABLE_DEFAULT_ROW_HEIGHT;
+  // A merged cell wraps across everything it spans; a covered one shows nothing.
+  if (tableCellIsCovered(table, row, col)) return [];
+  const area = tableAreaSize(table, tableCellArea(table, row, col));
+  const width = area.width || TABLE_DEFAULT_COL_WIDTH;
+  const height = area.height || TABLE_DEFAULT_ROW_HEIGHT;
   const fontSize = tableCellFontSize(table, cell);
   const lineHeight = fontSize * 1.25;
   const maxLines = Math.max(1, Math.floor((height - 2) / lineHeight));
@@ -609,8 +740,31 @@ export function tableCellLines(
 const TABLE_LINE_HEIGHT = 1.25;
 const TABLE_ROW_PADDING = 10;
 
+/**
+ * How tall one cell's text is at a given width: its own line count at its own
+ * size. Capped by what the tallest a row may be can show at that size, rather
+ * than by `TABLE_MAX_ROWS`, which counts rows in a table and has nothing to say
+ * about lines in a cell.
+ */
+function measureTableText(
+  table: Pick<TableElement, 'fontSizePreset'>,
+  cell: TableCell | null,
+  width: number,
+  maxHeight: number = TABLE_MAX_ROW_HEIGHT,
+): number {
+  const text = cell?.text?.trim();
+  if (!text) return 0;
+  const fontSize = tableCellFontSize(table, cell);
+  const maxLines = Math.max(
+    1,
+    Math.floor((maxHeight - TABLE_ROW_PADDING) / (fontSize * TABLE_LINE_HEIGHT)),
+  );
+  const lines = wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, maxLines).length;
+  return lines * fontSize * TABLE_LINE_HEIGHT;
+}
+
 export function tableAutoRowHeight(
-  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset'>,
+  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset' | 'merges'>,
   row: number,
 ): number {
   // Each cell is measured whole — its own line count at its own size — and the
@@ -620,25 +774,29 @@ export function tableAutoRowHeight(
   // taller than anything in it needed.
   let needed = tableFontSize(table) * TABLE_LINE_HEIGHT;
   for (let col = 0; col < tableColCount(table); col += 1) {
-    const cell = tableCellAt(table, row, col);
-    const text = cell?.text?.trim();
-    if (!text) continue;
-    const fontSize = tableCellFontSize(table, cell);
-    const width = table.colWidths[col] ?? TABLE_DEFAULT_COL_WIDTH;
-    // Capped by what the tallest a row may be can actually show at this size,
-    // rather than by `TABLE_MAX_ROWS`, which counts rows in a table and has
-    // nothing to say about lines in a cell.
-    const maxLines = Math.max(
-      1,
-      Math.floor((TABLE_MAX_ROW_HEIGHT - TABLE_ROW_PADDING) / (fontSize * TABLE_LINE_HEIGHT)),
-    );
-    const lines = wrapDiagramLabel(text, width - TABLE_CELL_PADDING, fontSize, maxLines).length;
-    needed = Math.max(needed, lines * fontSize * TABLE_LINE_HEIGHT);
+    const area = tableCellArea(table, row, col);
+    // A covered cell has nothing of its own, and a merge down several rows is
+    // made room for across all of them (`tableMergeNeededHeight`), not by
+    // stretching this one.
+    if (area.row !== row || area.col !== col || area.rowSpan > 1) continue;
+    const width = tableAreaSize(table, area).width || TABLE_DEFAULT_COL_WIDTH;
+    needed = Math.max(needed, measureTableText(table, tableCellAt(table, row, col), width));
   }
   return Math.min(
     TABLE_MAX_ROW_HEIGHT,
     Math.max(TABLE_MIN_ROW_HEIGHT, Math.ceil(needed + TABLE_ROW_PADDING)),
   );
+}
+
+/** How tall, all told, the rows a merge spans have to be for its text to fit. */
+export function tableMergeNeededHeight(
+  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'cells' | 'fontSizePreset' | 'merges'>,
+  merge: TableMerge,
+): number {
+  const width = tableAreaSize(table, merge).width || TABLE_DEFAULT_COL_WIDTH;
+  const most = TABLE_MAX_ROW_HEIGHT * merge.rowSpan;
+  const text = measureTableText(table, tableCellAt(table, merge.row, merge.col), width, most);
+  return Math.min(most, Math.ceil(text + TABLE_ROW_PADDING));
 }
 
 // --- Paint order ----------------------------------------------------------
