@@ -65,11 +65,19 @@ interface PinboardCanvasProps {
    */
   myProposals?: ReactNode;
   /**
-   * F12's mute toggle, for the header. A node for the same reason `agenda` is:
-   * the board does not know what a LiveKit room is, and should not start
-   * knowing in order to give voice somewhere prominent to sit.
+   * F12's mute toggle, for the header — and F11's Reconnect, which takes its
+   * place while voice is offline. A node for the same reason `agenda` is: the
+   * board does not know what a LiveKit room is, and should not start knowing
+   * in order to give voice somewhere prominent to sit.
    */
   micControl?: ReactNode;
+  /**
+   * F11's voice banner, hung just under the header rather than over it. Over
+   * it, the banner sat on the roster and could reach the Reconnect in
+   * `micControl` — the one thing that has to stay visible once the banner
+   * steps aside. A node for the same reason `micControl` is.
+   */
+  voiceNotice?: ReactNode;
   /**
    * F13's roster, centred in the header. A node for the same reason `agenda`
    * is: the board owns where things sit, but not what a LiveKit roster is.
@@ -210,6 +218,7 @@ export function PinboardCanvas({
   agenda,
   myProposals,
   micControl,
+  voiceNotice,
   participants,
   joinCode,
   viewerId,
@@ -1078,6 +1087,12 @@ export function PinboardCanvas({
         </div>
 
         {ballot}
+
+        {/* Positioned against this row, so it hangs just under the header the
+            way the lobby's does. After the ballot on purpose: they share
+            `z-30`, and the later one paints on top — a vote covers the board,
+            not voice. */}
+        {voiceNotice}
       </div>
     </div>
   );

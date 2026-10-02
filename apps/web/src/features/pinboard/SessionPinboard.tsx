@@ -17,7 +17,7 @@ import { ShortlistBar } from '../voting/ShortlistBar';
 import { ShortlistPrompt } from '../voting/ShortlistPrompt';
 import { useVoting } from '../voting/useVoting';
 import { VotingBallot } from '../voting/VotingBallot';
-import { MicToggle, ParticipantCluster, VoiceNotice, useVoiceRoom } from '../voice';
+import { MicToggle, ParticipantCluster, VoiceNotice, VoiceReconnect, useVoiceRoom } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { usePinboard } from './usePinboard';
 
@@ -196,21 +196,9 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           and around the whole page, since a picture can arrive from the
           toolbar, a drop on the board, or a paste. */}
       <ImageImportProvider>
-        {/* `relative` so VoiceNotice's `absolute` banner positions against this
-          frame; `overflow-hidden` so nothing on the board can produce a
-          page-level scrollbar; `h-dvh` so mobile browser chrome does not cut
-          it off. */}
-        <main className="relative h-dvh overflow-hidden">
-          <VoiceNotice
-            status={voice.status}
-            micStatus={voice.micStatus}
-            micPermissionDenied={voice.micPermissionDenied}
-            error={voice.error}
-            audioBlocked={voice.audioBlocked}
-            retry={voice.retry}
-            requestMicrophone={voice.requestMicrophone}
-            unlockAudio={voice.unlockAudio}
-          />
+        {/* `overflow-hidden` so nothing on the board can produce a page-level
+          scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
+        <main className="h-dvh overflow-hidden">
           <PinboardCanvas
             board={board}
             isLive={isLive}
@@ -296,15 +284,32 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                 canPropose={acceptsProposals}
               />
             }
-            micControl={
-              <MicToggle
-                name={selfName}
-                micEnabled={voice.micEnabled}
-                micStatus={voice.micStatus}
+            voiceNotice={
+              <VoiceNotice
                 status={voice.status}
-                busy={voice.micBusy}
-                toggle={voice.toggleMic}
+                micStatus={voice.micStatus}
+                micPermissionDenied={voice.micPermissionDenied}
+                error={voice.error}
+                audioBlocked={voice.audioBlocked}
+                retry={voice.retry}
+                requestMicrophone={voice.requestMicrophone}
+                unlockAudio={voice.unlockAudio}
               />
+            }
+            micControl={
+              // Only one of these two is ever drawn: the mic, or — once voice
+              // has given up — its Reconnect in the mic's place.
+              <>
+                <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
+                <MicToggle
+                  name={selfName}
+                  micEnabled={voice.micEnabled}
+                  micStatus={voice.micStatus}
+                  status={voice.status}
+                  busy={voice.micBusy}
+                  toggle={voice.toggleMic}
+                />
+              </>
             }
             participants={
               <ParticipantCluster participants={voice.participants} status={voice.status} />

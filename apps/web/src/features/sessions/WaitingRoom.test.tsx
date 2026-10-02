@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { NOTICE_AUTO_HIDE_MS } from '../voice/VoiceNotice';
 import type { SessionDetail } from './useSessionDetail';
 
 const start = vi.fn();
@@ -98,6 +99,10 @@ describe('WaitingRoom', () => {
     voice = freshVoice();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('puts invite on the left, questions on the right, and start in the table', () => {
     render(<WaitingRoom session={session} onStarted={() => undefined} />);
 
@@ -148,6 +153,29 @@ describe('WaitingRoom', () => {
     // their microphone, and drawing them as silent would put words in it.
     expect(screen.getByRole('button', { name: 'Alice Smith' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Alice Smith, muted' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the way back into voice in the header once the banner has gone', () => {
+    vi.useFakeTimers();
+    voice = freshVoice({
+      status: 'failed',
+      micEnabled: false,
+      error: 'Lost the voice connection. Reconnect to rejoin.',
+    });
+    render(<WaitingRoom session={session} onStarted={() => undefined} />);
+
+    act(() => {
+      vi.advanceTimersByTime(NOTICE_AUTO_HIDE_MS);
+    });
+
+    // The banner has stepped aside. The header still says why and still offers
+    // the way back — in the mic's place, since there is nothing to mute.
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByText('Voice offline')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /microphone/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect voice' }));
+    expect(voice.retry).toHaveBeenCalledTimes(1);
   });
 
   it('looks like an ordinary lobby on a server with no voice', () => {
