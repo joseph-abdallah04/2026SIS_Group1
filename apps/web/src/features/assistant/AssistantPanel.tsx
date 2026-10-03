@@ -2,14 +2,16 @@
 //
 // The conversation itself does NOT live here. `AssistantBubble` owns it, because F34
 // requires the thread to survive collapsing the panel — and this component unmounts when
-// the panel closes. The panel is a view over state it does not hold.
+// the rail closes. The panel is a view over state it does not hold.
 //
-// Layout lives on the shared `.rt-assistant` shell. This file is the inside of that shell
-// once it has grown into the rail.
+// The outer chrome is `BoardRail` (title, collapse). This file is what sits inside it.
+// `.rt-assistant-dock` repaints the transcript for that light surface; the marketing
+// mock still uses the glass rules in assistant.css.
 import { useContext, useEffect, useRef, useState } from 'react';
 import type { QuestionStatus } from '@roundtable/shared';
 
 import { CreativeToolsContext } from '../tools/CreativeToolsContext';
+import './assistant.css';
 import { LlmSettingsForm } from '../settings/LlmSettingsForm';
 import { AgentActivity } from './AgentActivity';
 import { ArtifactCard } from './ArtifactCard';
@@ -26,7 +28,6 @@ const SUGGESTIONS = [
 export interface AssistantPanelProps {
   /** Conversation state, owned by AssistantBubble so it outlives this component. */
   chat: AssistantChat;
-  onClose: () => void;
   /** null while the config is still loading; false when the user has no provider set up. */
   configured: boolean | null;
   modelLabel?: string;
@@ -34,22 +35,14 @@ export interface AssistantPanelProps {
   questionStatus?: QuestionStatus | null;
   /** After in-panel provider setup, so the rail can start chatting without a reload. */
   onProviderConfigured?: (model: string) => void;
-  /**
-   * True once the shell's clip has finished expanding. The composer waits to
-   * take focus until then — focusing mid-morph scrolls the clipped box and
-   * hitchs the animation.
-   */
-  revealed?: boolean;
 }
 
 export function AssistantPanel({
   chat,
-  onClose,
   configured,
   modelLabel,
   questionStatus,
   onProviderConfigured,
-  revealed = true,
 }: AssistantPanelProps) {
   const { entries, streaming, thinking, send, stop, clear, setProposeState } = chat;
   const [draft, setDraft] = useState('');
@@ -76,10 +69,10 @@ export function AssistantPanel({
   }, [followKey]);
 
   useEffect(() => {
-    if (revealed) inputRef.current?.focus();
-  }, [revealed]);
+    inputRef.current?.focus();
+  }, []);
 
-  // Escape closes this overlay first, not the whole rail — the bubble also listens.
+  // Escape closes this overlay only. The rail does not take the key.
   useEffect(() => {
     if (!setupOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -153,37 +146,22 @@ export function AssistantPanel({
   };
 
   return (
-    <div className="rt-assistant-rail">
+    <div className="rt-assistant-dock relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="rt-assistant-body" {...(setupOpen ? { inert: '' } : {})}>
-        <header className="rt-assistant-header">
-          <div className="min-w-0 flex-1">
-            <h2 className="rt-assistant-kicker">Assistant</h2>
-            <p className="rt-assistant-meta">
-              {modelLabel ? `${modelLabel} · private to you` : 'Private to you'}
-            </p>
-          </div>
+        <div className="flex shrink-0 items-center justify-between gap-2 py-2">
+          <p className="rt-assistant-meta min-w-0 flex-1">
+            {modelLabel ? `${modelLabel} · private to you` : 'Private to you'}
+          </p>
           {entries.length > 0 && (
-            <button type="button" onClick={clear} className="rt-assistant-icon-btn">
+            <button
+              type="button"
+              onClick={clear}
+              className="shrink-0 text-[11px] font-medium text-rt-ink-muted hover:underline"
+            >
               Clear
             </button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close assistant"
-            className="rt-assistant-icon-btn"
-          >
-            <svg
-              viewBox="0 0 20 20"
-              className="size-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
-            </svg>
-          </button>
-        </header>
+        </div>
 
         <div ref={scrollRef} className="rt-assistant-feed">
           {configured === false && <NotConfigured onOpenSetup={() => setSetupOpen(true)} />}
@@ -251,7 +229,7 @@ export function AssistantPanel({
         </div>
 
         <div className="rt-assistant-composer">
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-1.5">
             <textarea
               ref={inputRef}
               value={draft}

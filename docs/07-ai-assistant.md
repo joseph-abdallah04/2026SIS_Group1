@@ -5,21 +5,13 @@
 
 ## What it does
 
-Every participant gets a private ideation buddy in a floating bubble at the bottom-right of a
-session. Opening it swaps the bubble for the panel — the two are never on screen together. The
-panel's own X, or Escape, closes it and brings the bubble back with focus on it.
+Every participant gets a private ideation buddy in a collapsible rail on the right of the
+board, the same chrome as the agenda on the left. It starts collapsed. Opening it shows the
+chat in that column; collapsing it leaves a narrow strip, and the conversation stays. Escape
+does not close it — the agenda rail does not either, and Escape is already how dialogs, the
+studio, and text fields step back. The chevron does, and focus returns to that control.
 
-**The panel is movable and resizable**: drag the header to move it, drag any of the four sides
-or four corners to resize, double-click the header to put it back. The handles are the panel's
-last children on purpose — when they came first, the header and composer painted over three of
-the four and only the top-left corner was reachable. Sides are deliberately thin so they do not
-swallow the transcript's scrollbar. Position and size are remembered in `localStorage`
-(a lasting preference, unlike the transcript, which is per-tab) and re-clamped whenever the
-window changes, so a panel can never end up somewhere it cannot be grabbed. It ships sitting
-bottom-right at a height that clears the board header — the fixed height it had before ran
-straight through the session status and End session controls. The arithmetic lives in exported
-pure functions (`clampGeometry`, `resizeFrom`) and is unit-tested directly, because jsdom has
-no layout and a simulated drag there would prove nothing. It knows what is happening in the session, can search the web, and can draft sticky
+It knows what is happening in the session, can search the web, and can draft sticky
 notes and diagrams that the user drops onto the shared pinboard with one click.
 
 Nobody else sees your chat. The assistant reads session state and never writes it — the only
@@ -56,8 +48,8 @@ npm run dev
 
 Log in at <http://localhost:5173/login> as `alice@example.com` (the seed prints the password),
 add a provider at <http://localhost:5173/settings> — Groq's free tier and a local Ollama both
-work — press **Test connection**, then open the session the seed prints. The bubble is
-bottom-right.
+work — press **Test connection**, then open the session the seed prints. The assistant
+rail is on the right of the board.
 
 ## How a turn works
 

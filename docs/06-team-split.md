@@ -526,16 +526,9 @@ POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, e
   reserved rather than borrowed (the agenda rail carries the same question text
   untruncated, so nothing is actually lost)
 - **Resolved, and not to be re-litigated:** the roster was a rail on the right
-  until F13.2. It moved because the AI assistant covers that side — its bubble
-  is `fixed right-4 bottom-24` at 56px, which sat on the rail _permanently_,
-  whether the rail was open (256px) or collapsed (44px), and landed on the join
-  code card at its foot; its expanded panel defaults to 420px at `vw - 444`,
-  covering everything but the rail's rightmost 24px, and wins on paint order as
-  a later sibling of `<main>` with `z-index: auto`. Asking the assistant to
-  offset by the rail width would have meant tracking a rail that changes width
-  and may not exist. **The AI Assistant owner needs no change for this.** Note
-  the voting module's ballot rail still docks on that side and has the same
-  exposure — that one is unexamined here
+  until F13.2. It moved into the header so the assistant could take that edge.
+  The assistant is now that right-hand rail (the same chrome as the agenda),
+  not a bubble floating over it.
 - A header roster cannot scroll, so truncation would eventually hide whoever is
   talking. `splitForHeader` promotes a hidden speaker into the least-missed
   visible slot instead, never displacing you or another speaker, and the `⋯`
@@ -617,11 +610,10 @@ data: {"type":"artifact","type":"diagram","nodes":[...],"edges":[...]}
 data: {"type":"done"}
 ```
 
-### UI: Floating assistant bubble
+### UI: Assistant rail
 
-- Bottom-right corner (fixed position)
-- Animated persona/figure inside
-- Click to expand → floating panel on right side
+- Right-hand collapsible rail, the same chrome as the agenda
+- Starts collapsed; opening it shows the chat in the column
 - Chat messages + tool output display
 - **Propose button** appears below artifacts (sticky, diagram)
   - Click → creates new proposal via pinboard owner's API

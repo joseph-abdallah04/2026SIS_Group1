@@ -63,8 +63,8 @@ export function ArtifactCard({
       )}
 
       <div className="rt-assistant-artifact-actions">
-        {/* Not the shared `Button`: inside the panel the palette is monochrome, and a gold
-            pill on black glass is the one thing that breaks it. */}
+        {/* Not the shared `Button`. The session rail and the marketing mock each
+            paint `.rt-assistant-action` for their own surface. */}
         <button
           type="button"
           disabled={!canPropose || propose === 'proposed' || propose === 'sending'}
@@ -85,7 +85,9 @@ export function ArtifactCard({
           </span>
         )}
         {propose === 'failed' && proposeError && (
-          <span className="rt-assistant-artifact-hint text-[#ffc9c3]">{proposeError}</span>
+          <span className="rt-assistant-artifact-hint rt-assistant-propose-error">
+            {proposeError}
+          </span>
         )}
       </div>
     </div>
@@ -105,13 +107,15 @@ function StickyPreview({ text, color }: { text: string; color: StickyColor }) {
     >
       {/* Same anatomy as a board sticky: the note sits at the top of the paper,
           and a byline holds the bottom edge so it reads as a pad, not a swatch. */}
-      {/* The one size every note is set in, board and editors alike, rather than a size
-          chosen for this note's length: a preview set smaller than the sticky it becomes
-          is a preview of something else. A long note makes the card taller, as it does
-          on the board. */}
+      {/* The fallback is the board's own size. The session dock sets the
+          variables smaller on purpose, so a preview matches the agenda rail
+          rather than the card it becomes. */}
       <p
         className="rt-assistant-sticky-text"
-        style={{ fontSize: STICKY_FONT_SIZE, lineHeight: STICKY_LINE_HEIGHT }}
+        style={{
+          fontSize: `var(--rt-assistant-sticky-size, ${STICKY_FONT_SIZE}px)`,
+          lineHeight: `var(--rt-assistant-sticky-leading, ${STICKY_LINE_HEIGHT})`,
+        }}
       >
         {text}
       </p>
