@@ -22,7 +22,7 @@ import {
   DIAGRAM_NODE_STROKE_WIDTHS,
   DIAGRAM_STROKE_COLORS,
   diagramNodesInDrawOrder,
-  rotatedBounds,
+  rotatePoint,
   rotationTransform,
   wrapDiagramLabel,
   type DiagramEdge,
@@ -270,20 +270,63 @@ export function pathCurveLocalBounds(
   return pointsBounds(points);
 }
 
+const ORIGIN = { x: 0, y: 0 };
+
 /**
- * What a path paints on the sheet once it is turned: its curve's box, turned
- * about the anchors' centre, because that is the point a path pivots on.
+ * What a path paints on the sheet once it is turned, measured on the turned
+ * curve itself.
+ *
+ * Turning the curve's unturned box instead gave the box around a turned
+ * *frame*, which for a diagonal or a bulge is far bigger than the line: the
+ * canvas-edge clamp then held the path away from the edge by a gap anyone could
+ * see. A turn is affine, so the turned curve is the bezier of the turned
+ * controls — the anchors turn about the path's pivot, the anchors' centre, and
+ * the handles, which are offsets from their anchor, turn as directions — and the
+ * extrema search runs on that exactly as it does on an unturned one.
+ *
+ * The centreline, not the stroke's outer edge, like every element's bounds:
+ * a thick line can cross the sheet edge by half its width (3px at `thick`), as
+ * a node's border does. Widening only paths and ink would make them the odd
+ * ones out, and would nudge a line already drawn flush to the edge inward the
+ * next time it moved.
  */
 export function pathPaintedBounds(
   path: Pick<PathElement, 'anchors' | 'closed' | 'rotation'>,
 ): RotatableBox | null {
   const pivotBox = pathLocalBounds(path);
-  const curve = pathCurveLocalBounds(path);
-  if (!pivotBox || !curve) return null;
-  return rotatedBounds(curve, path.rotation, {
-    x: pivotBox.x + pivotBox.width / 2,
-    y: pivotBox.y + pivotBox.height / 2,
+  if (!pivotBox) return null;
+  const degrees = path.rotation;
+  if (!degrees) return pathCurveLocalBounds(path);
+  const pivot = { x: pivotBox.x + pivotBox.width / 2, y: pivotBox.y + pivotBox.height / 2 };
+  return pathCurveLocalBounds({
+    ...(path.closed !== undefined ? { closed: path.closed } : {}),
+    anchors: path.anchors.map((anchor) => {
+      const at = rotatePoint(anchor, pivot, degrees);
+      const turned: PathAnchor = { x: at.x, y: at.y };
+      if (anchor.in) turned.in = rotatePoint(anchor.in, ORIGIN, degrees);
+      if (anchor.out) turned.out = rotatePoint(anchor.out, ORIGIN, degrees);
+      return turned;
+    }),
   });
+}
+
+/**
+ * What a freehand stroke paints once it is turned: its points, turned about
+ * the centre of their own box (the pivot `inkRotationTransform` draws with),
+ * and the box around those. Not the turned box of the points — for a diagonal
+ * stroke that is a square around a line. Measured on the centreline, as
+ * `pathPaintedBounds` is and for the same reason.
+ */
+export function inkPaintedBounds(stroke: {
+  points: readonly { x: number; y: number }[];
+  rotation?: number | undefined;
+}): RotatableBox | null {
+  const local = pointsBounds(stroke.points);
+  const degrees = stroke.rotation;
+  // Half a turn about the box's own centre puts the points back in that box.
+  if (!local || !degrees || degrees % 180 === 0) return local;
+  const centre = { x: local.x + local.width / 2, y: local.y + local.height / 2 };
+  return pointsBounds(stroke.points.map((point) => rotatePoint(point, centre, degrees)));
 }
 
 /** The turn to draw a path with, or nothing when it is not turned. */

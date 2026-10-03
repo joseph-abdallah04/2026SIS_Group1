@@ -58,7 +58,7 @@ export function MyProposalsPanel({
   const total = groups.reduce((sum, group) => sum + group.items.length, 0);
 
   return (
-    <div className="flex max-h-[360px] w-72 flex-col overflow-hidden rounded-xl border border-rt-tertiary bg-rt-surface shadow-lg">
+    <div className="flex max-h-[360px] w-72 max-w-[calc(100cqw-3rem)] flex-col overflow-hidden rounded-xl border border-rt-tertiary bg-rt-surface shadow-lg">
       <p className="shrink-0 border-b border-rt-tertiary px-3 py-2 text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
         My proposals
       </p>

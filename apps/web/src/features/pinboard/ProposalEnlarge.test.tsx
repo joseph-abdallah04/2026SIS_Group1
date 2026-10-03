@@ -225,6 +225,30 @@ describe('proposal enlarge', () => {
     expect(screen.getByRole('dialog').style.width).toBe(wide.width);
   });
 
+  // With both side panels open on a small window the board can be narrower
+  // than the frame's minimum. Centred on that board, it would hang off the
+  // window when the board sits near the window's edge.
+  it('stays on screen when the board is narrower than the frame, near the window edge', async () => {
+    const user = userEvent.setup();
+    const board = document.createElement('div');
+    board.setAttribute('data-board-frame', '');
+    board.getBoundingClientRect = () => new DOMRect(0, 0, 200, 600);
+    document.body.append(board);
+    try {
+      render(<ProposalCard item={diagram} />);
+      await user.click(enlargeButton());
+
+      const panel = screen.getByRole('dialog');
+      const width = parseFloat(panel.style.width);
+      // Its narrowest, wider than the board itself, and no longer centred on
+      // the board's middle (100px) but held 16px in from the window's edge.
+      expect(width).toBe(280);
+      expect(panel.style.left).toBe(`${width / 2 + 16}px`);
+    } finally {
+      board.remove();
+    }
+  });
+
   // A canvas is drawn for a canvas, so its labels are small on any card. A
   // press takes you in at the spot you pressed, the way an image viewer does.
   it('zooms in where it was pressed, and back out on the next press', async () => {

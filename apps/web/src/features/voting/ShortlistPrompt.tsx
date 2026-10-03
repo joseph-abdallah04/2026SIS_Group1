@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Undo2, X } from 'lucide-react';
 import { SHORTLIST_MAX, SHORTLIST_MIN } from '@roundtable/shared';
 
-import { TOOL_LABEL } from '../toolbar/CreativeToolbar';
+import { BAR_BESIDE_ZOOM, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 
 interface ShortlistPromptProps {
   count: number;
@@ -70,7 +70,9 @@ export function ShortlistPrompt({
   }
 
   return (
-    <div className="pointer-events-auto flex h-11 max-w-[calc(100cqw-18rem)] min-w-0 items-center gap-3 rounded-full border border-rt-secondary/40 bg-white pr-1 pl-2 whitespace-nowrap shadow-[0_8px_28px_rgba(8,12,21,0.16)] @max-[36rem]/board:gap-1 @max-[36rem]/board:pl-1">
+    <div
+      className={`pointer-events-auto flex h-11 ${BAR_BESIDE_ZOOM} min-w-0 items-center gap-3 rounded-full border border-rt-secondary/40 bg-white pr-1 pl-2 whitespace-nowrap shadow-[0_8px_28px_rgba(8,12,21,0.16)] @max-[36rem]/board:gap-1 @max-[36rem]/board:pl-1`}
+    >
       <p role="status" className="min-w-0 truncate text-[12.5px] font-medium tabular-nums">
         {error ? (
           <span className="pl-2 text-red-600">{error}</span>

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { rotatePoint, rotatedBounds } from '@roundtable/shared';
 import type { ArrowElement, DiagramNode, PathElement } from '@roundtable/shared';
 
 import { createTable } from './studioTables';
@@ -107,6 +108,75 @@ describe('element bounds', () => {
     it('is caught by a sweep over the bulge alone', () => {
       const sweep = { x: 140, y: 160, width: 20, height: 10 };
       expect(studioElementsInRect({ nodes: [], paths: [arch] }, sweep).pathIds).toEqual(['arch']);
+    });
+  });
+
+  describe('a turned element', () => {
+    // A diagonal stroke turned 45 degrees stands upright: a line, whatever the
+    // box around its turned frame says.
+    const diagonal = {
+      points: [
+        { x: 0, y: 0 },
+        { x: 50, y: 50 },
+        { x: 100, y: 100 },
+      ],
+      rotation: 45,
+    };
+
+    it('measures a stroke by its turned points, not its turned box', () => {
+      const painted = inkBounds(diagonal)!;
+      expect(painted.x).toBeCloseTo(50);
+      expect(painted.width).toBeCloseTo(0);
+      expect(painted.height).toBeCloseTo(Math.SQRT2 * 100);
+      // The turned box is the square the old clamp held to the sheet.
+      expect(rotatedBounds({ x: 0, y: 0, width: 100, height: 100 }, 45).width).toBeCloseTo(
+        Math.SQRT2 * 100,
+      );
+    });
+
+    it('leaves an unturned or half-turned stroke on its own box', () => {
+      expect(inkBounds({ points: diagonal.points })).toEqual({
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+      });
+      expect(inkBounds({ ...diagonal, rotation: 180 })).toEqual({
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+      });
+    });
+
+    it('measures a turned curve on the turned curve itself', () => {
+      // Sampled densely and turned point by point, which is what is drawn.
+      const arch: PathElement = {
+        id: 'arch',
+        rotation: 45,
+        anchors: [
+          { x: 100, y: 200, out: { x: 0, y: -60 } },
+          { x: 200, y: 200, in: { x: 0, y: -60 } },
+        ],
+      };
+      const pivot = { x: 150, y: 200 };
+      const samples: { x: number; y: number }[] = [];
+      for (let step = 0; step <= 1000; step += 1) {
+        const t = step / 1000;
+        const u = 1 - t;
+        // Controls: (100,200), (100,140), (200,140), (200,200).
+        const x = u * u * u * 100 + 3 * u * u * t * 100 + 3 * u * t * t * 200 + t * t * t * 200;
+        const y = u * u * u * 200 + 3 * u * u * t * 140 + 3 * u * t * t * 140 + t * t * t * 200;
+        samples.push(rotatePoint({ x, y }, pivot, 45));
+      }
+      const xs = samples.map((point) => point.x);
+      const ys = samples.map((point) => point.y);
+
+      const painted = pathBounds(arch)!;
+      expect(painted.x).toBeCloseTo(Math.min(...xs), 1);
+      expect(painted.y).toBeCloseTo(Math.min(...ys), 1);
+      expect(painted.x + painted.width).toBeCloseTo(Math.max(...xs), 1);
+      expect(painted.y + painted.height).toBeCloseTo(Math.max(...ys), 1);
     });
   });
 

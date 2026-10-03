@@ -15,7 +15,8 @@ export const FLOATING_BAR =
 /**
  * The floating bars' last stage on a narrow board: text goes and the icons
  * stay. Keyed off the `board` container the pinboard declares, not the window,
- * because the agenda rail alone moves the board's width by 212px. Outside that
+ * because the agenda rail alone moves the board's width by up to 436px (from its
+ * collapsed strip to the widest it can be dragged). Outside that
  * container (the dev workbench, the editor tests) it never matches, so the
  * labels show.
  *
@@ -27,6 +28,31 @@ export const TOOL_LABEL = '@max-[42rem]/board:hidden';
 
 /** Horizontal padding for a labelled tool button, tightened once it is only an icon. */
 export const TOOL_BUTTON_PAD = 'px-3.5 @max-[42rem]/board:px-2.5';
+
+/**
+ * The widest a bar that shares the bottom row with the zoom control may be: the
+ * board less the zoom control, its 24px inset, a 16px gap and the bar's own
+ * 24px inset. 18rem leaves room for the labelled zoom control (~181px); below
+ * 36rem it is icons only (~125px), so 12rem does.
+ */
+export const BAR_BESIDE_ZOOM =
+  'max-w-[calc(100cqw-18rem)] @max-[36rem]/board:max-w-[calc(100cqw-12rem)]';
+
+/**
+ * The board's last stage: too narrow to use, so the floating controls go and a
+ * one-line note says why. 24rem because the right-anchored toolbar (~165px as
+ * icons) and the zoom control (~125px), with their insets and gap, meet just
+ * under 360px. Below this nothing could be pressed without hitting the other,
+ * and the board itself is too small to place anything on.
+ *
+ * `display: none`, not `sr-only`, on purpose: controls that can be tabbed to
+ * but not seen would be worse than none. They leave the accessibility tree
+ * with the screen, so the note (`BOARD_CRAMPED_ONLY`) is left readable to say
+ * why.
+ */
+export const BOARD_CRAMPED_HIDDEN = '@max-[24rem]/board:hidden';
+/** The note that stands in for the controls on a board that narrow. */
+export const BOARD_CRAMPED_ONLY = 'hidden @max-[24rem]/board:flex';
 
 interface CreativeToolbarProps {
   /**
@@ -46,6 +72,11 @@ interface CreativeToolbarProps {
  * strokes was a worse version of a tool already on offer. It is only the button
  * that has gone — drawings already on a board still render, and extending or
  * editing one still opens the editor that made it.
+ *
+ * The first-proposal hint's arrow points at Sticky from this bar's right edge
+ * once it is icons only, a fixed distance that counts the buttons after it
+ * (see `FirstProposalHint`). Re-derive that offset if a button is added,
+ * removed or reordered here.
  */
 export function CreativeToolbar({ children }: CreativeToolbarProps) {
   const { activeTool, isLive, openTool, submissionStatus } = useCreativeTools();

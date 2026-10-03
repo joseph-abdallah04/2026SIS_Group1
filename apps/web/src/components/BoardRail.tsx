@@ -1,5 +1,7 @@
 import type { ReactNode, Ref } from 'react';
 
+import { useRailResize } from './useRailResize';
+
 export type BoardRailSide = 'left' | 'right';
 /** Agenda column, or the wider one the assistant needs for a conversation. */
 export type BoardRailWidth = 'narrow' | 'wide';
@@ -34,6 +36,13 @@ interface BoardRailProps {
    * covers both rails and keeps this strip so the board does not change width.
    */
   inert?: boolean;
+  /**
+   * Lets the rail's inner edge be dragged to any width between
+   * `RAIL_MIN_WIDTH` and `RAIL_MAX_WIDTH`, and closed by dragging on past the
+   * minimum (`useRailResize`). `storageKey` names the remembered width: rails
+   * that share one open at the same size. Overrides `width` while set.
+   */
+  resize?: { storageKey: string; label: string };
   children: ReactNode;
 }
 
@@ -54,6 +63,7 @@ function RailTitle({ children, vertical }: { children: ReactNode; vertical?: boo
  * The two rails are mirrors of one piece: same padding, title and toggle.
  * `side` flips the border and the chevrons. `width` is the expanded column —
  * the agenda stays narrow, the assistant is wide enough to read a chat in.
+ * `resize` trades the fixed column for one the user drags to size.
  */
 export function BoardRail({
   side,
@@ -68,8 +78,10 @@ export function BoardRail({
   collapsedExtra,
   toggleRef,
   inert = false,
+  resize,
   children,
 }: BoardRailProps) {
+  const resizer = useRailResize({ side, storageKey: resize?.storageKey, collapsed, onToggle });
   const onLeft = side === 'left';
   const edge = onLeft ? 'border-r' : 'border-l';
   const expandChevron = onLeft ? '›' : '‹';
@@ -115,11 +127,20 @@ export function BoardRail({
     </button>
   );
 
+  const sizedWidth = resizer.width;
+
   return (
     <aside
       aria-label={title}
       {...(inert ? { inert: '' } : {})}
-      className={`box-border flex shrink-0 grow-0 flex-col ${EXPANDED_WIDTH[width]} ${edge} border-rt-tertiary bg-rt-surface-alt px-3`}
+      className={`relative box-border flex shrink-0 grow-0 flex-col ${
+        sizedWidth === null ? EXPANDED_WIDTH[width] : ''
+      } ${edge} border-rt-tertiary bg-rt-surface-alt px-3`}
+      style={
+        sizedWidth === null
+          ? undefined
+          : { width: sizedWidth, minWidth: sizedWidth, maxWidth: sizedWidth, flexBasis: sizedWidth }
+      }
     >
       <div className="-mx-3 flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">
         {onLeft ? (
@@ -134,7 +155,37 @@ export function BoardRail({
           </>
         )}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      <div
+        className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${
+          resizer.pendingClose ? 'opacity-40' : ''
+        }`}
+      >
+        {children}
+      </div>
+      {resize && resizer.handleProps && !inert ? (
+        // Straddles the inner border so it is easy to find: a few pixels over
+        // the board as well as the rail. The line inside is what shows; the
+        // strip around it is what takes the press.
+        <div
+          {...resizer.handleProps}
+          aria-label={resize.label}
+          title="Drag to resize. Double-click to reset."
+          className={`group absolute inset-y-0 z-20 w-2 cursor-col-resize touch-none outline-none ${
+            onLeft ? '-right-1' : '-left-1'
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 transition-colors ${
+              resizer.pendingClose
+                ? 'bg-rt-ink-faint'
+                : resizer.dragging
+                  ? 'bg-rt-secondary'
+                  : 'bg-transparent group-hover:bg-rt-secondary/70 group-focus-visible:bg-rt-secondary'
+            }`}
+          />
+        </div>
+      ) : null}
     </aside>
   );
 }

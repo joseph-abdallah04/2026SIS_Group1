@@ -8,9 +8,9 @@
 import {
   arrowBounds,
   arrowGeometry,
+  inkPaintedBounds,
   pathCurveLocalBounds,
   pathPaintedBounds,
-  rotatedBounds,
   tableSize,
   type ArrowElement,
   type PathElement,
@@ -90,11 +90,14 @@ export function pathBounds(
   return pathPaintedBounds(path);
 }
 
+/**
+ * The area a freehand stroke paints once it is turned: the turned points, not
+ * the turned box around them, which for a diagonal stroke is mostly empty.
+ */
 export function inkBounds(
   stroke: Pick<StudioInkStroke, 'points' | 'rotation'>,
 ): DiagramRect | null {
-  const local = boundsOfPoints(stroke.points);
-  return local && rotatedBounds(local, stroke.rotation);
+  return inkPaintedBounds(stroke);
 }
 
 /**

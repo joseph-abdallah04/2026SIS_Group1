@@ -317,7 +317,7 @@ function useStudioColumn() {
   }, []);
 
   // The board changes width without the window resizing when the agenda beside
-  // it opens or closes, so it is watched as well as the window.
+  // it opens, closes or is dragged wider, so it is watched as well as the window.
   useEffect(() => {
     const frame = document.querySelector<HTMLElement>('[data-board-frame]');
     window.addEventListener('resize', remeasure);

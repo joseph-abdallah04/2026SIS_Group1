@@ -1923,9 +1923,14 @@ export function DiagramEditor() {
   // has to put it down all the same. So does the offer at an arrow's loose end,
   // which can be raised from a connection handle while the tool is back on
   // Select: that left it dismissable only with focus in the form.
+  //
+  // Any armed tool counts too, holding something or not: Escape steps back to
+  // Select before it steps out of the studio. Without this a brush or a pen
+  // with nothing in hand let the key straight through to the overlay, which
+  // left the studio when all that was wanted was to put the tool down.
   const somethingToPutDown =
     ghost !== null ||
-    canvasTool === 'arrow' ||
+    canvasTool !== 'select' ||
     shapePicker !== null ||
     extendPicker !== null ||
     arrowDraft !== null;
@@ -1943,7 +1948,17 @@ export function DiagramEditor() {
       // it as a request to close the studio, which would switch this off.
       const target = event.target as HTMLElement | null;
       // Not while something is being typed into: Escape belongs to the field.
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      if (
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable === true
+      ) {
+        return;
+      }
+      // Tucked away on the board, the editor stays mounted but its canvas is
+      // inert, and Escape there brings the studio back — it must not also put
+      // the armed tool down behind the user's back.
+      if (canvasRef.current?.closest('[inert]')) return;
       event.preventDefault();
       cancelPlacementRef.current();
     }
@@ -3094,7 +3109,7 @@ export function DiagramEditor() {
             { x: node.x + offset.x, y: node.y + offset.y },
             effectiveDiagramNodeSize(node),
             false,
-            node.rotation,
+            node,
           ),
         };
       }),
@@ -5115,6 +5130,17 @@ export function DiagramEditor() {
    * whether that is the rail or a button inside one of its sub-toolbars.
    */
   function selectCanvasTool(next: CanvasTool) {
+    // Changing tools is the end of what the last one was drawing. A path in hand
+    // is kept, the way Escape keeps it — it was being drawn on purpose — while an
+    // arrow with only its first end down is dropped, as Escape drops it: its far
+    // end would land wherever the pointer happened to leave the canvas. Picking
+    // the tool already armed changes nothing, so the path carries on.
+    if (next !== canvasTool) {
+      if (pathAnchorsRef.current.length > 0) finishPenDraft();
+      setArrowDraft(null);
+      setArrowSnap(null);
+      arrowPressRef.current = null;
+    }
     setCanvasTool(next);
     setShapePicker(null);
     // A shape being dragged out does not survive the tool it was started under:
@@ -5690,6 +5716,13 @@ export function DiagramEditor() {
     setArrowDraft(null);
     setArrowSnap(null);
     arrowPressRef.current = null;
+    // A path in hand usually hears Escape first, through the form. With focus
+    // outside the form this is the only handler that does, and switching to
+    // Select without it left the anchors on the canvas under another tool.
+    if (pathAnchorsRef.current.length > 0) {
+      finishPenDraft(true);
+      return;
+    }
     setCanvasTool('select');
   }
   cancelPlacementRef.current = cancelPlacement;
@@ -6451,7 +6484,7 @@ export function DiagramEditor() {
 
     if (inkPointerRef.current === event.pointerId) {
       event.preventDefault();
-      if (canvasTool === 'erase') eraseAt(event);
+      if (eraseStartRef.current) eraseAt(event);
       else extendStroke(event);
       return;
     }
@@ -6542,11 +6575,14 @@ export function DiagramEditor() {
     if (inkPointerRef.current !== event.pointerId) return false;
     inkPointerRef.current = null;
 
-    if (canvasTool === 'erase') {
-      const previous = eraseStartRef.current;
+    // Which gesture this was is what the press began, not the tool armed now:
+    // Escape or a shortcut can change the tool while the button is still down,
+    // and reading the tool then dropped the sweep's undo step on the floor.
+    const previous = eraseStartRef.current;
+    if (previous) {
       eraseStartRef.current = null;
       // One undo step for the whole sweep, however many strokes it took out.
-      if (previous) history.recordPreview(previous);
+      history.recordPreview(previous);
     } else {
       finishStroke();
     }
@@ -6698,10 +6734,11 @@ export function DiagramEditor() {
     // half-drawn stroke is committed exactly as `pointerup` would commit it.
     if (inkPointerRef.current === event.pointerId) {
       inkPointerRef.current = null;
-      if (canvasTool === 'erase') {
-        const previous = eraseStartRef.current;
+      // By the gesture, not the tool armed now — the same reason `endInk` gives.
+      const previous = eraseStartRef.current;
+      if (previous) {
         eraseStartRef.current = null;
-        if (previous) history.recordPreview(previous);
+        history.recordPreview(previous);
       } else {
         finishStroke();
       }
@@ -6887,7 +6924,6 @@ export function DiagramEditor() {
       editingText: editingNodeId !== null || editingCell !== null || editingArrowId !== null,
       inCellMode: Boolean(selectedTable && cellRange),
       submitting: isSubmitting,
-      drawing: pathAnchorsRef.current.length > 0,
       modifier: event.ctrlKey || event.metaKey || event.altKey,
     });
     if (shortcutTool) {

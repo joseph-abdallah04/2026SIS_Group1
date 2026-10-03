@@ -16,8 +16,8 @@ import {
   pathCurveLocalBounds,
   pathLocalBounds,
   pathPaintedBounds,
+  inkPaintedBounds,
   pointsBounds,
-  rotatedBounds,
   rotatePoint,
   type PathElement,
 } from '@roundtable/shared';
@@ -239,8 +239,9 @@ export function scaleInk(
   };
   const requested = uniformScaleFromPull(frame, handle, pullInFrame(delta, rotation), fromCentre);
   const scale = clampScale(requested, frame, (candidate) => {
-    const scaled = pointsBounds(apply(candidate).points);
-    return insideSheet(scaled && rotatedBounds(scaled, rotation));
+    // What the turned stroke paints, not the turned box around it: that box
+    // stopped a diagonal stroke well short of the edge it could visibly reach.
+    return insideSheet(inkPaintedBounds(apply(candidate)));
   });
   return apply(scale);
 }

@@ -123,7 +123,10 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
 
       {/* Opens upward, because the toolbar floats at the foot of the board.
           No portal is needed: unlike a card, this is outside the canvas's
-          scale transform, so it is positioned against the page already. */}
+          scale transform, so it is positioned against the page already.
+          Opens rightward from this button while the toolbar is centred, and
+          leftward once the toolbar anchors to the board's right edge: Reuse
+          is its last button, so opening rightward would run off the board. */}
       {/* Derived rather than closed by a state write during render: if the
           button goes dead while the panel is up, the panel is simply not shown
           and the remembered state costs nothing. */}
@@ -131,7 +134,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
         <div
           role="dialog"
           aria-label="My proposals"
-          className="absolute bottom-full left-0 z-40 mb-2"
+          className="absolute bottom-full left-0 z-40 mb-2 @max-[52rem]/board:right-0 @max-[52rem]/board:left-auto"
         >
           <MyProposalsPanel
             groups={data?.groups ?? []}
