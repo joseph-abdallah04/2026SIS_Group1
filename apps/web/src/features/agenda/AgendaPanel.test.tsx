@@ -72,7 +72,7 @@ describe('AgendaPanel (F24)', () => {
       activeQuestionId: 'q2',
     });
 
-    expect(screen.getByText('Agenda 2/3')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Agenda' })).toBeInTheDocument();
     expect(screen.getByText('Answered')).toBeInTheDocument();
     expect(screen.getByText('Discussing')).toBeInTheDocument();
     // The current question is the one the board is showing, marked for
@@ -94,15 +94,137 @@ describe('AgendaPanel (F24)', () => {
 
   it('collapses to a rail that still says where the session is up to', async () => {
     renderPanel({
-      questions: [question(0, 'discussion'), question(1, 'pending')],
-      activeQuestionId: 'q1',
+      questions: [question(0, 'answered'), question(1, 'discussion'), question(2, 'pending')],
+      activeQuestionId: 'q2',
     });
 
     await userEvent.click(screen.getByLabelText('Collapse agenda'));
 
     expect(screen.queryByText('Question 1')).not.toBeInTheDocument();
-    expect(screen.getByText('Agenda 1/2')).toBeInTheDocument();
+    expect(screen.getByText('Agenda')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Agenda progress' })).toHaveAttribute(
+      'aria-valuetext',
+      '1 of 3 questions done',
+    );
+    expect(screen.getByText('1/3')).toBeInTheDocument();
     expect(screen.getByLabelText('Expand agenda')).toBeInTheDocument();
+  });
+
+  // Progress is how much of the agenda is finished, not which question the
+  // board is showing: looking back at question 1 does not undo question 2.
+  it('counts finished questions, skipped ones included, whatever the board is showing', () => {
+    renderPanel({
+      questions: [
+        question(0, 'answered'),
+        question(1, 'skipped'),
+        question(2, 'discussion'),
+        question(3, 'pending'),
+      ],
+      activeQuestionId: 'q1',
+    });
+
+    const progress = screen.getByRole('progressbar', { name: 'Agenda progress' });
+    expect(progress).toHaveAttribute('aria-valuenow', '2');
+    expect(progress).toHaveAttribute('aria-valuemax', '4');
+    expect(progress).toHaveAttribute('aria-valuetext', '2 of 4 questions done, 1 skipped');
+    expect(screen.getByText('1 skipped')).toBeInTheDocument();
+  });
+
+  it('says so when every question is finished', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'skipped')],
+      activeQuestionId: null,
+    });
+
+    expect(screen.getByText('All done')).toBeInTheDocument();
+  });
+
+  it('marks where the board is looking when another question is still in play', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+
+    expect(screen.getByText('Question 1').closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByText('Viewing').closest('li')).toBe(
+      screen.getByText('Question 1').closest('li'),
+    );
+    // The question in play keeps its status, and nothing says "Viewing" once
+    // the board is back on it.
+    expect(screen.getByText('Discussing').closest('li')).toBe(
+      screen.getByText('Question 2').closest('li'),
+    );
+  });
+
+  it('leaves a finished question’s status to its node, and says it to screen readers', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'answered'), question(2, 'discussion')],
+      activeQuestionId: 'q2',
+    });
+
+    const [inList, onCard] = screen.getAllByText('Answered');
+    expect(inList).toHaveClass('sr-only');
+    expect(screen.getByText('Question 1')).toHaveClass('line-clamp-2');
+    // The card on screen keeps its chip and its whole text.
+    expect(onCard).not.toHaveClass('sr-only');
+    expect(screen.getByText('Question 2')).not.toHaveClass('line-clamp-2');
+  });
+
+  it('scrolls the question the board moves to into view', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const { rerender } = renderPanel({
+        questions: [question(0, 'answered'), question(1, 'discussion')],
+        activeQuestionId: 'q1',
+      });
+      scrollIntoView.mockClear();
+
+      rerender(
+        <AgendaPanel
+          sessionId="s1"
+          questions={[question(0, 'answered'), question(1, 'discussion')]}
+          activeQuestionId="q2"
+          isLeader
+        />,
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByText('Question 2').closest('li'));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
+  it('does not say "Viewing" when the board is on the question in play', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'discussion')],
+      activeQuestionId: 'q2',
+    });
+
+    expect(screen.queryByText('Viewing')).not.toBeInTheDocument();
+  });
+
+  it('shows a participant the questions as text, not buttons', () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'discussion')],
+      activeQuestionId: 'q2',
+      isLeader: false,
+    });
+
+    expect(screen.queryByRole('button', { name: 'Question 1' })).not.toBeInTheDocument();
+    expect(screen.getByText('Question 1').tagName).toBe('P');
+  });
+
+  it('can be dragged wider, for participants as well as the leader', () => {
+    renderPanel({
+      questions: [question(0, 'discussion')],
+      activeQuestionId: 'q1',
+      isLeader: false,
+    });
+
+    expect(screen.getByRole('separator', { name: 'Resize agenda' })).toBeInTheDocument();
   });
 });
 
@@ -174,6 +296,8 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
+    // Said in the card, not only in a tooltip a pointer has to find.
+    expect(screen.getByText('Needs 2 proposals on the board first')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Open voting' }));
     expect(post).not.toHaveBeenCalled();
   });
@@ -379,6 +503,8 @@ describe('AgendaPanel board lock', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Board locked' }));
-    expect(await screen.findByText('Only the session leader can lock the board')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Only the session leader can lock the board'),
+    ).toBeInTheDocument();
   });
 });

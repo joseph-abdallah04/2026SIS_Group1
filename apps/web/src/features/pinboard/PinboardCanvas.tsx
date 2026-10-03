@@ -985,7 +985,8 @@ export function PinboardCanvas({
 
             It is also the `board` container the bars size themselves against,
             so their stages follow the board's width rather than the window's
-            (the agenda rail alone moves it by 212px). The container is this
+            (the agenda rail alone moves it by up to 436px, collapsed against
+            dragged out to its widest). The container is this
             layer and not the box above because `container-type` makes its
             element the containing block for anything `fixed` inside, and
             nothing on the board should be caught by that. */}

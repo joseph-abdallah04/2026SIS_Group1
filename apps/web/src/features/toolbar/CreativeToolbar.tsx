@@ -15,7 +15,8 @@ export const FLOATING_BAR =
 /**
  * The floating bars' last stage on a narrow board: text goes and the icons
  * stay. Keyed off the `board` container the pinboard declares, not the window,
- * because the agenda rail alone moves the board's width by 212px. Outside that
+ * because the agenda rail alone moves the board's width by up to 436px (from its
+ * collapsed strip to the widest it can be dragged). Outside that
  * container (the dev workbench, the editor tests) it never matches, so the
  * labels show.
  *

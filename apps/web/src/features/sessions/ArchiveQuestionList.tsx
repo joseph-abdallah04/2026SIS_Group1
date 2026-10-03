@@ -2,14 +2,25 @@ import { useState } from 'react';
 import type { Question, QuestionStatus } from '@roundtable/shared';
 
 import { BoardRail } from '../../components/BoardRail';
+import { AgendaProgress } from '../agenda/AgendaProgress';
+import { AgendaStep, AgendaTimeline, type AgendaChipTone } from '../agenda/AgendaTimeline';
+import { stepState, summarizeAgenda } from '../agenda/agendaSummary';
 
-const STATUS_LABEL: Record<QuestionStatus, string | null> = {
-  pending: null,
-  discussion: 'Not voted on',
-  voting: 'Voting',
-  answered: 'Answered',
-  skipped: 'Skipped',
+/**
+ * What became of each question, in the past tense the session ended in. The
+ * session is over, so nothing reads as in play: a question left open was
+ * simply not finished.
+ */
+const STATUS_CHIP: Record<QuestionStatus, { label: string; tone: AgendaChipTone }> = {
+  pending: { label: 'Not reached', tone: 'neutral' },
+  discussion: { label: 'Not voted on', tone: 'neutral' },
+  voting: { label: 'Voting', tone: 'neutral' },
+  answered: { label: 'Answered', tone: 'warm' },
+  skipped: { label: 'Skipped', tone: 'neutral' },
 };
+
+/** The live agenda's storage key, so the rail keeps one width across both. */
+const QUESTIONS_RESIZE = { storageKey: 'agenda', label: 'Resize questions' };
 
 interface ArchiveQuestionListProps {
   questions: Question[];
@@ -18,8 +29,9 @@ interface ArchiveQuestionListProps {
 }
 
 /**
- * The ended session's agenda. Every participant can open any question. There
- * are no phase, skip, or add controls: those would write, and this list does not.
+ * The ended session's agenda, on the same timeline and progress track as the
+ * live one. Every participant can open any question. There are no phase,
+ * skip, or add controls: those would write, and this list does not.
  */
 export function ArchiveQuestionList({
   questions,
@@ -27,69 +39,44 @@ export function ArchiveQuestionList({
   onSelect,
 }: ArchiveQuestionListProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const activeIndex = questions.findIndex((question) => question.id === activeQuestionId);
-  const position = activeIndex >= 0 ? `${activeIndex + 1}/${questions.length}` : null;
+  const summary = summarizeAgenda(questions, { ended: true });
 
   return (
     <BoardRail
       side="left"
-      title={`Questions ${position ?? ''}`}
+      title="Questions"
       collapsed={collapsed}
       onToggle={() => setCollapsed((open) => !open)}
       expandLabel="Expand questions"
       collapseLabel="Collapse questions"
+      collapsedExtra={<AgendaProgress summary={summary} vertical />}
+      resize={QUESTIONS_RESIZE}
     >
       {questions.length === 0 ? (
         <p className="py-3 text-[12px] text-rt-ink-muted">No questions in this session.</p>
       ) : (
-        <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2">
-          {questions.map((question, index) => {
-            const isFocused = question.id === activeQuestionId;
-            const label = STATUS_LABEL[question.status];
-            return (
-              <li
-                key={question.id}
-                className={`rounded-2xl border px-2.5 py-2 ${
-                  isFocused
-                    ? 'border-rt-secondary bg-white shadow-sm'
-                    : 'border-transparent bg-transparent'
-                }`}
-              >
-                <div className="flex items-baseline gap-2">
-                  <span
-                    className={`w-4 shrink-0 text-center text-[11px] font-semibold ${
-                      isFocused ? 'text-rt-primary-deep' : 'text-rt-ink-faint'
-                    }`}
-                    aria-hidden
-                  >
-                    {index + 1}
-                  </span>
-                  <button
-                    type="button"
-                    aria-current={isFocused ? 'step' : undefined}
-                    onClick={() => {
-                      if (!isFocused) onSelect(question.id);
-                    }}
-                    className={`text-left text-[12.5px] leading-snug hover:underline ${
-                      question.status === 'skipped'
-                        ? 'text-rt-ink-faint line-through'
-                        : isFocused
-                          ? 'font-medium text-rt-ink'
-                          : 'text-rt-ink-muted'
-                    }`}
-                  >
-                    {question.text}
-                  </button>
-                </div>
-                {label ? (
-                  <span className="mt-1 ml-[18px] block text-[10px] font-semibold tracking-[0.08em] text-rt-ink-faint uppercase">
-                    {label}
-                  </span>
-                ) : null}
-              </li>
-            );
-          })}
-        </ol>
+        <>
+          <AgendaProgress summary={summary} />
+          <AgendaTimeline>
+            {questions.map((question, index) => {
+              const isFocused = question.id === activeQuestionId;
+              return (
+                <AgendaStep
+                  key={question.id}
+                  number={index + 1}
+                  text={question.text}
+                  state={stepState(question.status, true)}
+                  focused={isFocused}
+                  last={index === questions.length - 1}
+                  onSelect={() => {
+                    if (!isFocused) onSelect(question.id);
+                  }}
+                  status={STATUS_CHIP[question.status]}
+                />
+              );
+            })}
+          </AgendaTimeline>
+        </>
       )}
     </BoardRail>
   );
