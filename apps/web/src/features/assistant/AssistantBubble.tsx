@@ -1,42 +1,19 @@
-// F34 — the floating assistant orb and the rail it morphs into.
+// F34 — the assistant, docked on the right of the board.
 //
-// Mounted by `SessionPinboard` inside `CreativeToolsProvider`, so Propose (F37) can use the
-// same submit path as the sticky and drawing editors. It sits on the right edge, from under
-// the session header to the bottom inset, with the launch orb in that corner. Zoom lives on
-// the other side so the rail can use the full height without covering those controls.
+// The chrome is `BoardRail`, the same piece as the agenda on the left. Collapsing
+// unmounts the panel, so the conversation lives here: F34 requires the thread to
+// survive open/close, and an unread mark when an answer lands while the rail is shut.
 //
-// It also owns the conversation. The rail unmounts when collapsed, so state kept there
-// would take the thread with it — and F34 requires history to persist across open/close,
-// plus an unread dot when an answer lands while you are not looking.
-//
-// The orb and the rail are the same object: opening uncovers the shell from a circle in the
-// corner out to a slim right-hand panel (see assistant.css for why that is a clip and not a
-// resize). The launch button is gone while the rail is up; the rail's own X, or Escape,
-// closes it.
+// Mounted by `SessionPinboard` inside `CreativeToolsProvider`, so Propose (F37) can
+// use the same submit path as the sticky and drawing editors.
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ArtifactJson, AssistantContext, QuestionStatus } from '@roundtable/shared';
 
-import './assistant.css';
+import { BoardRail } from '../../components/BoardRail';
 import { CreativeToolsContext } from '../tools/CreativeToolsContext';
 import { AssistantPanel } from './AssistantPanel';
 import { fetchLlmConfig } from './api';
 import { useAssistantChat } from './useAssistantChat';
-
-/**
- * How long the shell takes to expand, in step with `--rt-assistant-expand`.
- *
- * Only a fallback: `transitionend` is what normally releases the transcript, and this covers
- * the cases where it never fires — a reduced-motion user, or a browser that drops the
- * transition because the tab was hidden while it ran.
- */
-const EXPAND_MS = 520;
-
-function prefersReducedMotion() {
-  return (
-    typeof window.matchMedia !== 'function' ||
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 export interface AssistantBubbleProps {
   sessionId: string;
@@ -54,8 +31,8 @@ export interface AssistantBubbleProps {
   /** The pinboard's current phase, so a locked Propose can say why it is locked. */
   questionStatus?: QuestionStatus | null;
   /**
-   * Hide the rail entirely — used while a voting ballot covers the board, so a
-   * z-index fight cannot put the chat on top of the vote.
+   * Hide the rail entirely — used while a voting ballot covers the board, so the
+   * chat is not sitting in the strip beside the vote.
    */
   suppressed?: boolean;
 }
@@ -67,106 +44,45 @@ export function AssistantBubble({
   questionStatus,
   suppressed = false,
 }: AssistantBubbleProps) {
-  const [open, setOpen] = useState(false);
-  // Distinct from `open`: the panel is mounted as soon as it opens, but stays invisible until
-  // the shell has finished growing. Contents appearing inside a panel that is still expanding
-  // look half-built.
-  const [revealed, setRevealed] = useState(false);
-  // Stays mounted through the collapse so the clip-path does not have to rebuild
-  // an emptied flex tree on the first closing frame.
-  const [railMounted, setRailMounted] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [unread, setUnread] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [modelLabel, setModelLabel] = useState<string | undefined>(undefined);
+  const toggleRef = useRef<HTMLButtonElement>(null);
 
   const resolveContext = useCallback((): AssistantContext => getContext?.() ?? {}, [getContext]);
   const chat = useAssistantChat({ sessionId, getContext: resolveContext });
   const { syncProposedWithBoard } = chat;
   const creativeTools = useContext(CreativeToolsContext);
 
-  const closePanel = useCallback(() => {
-    setOpen(false);
-    setRevealed(false);
-  }, []);
-  const openPanel = useCallback(() => {
-    setRailMounted(true);
-    setOpen(true);
-  }, []);
+  const collapse = useCallback(() => setCollapsed(true), []);
 
-  // The studio is a page-modal at z-40; the rail is below it. Closing on open is
-  // the belt: a leftover open rail must not sit over the editor.
+  // The studio is a page-modal. A rail left open underneath is out of the way,
+  // but collapsing it keeps the board clear when the editor closes.
   useEffect(() => {
-    if (creativeTools?.activeTool) closePanel();
-  }, [closePanel, creativeTools?.activeTool]);
+    if (creativeTools?.activeTool) collapse();
+  }, [collapse, creativeTools?.activeTool]);
 
   useEffect(() => {
-    if (suppressed) closePanel();
-  }, [closePanel, suppressed]);
+    if (suppressed) collapse();
+  }, [collapse, suppressed]);
 
   useEffect(() => {
     syncProposedWithBoard(boardItems ?? []);
   }, [boardItems, syncProposedWithBoard]);
 
-  // An answer that finished while the panel was shut is the thing the dot marks. Watching
-  // the streaming edge (true → false) rather than entry count means a turn that produced
-  // only artifacts still counts as "something arrived".
+  // An answer that finished while the rail was shut is the thing the mark shows.
+  // Watching the streaming edge (true → false) rather than entry count means a
+  // turn that produced only artifacts still counts as "something arrived".
   const wasStreaming = useRef(false);
   useEffect(() => {
-    if (wasStreaming.current && !chat.streaming && !open) setUnread(true);
+    if (wasStreaming.current && !chat.streaming && collapsed) setUnread(true);
     wasStreaming.current = chat.streaming;
-  }, [chat.streaming, open]);
+  }, [chat.streaming, collapsed]);
 
   useEffect(() => {
-    if (open) setUnread(false);
-  }, [open]);
-
-  // Closing hides the transcript at once and lets the shell collapse over an empty panel;
-  // opening waits for the expansion to land. Watching the transition rather than trusting a
-  // timer keeps the two in step even if the easing or duration changes in the stylesheet.
-  const shellRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) {
-      setRevealed(false);
-      return;
-    }
-    setRailMounted(true);
-    // No media-query engine means nothing is animating to wait for, which is jsdom and
-    // the reduced-motion case both: show the transcript now rather than on a transition
-    // that will never end.
-    if (prefersReducedMotion()) {
-      setRevealed(true);
-      return;
-    }
-
-    const shell = shellRef.current;
-    const timer = window.setTimeout(() => setRevealed(true), EXPAND_MS);
-    const onEnd = (event: TransitionEvent) => {
-      if (event.propertyName === 'clip-path') setRevealed(true);
-    };
-    shell?.addEventListener('transitionend', onEnd);
-    return () => {
-      window.clearTimeout(timer);
-      shell?.removeEventListener('transitionend', onEnd);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (open) return;
-    if (prefersReducedMotion()) {
-      setRailMounted(false);
-      return;
-    }
-    const shell = shellRef.current;
-    const timer = window.setTimeout(() => setRailMounted(false), EXPAND_MS);
-    const onEnd = (event: TransitionEvent) => {
-      if (event.propertyName === 'clip-path') setRailMounted(false);
-    };
-    shell?.addEventListener('transitionend', onEnd);
-    return () => {
-      window.clearTimeout(timer);
-      shell?.removeEventListener('transitionend', onEnd);
-    };
-  }, [open]);
+    if (!collapsed) setUnread(false);
+  }, [collapsed]);
 
   // Check once per mount: the panel shows a setup prompt instead of failing on first send.
   useEffect(() => {
@@ -178,7 +94,7 @@ export function AssistantBubble({
         setModelLabel(config?.model);
       })
       .catch(() => {
-        // A failed check (not logged in yet, server restarting) shouldn't hide the bubble;
+        // A failed check (not logged in yet, server restarting) shouldn't hide the rail;
         // let the send attempt produce the real error.
         if (!cancelled) setConfigured(null);
       });
@@ -187,113 +103,93 @@ export function AssistantBubble({
     };
   }, []);
 
-  // Escape closes the panel, like every other overlay.
+  // Escape collapses the rail, the same way it used to dismiss the overlay.
   useEffect(() => {
-    if (!open) return;
+    if (collapsed) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closePanel();
+      if (event.key === 'Escape') collapse();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [closePanel, open]);
+  }, [collapse, collapsed]);
 
-  // Closing destroys the launch target, so focus would fall to <body> and a keyboard user
-  // would lose their place. Hand it back to the orb that has just reappeared.
-  const bubbleRef = useRef<HTMLButtonElement>(null);
+  // Collapsing destroys the control that had focus, so it would fall to <body>.
+  // Hand it back to the strip button that has just appeared.
   const wasOpen = useRef(false);
   useEffect(() => {
-    if (wasOpen.current && !open) bubbleRef.current?.focus();
-    wasOpen.current = open;
-  }, [open]);
-
-  const label = unread ? 'Open AI assistant — new answer' : 'Open AI assistant';
-  const busy = chat.streaming && !open;
+    if (wasOpen.current && collapsed) toggleRef.current?.focus();
+    wasOpen.current = !collapsed;
+  }, [collapsed]);
 
   if (suppressed) return null;
 
+  const expandLabel = unread ? 'Expand assistant — new answer' : 'Expand assistant';
+  const busy = chat.streaming && collapsed;
+
   return (
-    <div
-      className={`rt-assistant ${open ? 'is-open' : 'is-closed'}${revealed ? ' is-revealed' : ''}${
-        busy ? ' is-busy' : ''
-      }`}
+    <BoardRail
+      side="right"
+      width="wide"
+      title="Assistant"
+      collapsed={collapsed}
+      onToggle={() => setCollapsed((open) => !open)}
+      expandLabel={expandLabel}
+      collapseLabel="Collapse assistant"
+      toggleRef={toggleRef}
+      collapsedExtra={<RailMark unread={unread} unconfigured={configured === false} busy={busy} />}
     >
-      {/* Outside the shell, because the shell's clip would cut the ring off. */}
-      <div className="rt-assistant-aura" aria-hidden="true">
-        <span className="rt-assistant-aura-spin" />
-        <span className="rt-assistant-aura-spin rt-assistant-aura-spin--counter" />
-        <span className="rt-assistant-aura-glow" />
-      </div>
-
-      {/* Always the full rail; `clip-path` decides how much of it you can see. */}
-      <div
-        ref={shellRef}
-        className="rt-assistant-shell"
-        {...(open ? { role: 'dialog', 'aria-label': 'AI assistant' } : { 'aria-hidden': true })}
-      >
-        <div className="rt-assistant-orb" aria-hidden="true">
-          <AssistantIcon />
-        </div>
-
-        {railMounted && (
-          <AssistantPanel
-            chat={chat}
-            revealed={revealed}
-            onClose={closePanel}
-            configured={configured}
-            {...(modelLabel ? { modelLabel } : {})}
-            {...(questionStatus !== undefined ? { questionStatus } : {})}
-            onProviderConfigured={(model) => {
-              setConfigured(true);
-              setModelLabel(model);
-            }}
-          />
-        )}
-      </div>
-
-      {!open && (
-        <button
-          ref={bubbleRef}
-          type="button"
-          onClick={openPanel}
-          aria-label={label}
-          aria-haspopup="dialog"
-          className="rt-assistant-launch"
-        >
-          {/* Unread beats the setup warning: if an answer is waiting, that is the news. */}
-          {unread ? (
-            <span
-              className="rt-assistant-badge rt-assistant-badge--dot"
-              title="New answer from the assistant"
-              aria-hidden="true"
-            />
-          ) : (
-            configured === false && (
-              <span
-                className="rt-assistant-badge"
-                title="No AI provider configured"
-                aria-hidden="true"
-              >
-                !
-              </span>
-            )
-          )}
-        </button>
-      )}
-    </div>
+      <AssistantPanel
+        chat={chat}
+        configured={configured}
+        {...(modelLabel ? { modelLabel } : {})}
+        {...(questionStatus !== undefined ? { questionStatus } : {})}
+        onProviderConfigured={(model) => {
+          setConfigured(true);
+          setModelLabel(model);
+        }}
+      />
+    </BoardRail>
   );
 }
 
-function AssistantIcon() {
-  return (
-    <svg viewBox="0 0 32 32" className="rt-assistant-mark" aria-hidden="true">
-      <path
-        className="rt-sparkle"
-        d="M18 5.5l2.2 6.3 6.3 2.2-6.3 2.2L18 22.5l-2.2-6.3-6.3-2.2 6.3-2.2L18 5.5z"
+function RailMark({
+  unread,
+  unconfigured,
+  busy,
+}: {
+  unread: boolean;
+  unconfigured: boolean;
+  busy: boolean;
+}) {
+  // Unread beats the setup warning: if an answer is waiting, that is the news.
+  if (unread) {
+    return (
+      <span
+        className="size-1.5 rounded-full bg-rt-secondary"
+        title="New answer from the assistant"
+        aria-hidden="true"
       />
-      <path
-        className="rt-sparkle rt-sparkle--delayed"
-        d="M8.5 19l1.1 3.1 3.1 1.1-3.1 1.1L8.5 27.4l-1.1-3.1-3.1-1.1 3.1-1.1L8.5 19z"
+    );
+  }
+  if (unconfigured) {
+    return (
+      <span
+        className="text-[11px] font-bold leading-none text-rt-secondary-deep"
+        title="No AI provider configured"
+        aria-hidden="true"
+      >
+        !
+      </span>
+    );
+  }
+  if (busy) {
+    return (
+      <span
+        className="size-1.5 animate-pulse rounded-full bg-rt-cool"
+        title="The assistant is replying"
+        aria-hidden="true"
       />
-    </svg>
-  );
+    );
+  }
+  return null;
 }

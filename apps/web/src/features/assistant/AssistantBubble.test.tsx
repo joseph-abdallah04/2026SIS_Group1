@@ -16,8 +16,8 @@ vi.mock('./api', () => ({
 
 const { AssistantBubble } = await import('./AssistantBubble');
 
-const bubble = () => screen.queryByRole('button', { name: /open ai assistant/i });
-const panel = () => screen.queryByRole('dialog', { name: /ai assistant/i });
+const expand = () => screen.queryByRole('button', { name: /expand assistant/i });
+const composer = () => screen.queryByPlaceholderText(/ask the assistant/i);
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -27,44 +27,47 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('bubble and panel', () => {
-  it('swaps the button for the panel, and back again', async () => {
+describe('assistant rail', () => {
+  it('swaps the strip for the panel, and back again', async () => {
     const user = userEvent.setup();
     render(<AssistantBubble sessionId="s1" />);
 
-    expect(bubble()).toBeTruthy();
-    expect(panel()).toBeNull();
+    expect(expand()).toBeTruthy();
+    expect(composer()).toBeNull();
+    expect(document.querySelector('aside')?.className).toMatch(/w-11/);
 
-    await user.click(bubble()!);
-    // The launch button is gone while the rail is up — the same shell grew into the panel.
-    expect(panel()).toBeTruthy();
-    expect(bubble()).toBeNull();
+    await user.click(expand()!);
+    // The strip button is gone while the rail is open — collapse takes its place.
+    expect(composer()).toBeTruthy();
+    expect(expand()).toBeNull();
+    expect(document.querySelector('aside')?.className).toMatch(/border-l/);
+    expect(document.querySelector('aside')?.className).toMatch(/w-96/);
 
-    await user.click(screen.getByRole('button', { name: /close assistant/i }));
-    expect(panel()).toBeNull();
-    expect(bubble()).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /collapse assistant/i }));
+    expect(composer()).toBeNull();
+    expect(expand()).toBeTruthy();
   });
 
-  it('returns focus to the bubble when the panel closes', async () => {
+  it('returns focus to the strip when the panel closes', async () => {
     const user = userEvent.setup();
     render(<AssistantBubble sessionId="s1" />);
 
-    await user.click(bubble()!);
-    await user.click(screen.getByRole('button', { name: /close assistant/i }));
+    await user.click(expand()!);
+    await user.click(screen.getByRole('button', { name: /collapse assistant/i }));
 
     // Otherwise focus falls to <body> and a keyboard user loses their place entirely.
-    expect(document.activeElement).toBe(bubble());
+    expect(document.activeElement).toBe(expand());
   });
 
-  it('closes on Escape, since the button is no longer there to toggle', async () => {
+  it('collapses on Escape', async () => {
     const user = userEvent.setup();
     render(<AssistantBubble sessionId="s1" />);
 
-    await user.click(bubble()!);
+    await user.click(expand()!);
     await user.keyboard('{Escape}');
 
-    expect(panel()).toBeNull();
-    expect(bubble()).toBeTruthy();
+    expect(composer()).toBeNull();
+    expect(expand()).toBeTruthy();
   });
 
   it('brings the conversation back after a remount, as a refresh would', async () => {
@@ -75,7 +78,7 @@ describe('bubble and panel', () => {
     );
 
     render(<AssistantBubble sessionId="s1" />);
-    await user.click(bubble()!);
+    await user.click(expand()!);
 
     expect(screen.getByText('What have we proposed?')).toBeTruthy();
   });

@@ -50,6 +50,28 @@ describe('BoardRail', () => {
     }
   });
 
+  it('can open wider than the agenda column without changing the chrome', () => {
+    const { container } = render(
+      <BoardRail
+        side="right"
+        width="wide"
+        title="Assistant"
+        collapsed={false}
+        onToggle={() => undefined}
+        expandLabel="Expand dock"
+        collapseLabel="Collapse dock"
+      >
+        <p>Open body</p>
+      </BoardRail>,
+    );
+    const aside = container.querySelector('aside')?.className;
+    expect(aside).toMatch(/w-96/);
+    expect(aside).toMatch(/basis-96/);
+    expect(aside).toMatch(/border-l/);
+    expect(aside).toMatch(/px-3/);
+    expect(aside).not.toMatch(/w-64/);
+  });
+
   it('keeps the strip title when collapsed', async () => {
     render(<Harness side="right" />);
     await userEvent.click(screen.getByRole('button', { name: 'Collapse dock' }));

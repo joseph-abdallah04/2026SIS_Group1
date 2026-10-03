@@ -1146,3 +1146,278 @@
     transform: none;
   }
 }
+
+/*
+ * Session dock. The live assistant sits in `BoardRail` — the same light strip as
+ * the agenda — so these overrides repaint the transcript, composer and cards for
+ * that surface. The marketing mock keeps the glass rules above; it never carries
+ * `.rt-assistant-dock`.
+ */
+.rt-assistant-dock {
+  --rt-assistant-ink: var(--color-rt-ink);
+  --rt-assistant-muted: var(--color-rt-ink-muted);
+  --rt-assistant-faint: var(--color-rt-ink-faint);
+  --rt-assistant-line: var(--color-rt-tertiary);
+  --rt-assistant-fill: #fff;
+  --rt-assistant-fill-strong: var(--color-rt-primary-tint);
+  /* Same scale as the agenda rail: 12.5px for a line of content, 12px in a field. */
+  --rt-assistant-sticky-size: 12.5px;
+  --rt-assistant-sticky-leading: 1.375;
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-meta {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--color-rt-ink-faint);
+}
+
+.rt-assistant-dock .rt-assistant-feed {
+  /* A column of messages, not a flex scroller. Flex overflow re-lays-out on
+     every wheel tick, and a detailed diagram SVG in that layout is hit-tested
+     and repainted with it — that is the lag. Block flow plus a composited
+     scrollport moves the thread without redrawing it. */
+  display: block;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  will-change: scroll-position;
+  gap: 0;
+  padding: 0 0 0.75rem;
+  scrollbar-color: rgba(8, 12, 21, 0.22) transparent;
+}
+
+.rt-assistant-dock .rt-assistant-feed > * + * {
+  margin-top: 0.65rem;
+}
+
+/* The old flex `gap` plus this extra margin. Block flow has to say both. */
+.rt-assistant-dock .rt-assistant-feed > .rt-assistant-reply + * {
+  margin-top: 1.5rem;
+}
+
+.rt-assistant-dock .rt-assistant-feed::-webkit-scrollbar-thumb {
+  background: rgba(8, 12, 21, 0.18);
+}
+
+.rt-assistant-dock .rt-assistant-user {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  color: var(--color-rt-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.375;
+  box-shadow: 0 1px 2px rgba(8, 12, 21, 0.04);
+}
+
+.rt-assistant-dock .rt-assistant-reply,
+.rt-assistant-dock .rt-assistant-empty {
+  font-size: 12.5px;
+  line-height: 1.375;
+}
+
+.rt-assistant-dock .rt-assistant-activity-label {
+  color: var(--color-rt-ink-muted);
+  -webkit-text-fill-color: var(--color-rt-ink-muted);
+  font-size: 12.5px;
+}
+
+.rt-assistant-dock .rt-assistant-error {
+  border-color: #e7b2ac;
+  background: #fdf2f1;
+  color: #7a2e28;
+}
+
+.rt-assistant-dock .rt-assistant-composer {
+  margin: 0 -0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--color-rt-tertiary);
+}
+
+.rt-assistant-dock .rt-assistant-input,
+.rt-assistant-dock .rt-assistant-setup-form .rt-assistant-input {
+  min-height: 2rem;
+  border: 1px solid var(--color-rt-tertiary);
+  border-radius: 9999px;
+  background: var(--color-rt-surface);
+  padding: 0.35rem 0.7rem;
+  color: var(--color-rt-ink);
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: none;
+}
+
+.rt-assistant-dock .rt-assistant-input::placeholder {
+  color: var(--color-rt-ink-faint);
+}
+
+.rt-assistant-dock .rt-assistant-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-rt-secondary);
+}
+
+.rt-assistant-dock .rt-assistant-input:disabled {
+  opacity: 0.6;
+}
+
+.rt-assistant-dock .rt-assistant-send,
+.rt-assistant-dock .rt-assistant-setup-cta,
+.rt-assistant-dock .rt-assistant-action {
+  min-height: 2rem;
+  background: var(--color-rt-secondary);
+  color: var(--color-rt-ink);
+  font-size: 11px;
+}
+
+.rt-assistant-dock .rt-assistant-send {
+  padding: 0 0.65rem;
+}
+
+.rt-assistant-dock .rt-assistant-send:hover:not(:disabled),
+.rt-assistant-dock .rt-assistant-stop:hover,
+.rt-assistant-dock .rt-assistant-setup-cta:hover,
+.rt-assistant-dock .rt-assistant-action:hover:not(:disabled) {
+  background: var(--color-rt-secondary-deep);
+  color: #fff;
+}
+
+.rt-assistant-dock .rt-assistant-send:disabled {
+  opacity: 0.5;
+}
+
+.rt-assistant-dock .rt-assistant-stop {
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+}
+
+.rt-assistant-dock .rt-assistant-send:focus-visible,
+.rt-assistant-dock .rt-assistant-stop:focus-visible,
+.rt-assistant-dock .rt-assistant-action:focus-visible,
+.rt-assistant-dock .rt-assistant-icon-btn:focus-visible {
+  outline: 2px solid var(--color-rt-secondary);
+  outline-offset: 2px;
+}
+
+.rt-assistant-dock .rt-assistant-chip {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  color: var(--color-rt-ink);
+  font-size: 12px;
+}
+
+.rt-assistant-dock .rt-assistant-chip:hover {
+  border-color: var(--color-rt-secondary);
+  background: #fff;
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-setup {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  box-shadow: none;
+}
+
+.rt-assistant-dock .rt-assistant-setup p {
+  font-size: 12.5px;
+}
+
+.rt-assistant-dock .rt-assistant-setup p + p {
+  font-size: 12px;
+}
+
+.rt-assistant-dock .rt-assistant-setup-overlay {
+  inset: 0 -0.75rem;
+  background: var(--color-rt-surface-alt);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.rt-assistant-dock .rt-assistant-setup-secondary {
+  min-height: 2rem;
+  background: #fff;
+  color: var(--color-rt-ink);
+  font-size: 11px;
+  box-shadow: inset 0 0 0 1px var(--color-rt-tertiary);
+}
+
+.rt-assistant-dock .rt-assistant-setup-secondary:hover:not(:disabled) {
+  background: var(--color-rt-primary-tint);
+}
+
+.rt-assistant-dock .rt-assistant-setup-error,
+.rt-assistant-dock .rt-assistant-propose-error {
+  color: #7a2e28;
+}
+
+.rt-assistant-dock .rt-assistant-card {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(8, 12, 21, 0.04);
+}
+
+/* The paper fills the card, the same way a diagram fills its card. The board's
+   square minimum would leave a narrow note in a wide column. */
+.rt-assistant-dock .rt-assistant-sticky {
+  width: 100%;
+  min-height: 0;
+  /* Own layer: the clipped shadow otherwise re-rasterizes as the feed scrolls. */
+  transform: translateZ(0);
+}
+
+/* The preview is not clickable — Propose is the button under it. Leaving
+   pointer events on walks every node of the graph on each wheel hit-test. */
+.rt-assistant-dock .rt-assistant-card-well,
+.rt-assistant-dock .rt-assistant-diagram-fit,
+.rt-assistant-dock .rt-assistant-diagram-fit svg,
+.rt-assistant-dock .rt-assistant-card-well svg {
+  pointer-events: none;
+}
+
+.rt-assistant-dock .rt-assistant-diagram-fit {
+  transform: translateZ(0);
+}
+
+.rt-assistant-dock .rt-assistant-action--done {
+  background: #fff;
+  color: var(--color-rt-ink-muted);
+  box-shadow: inset 0 0 0 1px var(--color-rt-tertiary);
+}
+
+.rt-assistant-dock .rt-assistant-action--done:hover:not(:disabled) {
+  background: #fff;
+  color: var(--color-rt-ink-muted);
+}
+
+.rt-assistant-dock .rt-assistant-tool {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-dot--running {
+  background: var(--color-rt-secondary-deep);
+}
+
+.rt-assistant-dock .rt-assistant-source {
+  text-decoration-color: rgba(8, 12, 21, 0.35);
+}
+
+.rt-assistant-dock .rt-assistant-source:hover {
+  text-decoration-color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-icon-btn {
+  color: var(--color-rt-ink-muted);
+}
+
+.rt-assistant-dock .rt-assistant-icon-btn:hover:not(:disabled) {
+  background: var(--color-rt-primary-tint);
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-propose-error {
+  color: #ffc9c3;
+}

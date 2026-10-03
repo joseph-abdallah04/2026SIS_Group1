@@ -58,6 +58,11 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
   /**
+   * The assistant rail, opposite the agenda. A node for the same reason:
+   * the board owns the row, and the chat owns what goes in the rail.
+   */
+  assistant?: ReactNode;
+  /**
    * F38's way to put one of your earlier proposals on the board, rendered in
    * the floating toolbar beside the creative tools. A node for the same reason
    * `agenda` is: what goes in it is fetched and wired by the page, and this
@@ -74,8 +79,8 @@ interface PinboardCanvasProps {
    * F13's roster, centred in the header. A node for the same reason `agenda`
    * is: the board owns where things sit, but not what a LiveKit roster is.
    *
-   * It was a rail on the right until F13.2, when the assistant's corner bubble
-   * and chat panel turned out to cover that side permanently.
+   * It was a rail on the right until the assistant needed that edge. The roster
+   * stayed in the header; the assistant is the right rail now.
    */
   participants?: ReactNode;
   /**
@@ -208,6 +213,7 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  assistant,
   myProposals,
   micControl,
   participants,
@@ -803,11 +809,9 @@ export function PinboardCanvas({
         </div>
       </header>
 
-      {/* Everything under the header. There is no footer: the agenda runs to
-          the bottom of the screen, and the toolbars float over the board
-          instead of taking a strip of it. F13's roster used to dock opposite
-          the agenda; it lives in the header now, and the board has that 256px
-          back. */}
+      {/* Everything under the header. There is no footer: the agenda and the
+          assistant run to the bottom of the screen, and the toolbars float
+          over the board instead of taking a strip of it. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
 
@@ -986,10 +990,9 @@ export function PinboardCanvas({
             element the containing block for anything `fixed` inside, and
             nothing on the board should be caught by that. */}
           <div className="@container/board pointer-events-none absolute inset-0 z-20">
-            {/* A refused write, stacked above the toolbar. It stays centred
-                  when the bar shifts, because at this height it is already
-                  clear of the zoom control and the assistant orb. `bottom-19`
-                  is the bar's `bottom-6` plus its `h-11` plus an 8px gap. */}
+            {/* A refused write, stacked above the toolbar. `bottom-19` is the
+                  bar's `bottom-6` plus its `h-11` plus an 8px gap, clear of
+                  the zoom control. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
               {notice ? (
                 <p
@@ -1005,10 +1008,9 @@ export function PinboardCanvas({
                   into the zoom control on the left, then anchored right: the
                   centred bar (~375px) meets the zoom control (~181px, 24px in
                   from the edge, 16px gap) on a board narrower than ~816px, so
-                  52rem leaves a margin. Extra right padding clears the
-                  assistant orb in that corner. `bottom-6` clears the
-                  horizontal scrollbar. On a board too narrow even for icons
-                  (~320px) the two can still touch.
+                  52rem leaves a margin. `bottom-6` clears the horizontal
+                  scrollbar. On a board too narrow even for icons (~320px) the
+                  two can still touch.
 
                   The leader's shortlist bar, which takes this slot while the
                   board is closed, is wider (~490px) and meets the zoom
@@ -1022,8 +1024,8 @@ export function PinboardCanvas({
               data-board-toolbar
               className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
                 !boardOpen && boardOverlay
-                  ? '@max-[60rem]/board:justify-end @max-[60rem]/board:pr-[5.75rem]'
-                  : '@max-[52rem]/board:justify-end @max-[52rem]/board:pr-[5.75rem]'
+                  ? '@max-[60rem]/board:justify-end'
+                  : '@max-[52rem]/board:justify-end'
               }`}
             >
               {/* `relative` so the first-proposal hint can rise off whichever
@@ -1061,7 +1063,7 @@ export function PinboardCanvas({
               </div>
             </div>
 
-            {/* Zoom, opposite the assistant: clear of the vertical
+            {/* Zoom, on the left of the board: clear of the vertical
                   scrollbar by `left-6`, and on the same baseline as the
                   main bar. */}
             <div className="pointer-events-auto absolute bottom-6 left-6">
@@ -1077,6 +1079,7 @@ export function PinboardCanvas({
           </div>
         </div>
 
+        {assistant}
         {ballot}
       </div>
     </div>
