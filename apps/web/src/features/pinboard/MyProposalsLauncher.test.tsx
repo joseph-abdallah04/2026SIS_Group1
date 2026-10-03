@@ -45,6 +45,20 @@ describe('my proposals launcher', () => {
     expect(screen.getByRole('alert').textContent).toContain('Network unreachable');
   });
 
+  // Reuse is the last button on a toolbar that anchors to the board's right
+  // edge below 52rem, so from there the panel opens leftward, over the board.
+  it('opens leftward once the toolbar anchors right, and fits a narrow board', async () => {
+    vi.mocked(api.get).mockRejectedValue(new Error('Network unreachable'));
+
+    const button = renderLauncher();
+    await vi.waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+    await userEvent.click(button);
+
+    const panel = screen.getByRole('dialog', { name: 'My proposals' });
+    expect(panel).toHaveClass('@max-[52rem]/board:right-0', '@max-[52rem]/board:left-auto');
+    expect(panel.firstElementChild).toHaveClass('max-w-[calc(100cqw-3rem)]');
+  });
+
   it('does not claim there is nothing to reuse when the list failed', async () => {
     vi.mocked(api.get).mockRejectedValue(new Error('Network unreachable'));
 

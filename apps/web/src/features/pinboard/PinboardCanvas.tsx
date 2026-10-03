@@ -11,7 +11,14 @@ import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { useImageImport } from '../tools/image/ImageImportProvider';
 import { isImageFile } from '../tools/image/imageEncoding';
 import { stickyPlainText } from '../tools/sticky/stickyMarks';
-import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeToolbar';
+import {
+  BAR_BESIDE_ZOOM,
+  BOARD_CRAMPED_HIDDEN,
+  BOARD_CRAMPED_ONLY,
+  CreativeToolbar,
+  FLOATING_BAR,
+  TOOL_LABEL,
+} from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -195,12 +202,14 @@ function ZoomControl({
         title="Fit the board to the proposals"
         className={button}
       >
+        {/* The icon takes over at the same stage the word goes, so the button
+            is never empty. */}
         <span className={TOOL_LABEL}>Fit</span>
         <Scan
           aria-hidden="true"
           size={16}
           strokeWidth={1.8}
-          className="hidden @max-[36rem]/board:block"
+          className="hidden @max-[42rem]/board:block"
         />
       </button>
     </nav>
@@ -996,9 +1005,12 @@ export function PinboardCanvas({
                   the zoom control. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
               {notice ? (
+                // Kept on a board too narrow for the controls: a paste or a
+                // drop can still be refused there. Wraps rather than running
+                // past the board's edges.
                 <p
                   role="status"
-                  className="pointer-events-auto rounded-full border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-[11.5px] font-medium text-rt-secondary-deep shadow-sm"
+                  className="pointer-events-auto max-w-full rounded-2xl border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-center text-[11.5px] font-medium text-balance text-rt-secondary-deep shadow-sm"
                 >
                   {notice.text}
                 </p>
@@ -1010,8 +1022,9 @@ export function PinboardCanvas({
                   centred bar (~375px) meets the zoom control (~181px, 24px in
                   from the edge, 16px gap) on a board narrower than ~816px, so
                   52rem leaves a margin. `bottom-6` clears the horizontal
-                  scrollbar. On a board too narrow even for icons (~320px) the
-                  two can still touch.
+                  scrollbar. Below 24rem even the icon-only bars would touch,
+                  so this row and the zoom control give way to a one-line
+                  note (`BOARD_CRAMPED_HIDDEN`).
 
                   The leader's shortlist bar, which takes this slot while the
                   board is closed, is wider (~490px) and meets the zoom
@@ -1023,7 +1036,7 @@ export function PinboardCanvas({
                   make lopsided, and rest just above the toolbar. */}
             <div
               data-board-toolbar
-              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
+              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${BOARD_CRAMPED_HIDDEN} ${
                 !boardOpen && boardOverlay
                   ? '@max-[60rem]/board:justify-end'
                   : '@max-[52rem]/board:justify-end'
@@ -1056,7 +1069,7 @@ export function PinboardCanvas({
                   // A sentence cannot shrink to an icon, so it truncates
                   // instead, capped at what the zoom control leaves free.
                   <p
-                    className={`${FLOATING_BAR} max-w-[calc(100cqw-18rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
+                    className={`${FLOATING_BAR} ${BAR_BESIDE_ZOOM} px-4 text-[12px] font-medium text-rt-ink-muted`}
                   >
                     <span className="truncate">{closedMessage}</span>
                   </p>
@@ -1067,7 +1080,10 @@ export function PinboardCanvas({
             {/* Zoom, on the left of the board: clear of the vertical
                   scrollbar by `left-6`, and on the same baseline as the
                   main bar. */}
-            <div className="pointer-events-auto absolute bottom-6 left-6">
+            <div
+              data-board-zoom
+              className={`pointer-events-auto absolute bottom-6 left-6 ${BOARD_CRAMPED_HIDDEN}`}
+            >
               <ZoomControl
                 zoom={zoom}
                 canZoomIn={zoom !== ZOOM_LEVELS[0]}
@@ -1077,6 +1093,18 @@ export function PinboardCanvas({
                 onFit={onFit}
               />
             </div>
+
+            {/* What stands in for the bars on a board too narrow to use. Not
+                a control, and not announced: the bars are only hidden from
+                sight, so assistive tech still has them. Names no tool, so it
+                reads as true on an ended session's board too. */}
+            <p
+              aria-hidden="true"
+              data-board-cramped-note
+              className={`absolute inset-x-0 bottom-6 justify-center px-4 text-center text-[11px] font-medium text-rt-ink-faint ${BOARD_CRAMPED_ONLY}`}
+            >
+              Widen the board to see its controls
+            </p>
           </div>
         </div>
 

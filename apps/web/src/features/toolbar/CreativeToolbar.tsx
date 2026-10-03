@@ -29,6 +29,26 @@ export const TOOL_LABEL = '@max-[42rem]/board:hidden';
 /** Horizontal padding for a labelled tool button, tightened once it is only an icon. */
 export const TOOL_BUTTON_PAD = 'px-3.5 @max-[42rem]/board:px-2.5';
 
+/**
+ * The widest a bar that shares the bottom row with the zoom control may be: the
+ * board less the zoom control, its 24px inset, a 16px gap and the bar's own
+ * 24px inset. 18rem leaves room for the labelled zoom control (~181px); below
+ * 36rem it is icons only (~125px), so 12rem does.
+ */
+export const BAR_BESIDE_ZOOM =
+  'max-w-[calc(100cqw-18rem)] @max-[36rem]/board:max-w-[calc(100cqw-12rem)]';
+
+/**
+ * The board's last stage: too narrow to use, so the floating controls go and a
+ * one-line note says why. 24rem because the right-anchored toolbar (~165px as
+ * icons) and the zoom control (~125px), with their insets and gap, meet just
+ * under 360px. Below this nothing could be pressed without hitting the other,
+ * and the board itself is too small to place anything on.
+ */
+export const BOARD_CRAMPED_HIDDEN = '@max-[24rem]/board:hidden';
+/** The note that stands in for the controls on a board that narrow. */
+export const BOARD_CRAMPED_ONLY = 'hidden @max-[24rem]/board:flex';
+
 interface CreativeToolbarProps {
   /**
    * More ways to start a proposal, after the two built in — Reuse, today. Taken

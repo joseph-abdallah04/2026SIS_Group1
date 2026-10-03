@@ -131,6 +131,16 @@ describe('SessionArchive', () => {
       'aria-valuetext',
       '1 of 2 questions done',
     );
+    // On a board too narrow to use, the bars give way to one line saying so.
+    // jsdom applies no container queries, so the classes are the contract.
+    const toolbarRow = document.querySelector('[data-board-toolbar]');
+    const zoom = document.querySelector('[data-board-zoom]');
+    const note = document.querySelector('[data-board-cramped-note]');
+    expect(toolbarRow).toHaveClass('@max-[24rem]/board:hidden');
+    expect(zoom).toHaveClass('@max-[24rem]/board:hidden');
+    expect(note).toHaveClass('hidden', '@max-[24rem]/board:flex');
+    expect(note).toHaveAttribute('aria-hidden', 'true');
+    expect(note).toHaveTextContent('Widen the board to see its controls');
     // Resizing is a layout preference, not a write, so the archive keeps it.
     expect(screen.getByRole('separator', { name: 'Resize questions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();

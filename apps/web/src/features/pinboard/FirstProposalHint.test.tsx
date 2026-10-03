@@ -45,6 +45,20 @@ describe('FirstProposalHint', () => {
     expect(screen.getByText(TITLE)).toBeInTheDocument();
   });
 
+  // jsdom applies no container queries, so the classes are the contract: on a
+  // board where the toolbar is icons only, the bubble lines up with the
+  // toolbar's right end and grows left over the board, rather than off it.
+  it('anchors right with an icon-only toolbar, and wraps its words inside the bubble', () => {
+    render(<FirstProposalHint {...OPEN} />);
+    act(() => {
+      vi.advanceTimersByTime(HINT_DELAY_MS);
+    });
+
+    const hint = screen.getByRole('status');
+    expect(hint).toHaveClass('@max-[42rem]/board:right-0', '@max-[42rem]/board:left-auto');
+    expect(screen.getByText(TITLE).parentElement).toHaveClass('flex-1', 'wrap-break-word');
+  });
+
   it('retracts when dismissed, and is remembered as retired', () => {
     render(<FirstProposalHint {...OPEN} />);
     act(() => {
