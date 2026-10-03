@@ -72,7 +72,7 @@ export function AssistantPanel({
     inputRef.current?.focus();
   }, []);
 
-  // Escape closes this overlay first, not the whole rail — the bubble also listens.
+  // Escape closes this overlay only. The rail does not take the key.
   useEffect(() => {
     if (!setupOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {

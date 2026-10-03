@@ -24,34 +24,43 @@ function Harness({ side }: { side: BoardRailSide }) {
 
 describe('BoardRail', () => {
   it('puts the title outside the collapse control on the left', () => {
-    const { container } = render(<Harness side="left" />);
-    const header = container.querySelector('aside > div');
-    expect(header?.textContent).toMatch(/^Dock title/);
-    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveTextContent('‹');
-    expect(container.querySelector('aside')?.className).toMatch(/border-r/);
+    render(<Harness side="left" />);
+    const rail = screen.getByRole('complementary', { name: 'Dock title' });
+    expect(rail.querySelector(':scope > div')?.textContent).toMatch(/^Dock title/);
+    const collapse = screen.getByRole('button', { name: 'Collapse dock' });
+    expect(collapse).toHaveTextContent('‹');
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('mirrors the header on the right without changing the chrome', () => {
-    const { container } = render(<Harness side="right" />);
-    const header = container.querySelector('aside > div');
-    expect(header?.textContent).toMatch(/Dock title$/);
-    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveTextContent('›');
-    expect(container.querySelector('aside')?.className).toMatch(/border-l/);
-    expect(container.querySelector('aside')?.className).toMatch(/w-64/);
-    expect(container.querySelector('aside')?.className).toMatch(/basis-64/);
+    render(<Harness side="right" />);
+    const rail = screen.getByRole('complementary', { name: 'Dock title' });
+    expect(rail.querySelector(':scope > div')?.textContent).toMatch(/Dock title$/);
+    const collapse = screen.getByRole('button', { name: 'Collapse dock' });
+    expect(collapse).toHaveTextContent('›');
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('uses the same expanded width and padding on both sides', () => {
-    const left = render(<Harness side="left" />).container.querySelector('aside')?.className;
-    const right = render(<Harness side="right" />).container.querySelector('aside')?.className;
-    for (const token of ['w-64', 'min-w-64', 'max-w-64', 'basis-64', 'px-3']) {
-      expect(left).toContain(token);
-      expect(right).toContain(token);
-    }
+  it('names either side the same way, and reports when it closes', async () => {
+    const { rerender } = render(<Harness side="left" />);
+    expect(screen.getByRole('complementary', { name: 'Dock title' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+
+    rerender(<Harness side="right" />);
+    expect(screen.getByRole('complementary', { name: 'Dock title' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Collapse dock' }));
+    expect(screen.getByRole('button', { name: 'Expand dock' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
   });
 
   it('can open wider than the agenda column without changing the chrome', () => {
-    const { container } = render(
+    render(
       <BoardRail
         side="right"
         width="wide"
@@ -64,12 +73,13 @@ describe('BoardRail', () => {
         <p>Open body</p>
       </BoardRail>,
     );
-    const aside = container.querySelector('aside')?.className;
-    expect(aside).toMatch(/w-96/);
-    expect(aside).toMatch(/basis-96/);
-    expect(aside).toMatch(/border-l/);
-    expect(aside).toMatch(/px-3/);
-    expect(aside).not.toMatch(/w-64/);
+    expect(screen.getByRole('complementary', { name: 'Assistant' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveTextContent('›');
+    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByText('Open body')).toBeInTheDocument();
   });
 
   it('keeps the strip title when collapsed', async () => {

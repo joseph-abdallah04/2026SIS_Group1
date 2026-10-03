@@ -29,6 +29,11 @@ interface BoardRailProps {
   collapsedExtra?: ReactNode;
   /** The expand/collapse control, so a caller can hand focus back to it. */
   toggleRef?: Ref<HTMLButtonElement>;
+  /**
+   * Still in the layout, but not a tab stop or a click target. The ballot
+   * covers both rails and keeps this strip so the board does not change width.
+   */
+  inert?: boolean;
   children: ReactNode;
 }
 
@@ -62,6 +67,7 @@ export function BoardRail({
   collapseTitle,
   collapsedExtra,
   toggleRef,
+  inert = false,
   children,
 }: BoardRailProps) {
   const onLeft = side === 'left';
@@ -72,6 +78,8 @@ export function BoardRail({
   if (collapsed) {
     return (
       <aside
+        aria-label={title}
+        {...(inert ? { inert: '' } : {})}
         className={`box-border flex w-11 min-w-11 max-w-11 shrink-0 grow-0 basis-11 flex-col items-center gap-3 ${edge} border-rt-tertiary bg-rt-surface-alt py-3`}
       >
         <button
@@ -109,6 +117,8 @@ export function BoardRail({
 
   return (
     <aside
+      aria-label={title}
+      {...(inert ? { inert: '' } : {})}
       className={`box-border flex shrink-0 grow-0 flex-col ${EXPANDED_WIDTH[width]} ${edge} border-rt-tertiary bg-rt-surface-alt px-3`}
     >
       <div className="-mx-3 flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">

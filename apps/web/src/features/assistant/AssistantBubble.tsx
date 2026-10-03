@@ -31,8 +31,9 @@ export interface AssistantBubbleProps {
   /** The pinboard's current phase, so a locked Propose can say why it is locked. */
   questionStatus?: QuestionStatus | null;
   /**
-   * Hide the rail entirely — used while a voting ballot covers the board, so the
-   * chat is not sitting in the strip beside the vote.
+   * A ballot covers the board and both rails. The strip stays in the row, so the
+   * board does not change width under the overlay, and is marked inert so it is
+   * not something else to tab into while people are voting.
    */
   suppressed?: boolean;
 }
@@ -103,15 +104,11 @@ export function AssistantBubble({
     };
   }, []);
 
-  // Escape collapses the rail, the same way it used to dismiss the overlay.
-  useEffect(() => {
-    if (collapsed) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') collapse();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [collapse, collapsed]);
+  // Escape does not collapse this rail. It used to, when the assistant was an
+  // overlay, and that listener reached every Escape on the page: cancelling a
+  // delete, stepping back in the studio, or leaving a half-typed message. The
+  // agenda rail does not close on Escape either. The provider-setup dialog
+  // still does — that listener lives on the panel.
 
   // Collapsing destroys the control that had focus, so it would fall to <body>.
   // Hand it back to the strip button that has just appeared.
@@ -121,18 +118,21 @@ export function AssistantBubble({
     wasOpen.current = !collapsed;
   }, [collapsed]);
 
-  if (suppressed) return null;
-
+  const shownCollapsed = collapsed || suppressed;
   const expandLabel = unread ? 'Expand assistant — new answer' : 'Expand assistant';
-  const busy = chat.streaming && collapsed;
+  const busy = chat.streaming && shownCollapsed;
 
   return (
     <BoardRail
       side="right"
       width="wide"
       title="Assistant"
-      collapsed={collapsed}
-      onToggle={() => setCollapsed((open) => !open)}
+      collapsed={shownCollapsed}
+      inert={suppressed}
+      onToggle={() => {
+        if (suppressed) return;
+        setCollapsed((open) => !open);
+      }}
       expandLabel={expandLabel}
       collapseLabel="Collapse assistant"
       toggleRef={toggleRef}

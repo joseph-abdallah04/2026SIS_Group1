@@ -7,6 +7,7 @@
 import type { ArtifactJson, QuestionStatus, StickyColor } from '@roundtable/shared';
 
 import { CARD_INK, STICKY_THEMES } from '../pinboard/pinboardTokens';
+import { STICKY_FONT_SIZE, STICKY_LINE_HEIGHT } from '../tools/sticky/stickyPresentation';
 import { DiagramPreview } from './DiagramPreview';
 import type { ProposeState } from './useAssistantChat';
 
@@ -106,13 +107,14 @@ function StickyPreview({ text, color }: { text: string; color: StickyColor }) {
     >
       {/* Same anatomy as a board sticky: the note sits at the top of the paper,
           and a byline holds the bottom edge so it reads as a pad, not a swatch. */}
-      {/* Board size unless a rail overrides the variables. The session dock sets
-          them to the agenda's 12.5px so the two columns match. */}
+      {/* The fallback is the board's own size. The session dock sets the
+          variables smaller on purpose, so a preview matches the agenda rail
+          rather than the card it becomes. */}
       <p
         className="rt-assistant-sticky-text"
         style={{
-          fontSize: 'var(--rt-assistant-sticky-size, 14px)',
-          lineHeight: 'var(--rt-assistant-sticky-leading, 1.45)',
+          fontSize: `var(--rt-assistant-sticky-size, ${STICKY_FONT_SIZE}px)`,
+          lineHeight: `var(--rt-assistant-sticky-leading, ${STICKY_LINE_HEIGHT})`,
         }}
       >
         {text}
