@@ -139,7 +139,9 @@ describe('SessionArchive', () => {
     expect(toolbarRow).toHaveClass('@max-[24rem]/board:hidden');
     expect(zoom).toHaveClass('@max-[24rem]/board:hidden');
     expect(note).toHaveClass('hidden', '@max-[24rem]/board:flex');
-    expect(note).toHaveAttribute('aria-hidden', 'true');
+    // The bars leave the accessibility tree with the screen, so the note that
+    // explains their absence must not.
+    expect(note).not.toHaveAttribute('aria-hidden');
     expect(note).toHaveTextContent('Widen the board to see its controls');
     // Resizing is a layout preference, not a write, so the archive keeps it.
     expect(screen.getByRole('separator', { name: 'Resize questions' })).toBeInTheDocument();

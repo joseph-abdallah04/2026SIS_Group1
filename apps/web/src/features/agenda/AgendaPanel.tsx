@@ -62,10 +62,6 @@ const NEXT_PHASE: Partial<Record<QuestionStatus, { status: QuestionPhaseTarget; 
  */
 const AGENDA_RESIZE = { storageKey: 'agenda', label: 'Resize agenda' };
 
-function isComplete(status: QuestionStatus): boolean {
-  return status === 'answered' || status === 'skipped';
-}
-
 function statusChip(
   status: QuestionStatus,
   votingPhase?: VotingPhase,
@@ -119,7 +115,7 @@ export function AgendaPanel({
   const [draft, setDraft] = useState('');
 
   const summary = summarizeAgenda(questions);
-  const allDone = questions.length > 0 && questions.every((q) => isComplete(q.status));
+  const allDone = summary.total > 0 && summary.done === summary.total;
   const openQuestion = questions.find(
     (question) => question.status === 'discussion' || question.status === 'voting',
   );

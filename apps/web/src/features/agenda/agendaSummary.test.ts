@@ -59,7 +59,7 @@ describe('progressText', () => {
       '1 of 2 questions done',
     );
     expect(progressText(summarizeAgenda(questions('skipped', 'answered', 'pending')))).toBe(
-      '2 of 3 questions done, 1 skipped',
+      '2 of 3 questions done, including 1 skipped',
     );
     expect(progressText(summarizeAgenda(questions('answered')))).toBe('1 of 1 question done');
   });

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BoardRail, type BoardRailSide } from './BoardRail';
 import {
@@ -238,6 +238,77 @@ describe('BoardRail resize', () => {
         window.dispatchEvent(new Event('resize'));
       });
     }
+  });
+
+  // The window caps the rail, but the cap is not what the person chose: a
+  // rail left at 480 should come back to 480 when the window does.
+  describe('in a window too narrow for the width chosen', () => {
+    const resizeWindow = (width: number) =>
+      act(() => {
+        window.innerWidth = width;
+        window.dispatchEvent(new Event('resize'));
+      });
+    let original: number;
+    beforeEach(() => {
+      original = window.innerWidth;
+      localStorage.setItem(KEY, '480');
+      window.innerWidth = 700;
+    });
+    afterEach(() => {
+      window.innerWidth = original;
+    });
+    const cap = () => railMaxWidth(700);
+
+    it('keeps the preference through a press that never moved', () => {
+      render(<Harness />);
+      expect(rail().style.width).toBe(`${cap()}px`);
+      startDrag().release();
+      expect(localStorage.getItem(KEY)).toBe('480');
+
+      resizeWindow(1600);
+      expect(rail().style.width).toBe('480px');
+    });
+
+    it('keeps the preference through a drag pushed against the cap', () => {
+      render(<Harness />);
+      const drag = startDrag();
+      drag.moveBy(120);
+      expect(rail().style.width).toBe(`${cap()}px`);
+      drag.release();
+      expect(localStorage.getItem(KEY)).toBe('480');
+    });
+
+    it('keeps the preference, for this visit too, when a drag closes the rail', () => {
+      render(<Harness />);
+      const drag = startDrag();
+      drag.moveBy(-400);
+      drag.release();
+      expect(isCollapsed()).toBe(true);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Expand agenda' }));
+      resizeWindow(1600);
+      expect(rail().style.width).toBe('480px');
+      expect(localStorage.getItem(KEY)).toBe('480');
+    });
+
+    it('takes a drag that settles on a new width inside the cap as the new choice', () => {
+      render(<Harness />);
+      const drag = startDrag();
+      drag.moveBy(-40);
+      drag.release();
+      expect(localStorage.getItem(KEY)).toBe(String(cap() - 40));
+    });
+
+    it('steps the keyboard from the edge as shown, and does not store a press into the cap', () => {
+      render(<Harness />);
+      fireEvent.keyDown(handle(), { key: 'ArrowRight' });
+      fireEvent.keyDown(handle(), { key: 'End' });
+      expect(localStorage.getItem(KEY)).toBe('480');
+
+      fireEvent.keyDown(handle(), { key: 'ArrowLeft' });
+      expect(handle()).toHaveAttribute('aria-valuenow', String(cap() - 16));
+      expect(localStorage.getItem(KEY)).toBe(String(cap() - 16));
+    });
   });
 
   it('lets go of the window and the cursor when unmounted mid-drag', () => {

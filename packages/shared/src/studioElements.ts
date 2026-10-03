@@ -283,6 +283,12 @@ const ORIGIN = { x: 0, y: 0 };
  * controls — the anchors turn about the path's pivot, the anchors' centre, and
  * the handles, which are offsets from their anchor, turn as directions — and the
  * extrema search runs on that exactly as it does on an unturned one.
+ *
+ * The centreline, not the stroke's outer edge, like every element's bounds:
+ * a thick line can cross the sheet edge by half its width (3px at `thick`), as
+ * a node's border does. Widening only paths and ink would make them the odd
+ * ones out, and would nudge a line already drawn flush to the edge inward the
+ * next time it moved.
  */
 export function pathPaintedBounds(
   path: Pick<PathElement, 'anchors' | 'closed' | 'rotation'>,
@@ -308,7 +314,8 @@ export function pathPaintedBounds(
  * What a freehand stroke paints once it is turned: its points, turned about
  * the centre of their own box (the pivot `inkRotationTransform` draws with),
  * and the box around those. Not the turned box of the points — for a diagonal
- * stroke that is a square around a line.
+ * stroke that is a square around a line. Measured on the centreline, as
+ * `pathPaintedBounds` is and for the same reason.
  */
 export function inkPaintedBounds(stroke: {
   points: readonly { x: number; y: number }[];

@@ -67,6 +67,28 @@ function StepNode({ state, number }: { state: AgendaStepState; number: number })
   );
 }
 
+/**
+ * Scroll the list a step sits in just far enough to show it, and nothing else.
+ *
+ * Not `scrollIntoView`: that scrolls every ancestor that can scroll, and an
+ * `overflow: hidden` box still can from script. The board's row and the page
+ * are such boxes, so a step out of view could slide the whole session layout
+ * sideways or up. Only the list moves here, by exactly the overflow, and not
+ * at all when the step is already in view. No smoothing, so nothing glides on
+ * its own.
+ */
+export function revealInList(step: HTMLElement): void {
+  const list = step.parentElement;
+  if (!list) return;
+  const view = list.getBoundingClientRect();
+  const box = step.getBoundingClientRect();
+  if (box.top < view.top) list.scrollTop -= view.top - box.top;
+  // Below: bring its foot into view, but never push its head out of the top
+  // when it is taller than the list.
+  else if (box.bottom > view.bottom)
+    list.scrollTop += Math.min(box.bottom - view.bottom, box.top - view.top);
+}
+
 interface AgendaStepProps {
   /** One-based, for the pending node. */
   number: number;
@@ -118,10 +140,9 @@ export function AgendaStep({
 }: AgendaStepProps) {
   const stepRef = useRef<HTMLLIElement>(null);
   // A long agenda scrolls, and the board moving to a question below the fold
-  // should not leave everyone hunting for it. `nearest` only scrolls when it
-  // is out of view, and without smoothing so nothing glides on its own.
+  // should not leave everyone hunting for it.
   useEffect(() => {
-    if (focused) stepRef.current?.scrollIntoView?.({ block: 'nearest' });
+    if (focused && stepRef.current) revealInList(stepRef.current);
   }, [focused]);
 
   const finished = state === 'answered' || state === 'skipped';

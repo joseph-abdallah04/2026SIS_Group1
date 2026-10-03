@@ -48,8 +48,12 @@ export function summarizeAgenda(questions: Question[], { ended = false } = {}): 
   return { answered, skipped, done: answered + skipped, total: steps.length, steps };
 }
 
-/** "2 of 4 questions done, 1 skipped", for assistive tech. */
+/**
+ * "2 of 4 questions done, including 1 skipped", for assistive tech. "Including"
+ * because a skipped question is counted as done: "2 done, 1 skipped" could be
+ * read as three questions.
+ */
 export function progressText({ done, skipped, total }: AgendaSummary): string {
   const base = `${done} of ${total} ${total === 1 ? 'question' : 'questions'} done`;
-  return skipped > 0 ? `${base}, ${skipped} skipped` : base;
+  return skipped > 0 ? `${base}, including ${skipped} skipped` : base;
 }

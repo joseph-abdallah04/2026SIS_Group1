@@ -109,6 +109,12 @@ interface RailResize {
  * the width it had before the drag, so opening it later does not hand back
  * the squeezed version.
  *
+ * What is remembered is what the person chose, not what the window allows: a
+ * rail left at 480 shows at 280 in a small window and goes back to 480 when the
+ * window does. So the preference only changes when a drag settles somewhere
+ * new, a key moves the edge, or a double-click resets it — never because a
+ * press on a capped edge happened to land on the cap.
+ *
  * Move and release are heard on the window, not captured by the handle: the
  * handle is part of the expanded rail and unmounts when a drag closes it, and
  * the gesture has to outlive that to be able to reopen.
@@ -124,9 +130,12 @@ export function useRailResize({
   onToggle,
 }: UseRailResizeOptions): RailResize {
   const enabled = storageKey !== undefined;
-  const [width, setWidth] = useState(
+  // The width chosen, uncapped. The window's cap is applied when it is shown.
+  const [preferred, setPreferred] = useState(
     () => (storageKey ? readRailWidth(storageKey) : null) ?? RAIL_DEFAULT_WIDTH,
   );
+  // Where the edge is mid-drag. Null otherwise, so the preference shows.
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
   const [maxWidth, setMaxWidth] = useState(() => railMaxWidth(window.innerWidth));
   const [pendingClose, setPendingClose] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -152,11 +161,13 @@ export function useRailResize({
 
   const commit = useCallback(
     (next: number) => {
-      setWidth(next);
+      setPreferred(next);
       if (storageKey) writeRailWidth(storageKey, next);
     },
     [storageKey],
   );
+
+  const shown = dragWidth ?? clamp(preferred, maxWidth);
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
@@ -165,7 +176,7 @@ export function useRailResize({
       event.preventDefault();
 
       const startX = event.clientX;
-      const startWidth = clamp(width, maxWidthRef.current);
+      const startWidth = shown;
       const direction = side === 'left' ? 1 : -1;
       let current = startWidth;
       let closedByDrag = false;
@@ -193,7 +204,7 @@ export function useRailResize({
         }
         setPendingClose(raw < RAIL_MIN_WIDTH);
         current = clamp(raw, maxWidthRef.current);
-        setWidth(current);
+        setDragWidth(current);
       };
 
       const finish = () => {
@@ -205,9 +216,12 @@ export function useRailResize({
         endDrag.current = null;
         setDragging(false);
         setPendingClose(false);
-        // Closed by the drag: keep the width it had before, for next time.
-        if (closedByDrag) setWidth(startWidth);
-        else if (storageKey) writeRailWidth(storageKey, current);
+        setDragWidth(null);
+        // Only a drag that ends open somewhere new is a choice. One that closed
+        // the rail leaves the width it had for next time, and one that ended
+        // where it began (a click, or a push against the window's cap) leaves
+        // the preference alone, cap or no cap.
+        if (!closedByDrag && current !== startWidth) commit(current);
       };
 
       window.addEventListener('pointermove', onMove);
@@ -215,7 +229,7 @@ export function useRailResize({
       window.addEventListener('pointercancel', finish);
       endDrag.current = finish;
     },
-    [side, storageKey, width],
+    [commit, shown, side],
   );
 
   const onKeyDown = useCallback(
@@ -224,23 +238,26 @@ export function useRailResize({
       // "Grow" is towards the board, which is right of a left rail.
       const grow = side === 'left' ? 'ArrowRight' : 'ArrowLeft';
       const shrink = side === 'left' ? 'ArrowLeft' : 'ArrowRight';
+      // From the edge as shown, which in a capped window is not the
+      // preference: stepping from that would move nothing visible.
       let next: number;
-      if (event.key === grow) next = width + step;
-      else if (event.key === shrink) next = width - step;
+      if (event.key === grow) next = shown + step;
+      else if (event.key === shrink) next = shown - step;
       else if (event.key === 'Home') next = RAIL_MIN_WIDTH;
       else if (event.key === 'End') next = maxWidth;
       else return;
       event.preventDefault();
-      commit(clamp(next, maxWidth));
+      const clamped = clamp(next, maxWidth);
+      // Pressing into the cap is not a choice to be narrower than the preference.
+      if (clamped !== shown) commit(clamped);
     },
-    [commit, maxWidth, side, width],
+    [commit, maxWidth, shown, side],
   );
 
   const onDoubleClick = useCallback(() => commit(RAIL_DEFAULT_WIDTH), [commit]);
 
   if (!enabled) return { width: null, pendingClose: false, dragging: false, handleProps: null };
 
-  const shown = clamp(width, maxWidth);
   return {
     width: shown,
     pendingClose,

@@ -34,7 +34,7 @@ describe('AgendaProgress', () => {
     expect(segments[2]).toHaveClass('bg-rt-cool');
     expect(segments[3]).toHaveClass('bg-rt-tertiary/50');
     expect(track()).not.toHaveClass('overflow-hidden');
-    expect(screen.getByText('1 skipped')).toBeInTheDocument();
+    expect(screen.getByText('incl. 1 skipped')).toBeInTheDocument();
   });
 
   it('runs the segments together once there are too many to tell apart', () => {

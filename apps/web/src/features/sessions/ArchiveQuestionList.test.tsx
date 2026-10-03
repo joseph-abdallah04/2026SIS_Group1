@@ -38,7 +38,7 @@ describe('ArchiveQuestionList', () => {
     expect(screen.queryByText('Viewing')).not.toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Agenda progress' })).toHaveAttribute(
       'aria-valuetext',
-      '2 of 4 questions done, 1 skipped',
+      '2 of 4 questions done, including 1 skipped',
     );
   });
 

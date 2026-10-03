@@ -44,6 +44,11 @@ export const BAR_BESIDE_ZOOM =
  * icons) and the zoom control (~125px), with their insets and gap, meet just
  * under 360px. Below this nothing could be pressed without hitting the other,
  * and the board itself is too small to place anything on.
+ *
+ * `display: none`, not `sr-only`, on purpose: controls that can be tabbed to
+ * but not seen would be worse than none. They leave the accessibility tree
+ * with the screen, so the note (`BOARD_CRAMPED_ONLY`) is left readable to say
+ * why.
  */
 export const BOARD_CRAMPED_HIDDEN = '@max-[24rem]/board:hidden';
 /** The note that stands in for the controls on a board that narrow. */
@@ -67,6 +72,11 @@ interface CreativeToolbarProps {
  * strokes was a worse version of a tool already on offer. It is only the button
  * that has gone — drawings already on a board still render, and extending or
  * editing one still opens the editor that made it.
+ *
+ * The first-proposal hint's arrow points at Sticky from this bar's right edge
+ * once it is icons only, a fixed distance that counts the buttons after it
+ * (see `FirstProposalHint`). Re-derive that offset if a button is added,
+ * removed or reordered here.
  */
 export function CreativeToolbar({ children }: CreativeToolbarProps) {
   const { activeTool, isLive, openTool, submissionStatus } = useCreativeTools();

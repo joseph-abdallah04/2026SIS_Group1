@@ -1094,12 +1094,15 @@ export function PinboardCanvas({
               />
             </div>
 
-            {/* What stands in for the bars on a board too narrow to use. Not
-                a control, and not announced: the bars are only hidden from
-                sight, so assistive tech still has them. Names no tool, so it
-                reads as true on an ended session's board too. */}
+            {/* What stands in for the bars on a board too narrow to use. The
+                bars are `display: none` there, so they leave the
+                accessibility tree as well as the screen, and this is how
+                assistive tech learns why. Not a live region: it would speak
+                up on every resize across the line. Above 24rem it is
+                `display: none` itself, so it is only ever read when true.
+                Names no tool, so it reads as true on an ended session's
+                board too. */}
             <p
-              aria-hidden="true"
               data-board-cramped-note
               className={`absolute inset-x-0 bottom-6 justify-center px-4 text-center text-[11px] font-medium text-rt-ink-faint ${BOARD_CRAMPED_ONLY}`}
             >

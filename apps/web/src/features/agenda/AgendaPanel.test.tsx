@@ -126,8 +126,11 @@ describe('AgendaPanel (F24)', () => {
     const progress = screen.getByRole('progressbar', { name: 'Agenda progress' });
     expect(progress).toHaveAttribute('aria-valuenow', '2');
     expect(progress).toHaveAttribute('aria-valuemax', '4');
-    expect(progress).toHaveAttribute('aria-valuetext', '2 of 4 questions done, 1 skipped');
-    expect(screen.getByText('1 skipped')).toBeInTheDocument();
+    expect(progress).toHaveAttribute(
+      'aria-valuetext',
+      '2 of 4 questions done, including 1 skipped',
+    );
+    expect(screen.getByText('incl. 1 skipped')).toBeInTheDocument();
   });
 
   it('says so when every question is finished', () => {
@@ -170,16 +173,19 @@ describe('AgendaPanel (F24)', () => {
     expect(screen.getByText('Question 2')).not.toHaveClass('line-clamp-2');
   });
 
-  it('scrolls the question the board moves to into view', () => {
+  it('scrolls the agenda list, and only the list, to the question the board moves to', () => {
+    const { rerender } = renderPanel({
+      questions: [question(0, 'answered'), question(1, 'discussion')],
+      activeQuestionId: 'q1',
+    });
+    const step = screen.getByText('Question 2').closest('li')!;
+    const list = step.parentElement!;
+    // jsdom lays nothing out: the list shows 100–300, the step sits at 340–400.
+    list.getBoundingClientRect = () => new DOMRect(0, 100, 200, 200);
+    step.getBoundingClientRect = () => new DOMRect(0, 340, 200, 60);
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
     try {
-      const { rerender } = renderPanel({
-        questions: [question(0, 'answered'), question(1, 'discussion')],
-        activeQuestionId: 'q1',
-      });
-      scrollIntoView.mockClear();
-
       rerender(
         <AgendaPanel
           sessionId="s1"
@@ -189,9 +195,10 @@ describe('AgendaPanel (F24)', () => {
         />,
       );
 
-      expect(scrollIntoView).toHaveBeenCalledOnce();
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
-      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByText('Question 2').closest('li'));
+      // Just far enough for its foot to clear the bottom of the list.
+      expect(list.scrollTop).toBe(100);
+      // Never `scrollIntoView`, which would also scroll the page's hidden-overflow boxes.
+      expect(scrollIntoView).not.toHaveBeenCalled();
     } finally {
       delete (Element.prototype as Partial<Element>).scrollIntoView;
     }

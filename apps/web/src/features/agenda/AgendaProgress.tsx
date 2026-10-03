@@ -99,7 +99,9 @@ export function AgendaProgress({
           </span>
         )}
         {skipped > 0 ? (
-          <span className="text-[10.5px] text-rt-ink-faint tabular-nums">{skipped} skipped</span>
+          <span className="text-[10.5px] text-rt-ink-faint tabular-nums">
+            incl. {skipped} skipped
+          </span>
         ) : null}
       </div>
       <div {...meter}>
