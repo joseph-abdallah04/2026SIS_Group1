@@ -34,6 +34,7 @@ import {
   nodeBounds,
   nodeIdsInRect,
   normalizeRect,
+  placeNodePosition,
   pasteDiagramFragment,
   prepareDiagram,
   prepareNodeLabel,
@@ -1094,5 +1095,74 @@ describe('text that is typed is the text that is kept', () => {
     const prepared = prepareNodeLabel(long);
     expect(prepared.endsWith(NEWLINE)).toBe(false);
     expect(prepared.length).toBeLessThanOrEqual(DIAGRAM_LABEL_LIMIT);
+  });
+});
+
+describe('turned shapes held to the sheet by their outline', () => {
+  // A 120 x 72 ellipse turned 45 degrees reaches 49.5 from its centre, so its
+  // stored box may start 10.5 before the edge with the curve still on it.
+  const ellipse: DiagramNode = {
+    id: 'e',
+    label: '',
+    x: 400,
+    y: 300,
+    shape: 'ellipse',
+    width: 120,
+    height: 72,
+    rotation: 45,
+  };
+  const reach = 60 - Math.sqrt((60 * 60 + 36 * 36) / 2);
+
+  it('lets the curve, not the frame, meet the edge on a drag', () => {
+    const moved = moveNodesBy([ellipse], { e: { x: 400, y: 300 } }, { x: -5_000, y: 0 }, 'e')[0]!;
+    // Within a unit of the edge, never past it.
+    expect(nodeBounds(moved).x).toBeGreaterThanOrEqual(0);
+    expect(nodeBounds(moved).x).toBeLessThan(1);
+    expect(moved.x).toBeLessThan(0);
+  });
+
+  it('lets a quarter-turned box reach the edge it now stands against', () => {
+    // Stored 200 wide, it stands 100 wide; its stored corner is 50 off the
+    // sheet when its side touches the edge. The last step of the move used to
+    // clamp the stored box, which pushed it back 50 units from the edge.
+    const box: DiagramNode = {
+      id: 'b',
+      label: '',
+      x: 400,
+      y: 300,
+      shape: 'rectangle',
+      width: 200,
+      height: 100,
+      rotation: 90,
+    };
+    const moved = moveNodesBy([box], { b: { x: 400, y: 300 } }, { x: -5_000, y: 0 }, 'b')[0]!;
+    expect(moved.x).toBe(-50);
+    expect(nodeBounds(moved).x).toBe(0);
+  });
+
+  it('rounds a held position towards the sheet, not past its edge', () => {
+    const placed = placeNodePosition(
+      { x: -500, y: 200 },
+      { width: 120, height: 72 },
+      false,
+      ellipse,
+    );
+    expect(Number.isInteger(placed.x)).toBe(true);
+    expect(placed.x + reach).toBeGreaterThanOrEqual(0);
+    expect(placed.x).toBe(-10);
+  });
+
+  it('holds a turned ellipse resized against the edge by its curve', () => {
+    const atEdge: DiagramNode = { ...ellipse, x: -10 };
+    const resized = resizeNode(
+      [atEdge],
+      'e',
+      'e',
+      { x: atEdge.x, y: atEdge.y, width: 120, height: 72 },
+      { x: 40, y: 0 },
+      false,
+    )[0]!;
+    expect(resized.width).toBeGreaterThan(120);
+    expect(nodeBounds(resized).x).toBeGreaterThanOrEqual(-1e-9);
   });
 });

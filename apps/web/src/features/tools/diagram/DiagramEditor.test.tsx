@@ -17,6 +17,8 @@ import {
   diagramNodeSize,
   effectiveDiagramNodeSize,
   diagramNodeLabelLayout,
+  inkPaintedBounds,
+  rotatedBounds,
 } from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6696,9 +6698,9 @@ describe('tool shortcuts on the canvas', () => {
     expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('leaves a half-drawn shape alone', async () => {
-    // Mid-pen, P would abandon the anchors already placed. Enter and Escape are
-    // the way out of a shape, not the tool's own letter.
+  it('finishes a half-drawn path when another tool is picked by its letter', async () => {
+    // A letter is the keyboard's press on the rail, so it does what the rail
+    // does: the path in hand is kept, and the new tool is armed.
     const user = userEvent.setup();
     render(<Harness propose={propose()} />);
     const { canvas } = await openDiagram();
@@ -6706,9 +6708,28 @@ describe('tool shortcuts on the canvas', () => {
     await user.click(screen.getByRole('button', { name: 'Pen' }));
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 970, clientX: 200, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 970, clientX: 200, clientY: 200 });
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 971, clientX: 320, clientY: 260 });
+    fireEvent.pointerUp(canvas, { pointerId: 971, clientX: 320, clientY: 260 });
 
     canvas.focus();
     await user.keyboard('v');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+  });
+
+  it('keeps drawing when the letter names the tool already in hand', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 975, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 975, clientX: 200, clientY: 200 });
+
+    canvas.focus();
+    await user.keyboard('p');
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -7924,5 +7945,234 @@ describe('studio robustness fixes', () => {
         artifact.nodes[0]!.height!,
       );
     });
+  });
+});
+
+describe('changing tools part-way through', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  function clickAt(canvas: Element, pointerId: number, x: number, y: number) {
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: x, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: x, clientY: y });
+  }
+
+  it('finishes the pen path when another tool is picked on the rail', async () => {
+    // The anchors stayed on the canvas, rubber band and all, under whichever
+    // tool came next — the pen was never put down.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 1200, 100, 100);
+    clickAt(canvas, 1201, 300, 100);
+    clickAt(canvas, 1202, 300, 300);
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Text' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps the finished path selected when the tool picked is Select', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 1210, 100, 100);
+    clickAt(canvas, 1211, 300, 200);
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+    // Selected, so it can be turned straight away.
+    expect(screen.getByTestId('rotate-zone-nw')).toBeInTheDocument();
+  });
+
+  it('drops a line with only its first end down', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    clickAt(canvas, 1220, 200, 200);
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+  });
+
+  it('drops an arrow with only its first end down', async () => {
+    // Placing it would put its far end wherever the pointer left the canvas,
+    // so it goes, exactly as Escape drops it.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    clickAt(canvas, 1230, 200, 200);
+    fireEvent.pointerMove(canvas, { pointerId: 1231, clientX: 400, clientY: 300 });
+    expect(screen.getByTestId('arrow-draft')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+
+    expect(screen.queryByTestId('arrow-draft')).toBeNull();
+    expect(screen.queryByTestId('studio-arrow')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('puts an idle tool down on Escape before anything leaves', async () => {
+    // With nothing in hand the key went straight through to the studio, which
+    // closed it when all that was meant was "stop drawing".
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    canvas.focus();
+    await user.keyboard('b');
+    expect(screen.getByRole('button', { name: 'Freehand' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // The studio leaves on an Escape nothing inside it took, so whether the
+    // editor took the key is what decides. Heard after the editor's own
+    // document listener, before the studio's on the window.
+    const taken: boolean[] = [];
+    const listen = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') taken.push(event.defaultPrevented);
+    };
+    document.addEventListener('keydown', listen);
+    try {
+      fireEvent.keyDown(canvas, { key: 'Escape' });
+      expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      // With Select armed and nothing selected, Escape is left for the studio.
+      fireEvent.keyDown(canvas, { key: 'Escape' });
+    } finally {
+      document.removeEventListener('keydown', listen);
+    }
+    expect(taken).toEqual([true, false]);
+  });
+
+  it.each([
+    ['the pen', 'p'],
+    ['the line', 'l'],
+    ['the eraser', 'e'],
+  ])('hands the canvas back from %s on Escape', async (_name, key) => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    canvas.focus();
+    await user.keyboard(key);
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'false');
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('finishes the pen path on an Escape pressed outside the form', async () => {
+    // The form hears Escape first while the pen is mid-path. With focus left
+    // outside it, the document is the only one listening, and switching to
+    // Select there stranded the anchors.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    // Armed by its letter: the rail button would open the pen's panel, and
+    // Escape closing that panel is a different, earlier step.
+    canvas.focus();
+    await user.keyboard('p');
+    clickAt(canvas, 1240, 100, 100);
+    clickAt(canvas, 1241, 260, 180);
+    canvas.blur();
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('turned elements against the edge of the sheet', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('lets a turned ellipse reach the edge with its outline, not its frame', async () => {
+    // Held by the box around its turned frame, a 45-degree ellipse stopped with
+    // a visible gap between its curve and the edge.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    canvas.focus();
+    fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+    for (let press = 0; press < 60; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+    }
+
+    const node = screen.getByRole('button', { name: 'Ellipse: Unlabelled' });
+    const [x] = (node.getAttribute('transform') ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number);
+    // The stored box now hangs past the edge; the curve is what touches it.
+    // A 120 by 72 ellipse at 45 degrees reaches 49.5 from its centre, so its
+    // box can start up to 10.5 before the edge.
+    expect(x!).toBeLessThan(0);
+    expect(x!).toBeGreaterThanOrEqual(-11);
+  });
+
+  it('lets a turned diagonal stroke reach the edge with its line', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 1300, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 1300, clientX: 400, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 1300, clientX: 500, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 1300, clientX: 500, clientY: 400 });
+
+    // Turned 45 degrees, the diagonal stands nearly upright: close to a line,
+    // in a box nearly three hundred wide once the frame is turned with it.
+    canvas.focus();
+    await user.keyboard('v');
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+    fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+    // More than the whole sheet's width, so only the edge can stop it.
+    for (let press = 0; press < 130; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+    }
+
+    // Read off the canvas rather than a proposal, which is reframed on the way.
+    const numbers = (screen.getByTestId('ink-stroke').getAttribute('d') ?? '')
+      .match(/-?\d+(\.\d+)?/g)!
+      .map(Number);
+    const points: { x: number; y: number }[] = [];
+    for (let index = 0; index + 1 < numbers.length; index += 2) {
+      points.push({ x: numbers[index]!, y: numbers[index + 1]! });
+    }
+    // What it paints sits on the edge...
+    expect(inkPaintedBounds({ points, rotation: 45 })!.x).toBeCloseTo(0, 0);
+    // ...which the turned frame could never have let it reach: that frame now
+    // hangs well off the sheet.
+    expect(rotatedBounds(inkPaintedBounds({ points })!, 45).x).toBeLessThan(-20);
   });
 });

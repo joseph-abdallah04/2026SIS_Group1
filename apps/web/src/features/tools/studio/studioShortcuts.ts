@@ -59,8 +59,6 @@ export interface ShortcutContext {
   inCellMode: boolean;
   /** A proposal is in flight; changing tools would strand it. */
   submitting: boolean;
-  /** A pen or line is mid-shape. Finish it with Enter or Escape, not with P. */
-  drawing: boolean;
   /** Ctrl, Meta or Alt is held — those combinations belong to the canvas. */
   modifier: boolean;
 }
@@ -77,7 +75,8 @@ export function toolForShortcut(key: string, context: ShortcutContext): RailTool
   // Typing beats every shortcut. A letter that switched tools mid-sentence would
   // be indistinguishable from the application losing its mind.
   if (context.editingText || context.inCellMode) return null;
-  if (context.drawing) return null;
+  // A pen or line mid-shape is no reason to refuse: changing tools finishes the
+  // path in hand, the same as pressing another tool on the rail does.
   // Shift is not a modifier here — it constrains angles — but an upper-case
   // letter is still the same key, so the comparison is case-insensitive.
   return TOOL_FOR_KEY.get(key.toLowerCase()) ?? null;
