@@ -936,6 +936,11 @@ export interface SetQuestionVotingArgs {
  * F41: the leader turns one question's vote on or off mid-session. Drafts
  * set it through `updateSessionDraft` with the rest of the list.
  *
+ * Only while the session is `active`, where the agenda offers the switch. The
+ * waiting room shows the agenda read-only, and nothing is lost by waiting:
+ * starting leaves every question still pending or in discussion, where the
+ * switch works.
+ *
  * Only while the question is `pending` or `discussion`. Once it is in
  * `voting` there may be a shortlist or ballots, and turning the vote off
  * would strand them; once it is `answered` or `skipped` the record is
@@ -963,7 +968,7 @@ export async function setQuestionVoting({
     if (session.leaderId !== leaderId) {
       throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
     }
-    if (session.status !== 'active' && session.status !== 'lobby') {
+    if (session.status !== 'active') {
       throw new ApiError(
         409,
         `Cannot change the agenda of a session that is ${session.status}`,

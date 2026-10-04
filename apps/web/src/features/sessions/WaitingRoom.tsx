@@ -5,11 +5,10 @@ import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
 import { EndSessionControl } from './EndSessionControl';
 import { LeaveSessionControl } from './LeaveSessionControl';
-import { useSetQuestionVoting } from './useSetQuestionVoting';
 import { useStartSession } from './useStartSession';
 import { useWaitingRoom } from './useWaitingRoom';
 import { WaitingRoomTable } from './WaitingRoomTable';
-import { NoVoteTag, VoteToggle } from './VoteToggle';
+import { NoVoteTag } from './VoteToggle';
 
 interface WaitingRoomProps {
   session: SessionDetail;
@@ -32,13 +31,6 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
   // start of the call, not a preview of one.
   const voice = useVoiceRoom(session.id);
   const { start, starting, error: startError } = useStartSession(session.id);
-  // F41: every question is still pending here, so the leader can change which
-  // ones go to a vote before anyone has started on them.
-  const {
-    setVoting,
-    busyQuestionId: votingBusyId,
-    error: votingError,
-  } = useSetQuestionVoting(session.id);
   const isLeader = session.leaderId === useCurrentUserId();
   const joinLink = session.code ? `${window.location.origin}/join/${session.code}` : null;
 
@@ -140,25 +132,10 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
                 >
                   <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
                   <span className="flex-1 text-rt-ink">{question.text}</span>
-                  {isLeader ? (
-                    <VoteToggle
-                      size="sm"
-                      votingEnabled={question.votingEnabled}
-                      onChange={(votingEnabled) => void setVoting(question.id, votingEnabled)}
-                      label={`Vote on question ${index + 1}`}
-                      disabled={votingBusyId === question.id}
-                    />
-                  ) : question.votingEnabled ? null : (
-                    <NoVoteTag />
-                  )}
+                  {question.votingEnabled ? null : <NoVoteTag />}
                 </li>
               ))}
             </ol>
-            {votingError ? (
-              <p role="alert" className="mt-2 text-[12px] text-red-600">
-                {votingError}
-              </p>
-            ) : null}
           </div>
         </aside>
       </div>

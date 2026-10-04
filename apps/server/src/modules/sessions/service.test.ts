@@ -814,14 +814,6 @@ describe('setQuestionVoting (F41)', () => {
     );
   });
 
-  it('also works in the lobby, before the session starts', async () => {
-    sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status: 'lobby' });
-    givenRows(row(), row({ votingEnabled: false }));
-    questionUpdateMany.mockResolvedValueOnce({ count: 1 });
-
-    await expect(turnOff()).resolves.toMatchObject({ votingEnabled: false });
-  });
-
   it('is a no-op when the question already has that setting', async () => {
     sessionFindUnique.mockResolvedValueOnce(liveSession);
     questionFindUnique.mockResolvedValueOnce(row({ status: 'answered', votingEnabled: false }));
@@ -838,11 +830,16 @@ describe('setQuestionVoting (F41)', () => {
     expect(questionUpdateMany).not.toHaveBeenCalled();
   });
 
-  it.each(['draft', 'ended'] as const)('refuses while the session is %s', async (status) => {
-    sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
-    await expect(turnOff()).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
-    expect(questionUpdateMany).not.toHaveBeenCalled();
-  });
+  // The lobby too: the waiting room's agenda is read-only, so the server
+  // takes a vote change only where the live agenda offers one.
+  it.each(['draft', 'lobby', 'ended'] as const)(
+    'refuses while the session is %s',
+    async (status) => {
+      sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
+      await expect(turnOff()).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+      expect(questionUpdateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('refuses a question from another session', async () => {
     sessionFindUnique.mockResolvedValueOnce(liveSession);
