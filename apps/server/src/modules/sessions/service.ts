@@ -107,10 +107,11 @@ export async function createSession({ leaderId, input }: CreateSessionArgs): Pro
     // `position` is the array index: the order the leader arranged them in
     // is the order they play back in, with no separate reorder step for F04.
     await tx.question.createMany({
-      data: input.questions.map((text, position) => ({
+      data: input.questions.map(({ text, votingEnabled }, position) => ({
         sessionId: session.id,
         text,
         position,
+        votingEnabled,
       })),
     });
 
@@ -199,7 +200,12 @@ export async function updateSessionDraft({
 
     await tx.question.deleteMany({ where: { sessionId } });
     await tx.question.createMany({
-      data: input.questions.map((text, position) => ({ sessionId, text, position })),
+      data: input.questions.map(({ text, votingEnabled }, position) => ({
+        sessionId,
+        text,
+        position,
+        votingEnabled,
+      })),
     });
 
     const questions = await tx.question.findMany({
@@ -499,13 +505,14 @@ export async function startSession({ sessionId, leaderId }: StartSessionArgs): P
 }
 
 /**
- * Which statuses may follow which (F25). Leaving a state out of a list is the
- * rule, not an omission:
+ * Which statuses may follow which (F25) for a question that goes to a vote.
+ * Leaving a state out of a list is the rule, not an omission:
  *
  * - nothing returns to `pending`, so "un-start" a question is not expressible;
- * - `discussion -> answered` is absent because answering is what closes a
- *   vote (F30) — a leader who wants to move on without voting skips instead,
- *   which records *that* rather than inventing an answer nobody chose;
+ * - `discussion -> answered` is absent because answering a voting question is
+ *   what closes its vote (F30) — a leader who wants to move on without voting
+ *   skips instead, which records *that* rather than inventing an answer
+ *   nobody chose (or turns the vote off first, see below);
  * - `voting -> discussion` is the shortlisting escape hatch: accidental
  *   "Open voting" before the ballot is locked. Once ballots are in, the
  *   round has to close or skip — it cannot rewind;
@@ -516,6 +523,21 @@ const PHASE_TRANSITIONS: Record<QuestionStatus, readonly QuestionStatus[]> = {
   pending: ['discussion', 'skipped'],
   discussion: ['voting', 'skipped'],
   voting: ['discussion', 'answered', 'skipped'],
+  answered: [],
+  skipped: [],
+};
+
+/**
+ * The same machine for a brainstorm-only question (F41, `votingEnabled:
+ * false`). There is no vote to close, so the board itself is the answer:
+ * `discussion -> answered` is how the leader finishes it, and `voting` is
+ * never a target. `voting`'s own row cannot be reached — the flag only turns
+ * off before voting opens — and is listed so the table stays total.
+ */
+const BRAINSTORM_TRANSITIONS: Record<QuestionStatus, readonly QuestionStatus[]> = {
+  pending: ['discussion', 'skipped'],
+  discussion: ['answered', 'skipped'],
+  voting: ['discussion', 'skipped'],
   answered: [],
   skipped: [],
 };
@@ -581,7 +603,18 @@ export async function setQuestionPhase({
       return question;
     }
 
-    if (!PHASE_TRANSITIONS[question.status].includes(status)) {
+    // Its own code rather than INVALID_PHASE_TRANSITION: the leader can fix
+    // this one (turn the vote back on), and the client says so.
+    if (status === 'voting' && !question.votingEnabled) {
+      throw new ApiError(
+        409,
+        'This question is brainstorm-only — turn its vote on to open voting',
+        'VOTING_DISABLED',
+      );
+    }
+
+    const transitions = question.votingEnabled ? PHASE_TRANSITIONS : BRAINSTORM_TRANSITIONS;
+    if (!transitions[question.status].includes(status)) {
       throw new ApiError(
         409,
         `A question that is ${question.status} cannot become ${status}`,
@@ -634,14 +667,37 @@ export async function setQuestionPhase({
       }
     }
 
-    const updated = await tx.question.update({
-      where: { id: questionId },
+    // Written only if the question is still as it was read: same status, same
+    // vote choice (F41). Everything above was decided on that read, and the
+    // transaction alone does not hold it still — under Postgres's default
+    // isolation, `setQuestionVoting` or a second phase change can commit in
+    // between. Writing by id alone, "Open voting" could then land on a
+    // question whose vote was just turned off, and the room would vote on a
+    // brainstorm. A miss is a conflict, not a write.
+    const written = await tx.question.updateMany({
+      where: { id: questionId, status: question.status, votingEnabled: question.votingEnabled },
       data: {
         status,
         ...(status === 'discussion' ? { discussionStartedAt: new Date() } : {}),
       },
-      select: QUESTION_REF_SELECT,
     });
+    if (written.count === 0) {
+      const current = await tx.question.findUnique({
+        where: { id: questionId },
+        select: QUESTION_REF_SELECT,
+      });
+      // Lost to the same move from elsewhere (a double-click across two tabs):
+      // the same no-op as a repeated click above.
+      if (current?.status === status) return current;
+      throw new ApiError(
+        409,
+        'This question changed while you were moving it — check the agenda and try again',
+        'QUESTION_CHANGED',
+      );
+    }
+    // The write matched the row as read, so that row with its new status is
+    // what now stands.
+    const updated: QuestionRef = { ...question, status };
 
     // Drop an unfinished shortlist so a later "Open voting" does not revive
     // ticks from the attempt the leader backed out of.
@@ -797,18 +853,21 @@ export interface AddSessionQuestionArgs {
   leaderId: string;
   /** Already validated by the caller against `addSessionQuestionSchema`. */
   text: string;
+  /** F41: false appends a brainstorm-only question. */
+  votingEnabled: boolean;
 }
 
 /**
  * Append one pending question to a live agenda. Drafts still go through
  * `updateSessionDraft` (replace the whole list); ended sessions are frozen.
  * Position is the next index after whatever is already there — the client
- * only sends the text.
+ * only sends the text and whether it goes to a vote.
  */
 export async function addSessionQuestion({
   sessionId,
   leaderId,
   text,
+  votingEnabled,
 }: AddSessionQuestionArgs): Promise<Question> {
   return prisma.$transaction(async (tx) => {
     const session = await tx.session.findUnique({
@@ -852,6 +911,7 @@ export async function addSessionQuestion({
         text,
         position: (last?.position ?? -1) + 1,
         status: 'pending',
+        votingEnabled,
       },
       select: { ...QUESTION_REF_SELECT, createdAt: true },
     });
@@ -860,6 +920,129 @@ export async function addSessionQuestion({
 
 export function emitQuestionAdded(io: RealtimeServer, question: Question): void {
   io.to(sessionRoom(question.sessionId)).emit('questionAdded', {
+    sessionId: question.sessionId,
+    question,
+  });
+}
+
+export interface SetQuestionVotingArgs {
+  sessionId: string;
+  questionId: string;
+  leaderId: string;
+  votingEnabled: boolean;
+}
+
+/**
+ * F41: the leader turns one question's vote on or off mid-session. Drafts
+ * set it through `updateSessionDraft` with the rest of the list.
+ *
+ * Only while the session is `active`, where the agenda offers the switch. The
+ * waiting room shows the agenda read-only, and nothing is lost by waiting:
+ * starting leaves every question still pending or in discussion, where the
+ * switch works.
+ *
+ * Only while the question is `pending` or `discussion`. Once it is in
+ * `voting` there may be a shortlist or ballots, and turning the vote off
+ * would strand them; once it is `answered` or `skipped` the record is
+ * written, and changing the flag would relabel a past decision.
+ *
+ * The write is conditional, not by id alone: the transaction does not stop an
+ * "Open voting" or "Finish discussion" committing between the status check
+ * and the write. `setQuestionPhase` guards its write the same way, so
+ * whichever of the two lands second sees the other and backs off.
+ */
+export async function setQuestionVoting({
+  sessionId,
+  questionId,
+  leaderId,
+  votingEnabled,
+}: SetQuestionVotingArgs): Promise<Question> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: { leaderId: true, status: true },
+    });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.leaderId !== leaderId) {
+      throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+    }
+    if (session.status !== 'active') {
+      throw new ApiError(
+        409,
+        `Cannot change the agenda of a session that is ${session.status}`,
+        'INVALID_TRANSITION',
+      );
+    }
+
+    const question = await tx.question.findUnique({
+      where: { id: questionId },
+      select: { ...QUESTION_REF_SELECT, createdAt: true },
+    });
+    if (!question || question.sessionId !== sessionId) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+
+    // Before the status check, so a double-clicked toggle is a no-op rather
+    // than an error — same rule as `setQuestionPhase`.
+    if (question.votingEnabled === votingEnabled) {
+      return question;
+    }
+
+    if (!canChangeVote(question.status)) {
+      throw votingLocked(question.status);
+    }
+
+    // Only while it is still not voting, and still has the choice this request
+    // is flipping. Starting the discussion in between is fine — the switch is
+    // allowed there too — but voting opening, or the question finishing, is
+    // not: writing then would put a brainstorm in `voting`, or turn the vote
+    // back on for one already answered, and drop its ideas from the recap.
+    const written = await tx.question.updateMany({
+      where: {
+        id: questionId,
+        status: { in: VOTE_CHANGEABLE },
+        votingEnabled: question.votingEnabled,
+      },
+      data: { votingEnabled },
+    });
+    const current = await tx.question.findUnique({
+      where: { id: questionId },
+      select: { ...QUESTION_REF_SELECT, createdAt: true },
+    });
+    if (!current) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+    // Lost the race. The same switch landing from elsewhere is the no-op
+    // path; otherwise the question moved on after the check above.
+    if (written.count === 0 && current.votingEnabled !== votingEnabled) {
+      throw votingLocked(current.status);
+    }
+    return current;
+  });
+}
+
+/** F41: the statuses a question's vote can still change in — before voting opens. */
+const VOTE_CHANGEABLE: QuestionStatus[] = ['pending', 'discussion'];
+
+function canChangeVote(status: QuestionStatus): boolean {
+  return VOTE_CHANGEABLE.includes(status);
+}
+
+function votingLocked(status: QuestionStatus): ApiError {
+  return new ApiError(
+    409,
+    status === 'voting'
+      ? 'Voting has already opened on this question'
+      : `A question that is ${status} cannot change its vote`,
+    'QUESTION_VOTING_LOCKED',
+  );
+}
+
+/** F41's `questionUpdated`. Same shape as `emitQuestionAdded`. */
+export function emitQuestionUpdated(io: RealtimeServer, question: Question): void {
+  io.to(sessionRoom(question.sessionId)).emit('questionUpdated', {
     sessionId: question.sessionId,
     question,
   });
@@ -1292,6 +1475,8 @@ export interface QuestionRef {
   status: Question['status'];
   /** Whether only the leader may move proposals around this question's board. */
   boardLocked: boolean;
+  /** F41: false = brainstorm-only; picks the phase table and hides voting. */
+  votingEnabled: boolean;
 }
 
 /** Every read that returns a `QuestionRef` selects exactly these columns. */
@@ -1302,6 +1487,7 @@ const QUESTION_REF_SELECT = {
   position: true,
   status: true,
   boardLocked: true,
+  votingEnabled: true,
 } as const;
 
 /**

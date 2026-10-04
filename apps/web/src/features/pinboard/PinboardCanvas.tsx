@@ -135,6 +135,11 @@ interface PinboardCanvasProps {
   readOnly?: boolean;
   /** The way back to the recap, in the header slot End/Leave uses live. */
   archiveActions?: ReactNode;
+  /**
+   * F41: false when the question on screen is brainstorm-only, so the header
+   * tells the room up front that no vote is coming. Defaults to a vote.
+   */
+  questionVotingEnabled?: boolean;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -145,6 +150,12 @@ const PHASE_LABELS: Record<QuestionStatus, string> = {
   voting: 'Voting',
   answered: 'Answered',
   skipped: 'Skipped',
+};
+
+/** F41: the two phases a brainstorm-only question reads differently in. */
+const BRAINSTORM_PHASE_LABELS: Partial<Record<QuestionStatus, string>> = {
+  discussion: 'Brainstorming',
+  answered: 'Discussed',
 };
 
 function ZoomControl({
@@ -243,6 +254,7 @@ export function PinboardCanvas({
   onSelectProposal,
   readOnly = false,
   archiveActions,
+  questionVotingEnabled = true,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   // A message for the pill over the toolbar. The id makes the same words said
@@ -651,12 +663,23 @@ export function PinboardCanvas({
   // than tiling out over the surrounding desk.
   const dotBackground = `radial-gradient(${DOT_COLOR} ${DOT_RADIUS}px, transparent ${DOT_RADIUS}px)`;
 
+  // An ended brainstorm left in discussion was discussed, not still going
+  // (F41) — the same reading as the archive's agenda beside it.
+  const brainstormLabel =
+    readOnly && board.questionStatus === 'discussion'
+      ? 'Discussed'
+      : board.questionStatus
+        ? BRAINSTORM_PHASE_LABELS[board.questionStatus]
+        : undefined;
   // Human wording, not the raw enum: "Q2 · pending" reads as a bug, and the
   // difference between the phases is the difference between the board taking
   // proposals and not (F25).
   const phaseLabel =
     board.questionPosition != null && board.questionStatus
-      ? `Q${board.questionPosition + 1} · ${PHASE_LABELS[board.questionStatus]}`
+      ? `Q${board.questionPosition + 1} · ${
+          (questionVotingEnabled ? undefined : brainstormLabel) ??
+          PHASE_LABELS[board.questionStatus]
+        }`
       : // No active question at all: every question has been answered or
         // skipped, so the agenda is done and the leader's move is to end it.
         'Agenda complete';

@@ -307,9 +307,10 @@ function describeAgenda(agenda: Agenda): ToolOutcome {
 
   // Formatted as the session-context block formats it, so the agenda does not appear to
   // have changed shape between the prompt the model was given and the tool it just called.
+  // A brainstorm question (F41) is tagged so the model never expects a vote on it.
   const lines = agenda.questions.map(
     (question) =>
-      `${question.number}. [${question.status}] ${question.text}${question.isCurrent ? ' ← the team is on this one now' : ''}`,
+      `${question.number}. [${question.status}${question.votingEnabled ? '' : ', brainstorm only'}] ${question.text}${question.isCurrent ? ' ← the team is on this one now' : ''}`,
   );
 
   return {
@@ -363,6 +364,9 @@ function describeAnswers(data: SessionLookupData): ToolOutcome {
   const lines = answers.map(({ question, winner }) => {
     if (question.status === 'skipped') {
       return `${question.number}. "${question.text}" — skipped, never answered.`;
+    }
+    if (!question.votingEnabled) {
+      return `${question.number}. "${question.text}" — discussed as a brainstorm; no vote was taken, so no single proposal was chosen.`;
     }
     if (!winner) {
       return `${question.number}. "${question.text}" — answered, but no single proposal won (a tie, or the winner has since been removed).`;

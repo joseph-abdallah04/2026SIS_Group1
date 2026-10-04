@@ -4,6 +4,7 @@ import {
   DISCUSSION_TIMER_MAX_SECONDS,
   VOTING_TIMER_MAX_SECONDS,
   type CreateSessionInput,
+  type SessionQuestionInput,
   type TimerDurationParts,
 } from '@roundtable/shared/schemas';
 
@@ -13,10 +14,11 @@ import {
   TimerDurationFields,
   timerPartsFromSeconds,
 } from './TimerDurationFields';
+import { VoteToggle } from './VoteToggle';
 
 interface SessionQuestionsFormProps {
   initialTitle?: string;
-  initialQuestions?: string[];
+  initialQuestions?: SessionQuestionInput[];
   initialDiscussionTimerSeconds?: number | null;
   initialVotingTimerSeconds?: number | null;
   submitLabel: string;
@@ -30,6 +32,11 @@ interface SessionQuestionsFormProps {
 
 const ZERO_DURATION: TimerDurationParts = { hours: 0, minutes: 0, seconds: 0 };
 
+/** A fresh row is a voting question — what every question was before F41. */
+function blankQuestion(): SessionQuestionInput {
+  return { text: '', votingEnabled: true };
+}
+
 /**
  * The title + ordered-questions editor shared by F04 (create) and F05 (edit
  * a draft) — the shape is identical (`createSessionSchema` doubles as
@@ -37,11 +44,12 @@ const ZERO_DURATION: TimerDurationParts = { hours: 0, minutes: 0, seconds: 0 };
  * component with the persistence decided by the caller's `onSubmit`, not two
  * near-duplicates. Order here is exactly the order the server assigns as
  * `position` — no separate reorder step, so moving a row up/down before
- * submitting is the whole UI for it.
+ * submitting is the whole UI for it. Each row carries its own vote choice
+ * (F41), so it travels with the text when the row moves.
  */
 export function SessionQuestionsForm({
   initialTitle = '',
-  initialQuestions = [''],
+  initialQuestions = [blankQuestion()],
   initialDiscussionTimerSeconds = null,
   initialVotingTimerSeconds = null,
   submitLabel,
@@ -52,8 +60,8 @@ export function SessionQuestionsForm({
   extraActions,
 }: SessionQuestionsFormProps) {
   const [title, setTitle] = useState(initialTitle);
-  const [questions, setQuestions] = useState<string[]>(
-    initialQuestions.length > 0 ? initialQuestions : [''],
+  const [questions, setQuestions] = useState<SessionQuestionInput[]>(
+    initialQuestions.length > 0 ? initialQuestions : [blankQuestion()],
   );
   const [discussionTimer, setDiscussionTimer] = useState(
     () => timerPartsFromSeconds(initialDiscussionTimerSeconds) ?? ZERO_DURATION,
@@ -63,14 +71,19 @@ export function SessionQuestionsForm({
   );
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const ready = title.trim().length > 0 && questions.some((question) => question.trim().length > 0);
+  const ready =
+    title.trim().length > 0 && questions.some((question) => question.text.trim().length > 0);
 
   function updateQuestion(index: number, text: string) {
-    setQuestions((prev) => prev.map((q, i) => (i === index ? text : q)));
+    setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, text } : q)));
+  }
+
+  function setQuestionVoting(index: number, votingEnabled: boolean) {
+    setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, votingEnabled } : q)));
   }
 
   function addQuestion() {
-    setQuestions((prev) => [...prev, '']);
+    setQuestions((prev) => [...prev, blankQuestion()]);
   }
 
   function removeQuestion(index: number) {
@@ -101,7 +114,9 @@ export function SessionQuestionsForm({
 
     const parsed = createSessionSchema.safeParse({
       title,
-      questions: questions.map((q) => q.trim()).filter((q) => q.length > 0),
+      questions: questions
+        .map((q) => ({ ...q, text: q.text.trim() }))
+        .filter((q) => q.text.length > 0),
       discussionTimerSeconds: secondsFromTimerParts(discussionTimer),
       votingTimerSeconds: secondsFromTimerParts(votingTimer),
     });
@@ -133,6 +148,10 @@ export function SessionQuestionsForm({
 
       <div className="flex flex-col gap-2">
         <span className="text-[13px] font-semibold text-rt-ink">Questions (in order)</span>
+        <p className="text-[12px] leading-relaxed text-rt-ink-muted">
+          Turn off Vote for a brainstorm-only question: the team adds ideas, and nobody is asked to
+          vote.
+        </p>
         <div className="flex flex-col gap-2">
           {questions.map((question, index) => (
             <div key={index} className="flex items-center gap-2">
@@ -142,11 +161,16 @@ export function SessionQuestionsForm({
               <input
                 autoComplete="off"
                 type="text"
-                value={question}
+                value={question.text}
                 onChange={(e) => updateQuestion(index, e.target.value)}
                 placeholder={`Question ${index + 1}`}
                 maxLength={500}
-                className="min-h-10 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
+                className="min-h-10 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
+              />
+              <VoteToggle
+                votingEnabled={question.votingEnabled}
+                onChange={(votingEnabled) => setQuestionVoting(index, votingEnabled)}
+                label={`Vote on question ${index + 1}`}
               />
               <button
                 type="button"
@@ -204,7 +228,7 @@ export function SessionQuestionsForm({
             maxSeconds={VOTING_TIMER_MAX_SECONDS}
             value={votingTimer}
             onChange={setVotingTimer}
-            hint="Starts when the ballot opens. When it hits zero, voting ends and everyone sees the result. The leader then continues."
+            hint="Starts when the ballot opens, on questions with Vote on. When it hits zero, voting ends and everyone sees the result. The leader then continues."
           />
         </div>
       </fieldset>

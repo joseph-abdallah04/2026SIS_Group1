@@ -205,6 +205,7 @@ describe('look_up_session', () => {
       id: 'q1',
       text: 'What ships first?',
       status: 'discussion',
+      votingEnabled: true,
       isCurrent: true,
       ...overrides,
     };
@@ -310,6 +311,30 @@ describe('look_up_session', () => {
 
     expect(outcome.modelText).toContain('answered with [sticky] Flaky CI, by Ada');
     expect(outcome.modelText).toContain('skipped, never answered');
+  });
+
+  // F41: "answered with no winner" would read as a tie. A brainstorm had no vote at all.
+  it('describes a brainstorm-only question as discussed, not as a vote nobody won', () => {
+    const brainstorm = question({
+      number: 1,
+      id: 'q1',
+      text: 'What could we try?',
+      status: 'answered',
+      votingEnabled: false,
+      isCurrent: false,
+    });
+    const answers = runLookUpSession(
+      { what: 'answers' },
+      data({ answers: [{ question: brainstorm, winner: null }] }),
+    );
+    expect(answers.modelText).toContain('discussed as a brainstorm; no vote was taken');
+    expect(answers.modelText).not.toContain('tie');
+
+    const agenda = runLookUpSession(
+      { what: 'agenda' },
+      data({ agenda: { ...AGENDA, questions: [brainstorm] } }),
+    );
+    expect(agenda.modelText).toContain('1. [answered, brainstorm only] What could we try?');
   });
 
   it('says plainly when nothing has been settled yet', () => {

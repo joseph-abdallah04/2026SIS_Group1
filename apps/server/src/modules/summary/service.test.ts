@@ -31,6 +31,7 @@ const ENDED = {
       text: 'What ships first?',
       position: 0,
       status: 'answered' as const,
+      votingEnabled: true,
     },
     {
       id: 'q2',
@@ -38,6 +39,7 @@ const ENDED = {
       text: 'What can wait?',
       position: 1,
       status: 'skipped' as const,
+      votingEnabled: true,
     },
   ],
 };
@@ -128,5 +130,50 @@ describe('getSessionSummary', () => {
       winnerProposalId: null,
       proposals: [],
     });
+  });
+
+  // F41: a brainstorm question has no vote, so its recap is the whole board.
+  it('lists every idea on a discussed brainstorm question, with no vote result', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[0]!, votingEnabled: false }],
+    });
+    getSessionVoteOutcomes.mockResolvedValue([]);
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]).toMatchObject({
+      id: 'q1',
+      status: 'answered',
+      votingEnabled: false,
+      winnerProposalId: null,
+      tiedProposalIds: [],
+      tallies: [],
+      votedCount: 0,
+    });
+    expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('counts a brainstorm the session ended on mid-discussion', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[0]!, status: 'discussion' as const, votingEnabled: false }],
+    });
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]?.proposals).toHaveLength(3);
+  });
+
+  it('does not read the board of a skipped brainstorm question', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[1]!, votingEnabled: false }],
+    });
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]).toMatchObject({ status: 'skipped', proposals: [] });
+    expect(listProposals).not.toHaveBeenCalled();
   });
 });

@@ -45,6 +45,26 @@ export async function getSessionSummary(
 
   const questions: SessionRecapQuestion[] = await Promise.all(
     session.questions.map(async (question) => {
+      // F41: a brainstorm question has no vote to report, so its recap is
+      // the ideas themselves — every one on its board, not a shortlist.
+      // Only once it was actually discussed: a skipped or unreached
+      // brainstorm reads the same as a skipped or unreached vote.
+      if (!question.votingEnabled) {
+        const discussed = question.status === 'answered' || question.status === 'discussion';
+        return {
+          id: question.id,
+          position: question.position,
+          text: question.text,
+          status: question.status,
+          votingEnabled: false,
+          proposals: discussed ? await listProposals(question.id) : [],
+          winnerProposalId: null,
+          tiedProposalIds: [],
+          tallies: [],
+          votedCount: 0,
+        };
+      }
+
       const outcome = outcomeByQuestion.get(question.id);
       const shortlistedIds = (outcome?.proposalIds ?? []).slice(0, SHORTLIST_MAX);
       const board = shortlistedIds.length > 0 ? await listProposals(question.id) : [];
@@ -58,6 +78,7 @@ export async function getSessionSummary(
         position: question.position,
         text: question.text,
         status: question.status,
+        votingEnabled: true,
         proposals,
         winnerProposalId: outcome?.winnerProposalId ?? null,
         tiedProposalIds: outcome?.tiedProposalIds ?? [],

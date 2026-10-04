@@ -77,6 +77,7 @@ const SESSION: SessionDetail = {
       text: 'What next?',
       position: 1,
       status: 'discussion',
+      votingEnabled: true,
       createdAt: new Date('2026-09-01T00:00:00.000Z'),
     },
     {
@@ -85,6 +86,7 @@ const SESSION: SessionDetail = {
       text: 'What ships first?',
       position: 0,
       status: 'answered',
+      votingEnabled: true,
       createdAt: new Date('2026-09-01T00:00:00.000Z'),
     },
   ],
@@ -161,6 +163,27 @@ describe('SessionArchive', () => {
       '/api/sessions/s1/proposals?questionId=q1',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  // F41: a brainstorm was never going to be voted on, so it is not "Not voted on".
+  it('labels brainstorm-only questions Discussed, in the list and on the board', async () => {
+    render(
+      <MemoryRouter initialEntries={['/sessions/s1?view=boards&question=q1']}>
+        <SessionArchive
+          session={{
+            ...SESSION,
+            questions: SESSION.questions.map((question) => ({ ...question, votingEnabled: false })),
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Ship the pinboard')).toBeInTheDocument();
+    expect(screen.getAllByText('Discussed')).toHaveLength(2);
+    expect(screen.queryByText('Not voted on')).not.toBeInTheDocument();
+    expect(screen.queryByText('Answered')).not.toBeInTheDocument();
+    // Ended mid-discussion: discussed, like the agenda beside it says.
+    expect(screen.getByText('Q1 · Discussed')).toBeInTheDocument();
   });
 
   it('loads the next question when it is chosen, in agenda order', async () => {

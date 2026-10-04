@@ -5,7 +5,9 @@ import type { Question, QuestionStatus } from '@roundtable/shared';
  *
  * `live` is the question the room is working on: being discussed or voted on.
  * In an ended session nothing is live any more, and a question that was left
- * open simply was not finished, so it counts as `pending`.
+ * open simply was not finished, so it counts as `pending` — except a
+ * brainstorm-only one (F41) left in discussion: it had no vote to reach, and
+ * its ideas are its outcome, so it was discussed.
  */
 export type AgendaStepState = 'answered' | 'skipped' | 'live' | 'pending';
 
@@ -21,13 +23,19 @@ export interface AgendaSummary {
 /** Past this many questions a segment each gets too thin to read as one. */
 export const SEGMENTED_MAX = 16;
 
-export function stepState(status: QuestionStatus, ended = false): AgendaStepState {
+export function stepState(
+  status: QuestionStatus,
+  ended = false,
+  votingEnabled = true,
+): AgendaStepState {
   switch (status) {
     case 'answered':
       return 'answered';
     case 'skipped':
       return 'skipped';
     case 'discussion':
+      if (ended && !votingEnabled) return 'answered';
+      return ended ? 'pending' : 'live';
     case 'voting':
       return ended ? 'pending' : 'live';
     default:
@@ -42,7 +50,9 @@ export function stepState(status: QuestionStatus, ended = false): AgendaStepStat
  * without the session going backwards.
  */
 export function summarizeAgenda(questions: Question[], { ended = false } = {}): AgendaSummary {
-  const steps = questions.map((question) => stepState(question.status, ended));
+  const steps = questions.map((question) =>
+    stepState(question.status, ended, question.votingEnabled),
+  );
   const answered = steps.filter((step) => step === 'answered').length;
   const skipped = steps.filter((step) => step === 'skipped').length;
   return { answered, skipped, done: answered + skipped, total: steps.length, steps };
