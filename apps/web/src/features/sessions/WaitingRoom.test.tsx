@@ -1,9 +1,14 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SessionDetail } from './useSessionDetail';
 
 const start = vi.fn();
+const setVoting = vi.fn();
+/** Who is looking at the lobby. The leader unless a test says otherwise. */
+let viewerId = 'leader-1';
 
 /**
  * The voice room, as this lobby sees it. Mutable so a test can say "nobody has
@@ -59,12 +64,16 @@ vi.mock('./useStartSession', () => ({
   useStartSession: () => ({ start, starting: false, error: null }),
 }));
 
+vi.mock('./useSetQuestionVoting', () => ({
+  useSetQuestionVoting: () => ({ setVoting, busyQuestionId: null, error: null }),
+}));
+
 vi.mock('./useEndSession', () => ({
   useEndSession: () => ({ end: vi.fn(), ending: false, error: null }),
 }));
 
 vi.mock('../../lib/currentUser', () => ({
-  useCurrentUserId: () => 'leader-1',
+  useCurrentUserId: () => viewerId,
 }));
 
 const { WaitingRoom } = await import('./WaitingRoom');
@@ -96,6 +105,8 @@ const session: SessionDetail = {
 describe('WaitingRoom', () => {
   beforeEach(() => {
     start.mockReset();
+    setVoting.mockReset();
+    viewerId = 'leader-1';
     voice = freshVoice();
   });
 
@@ -109,6 +120,35 @@ describe('WaitingRoom', () => {
     expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Joey, Leader' })).toBeInTheDocument();
     expect(screen.queryByRole('listitem', { name: 'Joey' })).not.toBeInTheDocument();
+  });
+
+  // F41: nothing has started yet, so the leader can still change which
+  // questions go to a vote; everyone else sees which ones will not.
+  it('lets the leader turn a question into a brainstorm before starting', async () => {
+    render(<WaitingRoom session={session} onStarted={() => undefined} />);
+
+    const toggle = screen.getByRole('button', { name: 'Vote on question 1' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(toggle);
+
+    expect(setVoting).toHaveBeenCalledWith('q1', false);
+  });
+
+  it('shows a member which questions will not be voted on, with no switch', () => {
+    viewerId = 'u2';
+    const brainstorm = {
+      ...session,
+      questions: session.questions.map((question) => ({ ...question, votingEnabled: false })),
+    };
+    // A member's header has Leave instead of End, and Leave navigates.
+    render(
+      <MemoryRouter>
+        <WaitingRoom session={brainstorm} onStarted={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('No vote')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Vote on question/ })).not.toBeInTheDocument();
   });
 
   it('offers the microphone from the header, so the wait is a conversation', () => {

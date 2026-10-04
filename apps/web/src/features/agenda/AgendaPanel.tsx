@@ -213,7 +213,12 @@ export function AgendaPanel({
                 (next !== undefined ||
                   stillShortlisting ||
                   (question.status === 'voting' && canSkipVote));
-              const busy = phaseBusyId === question.id;
+              // One request per question at a time: a phase change and the vote
+              // switch (F41) both decide on the same row, so each waits for the
+              // other. The server refuses whichever loses a race anyway; this
+              // keeps the leader from starting one.
+              const phaseBusy = phaseBusyId === question.id;
+              const busy = phaseBusy || votingBusyId === question.id;
               const openVotingBlocked = next?.status === 'voting' && hasProposals === false;
               // The board is showing this one while another is still in play:
               // said out loud, so nobody mistakes the old board for the live one.
@@ -226,7 +231,7 @@ export function AgendaPanel({
                   votingEnabled={question.votingEnabled}
                   onChange={(votingEnabled) => void setVoting(question.id, votingEnabled)}
                   label={`Vote on question ${index + 1}`}
-                  disabled={votingBusyId === question.id}
+                  disabled={busy}
                 />
               ) : question.votingEnabled ? null : (
                 <AgendaChip tone="outline">No vote</AgendaChip>
@@ -283,7 +288,7 @@ export function AgendaPanel({
                             }
                             className="w-full rounded-full bg-rt-secondary px-3 py-1.5 text-[11.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60"
                           >
-                            {busy ? 'Working…' : next.label}
+                            {phaseBusy ? 'Working…' : next.label}
                           </button>
                           {openVotingBlocked ? (
                             <p className="text-[10.5px] leading-snug text-rt-ink-faint">

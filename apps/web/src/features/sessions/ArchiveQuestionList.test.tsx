@@ -56,6 +56,11 @@ describe('ArchiveQuestionList', () => {
     expect(screen.getAllByText('Discussed')).toHaveLength(2);
     expect(screen.queryByText('Answered')).not.toBeInTheDocument();
     expect(screen.queryByText('Not voted on')).not.toBeInTheDocument();
+    // The node and the progress count agree with the chip: both are done.
+    expect(screen.getByRole('progressbar', { name: 'Agenda progress' })).toHaveAttribute(
+      'aria-valuetext',
+      '2 of 2 questions done',
+    );
   });
 
   it('opens any question but the one already showing', async () => {

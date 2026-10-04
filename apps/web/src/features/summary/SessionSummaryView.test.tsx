@@ -179,4 +179,30 @@ describe('SessionSummaryView', () => {
       screen.queryByText('Nothing was shortlisted for this question.'),
     ).not.toBeInTheDocument();
   });
+
+  // Same reading as the archive's agenda: no vote to reach, so it was discussed.
+  it('labels a brainstorm the session ended on mid-discussion Discussed, ideas or not', () => {
+    render(
+      <SessionSummaryView
+        summary={{
+          ...RECAP,
+          questions: [
+            {
+              ...RECAP.questions[0]!,
+              status: 'discussion',
+              votingEnabled: false,
+              proposals: [],
+              winnerProposalId: null,
+              tallies: [],
+              votedCount: 0,
+            },
+          ],
+        }}
+        viewerId="u2"
+      />,
+    );
+
+    expect(screen.getByText('Discussed')).toBeInTheDocument();
+    expect(screen.getByText('No ideas were added.')).toBeInTheDocument();
+  });
 });

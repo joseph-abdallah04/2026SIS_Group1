@@ -663,13 +663,21 @@ export function PinboardCanvas({
   // than tiling out over the surrounding desk.
   const dotBackground = `radial-gradient(${DOT_COLOR} ${DOT_RADIUS}px, transparent ${DOT_RADIUS}px)`;
 
+  // An ended brainstorm left in discussion was discussed, not still going
+  // (F41) — the same reading as the archive's agenda beside it.
+  const brainstormLabel =
+    readOnly && board.questionStatus === 'discussion'
+      ? 'Discussed'
+      : board.questionStatus
+        ? BRAINSTORM_PHASE_LABELS[board.questionStatus]
+        : undefined;
   // Human wording, not the raw enum: "Q2 · pending" reads as a bug, and the
   // difference between the phases is the difference between the board taking
   // proposals and not (F25).
   const phaseLabel =
     board.questionPosition != null && board.questionStatus
       ? `Q${board.questionPosition + 1} · ${
-          (questionVotingEnabled ? undefined : BRAINSTORM_PHASE_LABELS[board.questionStatus]) ??
+          (questionVotingEnabled ? undefined : brainstormLabel) ??
           PHASE_LABELS[board.questionStatus]
         }`
       : // No active question at all: every question has been answered or

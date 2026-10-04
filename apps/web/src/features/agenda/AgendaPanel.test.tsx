@@ -619,6 +619,26 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     ).toBeInTheDocument();
   });
 
+  // Both decide on the same row, so the leader cannot start one while the
+  // other is still on its way (the server also refuses whichever loses).
+  it('holds Open voting while the vote switch is still being saved', async () => {
+    patch.mockReturnValueOnce(new Promise(() => {}));
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Vote on question 1' }));
+
+    expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
+  });
+
+  it('holds the vote switch while a phase change is still being saved', async () => {
+    post.mockReturnValueOnce(new Promise(() => {}));
+    renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Finish discussion' }));
+
+    expect(screen.getByRole('button', { name: 'Vote on question 1' })).toBeDisabled();
+  });
+
   it('adds a brainstorm-only question when the leader turns its vote off first', async () => {
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 

@@ -29,6 +29,13 @@ describe('stepState', () => {
     expect(stepState('voting', true)).toBe('pending');
     expect(stepState('answered', true)).toBe('answered');
   });
+
+  // F41: a brainstorm has no vote to reach — its ideas are the outcome.
+  it('counts a brainstorm left in discussion as discussed once the session has ended', () => {
+    expect(stepState('discussion', true, false)).toBe('answered');
+    expect(stepState('discussion', false, false)).toBe('live');
+    expect(stepState('pending', true, false)).toBe('pending');
+  });
 });
 
 describe('summarizeAgenda', () => {
@@ -46,6 +53,15 @@ describe('summarizeAgenda', () => {
   it('has nothing live in an ended session', () => {
     const summary = summarizeAgenda(questions('answered', 'discussion'), { ended: true });
     expect(summary.steps).toEqual(['answered', 'pending']);
+    expect(summary.done).toBe(1);
+  });
+
+  it('counts an ended brainstorm left in discussion as done', () => {
+    const [voted, brainstorm] = questions('discussion', 'discussion');
+    const summary = summarizeAgenda([voted!, { ...brainstorm!, votingEnabled: false }], {
+      ended: true,
+    });
+    expect(summary.steps).toEqual(['pending', 'answered']);
     expect(summary.done).toBe(1);
   });
 

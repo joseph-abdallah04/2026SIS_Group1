@@ -509,15 +509,13 @@ export interface SessionRecap {
  * Past-tense label for the recap (screen and PDF). A question left in
  * `voting` with a shortlist or result still reads as answered once the
  * session is over. A brainstorm question (F41) reads as discussed rather
- * than answered — nobody chose an answer — and one the session ended on,
- * mid-discussion with ideas on the board, counts too.
+ * than answered — nobody chose an answer — and so does one the session ended
+ * on mid-discussion: it had no vote to reach, and the archive's agenda counts
+ * it as done for the same reason.
  */
 export function recapQuestionStatusLabel(question: SessionRecapQuestion): string {
   if (!question.votingEnabled) {
-    if (
-      question.status === 'answered' ||
-      (question.status === 'discussion' && question.proposals.length > 0)
-    ) {
+    if (question.status === 'answered' || question.status === 'discussion') {
       return 'Discussed';
     }
     return question.status === 'skipped' ? 'Skipped' : 'Not reached';

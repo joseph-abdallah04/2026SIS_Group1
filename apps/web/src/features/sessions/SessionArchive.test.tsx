@@ -182,7 +182,8 @@ describe('SessionArchive', () => {
     expect(screen.getAllByText('Discussed')).toHaveLength(2);
     expect(screen.queryByText('Not voted on')).not.toBeInTheDocument();
     expect(screen.queryByText('Answered')).not.toBeInTheDocument();
-    expect(screen.getByText('Q1 · Brainstorming')).toBeInTheDocument();
+    // Ended mid-discussion: discussed, like the agenda beside it says.
+    expect(screen.getByText('Q1 · Discussed')).toBeInTheDocument();
   });
 
   it('loads the next question when it is chosen, in agenda order', async () => {
