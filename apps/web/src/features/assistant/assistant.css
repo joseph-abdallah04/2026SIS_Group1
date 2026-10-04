@@ -974,6 +974,22 @@
   color: #7a2e28;
 }
 
+/* The glass title is near-white pink, which vanishes on this card. */
+.rt-assistant-dock .rt-assistant-error-title {
+  color: #5c1f1a;
+}
+
+.rt-assistant-dock .rt-assistant-error-code {
+  border-color: #e7b2ac;
+  background: #fff;
+}
+
+/* Test connection's provider text, under the verdict in the rail's setup form. */
+.rt-assistant-dock .rt-assistant-setup-detail {
+  color: #7a2e28;
+  opacity: 1;
+}
+
 .rt-assistant-dock .rt-assistant-composer {
   margin: 0 -0.75rem;
   padding: 0.5rem 0.75rem;
