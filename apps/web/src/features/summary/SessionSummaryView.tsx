@@ -25,6 +25,19 @@ function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally | nul
   return tallies.find((row) => row.proposalId === proposalId) ?? null;
 }
 
+/**
+ * What to say under a question with nothing to show. A voting question shows
+ * its shortlist, so an empty one means nothing was shortlisted; a
+ * brainstorm-only question (F41) shows every idea, so an empty one means
+ * nobody added any — or it never got that far.
+ */
+function emptyMessage(question: SessionRecapQuestion): string {
+  if (question.votingEnabled) return 'Nothing was shortlisted for this question.';
+  return question.status === 'answered' || question.status === 'discussion'
+    ? 'No ideas were added.'
+    : 'This question was not discussed.';
+}
+
 function QuestionRecap({
   question,
   index,
@@ -57,10 +70,15 @@ function QuestionRecap({
         </p>
       ) : null}
 
-      {question.proposals.length === 0 ? (
-        <p className="mt-3 text-[13px] text-rt-ink-muted">
-          Nothing was shortlisted for this question.
+      {/* F41: a brainstorm has no vote count, so it gets an idea count. */}
+      {!question.votingEnabled && question.proposals.length > 0 ? (
+        <p className="mt-1 text-[12px] text-rt-ink-muted">
+          {question.proposals.length === 1 ? '1 idea' : `${question.proposals.length} ideas`}
         </p>
+      ) : null}
+
+      {question.proposals.length === 0 ? (
+        <p className="mt-3 text-[13px] text-rt-ink-muted">{emptyMessage(question)}</p>
       ) : (
         <ul className="mt-3 flex flex-wrap gap-4">
           {question.proposals.map((item) => {
@@ -109,7 +127,8 @@ function QuestionRecap({
 }
 
 /**
- * F31 recap: title, dates, who took part, the shortlist, and the winner.
+ * F31 recap: title, dates, who took part, the shortlist, and the winner — or,
+ * for a brainstorm-only question (F41), every idea it collected.
  * S04's download lives on the ended-session footer, beside Back to dashboard.
  */
 export function SessionSummaryView({

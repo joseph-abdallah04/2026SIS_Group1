@@ -38,6 +38,8 @@ function placeholder(session: SessionDetail, question: Question | null): BoardRe
     questionText: question?.text ?? null,
     questionPosition: question?.position ?? null,
     questionStatus: question?.status ?? null,
+    // An ended session's boards are read-only; nothing on them moves.
+    boardLocked: true,
     items: [],
     discussionTimer: null,
   };
@@ -139,6 +141,7 @@ export function SessionArchive({ session }: { session: SessionDetail }) {
       >
         <PinboardCanvas
           board={display}
+          questionVotingEnabled={selected?.votingEnabled ?? true}
           isLive={false}
           newItemIds={NO_NEW_ITEMS}
           isLeader={session.leaderId === viewerId}

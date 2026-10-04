@@ -10,9 +10,11 @@ import {
   diagramNodeDepth,
   diagramNodeLabelLayout,
   diagramNodeSize,
+  diagramNodeTurnedExtent,
   diagramNodesInDrawOrder,
   diagramEdgeRoute,
   diagramEdgeRoutes,
+  rotatedBounds,
 } from '@roundtable/shared';
 import { diagramWriteArtifactSchema } from '@roundtable/shared/schemas';
 import { describe, expect, it } from 'vitest';
@@ -419,5 +421,120 @@ describe('edge routing', () => {
     // And the anchor sits between the source and the triangle's centre.
     expect(route.x2).toBeLessThan(centre.x);
     expect(route.y2).toBeLessThan(centre.y);
+  });
+});
+
+describe('where a turned node paints', () => {
+  function frame(size: { width: number; height: number }, rotation: number) {
+    return rotatedBounds({ x: 0, y: 0, ...size }, rotation);
+  }
+
+  it('is exactly the box for every shape that is not turned', () => {
+    for (const shape of DIAGRAM_NODE_SHAPE_KEYS) {
+      const size = diagramNodeSize(shape);
+      expect(diagramNodeTurnedExtent(size, undefined, { shape, label: 'Some words' })).toEqual({
+        x: 0,
+        y: 0,
+        ...size,
+      });
+      expect(diagramNodeTurnedExtent(size, 0, { shape })).toEqual({ x: 0, y: 0, ...size });
+    }
+  });
+
+  it('measures a turned ellipse by its curve', () => {
+    const size = { width: 120, height: 72 };
+    const turned = diagramNodeTurnedExtent(size, 45, { shape: 'ellipse' });
+    const half = Math.sqrt((60 * 60 + 36 * 36) / 2);
+    expect(turned.width).toBeCloseTo(half * 2);
+    expect(turned.height).toBeCloseTo(half * 2);
+    expect(turned.x).toBeCloseTo(60 - half);
+    expect(turned.width).toBeLessThan(frame(size, 45).width - 30);
+
+    const upright = diagramNodeTurnedExtent(size, 90, { shape: 'ellipse' });
+    expect(upright.width).toBeCloseTo(72);
+    expect(upright.height).toBeCloseTo(120);
+  });
+
+  it('measures a turned diamond and triangle by their corners', () => {
+    const diamond = diagramNodeTurnedExtent({ width: 128, height: 88 }, 45, { shape: 'diamond' });
+    // (64, 0) turned 45 degrees reaches 64 / sqrt 2 sideways, past (0, 44)'s.
+    expect(diamond.width).toBeCloseTo((64 / Math.SQRT2) * 2);
+    expect(diamond.width).toBeLessThan(frame({ width: 128, height: 88 }, 45).width);
+
+    const triangle = diagramNodeTurnedExtent({ width: 104, height: 88 }, 30, {
+      shape: 'triangle',
+    });
+    expect(triangle.width).toBeLessThan(frame({ width: 104, height: 88 }, 30).width);
+    // Upside down it still fills its box from edge to edge.
+    expect(diagramNodeTurnedExtent({ width: 104, height: 88 }, 180, { shape: 'triangle' })).toEqual(
+      { x: 0, y: 0, width: 104, height: 88 },
+    );
+  });
+
+  it('measures a turned cylinder by its rims', () => {
+    const size = { width: 112, height: 88 };
+    const upright = diagramNodeTurnedExtent(size, 90, { shape: 'cylinder' });
+    expect(upright.width).toBeCloseTo(88);
+    expect(upright.height).toBeCloseTo(112);
+    expect(diagramNodeTurnedExtent(size, 45, { shape: 'cylinder' }).width).toBeLessThan(
+      frame(size, 45).width,
+    );
+  });
+
+  it('lets a rounded box reach a little further than its square frame', () => {
+    const size = { width: 120, height: 56 };
+    const turned = diagramNodeTurnedExtent(size, 45, { shape: 'box' });
+    expect(turned.width).toBeLessThan(frame(size, 45).width);
+    // A square-cornered rectangle fills its frame exactly.
+    expect(diagramNodeTurnedExtent(size, 45, { shape: 'rectangle' })).toEqual(frame(size, 45));
+  });
+
+  describe('a turned text element', () => {
+    const size = { width: 400, height: 40 };
+
+    it('is measured by its words rather than its box', () => {
+      const turned = diagramNodeTurnedExtent(size, 90, { shape: 'text', label: 'Hi' });
+      // Upright, the box would be 400 tall; two letters are far shorter.
+      expect(turned.height).toBeLessThan(60);
+      // Centred, so the words sit around the box's middle.
+      expect(turned.y + turned.height / 2).toBeCloseTo(size.height / 2, 0);
+    });
+
+    it('follows the alignment the words are set with', () => {
+      const left = diagramNodeTurnedExtent(size, 90, {
+        shape: 'text',
+        label: 'Hi',
+        labelAlign: 'left',
+      });
+      const right = diagramNodeTurnedExtent(size, 90, {
+        shape: 'text',
+        label: 'Hi',
+        labelAlign: 'right',
+      });
+      // Turned a quarter clockwise, the start of the line is at the top.
+      expect(left.y).toBeLessThan(right.y);
+    });
+
+    it('never reaches past its own box', () => {
+      const long = 'A line long enough to fill every unit of the box it was typed into';
+      const turned = diagramNodeTurnedExtent({ width: 160, height: 120 }, 30, {
+        shape: 'text',
+        label: long,
+      });
+      const box = frame({ width: 160, height: 120 }, 30);
+      expect(turned.x).toBeGreaterThanOrEqual(box.x - 1e-9);
+      expect(turned.y).toBeGreaterThanOrEqual(box.y - 1e-9);
+      expect(turned.x + turned.width).toBeLessThanOrEqual(box.x + box.width + 1e-9);
+      expect(turned.y + turned.height).toBeLessThanOrEqual(box.y + box.height + 1e-9);
+    });
+
+    it('keeps its box when it has no words, or a fill that shows the box', () => {
+      expect(diagramNodeTurnedExtent(size, 45, { shape: 'text', label: '' })).toEqual(
+        frame(size, 45),
+      );
+      expect(
+        diagramNodeTurnedExtent(size, 45, { shape: 'text', label: 'Hi', fillColor: 'blue' }),
+      ).toEqual(frame(size, 45));
+    });
   });
 });

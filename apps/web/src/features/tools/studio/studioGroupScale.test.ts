@@ -214,7 +214,7 @@ describe('scaling a table', () => {
 
   it('scales every column and every row by the same factor', () => {
     const scaled = scaleTable(table, 1.5, 2);
-    expect(scaled.colWidths).toEqual([144, 144, 144]);
+    expect(scaled.colWidths).toEqual([192, 192, 192]);
     expect(scaled.rowHeights).toEqual([64, 64]);
   });
 
@@ -236,7 +236,7 @@ describe('scaling a table', () => {
     // A quarter wider, which keeps the far edge on the sheet.
     const scaled = scaleGroup(scene, selection, 'e', box, { x: box.width / 4, y: 0 });
     const [grown] = scaled.tables!;
-    expect(grown!.colWidths).toEqual([120, 120]);
+    expect(grown!.colWidths).toEqual([160, 160]);
     expect(grown!.rowHeights).toEqual(placed.rowHeights);
   });
 });

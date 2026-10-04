@@ -1,9 +1,11 @@
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent,
   type CSSProperties,
   type DragEvent,
   type FormEvent,
@@ -13,7 +15,6 @@ import {
   useId,
 } from 'react';
 import {
-  ArrowDown,
   ArrowDownFromLine,
   ArrowRight,
   ArrowUpFromLine,
@@ -24,18 +25,17 @@ import {
   Bold,
   DropletOff,
   Eraser,
-  Grid2x2,
-  LayoutTemplate,
   CornerDownRight,
   GitBranch,
   Minus,
   MoveRight,
-  MoveHorizontal,
   PaintBucket,
   Pencil,
   PenTool,
   RotateCcw,
   Rows3,
+  TableCellsMerge,
+  TableCellsSplit,
   BringToFront,
   SendToBack,
   Spline,
@@ -123,22 +123,16 @@ import {
   pathHandlePoint,
   TABLE_CELL_PADDING,
   TABLE_CELL_TEXT_LIMIT,
-  tableAutoRowHeight,
   tableCellAt,
   tableCellBold,
   tableCellColor,
-  tableCellFill,
   tableCellFontSize,
-  tableCellLines,
   tableColCount,
   tableRowCount,
   tableColumnOffsets,
   tableRowOffsets,
   tableSize,
   toElementSpace,
-  tableStrokeColor,
-  tableStrokeWidth,
-  TABLE_DEFAULT_COL_WIDTH,
   TABLE_DEFAULT_ROW_HEIGHT,
   TABLE_MAX_COLS,
   TABLE_MAX_ROWS,
@@ -184,7 +178,6 @@ import {
   nodeBounds,
   nodeLocalBounds,
   normalizeRect,
-  pasteDiagramFragment,
   prepareDiagram,
   preparedDiagramKey,
   prepareEdgeLabel,
@@ -216,7 +209,6 @@ import {
   zoomDiagramView,
   type DiagramView,
 } from './diagramView';
-import { layoutDiagram, type DiagramLayoutDirection } from './diagramLayout';
 import { useDiagramHistory } from './useDiagramHistory';
 import { StudioPropertiesBar } from '../studio/toolbar/StudioPropertiesBar';
 import { STUDIO_LAYER } from '../studio/studioLayers';
@@ -225,7 +217,6 @@ import { ShapeThumbnail } from '../studio/ShapeThumbnail';
 import {
   CHROME,
   STUDIO_ACCENT,
-  STUDIO_ACCENT_DEEP,
   STUDIO_ACCENT_WASH,
   STUDIO_COOL,
   chromeDash,
@@ -249,7 +240,7 @@ import {
   scaleInk,
   scalePath,
 } from '../studio/studioScale';
-import { groupFrame, scaleGroup } from '../studio/studioGroupScale';
+import { groupFrame, groupMustScaleUniformly, scaleGroup } from '../studio/studioGroupScale';
 import {
   EXTEND_SIDES,
   EXTEND_SIDE_ANGLE,
@@ -270,6 +261,7 @@ import {
   clampDragToCanvas,
   offsetRect,
   snapDragToGrid,
+  snapResizePull,
   unionBounds,
 } from '../studio/studioSnapping';
 import {
@@ -288,28 +280,55 @@ import {
   type StudioSelection,
 } from '../studio/studioSelection';
 import {
+  anchorCellsInRange,
+  bakeHeaderRow,
+  cellAtPoint,
   cellsInRange,
-  clampCellRef,
   wholeTableRange,
   createTable,
-  deleteColumn,
-  deleteRow,
+  deleteTracks,
+  duplicateTracks,
+  expandRangeToMerges,
   fillCellRange,
+  fitColumnWidth,
+  fitRowHeight,
+  fitRowsToContent,
   insertColumn,
   insertRow,
   alignCellRange,
   clearCellRange,
   isCellInRange,
+  mergeAction,
+  mergeCells,
   moveTableBy,
   moveTableSelection,
+  movedTrackStart,
+  moveTracks,
+  newTableColWidth,
+  parseTabularText,
+  pasteGrid,
+  rangeAsTabularText,
+  rangeFocusCell,
+  resolveCell,
+  rangeAfterDelete,
   resizeColumn,
+  resizeOuterTrack,
   resizeRow,
   setCell,
+  shiftRangeForInsert,
   styleCellRange,
+  trackSpan,
+  tracksAsTable,
+  unmergeCells,
+  wholeTracks,
+  wholeTracksRange,
   type CellRange,
   type CellRef,
+  type TableAxis,
   type TableNavKey,
 } from '../studio/studioTables';
+import { StudioTableView, TABLE_CORNER_RADIUS, type TableCellBox } from '../studio/StudioTableView';
+import { TABLE_CHROME_REACH_PX, TableChrome, type TableChromeHandle } from '../studio/TableChrome';
 import {
   anchorAtPoint,
   isSmoothAnchor,
@@ -365,7 +384,14 @@ import {
 import { arrowTargets } from '../studio/studioArrowTargets';
 import { StudioArrowView } from '../studio/StudioArrowView';
 import { toolForShortcut } from '../studio/studioShortcuts';
-import { STUDIO_TEMPLATES, type StudioTemplate } from '../studio/studioTemplates';
+import { STUDIO_TEMPLATES, templateFragment, type StudioTemplate } from '../studio/studioTemplates';
+import { studioLimitError } from '../studio/studioLimits';
+import {
+  StudioArtwork,
+  StudioSceneContent,
+  studioSceneBounds,
+  type StudioScene,
+} from '../studio/StudioArtwork';
 import { StudioActions, StudioProposeButton, useReportStudioStatus } from '../StudioOverlay';
 import { EXTEND_UNCHANGED_HINT } from '../proposeErrors';
 import { useSlowSubmission } from '../useProposalSubmission';
@@ -519,14 +545,6 @@ const STROKE_STYLE_DASH: Record<DiagramStrokeStyle, string | undefined> = {
   solid: undefined,
   dashed: '6 4',
   dotted: '0.5 4.5',
-};
-
-const TEMPLATE_ICONS: Record<string, LucideIcon> = {
-  matrix: Grid2x2,
-  // Lanes run across the board and a retro's headings run down it.
-  lanes: Rows3,
-  retro: Columns3,
-  timeline: MoveHorizontal,
 };
 
 /**
@@ -732,7 +750,14 @@ function paintOrderWithNewestOnTop(graph: DiagramSnapshot, id: string): string[]
 type Ghost =
   | { kind: 'node'; shape: DiagramNodeShape; size: DiagramNodeSize }
   | { kind: 'table'; rows: number; cols: number; size: DiagramNodeSize }
-  | { kind: 'template'; size: DiagramNodeSize };
+  | {
+      kind: 'template';
+      size: DiagramNodeSize;
+      /** What it will put down, drawn faintly where it will land. */
+      scene: StudioScene;
+      /** Where the scene's own top-left is, so it can be drawn from the ghost's corner. */
+      origin: DiagramPoint;
+    };
 
 /**
  * The box a drag-out asks for, grown from the corner the press started at.
@@ -796,27 +821,50 @@ function textRectFromDrag(origin: DiagramPoint, current: DiagramPoint): DiagramR
 }
 
 function emptyTableSize({ rows, cols }: { rows: number; cols: number }): DiagramNodeSize {
-  return { width: cols * TABLE_DEFAULT_COL_WIDTH, height: rows * TABLE_DEFAULT_ROW_HEIGHT };
+  return { width: cols * newTableColWidth(cols), height: rows * TABLE_DEFAULT_ROW_HEIGHT };
 }
 
-/** A starter frame's footprint, so its ghost is the shape it will occupy. */
+/** A template's footprint, so its ghost is the shape it will occupy. */
 function templateSize(template: StudioTemplate): DiagramNodeSize {
   const bounds = templateBounds(template);
   return { width: bounds.width, height: bounds.height };
 }
 
+/**
+ * Everything a template puts down — shapes, tables and each arrow's whole
+ * route — measured the way the board card measures a canvas, so the drop
+ * preview, where it lands and what the card shows all agree.
+ */
 function templateBounds(template: StudioTemplate) {
-  // Measured with `nodeBounds`, which is the turned extent. No template ships a
-  // rotated node today, so this changes nothing — but a footprint that ignored
-  // rotation would put the drop ghost and the frame itself out by the overhang
-  // the first time one did, and that is a trap worth closing while it is free.
-  const boxes = template.build().nodes.map(nodeBounds);
-  const left = Math.min(...boxes.map((box) => box.x));
-  const top = Math.min(...boxes.map((box) => box.y));
-  const right = Math.max(...boxes.map((box) => box.x + box.width));
-  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
-  return { x: left, y: top, width: right - left, height: bottom - top };
+  // Templates never change, and this runs on every pointer move while one is
+  // carried — arrow routes and all — so each is measured once.
+  const known = TEMPLATE_BOUNDS.get(template.id);
+  if (known) return known;
+  const bounds = studioSceneBounds(templateFragment(template));
+  TEMPLATE_BOUNDS.set(template.id, bounds);
+  return bounds;
 }
+
+const TEMPLATE_BOUNDS = new Map<string, ReturnType<typeof studioSceneBounds>>();
+
+/**
+ * A template's picture in the picker. Its own component, and memoised, so the
+ * eight of them are drawn once rather than again on every render of the
+ * editor while the picker is open.
+ */
+const TemplateThumbnail = memo(function TemplateThumbnail({
+  template,
+}: {
+  template: StudioTemplate;
+}) {
+  return (
+    <StudioArtwork
+      scene={templateFragment(template)}
+      fit="content"
+      className="absolute inset-0 h-full w-full p-1"
+    />
+  );
+});
 
 /**
  * A control on the properties bar: an icon that opens its own choices.
@@ -915,13 +963,13 @@ function CapTile({ cap }: { cap: ArrowCap }) {
   );
 }
 
-/**
- * How far outside a table its row and column controls reach, in scene units.
- *
- * Shared with the properties bar's placement: the bar keeps clear of the
- * selection it is given, so the selection it is given has to include these.
- */
-const TABLE_INSERT_REACH = 14;
+/** The gap carried rows or columns will drop into: the surface, sunk. */
+const STUDIO_DROP_SLOT_FILL = '#EEF2F4';
+
+/** A resize grip on a frame's side rather than its corner. */
+function isEdgeHandle(handle: DiagramResizeHandle): handle is 'n' | 'e' | 's' | 'w' {
+  return handle === 'n' || handle === 'e' || handle === 's' || handle === 'w';
+}
 
 /** Shown faintly inside a selected element that has no label yet. */
 const NODE_LABEL_PLACEHOLDER = 'Add text';
@@ -1123,6 +1171,20 @@ const STROKE_WIDTH_LABELS: Record<DiagramStrokeWidthPreset, string> = {
   thick: 'Thick',
 };
 
+/**
+ * The arrow as its label is typed and stored: an arrow labelled for the first
+ * time takes the size new text does (Medium), as a new shape's label does.
+ *
+ * Only a first label. An arrow that already carries one without a preset was
+ * drawn at the legacy size, and giving it one on the next edit would suddenly
+ * enlarge a label someone laid out around — the same no-reflow rule stored
+ * diagrams keep.
+ */
+function withNewLabelSize(arrow: ArrowElement): ArrowElement {
+  if (arrow.fontSizePreset || arrow.label) return arrow;
+  return { ...arrow, fontSizePreset: DIAGRAM_NEW_NODE_FONT_SIZE };
+}
+
 const FONT_SIZE_LABELS: Record<DiagramFontSizePreset, string> = {
   small: 'S',
   medium: 'M',
@@ -1135,15 +1197,6 @@ const STROKE_STYLE_LABELS: Record<DiagramStrokeStyle, string> = {
   dashed: 'Dashed',
   dotted: 'Dotted',
 };
-
-const LAYOUT_DIRECTIONS: {
-  direction: DiagramLayoutDirection;
-  label: string;
-  Icon: typeof ArrowDown;
-}[] = [
-  { direction: 'TB', label: 'Arrange top to bottom', Icon: ArrowDown },
-  { direction: 'LR', label: 'Arrange left to right', Icon: ArrowRight },
-];
 
 /**
  * The checkerboard every graphics tool uses for "nothing here".
@@ -1516,7 +1569,6 @@ export function DiagramEditor() {
   const [marquee, setMarquee] = useState<MarqueeSession | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [pendingContainerDelete, setPendingContainerDelete] = useState<string | null>(null);
-  const [layoutDirection, setLayoutDirection] = useState<DiagramLayoutDirection>('TB');
   const [panReady, setPanReady] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   // v4: what a press on empty canvas does. `select` is the diagram's original
@@ -1580,18 +1632,52 @@ export function DiagramEditor() {
     startBounds: DiagramRect | null;
     previous: DiagramSnapshot;
     moved: boolean;
+    /** How far, in scene units, the pointer has to travel before this is a drag. */
+    slop: number;
+    /** What a press that never became a drag does instead. */
+    onClick?: () => void;
   } | null>(null);
-  // Table creation size, and which cell of which table is in hand.
-  // Which insertion point on a table the pointer is over. Rows and columns are
-  // added on the table itself rather than from a menu, so this is what decides
-  // where the one visible "+" sits.
-  const [tableInsert, setTableInsert] = useState<{
+  // A press inside a table's cells, dragged across them to pick a block.
+  const cellRangeDragRef = useRef<{ pointerId: number; tableId: string; anchor: CellRef } | null>(
+    null,
+  );
+  // The selected table's add buttons and grips, woken by the pointer directly.
+  const tableChromeRef = useRef<TableChromeHandle>(null);
+  // Whole rows or columns picked up by their handle and being carried.
+  const trackDragRef = useRef<{
+    pointerId: number;
     tableId: string;
-    axis: 'row' | 'col';
-    index: number;
-    /** A boundary adds; a row or column body takes that one away. */
-    action: 'insert' | 'remove';
+    axis: TableAxis;
+    start: number;
+    end: number;
+    origin: DiagramPoint;
+    moved: boolean;
+    boundary: number | null;
+    /** The canvas at the press: the reflow is previewed from it and undone to it. */
+    previous: DiagramSnapshot;
+    /** The table at the press. */
+    original: TableElement;
+    /** How far into the carried block the pointer took hold, along the drag. */
+    grab: number;
+    /** The carried rows or columns on their own, taken once when the drag starts. */
+    lifted: TableElement | null;
   } | null>(null);
+  // What is drawn while they are carried: the gap they will drop into, and the
+  // rows themselves under the pointer.
+  const [trackDrag, setTrackDrag] = useState<{
+    tableId: string;
+    axis: TableAxis;
+    /** Where the block sits in the reflowed table. */
+    first: number;
+    count: number;
+    /** The carried rows or columns on their own, from the table at the press. */
+    lifted: TableElement;
+    /** Where the block's leading edge follows the pointer to, along the drag. */
+    at: number;
+  } | null>(null);
+  // A second press on a table's line fits the row or column to its text.
+  const lastTableLinePressRef = useRef<NodePress | null>(null);
+  // Table creation size, and which cell of which table is in hand.
   const [tableRows, setTableRows] = useState(3);
   const [tableCols, setTableCols] = useState(3);
   // Pen and line styling, kept apart from the freehand ink's own pen.
@@ -1674,11 +1760,6 @@ export function DiagramEditor() {
   const pixel = scenePerPixel(renderedView, canvasPixels);
   /** How far every selection frame sits outside what it surrounds. */
   const frameOutset = CHROME.frameOutset * pixel;
-  /**
-   * A table's frame sits beyond the strip its add and remove targets occupy,
-   * so the grips on the frame and the targets beside the grid never overlap.
-   */
-  const tableFrameOutset = TABLE_INSERT_REACH + frameOutset;
   // More than one element selected, of whatever kinds: the group's frame takes
   // over from each element's own grips.
   const multiSelected =
@@ -1733,6 +1814,12 @@ export function DiagramEditor() {
   const arrowTargetMap = arrowTargets({ nodes, ink, paths, tables });
   const arrowTargetsById: ArrowTargetLookup = (id) => arrowTargetMap.get(id);
   const selectedTable = selectedTableId ? (tableById.get(selectedTableId) ?? null) : null;
+  // The cells in hand, grown to take in whole any merged cell they touch. The
+  // range as stored is where the presses and keys put it; this is what is
+  // drawn as selected and what every action on the cells acts on, so none of
+  // them can ever work on part of a merged cell.
+  const heldRange =
+    selectedTable && cellRange ? expandRangeToMerges(selectedTable, cellRange) : null;
   const edgeIndexByKey = new Map(edges.map((edge, index) => [edgeKey(edge), index]));
   const edgeArrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
   // Routing is derived from the edge set, never stored: a reciprocal pair bows
@@ -1781,7 +1868,13 @@ export function DiagramEditor() {
       return { kind: 'table', ...pendingTable, size: emptyTableSize(pendingTable) };
     }
     if (canvasTool === 'template' && pendingTemplate) {
-      return { kind: 'template', size: templateSize(pendingTemplate) };
+      const bounds = templateBounds(pendingTemplate);
+      return {
+        kind: 'template',
+        size: { width: bounds.width, height: bounds.height },
+        scene: templateFragment(pendingTemplate),
+        origin: { x: bounds.x, y: bounds.y },
+      };
     }
     return null;
   })();
@@ -1830,9 +1923,14 @@ export function DiagramEditor() {
   // has to put it down all the same. So does the offer at an arrow's loose end,
   // which can be raised from a connection handle while the tool is back on
   // Select: that left it dismissable only with focus in the form.
+  //
+  // Any armed tool counts too, holding something or not: Escape steps back to
+  // Select before it steps out of the studio. Without this a brush or a pen
+  // with nothing in hand let the key straight through to the overlay, which
+  // left the studio when all that was wanted was to put the tool down.
   const somethingToPutDown =
     ghost !== null ||
-    canvasTool === 'arrow' ||
+    canvasTool !== 'select' ||
     shapePicker !== null ||
     extendPicker !== null ||
     arrowDraft !== null;
@@ -1850,7 +1948,17 @@ export function DiagramEditor() {
       // it as a request to close the studio, which would switch this off.
       const target = event.target as HTMLElement | null;
       // Not while something is being typed into: Escape belongs to the field.
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      if (
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable === true
+      ) {
+        return;
+      }
+      // Tucked away on the board, the editor stays mounted but its canvas is
+      // inert, and Escape there brings the studio back — it must not also put
+      // the armed tool down behind the user's back.
+      if (canvasRef.current?.closest('[inert]')) return;
       event.preventDefault();
       cancelPlacementRef.current();
     }
@@ -1963,7 +2071,8 @@ export function DiagramEditor() {
     cellEditCancelledRef.current = false;
     cellEditSelectAllRef.current = selectAll;
     setCellDraft(text);
-    setEditingCell(cell);
+    // Only a cell that shows can be typed into: a covered one has no editor.
+    setEditingCell(selectedTable ? resolveCell(selectedTable, cell) : cell);
   }
 
   function clearError() {
@@ -2204,10 +2313,12 @@ export function DiagramEditor() {
           ...strokeKeys,
           ...(style.fontSizePreset ? { fontSizePreset: style.fontSizePreset } : {}),
         };
+        // Larger text needs taller rows, here as much as from the text panel.
+        const sized = style.fontSizePreset ? fitRowsToContent(styled, null, 'grow') : styled;
         // A table has no fill of its own — it is a grid of cells — so filling
         // one means filling all of them.
-        if (style.fillColor === undefined) return styled;
-        return fillCellRange(styled, wholeTableRange(styled), style.fillColor);
+        if (style.fillColor === undefined) return sized;
+        return fillCellRange(sized, wholeTableRange(sized), style.fillColor);
       }),
       arrows: (graph.arrows ?? []).map((arrow) =>
         arrowIds.has(arrow.id)
@@ -2248,12 +2359,14 @@ export function DiagramEditor() {
       edges: graph.edges,
       arrows: (graph.arrows ?? []).map((arrow) => {
         if (arrow.id !== arrowId) return arrow;
-        const next = { ...arrow };
         // An empty label is no label: stored as an absent key, the way every
         // other optional field on this contract is.
-        if (trimmed === '') delete next.label;
-        else next.label = trimmed;
-        return next;
+        if (trimmed === '') {
+          const next = { ...arrow };
+          delete next.label;
+          return next;
+        }
+        return { ...withNewLabelSize(arrow), label: trimmed };
       }),
     });
     setEditingArrowId(null);
@@ -2329,8 +2442,8 @@ export function DiagramEditor() {
                 activeKey={null}
                 disabled={showSubmitting}
                 onSelect={(key) => {
-                  if (selectedTable && cellRange) {
-                    replaceTable(fillCellRange(selectedTable, cellRange, key), selectedTable.id);
+                  if (selectedTable && heldRange) {
+                    replaceTable(fillCellRange(selectedTable, heldRange, key), selectedTable.id);
                   }
                   close();
                 }}
@@ -2338,6 +2451,85 @@ export function DiagramEditor() {
             )}
           </BarMenu>
         );
+
+      case 'tableRows':
+      case 'tableColumns': {
+        if (!selectedTable || !heldRange) return null;
+        const table = selectedTable;
+        const axis: TableAxis = property.id === 'tableRows' ? 'row' : 'col';
+        const span = trackSpan(heldRange, axis);
+        const count = span.end - span.start + 1;
+        const total = axis === 'row' ? tableRowCount(table) : tableColCount(table);
+        const limit = axis === 'row' ? TABLE_MAX_ROWS : TABLE_MAX_COLS;
+        const full = total >= limit;
+        const noun = axis === 'row' ? 'row' : 'column';
+        const nouns = count > 1 ? `${count} ${noun}s` : noun;
+        // Picked whole, by their handles: they can be copied as well.
+        const whole = heldRange.whole === axis;
+        const actions = [
+          {
+            label: axis === 'row' ? 'Insert row above' : 'Insert column left',
+            disabled: full,
+            run: () => insertTableTrack(table, axis, span.start),
+          },
+          {
+            label: axis === 'row' ? 'Insert row below' : 'Insert column right',
+            disabled: full,
+            run: () => insertTableTrack(table, axis, span.end + 1),
+          },
+          ...(whole
+            ? [
+                {
+                  label: `Duplicate ${nouns}`,
+                  disabled: total + count > limit,
+                  run: () => duplicateTableTracks(table, axis, span.start, span.end),
+                },
+              ]
+            : []),
+          {
+            label: `Delete ${nouns}`,
+            // A table keeps at least one of each; deleting the table is Delete
+            // with the table itself selected.
+            disabled: count >= total,
+            run: () => deleteTableTracks(table, axis, span.start, span.end),
+          },
+        ];
+        return (
+          <BarMenu
+            openMenu={openBarMenu}
+            onOpenChange={setOpenBarMenu}
+            disabled={showSubmitting}
+            label={property.label}
+            icon={
+              axis === 'row' ? (
+                <Rows3 aria-hidden="true" size={15} />
+              ) : (
+                <Columns3 aria-hidden="true" size={15} />
+              )
+            }
+          >
+            {(close) => (
+              <div className="flex w-44 flex-col gap-0.5">
+                {actions.map((action) => (
+                  <button
+                    key={action.label}
+                    type="button"
+                    disabled={showSubmitting || action.disabled}
+                    onClick={() => {
+                      action.run();
+                      close();
+                      canvasRef.current?.focus({ preventScroll: true });
+                    }}
+                    className="w-full rounded-md px-2.5 py-1.5 text-left text-[12px] text-rt-ink transition-colors hover:bg-rt-primary-tint disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </BarMenu>
+        );
+      }
 
       case 'strokeColor': {
         const current =
@@ -2445,6 +2637,44 @@ export function DiagramEditor() {
             )}
           </BarMenu>
         );
+
+      case 'tableMerge': {
+        if (!selectedTable || !heldRange) return null;
+        const table = selectedTable;
+        const range = heldRange;
+        const splitting = mergeAction(table, range) === 'unmerge';
+        const label = splitting ? 'Unmerge cells' : 'Merge cells';
+        return (
+          <Tooltip label={label} placement="bottom">
+            <button
+              type="button"
+              aria-label={label}
+              disabled={showSubmitting}
+              onClick={() => {
+                clearError();
+                const next = splitting ? unmergeCells(table, range) : mergeCells(table, range);
+                if (next === table) {
+                  if (!splitting)
+                    setValidationError('This table cannot hold any more merged cells.');
+                  return;
+                }
+                replaceTable(next, table.id);
+                // The merged cell is what is held: one cell now, where the block was.
+                const area = expandRangeToMerges(next, range);
+                setCellRange({ anchor: area.anchor, focus: area.anchor });
+                canvasRef.current?.focus({ preventScroll: true });
+              }}
+              className={BAR_CONTROL}
+            >
+              {splitting ? (
+                <TableCellsSplit aria-hidden="true" size={15} />
+              ) : (
+                <TableCellsMerge aria-hidden="true" size={15} />
+              )}
+            </button>
+          </Tooltip>
+        );
+      }
 
       case 'addText':
         return (
@@ -2554,31 +2784,53 @@ export function DiagramEditor() {
 
       case 'textFormat': {
         const cellStyleTarget = selectedTable
-          ? (cellRange ?? wholeTableRange(selectedTable))
+          ? (heldRange ?? wholeTableRange(selectedTable))
           : null;
 
-        /** Whether every cell the change would touch is already bold. */
+        /**
+         * Whether every cell the change would touch is already bold — as drawn,
+         * so a heading row, bold without being told to be, shows as bold.
+         */
         const cellsAllBold =
           selectedTable && cellStyleTarget
-            ? cellsInRange(cellStyleTarget).every(
-                (ref) => tableCellAt(selectedTable, ref.row, ref.col)?.bold,
+            ? anchorCellsInRange(selectedTable, cellStyleTarget).every((ref) =>
+                tableCellBold(selectedTable, tableCellAt(selectedTable, ref.row, ref.col), ref.row),
               )
             : false;
 
         function styleCells(style: Parameters<typeof styleCellRange>[2]) {
           if (!selectedTable || !cellStyleTarget) return;
-          replaceTable(styleCellRange(selectedTable, cellStyleTarget, style), selectedTable.id);
+          const styled = styleCellRange(selectedTable, cellStyleTarget, style);
+          // Larger text needs taller rows; the ones it touches make room.
+          const rows = trackSpan(cellStyleTarget, 'row');
+          replaceTable(
+            style.fontSizePreset
+              ? fitRowsToContent(
+                  styled,
+                  Array.from(
+                    { length: rows.end - rows.start + 1 },
+                    (_, index) => rows.start + index,
+                  ),
+                  'grow',
+                )
+              : styled,
+            selectedTable.id,
+          );
         }
 
         const bold = selectedTable
           ? cellsAllBold
           : Boolean(selectedNode?.labelBold ?? selectedArrow?.labelBold);
+        // A cell with no alignment of its own is drawn left-aligned, so that
+        // is what the control says; claiming centre lit the wrong button.
+        // What the controls show is read from the cell that shows at the
+        // range's end — a merged cell's top-left, never a cell it covers.
+        const shownCell =
+          selectedTable && cellStyleTarget
+            ? rangeFocusCell(selectedTable, cellStyleTarget)
+            : { row: 0, col: 0 };
         const align: DiagramTextAlign = selectedTable
-          ? (tableCellAt(
-              selectedTable,
-              cellStyleTarget?.focus.row ?? 0,
-              cellStyleTarget?.focus.col ?? 0,
-            )?.align ?? 'center')
+          ? (tableCellAt(selectedTable, shownCell.row, shownCell.col)?.align ?? 'left')
           : (selectedNode?.labelAlign ?? 'center');
 
         function setBold(next: boolean) {
@@ -2607,11 +2859,7 @@ export function DiagramEditor() {
         // button lights up. Claiming Medium there showed a size that was not
         // the one being drawn. A cell with no size of its own uses its table's.
         const size: DiagramFontSizePreset | null = selectedTable
-          ? (tableCellAt(
-              selectedTable,
-              cellStyleTarget?.focus.row ?? 0,
-              cellStyleTarget?.focus.col ?? 0,
-            )?.fontSizePreset ??
+          ? (tableCellAt(selectedTable, shownCell.row, shownCell.col)?.fontSizePreset ??
             selectedTable.fontSizePreset ??
             null)
           : (selectedNode?.fontSizePreset ?? selectedArrow?.fontSizePreset ?? null);
@@ -2745,9 +2993,11 @@ export function DiagramEditor() {
         kind: 'table',
         element: table,
         inCellMode,
+        wholeTracks: inCellMode ? (cellRange?.whole ?? null) : null,
+        mergeAction: inCellMode && heldRange ? mergeAction(table, heldRange) : null,
         cellsHaveText:
-          inCellMode && cellRange
-            ? cellsInRange(cellRange).some((ref) =>
+          inCellMode && heldRange
+            ? anchorCellsInRange(table, heldRange).some((ref) =>
                 Boolean(tableCellAt(table, ref.row, ref.col)?.text?.trim()),
               )
             : false,
@@ -2767,10 +3017,10 @@ export function DiagramEditor() {
 
     // The bar is placed clear of whatever it is given, so it is given the
     // selection's frame and its grips rather than the bare elements: the frame
-    // sits outside them, and outside a table's insert and remove badges. In
-    // scene units, so the clearance holds at any zoom rather than only at the
-    // one a fixed pixel gap was chosen for.
-    const reach = selectedTableIds.length > 0 ? tableFrameOutset : frameOutset;
+    // sits outside them, and a table's add buttons sit outside that. In scene
+    // units, so the clearance holds at any zoom rather than only at the one a
+    // fixed pixel gap was chosen for.
+    const reach = selectedTableIds.length > 0 ? TABLE_CHROME_REACH_PX * pixel : frameOutset;
 
     return diagramRectToClientRect(
       {
@@ -2859,7 +3109,7 @@ export function DiagramEditor() {
             { x: node.x + offset.x, y: node.y + offset.y },
             effectiveDiagramNodeSize(node),
             false,
-            node.rotation,
+            node,
           ),
         };
       }),
@@ -3175,6 +3425,18 @@ export function DiagramEditor() {
     lastNodePressRef.current = null;
 
     const graph = history.snapshotRef.current;
+    // A table's outer edge is its outermost row's or column's line, and a
+    // second press on it fits that row or column, as an inside line's does.
+    if (kind === 'table' && isEdgeHandle(handle)) {
+      const table = (graph.tables ?? []).find((candidate) => candidate.id === id);
+      if (table) {
+        const axis: TableAxis = handle === 'e' || handle === 'w' ? 'col' : 'row';
+        const last = (axis === 'col' ? tableColCount(table) : tableRowCount(table)) - 1;
+        const track = handle === 'e' || handle === 's' ? last : 0;
+        if (fitOnSecondLinePress(event, table, axis, track)) return;
+      }
+    }
+
     const node = kind === 'node' ? graph.nodes.find((candidate) => candidate.id === id) : undefined;
     const size = node ? effectiveDiagramNodeSize(node) : { width: 0, height: 0 };
     // A table is scaled as a group of one: the group's rules for its tracks are
@@ -3236,17 +3498,52 @@ export function DiagramEditor() {
       return true;
     }
 
+    // Everything scaled from a frame lands its pulled edge on the grid, as a
+    // shape's own resize does. Shift is the free, proportional pull, and it
+    // stays free — rounding an edge is exactly what breaks a ratio.
+    const snapPull = (frame: DiagramRect | null, uniform: boolean, rotated = false) =>
+      snapEnabled && !event.shiftKey && frame && !rotated
+        ? snapResizePull(frame, resize.handle, delta, { uniform, fromCentre })
+        : delta;
+
+    // A table's own edge moves its outermost row or column; only its corners
+    // scale the whole grid.
+    if (resize.kind === 'table' && isEdgeHandle(resize.handle)) {
+      const start = (before.tables ?? []).find((table) => table.id === resize.id);
+      if (!start) return true;
+      const side = resize.handle;
+      const pull = snapPull(resize.frame, false);
+      const across = side === 'e' || side === 'w';
+      const pulled = resizeOuterTrack(start, side, across ? pull.x : pull.y);
+      // A narrower column wraps its text onto more lines, so its rows make room.
+      const next = across ? fitRowsToContent(pulled, null, 'grow') : pulled;
+      history.preview({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        tables: (graph.tables ?? []).map((table) => (table.id === resize.id ? next : table)),
+      });
+      return true;
+    }
+
     if (resize.kind === 'group' || resize.kind === 'table') {
-      const scaled = scaleGroup(before, resize.selection, resize.handle, resize.frame, delta, {
+      const pull = snapPull(resize.frame, groupMustScaleUniformly(before, resize.selection));
+      const scaled = scaleGroup(before, resize.selection, resize.handle, resize.frame, pull, {
         lockAspect: event.shiftKey,
         fromCentre,
       });
+      // A table scaled down keeps its text size, so its rows make room for
+      // whatever now wraps rather than clipping it.
+      const scaledTables = scaled.tables?.map((table) =>
+        resize.selection.tableIds.includes(table.id)
+          ? fitRowsToContent(table, null, 'grow')
+          : table,
+      );
       history.preview({
         nodes: scaled.nodes,
         edges: graph.edges,
         ink: scaled.ink,
         paths: scaled.paths,
-        tables: scaled.tables,
+        tables: scaledTables,
         arrows: scaled.arrows,
       });
       return true;
@@ -3257,7 +3554,8 @@ export function DiagramEditor() {
     if (resize.kind === 'ink') {
       const source = (before.ink ?? []).find((stroke) => stroke.id === resize.id);
       if (!source) return true;
-      const scaled = scaleInk(source, resize.handle, delta, fromCentre);
+      const pull = snapPull(inkLocalBounds(source), true, Boolean(source.rotation));
+      const scaled = scaleInk(source, resize.handle, pull, fromCentre);
       history.preview({
         nodes: graph.nodes,
         edges: graph.edges,
@@ -3268,7 +3566,8 @@ export function DiagramEditor() {
 
     const source = (before.paths ?? []).find((path) => path.id === resize.id);
     if (!source) return true;
-    const scaled = scalePath(source, resize.handle, delta, fromCentre);
+    const pull = snapPull(pathFrameBounds(source), true, Boolean(source.rotation));
+    const scaled = scalePath(source, resize.handle, pull, fromCentre);
     history.preview({
       nodes: graph.nodes,
       edges: graph.edges,
@@ -3308,13 +3607,10 @@ export function DiagramEditor() {
     if (!multiSelected || canvasTool !== 'select' || isSubmitting || marquee) return null;
     const frame = groupFrame(history.snapshotRef.current, currentSelection());
     if (!frame) return null;
-    // A selected table's add and remove targets sit around its edges; the
-    // group's grips keep clear of them the same way the table's own frame does.
-    const outset = selectedTableIds.length > 0 ? tableFrameOutset : frameOutset;
     return (
       <g data-testid="group-frame">
-        <SelectionFrame bounds={frame} pixel={pixel} inset={outset} />
-        {renderResizeChrome('group', 'group', frame, { outset })}
+        <SelectionFrame bounds={frame} pixel={pixel} />
+        {renderResizeChrome('group', 'group', frame)}
       </g>
     );
   }
@@ -3534,16 +3830,28 @@ export function DiagramEditor() {
     });
   }
 
+  /**
+   * Whether a shape or text press has travelled far enough to be sizing
+   * something rather than placing it.
+   *
+   * The same on-screen slop the arrow and line tools use, so a hand that
+   * wobbles while clicking still gets the default size, at any zoom. A text box
+   * only takes its width from the drag, so only sideways travel counts: a
+   * wobble up or down would otherwise make a narrow box nobody asked for.
+   */
+  function shapeDraftTravelled(origin: DiagramPoint, current: DiagramPoint): boolean {
+    const slop = travelSlop();
+    if (canvasTool === 'text') return Math.abs(current.x - origin.x) > slop;
+    return Math.hypot(current.x - origin.x, current.y - origin.y) > slop;
+  }
+
   function updateShapeDraft(event: PointerEvent<SVGSVGElement>): boolean {
     const draft = shapeDraftRef.current;
     if (!draft || draft.pointerId !== event.pointerId) return false;
     event.preventDefault();
 
     const current = surfacePoint(event);
-    if (
-      !draft.moved &&
-      Math.hypot(current.x - draft.origin.x, current.y - draft.origin.y) > DRAG_THRESHOLD
-    ) {
+    if (!draft.moved && shapeDraftTravelled(draft.origin, current)) {
       draft.moved = true;
     }
     setShapeDraftSquare(event.shiftKey);
@@ -3557,9 +3865,7 @@ export function DiagramEditor() {
     event.preventDefault();
 
     const current = surfacePoint(event);
-    const dragged =
-      draft.moved ||
-      Math.hypot(current.x - draft.origin.x, current.y - draft.origin.y) > DRAG_THRESHOLD;
+    const dragged = draft.moved || shapeDraftTravelled(draft.origin, current);
     // What is held at the release, and nothing else. Falling back to the last
     // move's flag squared a drag that had never previewed as square.
     const square = event.shiftKey;
@@ -3690,10 +3996,10 @@ export function DiagramEditor() {
   function applyTemplate(template: StudioTemplate, at?: DiagramPoint) {
     clearError();
     const graph = history.snapshotRef.current;
-    const fragment = template.build();
-    // Laid out at absolute positions. Dropped somewhere, the frame moves as a
-    // whole to land its top-left there; without a point it takes the canvas as
-    // designed, stepped clear of anything already on it.
+    const fragment = templateFragment(template);
+    // Laid out at absolute positions. Dropped somewhere, the template moves as
+    // a whole to land its top-left there; without a point it takes the canvas
+    // as designed, stepped clear of anything already on it.
     const bounds = templateBounds(template);
     const offset = at
       ? { x: at.x - bounds.x, y: at.y - bounds.y }
@@ -3701,17 +4007,27 @@ export function DiagramEditor() {
         ? { x: 0, y: 0 }
         : DIAGRAM_PASTE_OFFSET;
 
-    const pasted = pasteDiagramFragment(graph.nodes, graph.edges, fragment, offset, snapEnabled);
+    // The studio's own paster, so the shapes, the tables and the arrows between
+    // them all come across, every id new and every arrow still bound to the
+    // shape it was drawn to.
+    const pasted = pasteStudioFragment(graph, fragment, offset, snapEnabled);
     if (!pasted.ok) {
       setValidationError(pasted.error);
       return;
     }
 
-    history.commit({ nodes: pasted.nodes, edges: pasted.edges });
+    history.commit({
+      nodes: pasted.nodes,
+      edges: pasted.edges,
+      ink: pasted.ink,
+      paths: pasted.paths,
+      tables: pasted.tables,
+      arrows: pasted.arrows,
+    });
     setCanvasTool('select');
     setPendingTemplate(null);
     setGhostCursor(null);
-    applySelection({ ...EMPTY_STUDIO_SELECTION, nodeIds: pasted.addedIds });
+    applySelection(pasted.selection);
     // Applying from a popover unmounts the button that had focus; without moving
     // it back to the canvas it lands on document.body, outside the form, and the
     // form's Ctrl+Z handler stops seeing keystrokes until something is clicked.
@@ -3729,9 +4045,16 @@ export function DiagramEditor() {
     });
   }
 
-  /** Scene-unit close target, scaled so it stays a constant size on screen. */
+  /**
+   * Scene-unit close target, scaled so it stays a constant size on screen.
+   *
+   * By pixels on screen rather than by zoom alone: dividing by the zoom left
+   * out how far the sheet is stretched to fit the window, so the target was a
+   * different size in every window — as the arrow snap and the travel slop
+   * already are not.
+   */
   function closeTolerance() {
-    return PATH_CLOSE_TOLERANCE / diagramViewZoom(renderedViewRef.current);
+    return PATH_CLOSE_TOLERANCE * scenePerPixel(renderedViewRef.current, surfaceBounds());
   }
 
   function clearPathDraft() {
@@ -4140,8 +4463,13 @@ export function DiagramEditor() {
 
   function placeTable(at: DiagramPoint, rows = tableRows, cols = tableCols) {
     clearError();
-    const table = createTable(rows, cols, at);
     const graph = history.snapshotRef.current;
+    const over = studioLimitError({ tables: (graph.tables ?? []).length + 1 });
+    if (over) {
+      setValidationError(over);
+      return;
+    }
+    const table = createTable(rows, cols, at);
     history.commit({
       nodes: graph.nodes,
       edges: graph.edges,
@@ -4160,7 +4488,11 @@ export function DiagramEditor() {
 
   /** The one cell a keystroke acts on: the focus end of the current range. */
   function activeCell(): CellRef | null {
-    return cellRange?.focus ?? null;
+    if (!cellRange) return null;
+    // The cell that shows at the range's end: a whole row picked by its handle
+    // can end inside a merged cell, and typing there went into a cell that is
+    // never drawn.
+    return selectedTable ? rangeFocusCell(selectedTable, cellRange) : cellRange.focus;
   }
 
   function selectCell(table: TableElement, row: number, col: number, extend: boolean) {
@@ -4179,24 +4511,373 @@ export function DiagramEditor() {
     );
   }
 
-  function commitCellText(table: TableElement, cell: CellRef, text: string) {
+  function commitCellText(table: TableElement, cell: CellRef, typed: string) {
+    // Blank lines left at the end are not kept: nothing is drawn on them, and
+    // stored they would hold the row open around nothing.
+    const text = typed.replace(/\s+$/, '');
+    const before = tableCellAt(table, cell.row, cell.col)?.text ?? '';
     const withText = setCell(table, cell.row, cell.col, { text });
-    // The row is fitted to what its cells now hold, in both directions. Growing
-    // only meant a row that had stretched for a long value stayed stretched
-    // after the value was deleted, with no way back but dragging the divider —
-    // and correcting a different cell in that row could never bring it down
-    // either. The default height is the floor, so a row never collapses below
-    // the size an empty table is drawn at.
-    const fitted = Math.max(TABLE_DEFAULT_ROW_HEIGHT, tableAutoRowHeight(withText, cell.row));
-    const current = withText.rowHeights[cell.row] ?? TABLE_DEFAULT_ROW_HEIGHT;
-    const sized = fitted === current ? withText : resizeRow(withText, cell.row, fitted - current);
-    replaceTable(sized, table.id);
+    // Opened and closed without a change is not an edit: it adds nothing to
+    // undo, and it leaves alone a row that was sized by hand.
+    if ((tableCellAt(withText, cell.row, cell.col)?.text ?? '') === before) return;
+    // The row grows to hold what its cells now say, and never shrinks by
+    // itself: a row someone opened up by hand stays that tall however its text
+    // is edited. Bringing a row back down to its text is a double-click on its
+    // line. (This used to pass the *change* in height to a resize that expects
+    // the height itself, so a second line shrank the row and clipped both.)
+    replaceTable(fitRowsToContent(withText, [cell.row], 'grow'), table.id);
+  }
+
+  /**
+   * A table as it is drawn: while one of its cells is being typed into, its row
+   * already as tall as the text so far needs. Worked out on every keystroke
+   * and never stored — committing applies the same growth — so the field never
+   * runs over the rows below it and nothing jumps when the edit lands.
+   */
+  function tableAsShown(table: TableElement): TableElement {
+    if (!editingCell || selectedTableId !== table.id) return table;
+    // Measured the way the field shows it. Laying text out trims it, so the
+    // empty line Enter has just made — nothing typed on it yet — would not be
+    // counted, and the row would only grow once something was. A placeholder
+    // holds an empty first or last line open for the measuring.
+    const measured = cellDraft.replace(/^[^\S\n]*\n/, '.\n').replace(/\n[^\S\n]*$/, '\n.');
+    return fitRowsToContent(
+      setCell(table, editingCell.row, editingCell.col, { text: measured }),
+      [editingCell.row],
+      'grow',
+    );
+  }
+
+  /** Into a table's cells, with one cell in hand. */
+  function enterTableCells(tableId: string, cell: CellRef) {
+    selectTable(tableId);
+    setTableEditing(true);
+    setCellRange({ anchor: cell, focus: cell });
+  }
+
+  /** A row or column added at `index`, with the selection kept on its cells. */
+  function insertTableTrack(table: TableElement, axis: TableAxis, index: number) {
+    const next = axis === 'row' ? insertRow(table, index) : insertColumn(table, index);
+    if (next === table) {
+      setValidationError(
+        axis === 'row'
+          ? `A table can hold ${TABLE_MAX_ROWS} rows at most.`
+          : `A table can hold ${TABLE_MAX_COLS} columns at most.`,
+      );
+      return;
+    }
+    clearError();
+    replaceTable(next, table.id);
+    if (cellRange && selectedTableId === table.id) {
+      setCellRange(shiftRangeForInsert(cellRange, axis, index));
+    }
+  }
+
+  /** Rows or columns copied in straight after themselves, and selected. */
+  function duplicateTableTracks(table: TableElement, axis: TableAxis, start: number, end: number) {
+    const next = duplicateTracks(table, axis, start, end);
+    if (next === table) {
+      setValidationError(
+        axis === 'row'
+          ? `A table can hold ${TABLE_MAX_ROWS} rows at most.`
+          : `A table can hold ${TABLE_MAX_COLS} columns at most.`,
+      );
+      return;
+    }
+    clearError();
+    replaceTable(next, table.id);
+    const count = end - start + 1;
+    setCellRange(wholeTracksRange(next, axis, end + 1, end + count));
+  }
+
+  /**
+   * A press on a row's or column's handle. It takes that row or column whole —
+   * or, with Shift, everything from the one already held to this one — and a
+   * drag from there carries them, the way FigJam's handles do. Grabbing one of
+   * several already held carries them all.
+   */
+  function onTableHandleDown(
+    event: PointerEvent<SVGGElement>,
+    table: TableElement,
+    axis: TableAxis,
+    track: number,
+  ) {
+    const canvas = canvasRef.current;
+    if (!canvas || isSubmitting) return;
+    canvas.focus({ preventScroll: true });
+    clearError();
+    lastNodePressRef.current = null;
+    const held = selectedTableId === table.id ? wholeTracks(cellRange) : null;
+    let start = track;
+    let end = track;
+    if (held && held.axis === axis) {
+      if (event.shiftKey) {
+        start = Math.min(held.start, track);
+        end = Math.max(held.end, track);
+      } else if (track >= held.start && track <= held.end) {
+        start = held.start;
+        end = held.end;
+      }
+    }
+    // Rows a merged cell runs down go together: half of one cannot be taken.
+    ({ start, end } = trackSpan(
+      expandRangeToMerges(table, wholeTracksRange(table, axis, start, end)),
+      axis,
+    ));
+    selectTable(table.id);
+    setTableEditing(true);
+    setEditingCell(null);
+    setCellRange(wholeTracksRange(table, axis, start, end));
+    canvas.setPointerCapture(event.pointerId);
+    const origin = surfacePoint(event);
+    const offsets = axis === 'row' ? tableRowOffsets(table) : tableColumnOffsets(table);
+    const along = axis === 'row' ? origin.y - table.y : origin.x - table.x;
+    trackDragRef.current = {
+      pointerId: event.pointerId,
+      tableId: table.id,
+      axis,
+      start,
+      end,
+      origin,
+      moved: false,
+      boundary: null,
+      previous: history.snapshotRef.current,
+      original: table,
+      grab: along - (offsets[start] ?? 0),
+      lifted: null,
+    };
+  }
+
+  /**
+   * Carrying rows or columns, the way FigJam does it: the block lifts off the
+   * table and follows the pointer, and the rest of the table reflows round it,
+   * opening the gap it will drop into. The reflow is a preview of the moved
+   * table, worked out afresh from the table at the press each time the gap
+   * changes place, so letting go only has to keep what is already shown.
+   */
+  function updateTrackDrag(event: PointerEvent<SVGSVGElement>): boolean {
+    const drag = trackDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    const point = surfacePoint(event);
+    if (!drag.moved) {
+      if (Math.hypot(point.x - drag.origin.x, point.y - drag.origin.y) < travelSlop()) return true;
+      drag.moved = true;
+      drag.lifted = tracksAsTable(bakeHeaderRow(drag.original), drag.axis, drag.start, drag.end);
+    }
+    const { original, axis, start, end } = drag;
+    // The gap goes to the boundary of the table-as-pressed nearest the pointer:
+    // past the middle of the next row, the carried one swaps with it.
+    const offsets = axis === 'row' ? tableRowOffsets(original) : tableColumnOffsets(original);
+    const along = axis === 'row' ? point.y - original.y : point.x - original.x;
+    let boundary = 0;
+    offsets.forEach((offset, index) => {
+      if (Math.abs(along - offset) < Math.abs(along - (offsets[boundary] ?? 0))) boundary = index;
+    });
+    const moved = moveTracks(original, axis, start, end, boundary);
+    if (boundary !== drag.boundary) {
+      drag.boundary = boundary;
+      const graph = drag.previous;
+      history.preview({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        tables: (graph.tables ?? []).map((table) => (table.id === original.id ? moved : table)),
+      });
+    }
+    setTrackDrag({
+      tableId: original.id,
+      axis,
+      first: moved === original ? start : movedTrackStart(start, end, boundary),
+      count: end - start + 1,
+      lifted: drag.lifted ?? tracksAsTable(bakeHeaderRow(original), axis, start, end),
+      at: along - drag.grab,
+    });
+    return true;
+  }
+
+  function endTrackDrag(event: PointerEvent<SVGSVGElement>): boolean {
+    const drag = trackDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return false;
+    trackDragRef.current = null;
+    setTrackDrag(null);
+    releaseCapture(event);
+    if (!drag.moved) return true;
+    // What is shown is what is kept, as one step — or none, if it was put back
+    // where it started.
+    history.recordPreview(drag.previous);
+    if (drag.boundary === null) return true;
+    const moved = moveTracks(drag.original, drag.axis, drag.start, drag.end, drag.boundary);
+    if (moved === drag.original) return true;
+    // The selection goes with them, so they can be carried again or deleted.
+    const first = movedTrackStart(drag.start, drag.end, drag.boundary);
+    setCellRange(wholeTracksRange(moved, drag.axis, first, first + drag.end - drag.start));
+    return true;
+  }
+
+  /** A carry abandoned — the pointer lost, or Escape — puts everything back. */
+  function cancelTrackDrag() {
+    const drag = trackDragRef.current;
+    if (!drag) return;
+    trackDragRef.current = null;
+    setTrackDrag(null);
+    if (drag.moved) history.restorePreview(drag.previous);
+  }
+
+  /**
+   * A second quick press on a table's line: the column before it is fitted to
+   * its text, or the row above it to its lines — the double-click every
+   * spreadsheet has. True when it was that second press, and nothing else
+   * should happen.
+   */
+  function fitOnSecondLinePress(
+    event: PointerEvent<SVGElement>,
+    table: TableElement,
+    axis: TableAxis,
+    track: number,
+  ): boolean {
+    const press: NodePress = {
+      key: `${table.id}:${axis}:${track}`,
+      time: event.timeStamp,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    if (!isDoublePress(lastTableLinePressRef.current, press.key, press)) {
+      lastTableLinePressRef.current = press;
+      return false;
+    }
+    lastTableLinePressRef.current = null;
+    event.preventDefault();
+    event.stopPropagation();
+    const fitted = axis === 'col' ? fitColumnWidth(table, track) : fitRowHeight(table, track);
+    if (fitted !== table) {
+      clearError();
+      replaceTable(fitted, table.id);
+    }
+    return true;
+  }
+
+  /** Text pasted into a table's cells: a spreadsheet's block, or one value. */
+  function pasteIntoCells(table: TableElement, range: CellRange, text: string) {
+    const grid = parseTabularText(text);
+    if (grid.length === 0) return;
+    const rows = trackSpan(range, 'row');
+    const cols = trackSpan(range, 'col');
+    const top = { row: rows.start, col: cols.start };
+    clearError();
+
+    // One value over a block fills every cell of it, as a spreadsheet does —
+    // every cell that shows, so a merged cell takes it once, in its top-left,
+    // and nothing lands in the cells it covers.
+    const shown = anchorCellsInRange(table, range);
+    if (grid.length === 1 && grid[0]!.length === 1 && cellsInRange(range).length > 1) {
+      const value = grid[0]![0]!.slice(0, TABLE_CELL_TEXT_LIMIT);
+      let next = table;
+      for (const ref of shown) next = setCell(next, ref.row, ref.col, { text: value });
+      const touched = Array.from({ length: rows.end - rows.start + 1 }, (_, i) => rows.start + i);
+      replaceTable(fitRowsToContent(next, touched, 'grow'), table.id);
+      return;
+    }
+
+    const pasted = pasteGrid(table, top, grid);
+    replaceTable(pasted.table, table.id);
+    setCellRange(pasted.range);
+    if (pasted.truncated) {
+      setValidationError(
+        `Only part of it fitted: a table holds ${TABLE_MAX_ROWS} rows, ${TABLE_MAX_COLS} columns and ${TABLE_CELL_TEXT_LIMIT} characters a cell.`,
+      );
+    }
+  }
+
+  /** In a table's cells, with nothing being typed: where copy and paste mean cells. */
+  function workingInCells(): boolean {
+    return Boolean(selectedTable && cellRange && tableEditing && !editingCell);
+  }
+
+  function onFormPaste(event: ClipboardEvent<HTMLFormElement>) {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    if (!workingInCells() || !selectedTable || !heldRange) return;
+    event.preventDefault();
+    const text = event.clipboardData.getData('text/plain');
+    // Nothing in the system clipboard to lay into cells: an element copied in
+    // the studio is pasted as one, the way it always has been.
+    if (!text) {
+      pasteFragment(clipboard);
+      return;
+    }
+    pasteIntoCells(selectedTable, heldRange, text);
+  }
+
+  function onFormCopy(event: ClipboardEvent<HTMLFormElement>) {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    if (!workingInCells() || !selectedTable || !heldRange) return;
+    // The cells in hand go out as spreadsheet text, so they can be pasted into
+    // a spreadsheet — or back into another table here.
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', rangeAsTabularText(selectedTable, heldRange));
+  }
+
+  /** Rows or columns `start`..`end` taken out. A table always keeps one. */
+  function deleteTableTracks(table: TableElement, axis: TableAxis, start: number, end: number) {
+    const next = deleteTracks(table, axis, start, end);
+    if (!next) return;
+    clearError();
+    replaceTable(next, table.id);
+    if (cellRange && selectedTableId === table.id) {
+      setCellRange(rangeAfterDelete(next, cellRange, axis, start, end));
+    }
+  }
+
+  /**
+   * A press in a table's cells dragged across them: the block it sweeps is the
+   * range, the way it is in any spreadsheet.
+   */
+  function beginCellRangeDrag(
+    event: PointerEvent<SVGElement>,
+    table: TableElement,
+    anchor: CellRef,
+  ) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(event.pointerId);
+    cellRangeDragRef.current = { pointerId: event.pointerId, tableId: table.id, anchor };
+  }
+
+  function updateCellRangeDrag(event: PointerEvent<SVGSVGElement>): boolean {
+    const drag = cellRangeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    const table = tableById.get(drag.tableId);
+    if (!table) return true;
+    const focus = cellAtPoint(table, surfacePoint(event), true);
+    if (!focus) return true;
+    // Only when the pointer crosses into another cell: a move within one would
+    // otherwise re-render the whole editor for a range that has not changed.
+    setCellRange((current) =>
+      current &&
+      current.focus.row === focus.row &&
+      current.focus.col === focus.col &&
+      current.anchor.row === drag.anchor.row &&
+      current.anchor.col === drag.anchor.col
+        ? current
+        : { anchor: drag.anchor, focus },
+    );
+    return true;
+  }
+
+  function endCellRangeDrag(event: PointerEvent<SVGSVGElement>): boolean {
+    const drag = cellRangeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return false;
+    cellRangeDragRef.current = null;
+    releaseCapture(event);
+    return true;
   }
 
   function beginTableResize(
     event: PointerEvent<SVGElement>,
     table: TableElement,
-    axis: 'col' | 'row',
+    axis: TableAxis,
     index: number,
   ) {
     event.preventDefault();
@@ -4220,23 +4901,32 @@ export function DiagramEditor() {
     event.preventDefault();
 
     const graph = history.snapshotRef.current;
-    const table = (graph.tables ?? []).find((current) => current.id === session.tableId);
+    // Worked out from the table as it was at the press, every move, so rows
+    // grown to fit a narrow column come back down if it is widened again in
+    // the same drag.
+    const table = (session.previous.tables ?? []).find((current) => current.id === session.tableId);
     if (!table) return true;
 
     const point = surfacePoint(event);
+    // The line lands on the grid, as every other edge being pulled does.
+    const at = (value: number) => (snapEnabled ? snapToGrid(value) : value);
     // The boundary being dragged is measured from where its own track starts,
     // so the neighbouring columns keep the widths their authors chose.
     const next =
       session.axis === 'col'
-        ? resizeColumn(
-            table,
-            session.index,
-            point.x - (table.x + (tableColumnOffsets(table)[session.index] ?? 0)),
+        ? fitRowsToContent(
+            resizeColumn(
+              table,
+              session.index,
+              at(point.x) - (table.x + (tableColumnOffsets(table)[session.index] ?? 0)),
+            ),
+            null,
+            'grow',
           )
         : resizeRow(
             table,
             session.index,
-            point.y - (table.y + (tableRowOffsets(table)[session.index] ?? 0)),
+            at(point.y) - (table.y + (tableRowOffsets(table)[session.index] ?? 0)),
           );
 
     history.preview({
@@ -4266,6 +4956,7 @@ export function DiagramEditor() {
     event: PointerEvent<SVGElement>,
     kind: 'path' | 'table' | 'ink' | 'node' | 'arrow',
     id: string,
+    { slop = 0, onClick }: { slop?: number; onClick?: () => void } = {},
   ) {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -4312,6 +5003,8 @@ export function DiagramEditor() {
       startBounds: unionBounds(boundsOfSelection(previous, selection)),
       previous,
       moved: false,
+      slop,
+      onClick,
     };
   }
 
@@ -4332,6 +5025,9 @@ export function DiagramEditor() {
 
     const point = surfacePoint(event);
     const rawTotal = { x: point.x - session.start.x, y: point.y - session.start.y };
+    // A press that has not gone far enough might still be a click, which means
+    // something else (a table's cells) — so the artwork stays put until it has.
+    if (!session.moved && Math.hypot(rawTotal.x, rawTotal.y) < session.slop) return true;
     // Snapped by the group's outer box, so a multi-element drag keeps its
     // internal spacing rather than each member rounding independently.
     const snapped = session.startBounds
@@ -4392,6 +5088,7 @@ export function DiagramEditor() {
     // A click that never moved is a selection, not an edit worth undoing.
     if (session.moved) history.recordPreview(session.previous);
     releaseCapture(event);
+    if (!session.moved) session.onClick?.();
     return true;
   }
 
@@ -4433,6 +5130,17 @@ export function DiagramEditor() {
    * whether that is the rail or a button inside one of its sub-toolbars.
    */
   function selectCanvasTool(next: CanvasTool) {
+    // Changing tools is the end of what the last one was drawing. A path in hand
+    // is kept, the way Escape keeps it — it was being drawn on purpose — while an
+    // arrow with only its first end down is dropped, as Escape drops it: its far
+    // end would land wherever the pointer happened to leave the canvas. Picking
+    // the tool already armed changes nothing, so the path carries on.
+    if (next !== canvasTool) {
+      if (pathAnchorsRef.current.length > 0) finishPenDraft();
+      setArrowDraft(null);
+      setArrowSnap(null);
+      arrowPressRef.current = null;
+    }
     setCanvasTool(next);
     setShapePicker(null);
     // A shape being dragged out does not survive the tool it was started under:
@@ -4855,74 +5563,36 @@ export function DiagramEditor() {
     );
   }
 
-  function renderArrangeOptions(close: () => void) {
-    return (
-      <div className="w-40">
-        <PopoverSection label="Flow">
-          <div className="flex gap-1">
-            {LAYOUT_DIRECTIONS.map(({ direction, label, Icon }) => (
-              <PresetButton
-                key={direction}
-                label={<Icon aria-hidden="true" size={15} />}
-                name={label}
-                active={layoutDirection === direction}
-                disabled={showSubmitting}
-                onSelect={() => setLayoutDirection(direction)}
-              />
-            ))}
-          </div>
-        </PopoverSection>
-        <Button
-          variant="secondary"
-          className="w-full"
-          // Distinct from the rail button that opens this panel, which is also
-          // called Arrange: one opens the choices, this one acts on them.
-          aria-label="Arrange the diagram"
-          disabled={nodes.length < 2 || showSubmitting}
-          // Says "connections" rather than "arrows": it lays out by `edges`,
-          // and every connection made in the studio has been a standalone
-          // arrow since it gained them, so this cannot see those.
-          title="Lay inherited connections out as a graph"
-          onClick={() => {
-            clearError();
-            const graph = history.snapshotRef.current;
-            history.commit({
-              nodes: layoutDiagram(graph.nodes, graph.edges, layoutDirection),
-              edges: graph.edges,
-            });
-            close();
-          }}
-        >
-          Arrange
-        </Button>
-      </div>
-    );
-  }
-
   function renderTemplateOptions(close: () => void) {
     return (
-      <div role="group" aria-label="Start from" className="flex flex-col gap-1">
-        {STUDIO_TEMPLATES.map((template) => {
-          const TemplateIcon = TEMPLATE_ICONS[template.id] ?? LayoutTemplate;
-          return (
-            <button
-              key={template.id}
-              type="button"
-              title={template.hint}
-              disabled={showSubmitting}
-              onClick={() => {
-                setPendingTemplate(template);
-                selectCanvasTool('template');
-                close();
-              }}
-              aria-label={template.label}
-              className="flex w-16 flex-col items-center justify-center gap-0.5 rounded-lg border border-rt-tertiary bg-rt-surface px-1 py-1.5 text-[10px] font-semibold text-rt-ink-muted transition-colors hover:border-rt-primary hover:bg-rt-primary-tint hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+      // Each shown as what it puts down, rather than as an icon standing for it.
+      <div role="group" aria-label="Start from" className="grid w-[288px] grid-cols-2 gap-2">
+        {STUDIO_TEMPLATES.map((template) => (
+          <button
+            key={template.id}
+            type="button"
+            title={template.hint}
+            disabled={showSubmitting}
+            onClick={() => {
+              setPendingTemplate(template);
+              selectCanvasTool('template');
+              close();
+            }}
+            aria-label={template.label}
+            className="group flex flex-col gap-1 rounded-lg border border-rt-tertiary bg-rt-surface p-1.5 text-left transition-colors hover:border-rt-primary hover:bg-rt-primary-tint focus-visible:ring-2 focus-visible:ring-rt-secondary-deep focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <span
+              aria-hidden="true"
+              data-testid="template-thumbnail"
+              className="relative block aspect-[4/3] w-full overflow-hidden rounded-md border border-rt-tertiary/60 bg-white"
             >
-              <TemplateIcon aria-hidden="true" size={14} className="shrink-0" />
+              <TemplateThumbnail template={template} />
+            </span>
+            <span className="px-0.5 text-[11px] font-semibold text-rt-ink-muted group-hover:text-rt-ink">
               {template.label}
-            </button>
-          );
-        })}
+            </span>
+          </button>
+        ))}
       </div>
     );
   }
@@ -5046,6 +5716,13 @@ export function DiagramEditor() {
     setArrowDraft(null);
     setArrowSnap(null);
     arrowPressRef.current = null;
+    // A path in hand usually hears Escape first, through the form. With focus
+    // outside the form this is the only handler that does, and switching to
+    // Select without it left the anchors on the canvas under another tool.
+    if (pathAnchorsRef.current.length > 0) {
+      finishPenDraft(true);
+      return;
+    }
     setCanvasTool('select');
   }
   cancelPlacementRef.current = cancelPlacement;
@@ -5062,7 +5739,8 @@ export function DiagramEditor() {
 
   /**
    * How far the pointer has to travel before a press is a drag rather than a
-   * click. Shared by the arrow and the line, so both read a wobble the same way.
+   * click. Shared by the arrow, the line and shape and text placement, so they
+   * all read a wobble the same way.
    */
   function travelSlop() {
     return pointerTravelSlopForView(renderedViewRef.current, surfaceBounds());
@@ -5668,7 +6346,11 @@ export function DiagramEditor() {
       event.preventDefault();
       clearAllSelection();
       const size = templateSize(pendingTemplate);
-      applyTemplate(pendingTemplate, centredOnCursor(surfacePoint(event), size));
+      // Where its ghost is: centred on the press, on the grid and on the sheet.
+      applyTemplate(
+        pendingTemplate,
+        placeNodePosition(centredOnCursor(surfacePoint(event), size), size, snapEnabled),
+      );
       return;
     }
 
@@ -5762,6 +6444,8 @@ export function DiagramEditor() {
 
   function onCanvasPointerMove(event: PointerEvent<SVGSVGElement>) {
     updateExtendProximity(event.clientX, event.clientY);
+    // Only measured when there is table chrome to wake: this runs on every move.
+    if (tableChromeRef.current) tableChromeRef.current.updatePointer(surfacePoint(event));
     if (updateArrowEdit(event)) return;
     if (updateExtendPress(event)) return;
 
@@ -5795,10 +6479,12 @@ export function DiagramEditor() {
     if (updateElementMove(event)) return;
     if (updatePathEdit(event)) return;
     if (updateTableResize(event)) return;
+    if (updateCellRangeDrag(event)) return;
+    if (updateTrackDrag(event)) return;
 
     if (inkPointerRef.current === event.pointerId) {
       event.preventDefault();
-      if (canvasTool === 'erase') eraseAt(event);
+      if (eraseStartRef.current) eraseAt(event);
       else extendStroke(event);
       return;
     }
@@ -5889,11 +6575,14 @@ export function DiagramEditor() {
     if (inkPointerRef.current !== event.pointerId) return false;
     inkPointerRef.current = null;
 
-    if (canvasTool === 'erase') {
-      const previous = eraseStartRef.current;
+    // Which gesture this was is what the press began, not the tool armed now:
+    // Escape or a shortcut can change the tool while the button is still down,
+    // and reading the tool then dropped the sweep's undo step on the floor.
+    const previous = eraseStartRef.current;
+    if (previous) {
       eraseStartRef.current = null;
       // One undo step for the whole sweep, however many strokes it took out.
-      if (previous) history.recordPreview(previous);
+      history.recordPreview(previous);
     } else {
       finishStroke();
     }
@@ -5955,6 +6644,8 @@ export function DiagramEditor() {
     if (endElementMove(event)) return;
     if (endPathEdit(event)) return;
     if (endTableResize(event)) return;
+    if (endCellRangeDrag(event)) return;
+    if (endTrackDrag(event)) return;
     if (endPath(event)) return;
     if (endShapeDraft(event)) return;
     if (endRotate(event)) return;
@@ -6030,6 +6721,10 @@ export function DiagramEditor() {
       history.recordPreview(tableResize.previous);
       tableResizeRef.current = null;
     }
+    if (cellRangeDragRef.current?.pointerId === event.pointerId) cellRangeDragRef.current = null;
+    // A carried row that loses the pointer stays where it was: the release is
+    // what says where it goes, and there was none.
+    if (trackDragRef.current?.pointerId === event.pointerId) cancelTrackDrag();
     const pathEdit = pathEditRef.current;
     if (pathEdit?.pointerId === event.pointerId) {
       history.recordPreview(pathEdit.previous);
@@ -6039,10 +6734,11 @@ export function DiagramEditor() {
     // half-drawn stroke is committed exactly as `pointerup` would commit it.
     if (inkPointerRef.current === event.pointerId) {
       inkPointerRef.current = null;
-      if (canvasTool === 'erase') {
-        const previous = eraseStartRef.current;
+      // By the gesture, not the tool armed now — the same reason `endInk` gives.
+      const previous = eraseStartRef.current;
+      if (previous) {
         eraseStartRef.current = null;
-        if (previous) history.recordPreview(previous);
+        history.recordPreview(previous);
       } else {
         finishStroke();
       }
@@ -6184,6 +6880,13 @@ export function DiagramEditor() {
   function onCanvasKeyDown(event: KeyboardEvent<SVGSVGElement>) {
     if (isSubmitting) return;
 
+    // Rows being carried go back where they were, and nothing else happens.
+    if (event.key === 'Escape' && trackDragRef.current) {
+      event.preventDefault();
+      cancelTrackDrag();
+      return;
+    }
+
     // Held Space arms panning; the keyup below disarms it. Auto-repeat lands here
     // too, which is why this returns rather than falling through to the shortcuts.
     if (event.key === ' ') {
@@ -6195,6 +6898,14 @@ export function DiagramEditor() {
     if (event.key === 'Enter' && selectedNode) {
       event.preventDefault();
       beginInlineNodeEdit(selectedNode);
+      return;
+    }
+
+    // Enter goes into a selected table, at its first cell: the keyboard's way
+    // to the click that does the same.
+    if (event.key === 'Enter' && selectedTable && !cellRange && !multiSelected) {
+      event.preventDefault();
+      enterTableCells(selectedTable.id, { row: 0, col: 0 });
       return;
     }
 
@@ -6213,7 +6924,6 @@ export function DiagramEditor() {
       editingText: editingNodeId !== null || editingCell !== null || editingArrowId !== null,
       inCellMode: Boolean(selectedTable && cellRange),
       submitting: isSubmitting,
-      drawing: pathAnchorsRef.current.length > 0,
       modifier: event.ctrlKey || event.metaKey || event.altKey,
     });
     if (shortcutTool) {
@@ -6262,17 +6972,27 @@ export function DiagramEditor() {
 
       if (cell && (event.key === 'Delete' || event.key === 'Backspace')) {
         event.preventDefault();
-        replaceTable(clearCellRange(selectedTable, cellRange), selectedTable.id);
+        // Rows or columns picked whole go; a block of cells is emptied.
+        const whole = wholeTracks(heldRange);
+        if (whole) {
+          // Every row there is, is the table.
+          if (!deleteTracks(selectedTable, whole.axis, whole.start, whole.end)) {
+            deleteSelection();
+            return;
+          }
+          deleteTableTracks(selectedTable, whole.axis, whole.start, whole.end);
+          return;
+        }
+        replaceTable(clearCellRange(selectedTable, heldRange ?? cellRange), selectedTable.id);
         return;
       }
 
-      // Typing replaces the cell, exactly as it does in a spreadsheet.
+      // Typing replaces the cell, exactly as it does in a spreadsheet. Nothing
+      // is written until the edit is committed: writing the first character
+      // straight away made the edit two undo steps, and left that character
+      // behind when the edit was abandoned with Escape.
       if (cell && !withModifier && event.key.length === 1) {
         event.preventDefault();
-        replaceTable(
-          setCell(selectedTable, cell.row, cell.col, { text: event.key }),
-          selectedTable.id,
-        );
         openCellEditor(cell, event.key, false);
         return;
       }
@@ -6453,6 +7173,9 @@ export function DiagramEditor() {
         });
         return;
       }
+      // In a table's cells, copy and paste are left to the browser, whose
+      // clipboard events carry text in and out — to and from a spreadsheet.
+      if ((key === 'c' || key === 'v') && workingInCells()) return;
       if (key === 'c') {
         event.preventDefault();
         copySelection();
@@ -6494,6 +7217,7 @@ export function DiagramEditor() {
     if (arrowEditRef.current) return 'Finish moving the arrow before proposing.';
     if (pathEditRef.current) return 'Finish moving the point before proposing.';
     if (tableResizeRef.current) return 'Finish resizing the table before proposing.';
+    if (trackDragRef.current) return 'Finish moving the row or column before proposing.';
     if (shapeDraftRef.current) return 'Finish drawing the shape before proposing.';
     if (inkPointerRef.current !== null) return 'Finish the stroke before proposing.';
     // Uncommitted work, rather than a half-applied change: proposing over it
@@ -7094,478 +7818,346 @@ export function DiagramEditor() {
   }
 
   function renderTable(table: TableElement) {
-    const cols = tableColCount(table);
-    const colOffsets = tableColumnOffsets(table);
-    const rowOffsets = tableRowOffsets(table);
-    const size = tableSize(table);
-    const stroke = tableStrokeColor(table);
-    const strokeWidth = tableStrokeWidth(table);
-    const selected = selectedTableIds.includes(table.id);
-
+    const inCells = tableEditing && selectedTableId === table.id;
+    const editingHere = selectedTableId === table.id ? editingCell : null;
+    // While rows are carried the range is theirs, and they are drawn lifted.
+    const carrying = trackDrag?.tableId === table.id;
     return (
-      <g key={table.id} transform={`translate(${table.x}, ${table.y})`}>
-        {table.cells.map((_, index) => {
-          const row = Math.floor(index / cols);
-          const col = index % cols;
-          const cell = tableCellAt(table, row, col);
-          const x = colOffsets[col] ?? 0;
-          const y = rowOffsets[row] ?? 0;
-          const width = table.colWidths[col] ?? 0;
-          const height = table.rowHeights[row] ?? 0;
-          const lines = tableCellLines(table, cell, col, row);
-          const fontSize = tableCellFontSize(table, cell);
-          const lineHeight = fontSize * 1.25;
-          const align = cell?.align ?? 'left';
-          const textX =
-            align === 'center'
-              ? x + width / 2
-              : align === 'right'
-                ? x + width - TABLE_CELL_PADDING
-                : x + TABLE_CELL_PADDING;
-          const inRange = cellRange ? isCellInRange(cellRange, row, col) : false;
-          const isEditing =
-            editingCell !== null && editingCell.row === row && editingCell.col === col;
-
-          return (
-            <g key={`${table.id}-${row}-${col}`}>
-              <rect
-                x={x}
-                y={y}
-                width={width}
-                height={height}
-                fill={tableCellFill(table, cell, row)}
-                stroke={stroke}
-                strokeWidth={strokeWidth}
-              />
-              {selected && tableEditing && inRange ? (
-                <rect
-                  x={x}
-                  y={y}
-                  width={width}
-                  height={height}
-                  fill={STUDIO_ACCENT_WASH}
-                  pointerEvents="none"
-                />
-              ) : null}
-              {isEditing ? (
-                <foreignObject
-                  x={x + 1}
-                  y={y + 1}
-                  width={Math.max(10, width - 2)}
-                  // As tall as the text in it. Sized to the cell, a value that
-                  // wrapped past one line was clipped away while it was being
-                  // typed and only appeared once the edit was committed.
-                  height={Math.max(
-                    height - 2,
-                    Math.ceil(
-                      Math.max(1, cellDraft.split('\n').length) * fontSize * INLINE_LINE_HEIGHT,
-                    ) + 6,
-                  )}
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  <div
-                    className="flex h-full w-full items-center"
-                    // The renderer wraps a cell at `colWidth - TABLE_CELL_PADDING`
-                    // and `wrapDiagramLabel` takes another `DIAGRAM_LABEL_PADDING`
-                    // off that. Matching it here stops text re-wrapping, and the
-                    // row growing, the instant the edit is committed.
-                    style={{
-                      padding: `0 ${(TABLE_CELL_PADDING + DIAGRAM_LABEL_PADDING - 2) / 2}px`,
-                    }}
-                  >
-                    <textarea
-                      ref={cellInputRef}
-                      aria-label={`Cell row ${row + 1} column ${col + 1}`}
-                      value={cellDraft}
-                      rows={Math.max(1, cellDraft.split('\n').length)}
-                      maxLength={TABLE_CELL_TEXT_LIMIT}
-                      onChange={(event) => setCellDraft(event.target.value)}
-                      onBlur={(event) => {
-                        if (cellEditCancelledRef.current) {
-                          cellEditCancelledRef.current = false;
-                          return;
-                        }
-                        commitCellText(table, { row, col }, event.target.value);
-                        setEditingCell(null);
-                      }}
-                      onKeyDown={(event) => {
-                        event.stopPropagation();
-                        // Enter mid-composition picks an IME candidate; taking
-                        // it as "done" committed the raw reading and jumped to
-                        // the next cell in the middle of a word.
-                        if (event.nativeEvent.isComposing) return;
-                        // Shift-Enter breaks the line, as it does in the shape
-                        // and arrow editors this one now looks identical to.
-                        // Shift-Tab is still how you go back through the grid.
-                        if (event.key === 'Enter' && event.shiftKey) return;
-                        if (event.key === 'Escape') {
-                          event.preventDefault();
-                          // Escape abandons the edit and keeps what was there.
-                          cellEditCancelledRef.current = true;
-                          setEditingCell(null);
-                          canvasRef.current?.focus({ preventScroll: true });
-                          return;
-                        }
-                        if (event.key === 'Enter' || event.key === 'Tab') {
-                          event.preventDefault();
-                          commitCellText(table, { row, col }, event.currentTarget.value);
-                          const next = moveTableSelection(
-                            table,
-                            { row, col },
-                            event.key as TableNavKey,
-                            event.shiftKey,
-                          );
-                          setEditingCell(null);
-                          setCellRange({ anchor: next, focus: next });
-                          canvasRef.current?.focus({ preventScroll: true });
-                        }
-                      }}
-                      className={INLINE_EDITOR_CLASS}
-                      style={{
-                        fontSize: `${fontSize}px`,
-                        fontFamily: INLINE_FONT_FAMILY,
-                        fontWeight: tableCellBold(table, cell, row) ? 700 : 400,
-                        color: tableCellColor(cell),
-                        textAlign: align,
-                        lineHeight: INLINE_LINE_HEIGHT,
-                      }}
-                    />
-                  </div>
-                </foreignObject>
-              ) : (
-                <>
-                  <text
-                    fill={tableCellColor(cell)}
-                    textAnchor={align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start'}
-                    style={{
-                      fontSize: `${fontSize}px`,
-                      fontFamily: 'Inter, system-ui, sans-serif',
-                      fontWeight: tableCellBold(table, cell, row) ? 600 : 400,
-                    }}
+      <StudioTableView
+        key={table.id}
+        // Drawn as shown — a row growing as it is typed into — while the edit
+        // itself works on the table as stored.
+        table={tableAsShown(table)}
+        hiddenText={editingHere}
+        wash={
+          inCells && heldRange && !carrying
+            ? (box) =>
+                isCellInRange(heldRange, box.row, box.col) ? (
+                  <rect
+                    key={`wash-${box.row}-${box.col}`}
+                    data-testid="table-cell-selected"
+                    x={box.x}
+                    y={box.y}
+                    width={box.width}
+                    height={box.height}
+                    fill={STUDIO_ACCENT_WASH}
                     pointerEvents="none"
-                  >
-                    {lines.map((line, lineIndex) => (
-                      <tspan
-                        key={line + String(lineIndex)}
-                        x={textX}
-                        y={
-                          y +
-                          height / 2 +
-                          fontSize / 3 -
-                          ((lines.length - 1) * lineHeight) / 2 +
-                          lineIndex * lineHeight
-                        }
-                      >
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
-                  {canvasTool === 'select' ? (
-                    <rect
-                      role="button"
-                      aria-label={`Cell row ${row + 1} column ${col + 1}`}
-                      x={x}
-                      y={y}
-                      width={width}
-                      height={height}
-                      fill="transparent"
-                      className="cursor-cell"
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) return;
-                        event.stopPropagation();
-                        canvasRef.current?.focus({ preventScroll: true });
-
-                        // Outside cell mode, shift builds a selection of
-                        // whole tables rather than a range of cells.
-                        if (event.shiftKey && (!tableEditing || selectedTableId !== table.id)) {
-                          toggleStudioSelection('table', table.id);
-                          return;
-                        }
-
-                        const press: NodePress = {
-                          key: `${table.id}:${row}:${col}`,
-                          time: event.timeStamp,
-                          clientX: event.clientX,
-                          clientY: event.clientY,
-                        };
-                        const isSecond = isDoublePress(
-                          lastNodePressRef.current,
-                          `${table.id}:${row}:${col}`,
-                          press,
-                        );
-                        lastNodePressRef.current = isSecond ? null : press;
-
-                        if (isSecond) {
-                          setSelectedTableIds([table.id]);
-                          // First double-click goes inside the table; a second,
-                          // already inside, opens the cell for typing.
-                          if (tableEditing) {
-                            openCellEditor({ row, col }, cell?.text ?? '', true);
-                          } else setTableEditing(true);
-                          setCellRange({ anchor: { row, col }, focus: { row, col } });
-                          return;
-                        }
-
-                        // Outside cell mode a press grabs the whole table.
-                        if (!tableEditing || selectedTableId !== table.id) {
-                          selectTable(table.id);
-                          beginElementMove(event, 'table', table.id);
-                          return;
-                        }
-                        selectCell(table, row, col, event.shiftKey);
-                      }}
-                    />
-                  ) : null}
-                </>
-              )}
-            </g>
-          );
-        })}
-
-        {canvasTool === 'select' ? renderTableInserts(table, size, colOffsets, rowOffsets) : null}
-
-        {selected ? (
-          <>
-            {/* The same frame every other kind shows, but no rotate grip: a
-                turned table's cells would no longer line up with the rows and
-                columns people read them by. It sits outside the strip where
-                rows and columns are added and removed, so pulling the frame and
-                adding a row are never the same press. */}
-            <SelectionFrame
-              bounds={{ x: 0, y: 0, width: size.width, height: size.height }}
-              pixel={pixel}
-              inset={tableFrameOutset}
-              member={multiSelected}
-            />
-            {!multiSelected && canvasTool === 'select'
-              ? renderResizeChrome(
-                  'table',
-                  table.id,
-                  { x: 0, y: 0, width: size.width, height: size.height },
-                  { outset: tableFrameOutset },
-                )
-              : null}
-            {/* Resizing is an inside-the-table gesture, like editing a cell. */}
-            {tableEditing
-              ? table.colWidths.map((_, col) => (
-                  <rect
-                    key={`col-grip-${col}`}
-                    role="button"
-                    aria-label={`Resize column ${col + 1}`}
-                    x={(colOffsets[col + 1] ?? 0) - 3}
-                    y={0}
-                    width={6}
-                    height={size.height}
-                    fill="transparent"
-                    className="cursor-col-resize"
-                    onPointerDown={(event) => beginTableResize(event, table, 'col', col)}
                   />
-                ))
-              : null}
-            {tableEditing
-              ? table.rowHeights.map((_, row) => (
-                  <rect
-                    key={`row-grip-${row}`}
-                    role="button"
-                    aria-label={`Resize row ${row + 1}`}
-                    x={0}
-                    y={(rowOffsets[row + 1] ?? 0) - 3}
-                    width={size.width}
-                    height={6}
-                    fill="transparent"
-                    className="cursor-row-resize"
-                    onPointerDown={(event) => beginTableResize(event, table, 'row', row)}
-                  />
-                ))
-              : null}
-          </>
-        ) : null}
-      </g>
+                ) : null
+            : undefined
+        }
+        overlay={(box) =>
+          editingHere && editingHere.row === box.row && editingHere.col === box.col
+            ? renderCellEditor(table, box)
+            : canvasTool === 'select'
+              ? renderCellTarget(table, box)
+              : null
+        }
+      />
     );
   }
 
   /**
-   * Where a row or a column can be added or taken away, on the table itself.
+   * The press target over one cell.
    *
-   * A boundary adds — rows reached from the left edge, columns from the top,
-   * and the last of each from the bottom and right edges, which is where "one
-   * more" belongs. The body of a row or column takes that one away.
-   *
-   * Each is a real control rather than something the pointer conjures: the
-   * target is always there and always named, and hovering only draws the badge
-   * on it. A target that exists only while it is hovered cannot be found by
-   * anything that does not hover — a screen reader, a test, a touch. Keyboard
-   * operation still goes through the canvas, as it does for every element here.
-   *
-   * This replaces a menu of Row-below / Column-right buttons. A menu cannot say
-   * *where*, so it could only act on the last row or on whichever cell happened
-   * to be selected.
+   * A table works the way FigJam's does. The first press takes the whole table
+   * — and a drag from there moves it, from any cell. A click on a table that is
+   * already selected goes inside it, to that cell; inside, a drag sweeps a block
+   * of cells instead of moving anything. Two quick presses on a cell open it for
+   * typing, from anywhere.
    */
-  function renderTableInserts(
+  function renderCellTarget(
     table: TableElement,
-    size: DiagramNodeSize,
-    colOffsets: number[],
-    rowOffsets: number[],
+    { row, col, x, y, width, height, rowSpan, colSpan, cell }: TableCellBox,
   ) {
-    const rows = tableRowCount(table);
-    const cols = tableColCount(table);
-    const REACH = TABLE_INSERT_REACH;
+    return (
+      <rect
+        key={`target-${row}-${col}`}
+        role="button"
+        aria-label={
+          rowSpan > 1 || colSpan > 1
+            ? `Merged cell rows ${row + 1}–${row + rowSpan}, columns ${col + 1}–${col + colSpan}`
+            : `Cell row ${row + 1} column ${col + 1}`
+        }
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill="transparent"
+        className="cursor-cell"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          canvasRef.current?.focus({ preventScroll: true });
+          const here = { row, col };
+          const inCells = tableEditing && selectedTableId === table.id;
 
-    function control(
-      key: string,
-      action: 'insert' | 'remove',
-      axis: 'row' | 'col',
-      index: number,
-      name: string,
-      zone: { x: number; y: number; width: number; height: number },
-      badge: DiagramPoint,
-    ) {
-      const showing =
-        tableInsert !== null &&
-        tableInsert.tableId === table.id &&
-        tableInsert.axis === axis &&
-        tableInsert.index === index &&
-        tableInsert.action === action;
-
-      return (
-        <g
-          key={key}
-          role="button"
-          aria-label={name}
-          style={{ cursor: 'pointer' }}
-          onPointerEnter={() => setTableInsert({ tableId: table.id, axis, index, action })}
-          onPointerLeave={() =>
-            setTableInsert((current) =>
-              current &&
-              current.tableId === table.id &&
-              current.axis === axis &&
-              current.index === index &&
-              current.action === action
-                ? null
-                : current,
-            )
+          // Outside the cells, shift builds a selection of whole tables rather
+          // than a range of cells.
+          if (event.shiftKey && !inCells) {
+            toggleStudioSelection('table', table.id);
+            return;
           }
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            event.preventDefault();
-            clearError();
-            const next =
-              action === 'insert'
-                ? axis === 'row'
-                  ? insertRow(table, index)
-                  : insertColumn(table, index)
-                : axis === 'row'
-                  ? deleteRow(table, index)
-                  : deleteColumn(table, index);
-            replaceTable(next, table.id);
-            // What was selected may not exist any more, so the range comes back
-            // inside whatever the table now is.
-            if (action === 'remove' && cellRange) {
-              const clamped = clampCellRef(next, cellRange.focus);
-              setCellRange({ anchor: clamped, focus: clamped });
-            }
-            setTableInsert(null);
+
+          const press: NodePress = {
+            key: `${table.id}:${row}:${col}`,
+            time: event.timeStamp,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          };
+          const isSecond = isDoublePress(lastNodePressRef.current, press.key, press);
+          lastNodePressRef.current = isSecond ? null : press;
+          if (isSecond) {
+            enterTableCells(table.id, here);
+            openCellEditor(here, cell?.text ?? '', true);
+            return;
+          }
+
+          if (inCells) {
+            const anchor = event.shiftKey && cellRange ? cellRange.anchor : here;
+            selectCell(table, row, col, event.shiftKey);
+            beginCellRangeDrag(event, table, anchor);
+            return;
+          }
+
+          // Held on its own already, a click goes inside; one of several, a
+          // click narrows the selection to it, as a click on a shape does.
+          const alone = selectedTableId === table.id && selectionSize(currentSelection()) === 1;
+          const held = selectedTableIds.includes(table.id);
+          if (!held) selectTable(table.id);
+          beginElementMove(event, 'table', table.id, {
+            slop: travelSlop(),
+            onClick: () => {
+              if (alone) enterTableCells(table.id, here);
+              else if (held) selectTable(table.id);
+            },
+          });
+        }}
+      />
+    );
+  }
+
+  function renderCellEditor(
+    table: TableElement,
+    { row, col, x, y, width, height, cell }: TableCellBox,
+  ) {
+    const fontSize = tableCellFontSize(table, cell);
+    const align = cell?.align ?? 'left';
+    return (
+      <foreignObject
+        key={`editor-${row}-${col}`}
+        x={x + 1}
+        y={y + 1}
+        width={Math.max(10, width - 2)}
+        // As tall as the text in it. Sized to the cell, a value that
+        // wrapped past one line was clipped away while it was being
+        // typed and only appeared once the edit was committed.
+        height={Math.max(
+          height - 2,
+          Math.ceil(Math.max(1, cellDraft.split('\n').length) * fontSize * INLINE_LINE_HEIGHT) + 6,
+        )}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div
+          className="flex h-full w-full items-center"
+          // The renderer wraps a cell at `colWidth - TABLE_CELL_PADDING`
+          // and `wrapDiagramLabel` takes another `DIAGRAM_LABEL_PADDING`
+          // off that. Matching it here stops text re-wrapping, and the
+          // row growing, the instant the edit is committed.
+          style={{
+            padding: `0 ${(TABLE_CELL_PADDING + DIAGRAM_LABEL_PADDING - 2) / 2}px`,
           }}
         >
-          <rect {...zone} fill="transparent" />
-          {showing ? (
-            <>
-              <circle
-                cx={badge.x}
-                cy={badge.y}
-                r={7}
-                fill={action === 'insert' ? STUDIO_ACCENT : STUDIO_ACCENT_DEEP}
-                pointerEvents="none"
-              />
-              <path
-                d={
-                  action === 'insert'
-                    ? `M ${badge.x - 3.5} ${badge.y} L ${badge.x + 3.5} ${badge.y} M ${badge.x} ${badge.y - 3.5} L ${badge.x} ${badge.y + 3.5}`
-                    : `M ${badge.x - 3.5} ${badge.y} L ${badge.x + 3.5} ${badge.y}`
+          <textarea
+            ref={cellInputRef}
+            aria-label={`Cell row ${row + 1} column ${col + 1}`}
+            value={cellDraft}
+            rows={Math.max(1, cellDraft.split('\n').length)}
+            maxLength={TABLE_CELL_TEXT_LIMIT}
+            onChange={(event) => setCellDraft(event.target.value)}
+            onBlur={(event) => {
+              if (cellEditCancelledRef.current) {
+                cellEditCancelledRef.current = false;
+                return;
+              }
+              commitCellText(table, { row, col }, event.target.value);
+              setEditingCell(null);
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              // A composition in progress owns every key, Escape included.
+              if (event.nativeEvent.isComposing) return;
+              // Enter is a new line, as in FigJam's cells: a cell is often a
+              // few lines long, and breaking one is the commonest thing typed
+              // in it. The field takes the key itself.
+              if (event.key === 'Enter') return;
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                // Escape finishes typing and keeps it. Nothing typed is thrown
+                // away by a key; Undo is the way back.
+                commitCellText(table, { row, col }, event.currentTarget.value);
+                // The field is about to unmount, and its blur must not commit
+                // a second time.
+                cellEditCancelledRef.current = true;
+                setEditingCell(null);
+                canvasRef.current?.focus({ preventScroll: true });
+                return;
+              }
+              if (event.key === 'Tab') {
+                event.preventDefault();
+                commitCellText(table, { row, col }, event.currentTarget.value);
+                const next = moveTableSelection(
+                  table,
+                  { row, col },
+                  event.key as TableNavKey,
+                  event.shiftKey,
+                );
+                setEditingCell(null);
+                setCellRange({ anchor: next, focus: next });
+                canvasRef.current?.focus({ preventScroll: true });
+              }
+            }}
+            className={INLINE_EDITOR_CLASS}
+            style={{
+              fontSize: `${fontSize}px`,
+              fontFamily: INLINE_FONT_FAMILY,
+              fontWeight: tableCellBold(table, cell, row) ? 700 : 400,
+              color: tableCellColor(cell),
+              textAlign: align,
+              lineHeight: INLINE_LINE_HEIGHT,
+            }}
+          />
+        </div>
+      </foreignObject>
+    );
+  }
+
+  /**
+   * The frame round each selected table, and, round one held on its own, its
+   * grips and the controls that add rows and columns.
+   *
+   * Drawn after every element rather than inside the table's own place in the
+   * paint order: drawn there, anything painted above the table covered the
+   * very controls used to work on it. The frame sits on the table's edge like
+   * every other element's; the add buttons sit outside it, so the frame no
+   * longer has to be blown out to make room for them.
+   */
+  function renderTableSelection() {
+    return tables
+      .filter((table) => selectedTableIds.includes(table.id))
+      .map((stored) => {
+        const table = tableAsShown(stored);
+        const size = tableSize(table);
+        const bounds = { x: table.x, y: table.y, width: size.width, height: size.height };
+        const sole = !multiSelected && canvasTool === 'select';
+        const carrying = trackDrag?.tableId === table.id ? trackDrag : null;
+        const inCells = tableEditing && selectedTableId === table.id;
+        return (
+          <g key={`table-selection-${table.id}`}>
+            {/* The same frame every other kind shows, but no rotate grip: a
+                turned table's cells would no longer line up with the rows and
+                columns people read them by. */}
+            <SelectionFrame bounds={bounds} pixel={pixel} member={multiSelected} />
+            {inCells && heldRange && !carrying && !editingCell
+              ? renderRangeOutline(table, heldRange)
+              : null}
+            {carrying ? renderCarriedTracks(table, carrying) : null}
+            {sole ? renderResizeChrome('table', table.id, bounds) : null}
+            {sole && !editingCell && !isSubmitting && !carrying ? (
+              <TableChrome
+                ref={tableChromeRef}
+                table={table}
+                pixel={pixel}
+                disabled={showSubmitting}
+                onInsert={(axis, index) => insertTableTrack(table, axis, index)}
+                onResizeStart={(event, axis, track) => {
+                  if (!fitOnSecondLinePress(event, table, axis, track)) {
+                    beginTableResize(event, table, axis, track);
+                  }
+                }}
+                onHandleDown={(event, axis, track) => onTableHandleDown(event, table, axis, track)}
+                selectedTracks={
+                  tableEditing && selectedTableId === table.id ? wholeTracks(heldRange) : null
                 }
-                stroke="#FFFFFF"
-                strokeWidth={1.6}
-                strokeLinecap="round"
-                pointerEvents="none"
               />
-            </>
-          ) : null}
+            ) : null}
+          </g>
+        );
+      });
+  }
+
+  /**
+   * A border round the cells in hand, as a spreadsheet draws one: while a block
+   * is being swept it shows exactly what the drag has taken so far.
+   */
+  function renderRangeOutline(table: TableElement, range: CellRange) {
+    const rows = trackSpan(range, 'row');
+    const cols = trackSpan(range, 'col');
+    const colOffsets = tableColumnOffsets(table);
+    const rowOffsets = tableRowOffsets(table);
+    const left = colOffsets[cols.start] ?? 0;
+    const top = rowOffsets[rows.start] ?? 0;
+    return (
+      <rect
+        data-testid="table-range-outline"
+        x={table.x + left}
+        y={table.y + top}
+        width={(colOffsets[cols.end + 1] ?? left) - left}
+        height={(rowOffsets[rows.end + 1] ?? top) - top}
+        rx={2 * pixel}
+        fill="none"
+        stroke={STUDIO_ACCENT}
+        strokeWidth={2 * pixel}
+        pointerEvents="none"
+      />
+    );
+  }
+
+  /**
+   * Rows or columns being carried: the gap they will drop into, sunk into the
+   * reflowed table, and the rows themselves, lifted on a shadow and following
+   * the pointer along the table.
+   */
+  function renderCarriedTracks(table: TableElement, carrying: NonNullable<typeof trackDrag>) {
+    const rows = carrying.axis === 'row';
+    const offsets = rows ? tableRowOffsets(table) : tableColumnOffsets(table);
+    const size = tableSize(table);
+    const from = offsets[carrying.first] ?? 0;
+    const to = offsets[carrying.first + carrying.count] ?? from;
+    const lifted = {
+      ...carrying.lifted,
+      x: rows ? table.x : table.x + carrying.at,
+      y: rows ? table.y + carrying.at : table.y,
+    };
+    const liftedSize = tableSize(lifted);
+    return (
+      <g pointerEvents="none">
+        <rect
+          data-testid="table-drop"
+          x={rows ? table.x : table.x + from}
+          y={rows ? table.y + from : table.y}
+          width={rows ? size.width : to - from}
+          height={rows ? to - from : size.height}
+          fill={STUDIO_DROP_SLOT_FILL}
+          stroke={STUDIO_ACCENT}
+          strokeWidth={1.5 * pixel}
+          strokeDasharray={chromeDash(CHROME.ghostDash, pixel)}
+        />
+        <g data-testid="table-drag-ghost" filter="url(#studio-lift-shadow)">
+          <StudioTableView table={lifted} />
+          <rect
+            x={lifted.x}
+            y={lifted.y}
+            width={liftedSize.width}
+            height={liftedSize.height}
+            rx={TABLE_CORNER_RADIUS}
+            fill="none"
+            stroke={STUDIO_ACCENT}
+            strokeWidth={2 * pixel}
+          />
         </g>
-      );
-    }
-
-    const controls: ReactNode[] = [];
-
-    for (let index = 0; index <= rows; index += 1) {
-      const y = rowOffsets[index] ?? size.height;
-      const last = index === rows;
-      controls.push(
-        control(
-          `row-add-${index}`,
-          'insert',
-          'row',
-          index,
-          last ? 'Add a row' : `Insert a row above row ${index + 1}`,
-          last
-            ? { x: 0, y: size.height, width: size.width, height: REACH }
-            : { x: -REACH, y: y - REACH / 2, width: REACH, height: REACH },
-          last ? { x: size.width / 2, y: size.height + REACH / 2 } : { x: -REACH / 2, y },
-        ),
-      );
-
-      // The body of the row, between its two boundaries. A table has to keep a
-      // row, so the last one cannot be taken away.
-      if (last || rows <= 1) continue;
-      const height = (rowOffsets[index + 1] ?? size.height) - y;
-      if (height <= REACH) continue;
-      controls.push(
-        control(
-          `row-remove-${index}`,
-          'remove',
-          'row',
-          index,
-          `Delete row ${index + 1}`,
-          { x: -REACH, y: y + REACH / 2, width: REACH, height: height - REACH },
-          { x: -REACH / 2, y: y + height / 2 },
-        ),
-      );
-    }
-
-    for (let index = 0; index <= cols; index += 1) {
-      const x = colOffsets[index] ?? size.width;
-      const last = index === cols;
-      controls.push(
-        control(
-          `col-add-${index}`,
-          'insert',
-          'col',
-          index,
-          last ? 'Add a column' : `Insert a column left of column ${index + 1}`,
-          last
-            ? { x: size.width, y: 0, width: REACH, height: size.height }
-            : { x: x - REACH / 2, y: -REACH, width: REACH, height: REACH },
-          last ? { x: size.width + REACH / 2, y: size.height / 2 } : { x, y: -REACH / 2 },
-        ),
-      );
-
-      if (last || cols <= 1) continue;
-      const width = (colOffsets[index + 1] ?? size.width) - x;
-      if (width <= REACH) continue;
-      controls.push(
-        control(
-          `col-remove-${index}`,
-          'remove',
-          'col',
-          index,
-          `Delete column ${index + 1}`,
-          { x: x + REACH / 2, y: -REACH, width: width - REACH, height: REACH },
-          { x: x + width / 2, y: -REACH / 2 },
-        ),
-      );
-    }
-
-    return <>{controls}</>;
+      </g>
+    );
   }
 
   function renderInk(stroke: StudioInkStroke) {
@@ -7822,6 +8414,8 @@ export function DiagramEditor() {
       // The narrow layout stacks and does need to scroll.
       className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] overflow-y-auto bg-rt-surface-sunken md:grid-rows-[minmax(0,1fr)_auto] md:overflow-visible"
       onKeyDown={onFormKeyDown}
+      onPaste={onFormPaste}
+      onCopy={onFormCopy}
       onSubmit={(event) => void onSubmit(event)}
     >
       <section ref={canvasFrameRef} className="relative min-h-0">
@@ -7874,7 +8468,6 @@ export function DiagramEditor() {
           penOptions={renderPenOptions}
           tableOptions={renderTableOptions}
           templateOptions={renderTemplateOptions}
-          arrangeOptions={renderArrangeOptions}
           canUndo={history.canUndo}
           canRedo={history.canRedo}
           onUndo={undoDiagram}
@@ -7950,6 +8543,7 @@ export function DiagramEditor() {
           onPointerLeave={() => {
             setGhostCursor(null);
             updateExtendProximity(null, null);
+            tableChromeRef.current?.updatePointer(null);
           }}
           onLostPointerCapture={onLostPointerCapture}
           onKeyDown={onCanvasKeyDown}
@@ -7960,6 +8554,16 @@ export function DiagramEditor() {
           onDrop={onCanvasDrop}
         >
           <defs>
+            {/* The shadow a lifted row or column casts while it is carried. */}
+            <filter id="studio-lift-shadow" x="-10%" y="-40%" width="120%" height="180%">
+              <feDropShadow
+                dx={0}
+                dy={3 * pixel}
+                stdDeviation={5 * pixel}
+                floodColor="#080C15"
+                floodOpacity={0.2}
+              />
+            </filter>
             <pattern
               id="diagram-grid"
               width={DIAGRAM_GRID}
@@ -8077,7 +8681,9 @@ export function DiagramEditor() {
           {editingArrow
             ? (() => {
                 const geometry = arrowGeometry(editingArrow, arrowTargetsById);
-                const fontSize = arrowFontSize(editingArrow);
+                // Typed at the size it will be stored at, so a first label
+                // does not jump when the edit is committed.
+                const fontSize = arrowFontSize(withNewLabelSize(editingArrow));
                 // Sized from the text being typed, not from the stored label:
                 // reading the stored one left the box the size it was when the
                 // editor opened, so a line added with Shift-Enter was clipped
@@ -8315,14 +8921,23 @@ export function DiagramEditor() {
                       strokeDasharray={chromeDash(CHROME.ghostDash, pixel)}
                     />
                   )}
+                  {ghost.kind === 'template' ? (
+                    // The template itself, faint, from the footprint's corner.
+                    <g
+                      data-testid="template-ghost"
+                      transform={`translate(${-ghost.origin.x}, ${-ghost.origin.y})`}
+                    >
+                      <StudioSceneContent scene={ghost.scene} />
+                    </g>
+                  ) : null}
                   {ghost.kind === 'table'
                     ? [
                         ...Array.from({ length: ghost.cols - 1 }, (_, index) => (
                           <line
                             key={`v${index}`}
-                            x1={(index + 1) * TABLE_DEFAULT_COL_WIDTH}
+                            x1={(index + 1) * newTableColWidth(ghost.cols)}
                             y1={0}
-                            x2={(index + 1) * TABLE_DEFAULT_COL_WIDTH}
+                            x2={(index + 1) * newTableColWidth(ghost.cols)}
                             y2={ghost.size.height}
                             stroke={STUDIO_COOL}
                             strokeWidth={pixel}
@@ -8377,6 +8992,7 @@ export function DiagramEditor() {
           ) : null}
 
           {renderSelectedArrowHandles()}
+          {renderTableSelection()}
           {renderGroupFrame()}
 
           {marqueeRect ? (

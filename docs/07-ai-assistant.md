@@ -3,25 +3,28 @@
 > Owner: AI Assistant (docs/06 §7). Covers **F33–F37** plus the two items docs/05 deferred to
 > this module: the SSE streaming helper and decrypting LLM keys at call time.
 >
-> Checked against `main` at `eed6858` plus the changes on branch `assistant-error-codes`,
-> 29 Sep 2026.
+> Checked against `main` at `42283e4` plus the changes on branch `assistant-error-codes`,
+> 4 Oct 2026.
 
 ## What it does
 
-Every participant gets a private ideation assistant. In a session it is an orb in the
-bottom-right corner of the board; opening it grows the orb into a slim rail down the right
-edge, from under the session header to the bottom inset. The orb and the rail are the same
-element — the animation is a `clip-path`, not a resize (`assistant.css` explains why). The
-rail's X, or Escape, closes it and hands focus back to the orb.
+Every participant gets a private ideation assistant in a collapsible rail on the right of the
+board — `BoardRail`, the same chrome as the agenda on the left, only wider so a chat fits. It
+starts collapsed to a narrow strip. The chevron opens and closes it, and focus returns to that
+control on close. Escape does not close it: the agenda rail does not either, and Escape is
+already how dialogs, the studio and text fields step back.
 
-The rail replaced an earlier floating panel that could be dragged and resized. That panel,
-`usePanelGeometry` and its stored geometry are gone.
+The rail replaced the earlier orb, which grew into a floating glass panel with a `clip-path`
+animation, and before that a panel that could be dragged and resized. Both are gone. The glass
+rules in `assistant.css` are now the marketing mock's (`AssistantBeat`); `.rt-assistant-dock`
+repaints the same classes for the light rail.
 
-- **The conversation survives closing the rail.** `AssistantBubble` owns it, not the rail,
-  because the rail unmounts when it collapses. An answer that lands while the rail is shut
-  puts an unread dot on the orb.
-- **It gets out of the way.** The rail closes when the creative studio opens (the studio is a
-  page modal above it), and disappears entirely while a voting ballot covers the board.
+- **The conversation survives closing the rail.** `AssistantBubble` owns it, not the panel,
+  because the panel unmounts when the rail collapses. An answer that lands while the rail is
+  shut puts an unread dot on the strip; a missing provider shows a `!` there instead.
+- **It gets out of the way.** The rail collapses when the creative studio opens (the studio is
+  a page modal above it). While a voting ballot covers the board it stays as a collapsed,
+  `inert` strip, so the board does not change width under the ballot.
 - **Set up without leaving the session.** A user with no provider is offered the same form as
   the Settings page, inside the rail (`LlmSettingsForm variant="panel"`).
 - **It can see the session and draft for it.** It reads the agenda, the live question, what is
@@ -64,8 +67,8 @@ Log in at <http://localhost:5173/login> as `alice@example.com` (the seed prints 
 The seeded session is already ended — it is there as history, not as a board — so to try the
 assistant, create one: **New session**, add a question or two, **Open for joining**, then
 **Start session**. Starting puts the first question into discussion, so Propose works
-straight away. The orb is in the board's bottom-right corner. With no provider saved, the rail
-offers the setup form; the same form lives at <http://localhost:5173/settings>. Groq's free
+straight away. The assistant rail is on the right of the board; open it with the chevron. With
+no provider saved, the rail offers the setup form; the same form lives at <http://localhost:5173/settings>. Groq's free
 tier and a local Ollama both work — press **Test connection** before saving.
 
 To see that the chat is private and that a proposed card reaches everyone, log in as
@@ -215,7 +218,7 @@ Web, under `apps/web/src/features/assistant/`:
 
 | File                                                            | Responsibility                                                                 |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `AssistantBubble.tsx`                                           | The orb/rail shell; owns the conversation, the unread dot and the config check |
+| `AssistantBubble.tsx`                                           | The rail (`BoardRail`); owns the conversation, the unread dot and config check |
 | `AssistantPanel.tsx`                                            | Inside the rail: transcript, composer, artifact cards, inline provider setup   |
 | `AssistantErrorNotice.tsx`                                      | A failed turn: title, next step, error code, and the provider's words          |
 | `useAssistantChat.ts`                                           | Transcript reducer, send/stop, and the `history` each turn sends               |
@@ -446,8 +449,8 @@ Propose is enabled only while the session is live and the question is in discuss
 card says why when it is not. A card marked proposed unlocks again if its card is deleted from
 the board (`syncProposedWithBoard`).
 
-`AssistantBubble` is mounted inside `CreativeToolsProvider` in `SessionPinboard`, which is
-what puts that context in reach.
+`SessionPinboard` renders `AssistantBubble` inside `CreativeToolsProvider` and hands it to
+`PinboardCanvas` as the `assistant` rail, which is what puts that context in reach.
 
 **Auth owner — F33 handover.** `llmConfig.service.ts` holds every read/write of
 `UserLLMConfig`; move the file into `modules/auth/` and re-export it, or leave it and import

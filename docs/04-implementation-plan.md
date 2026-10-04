@@ -22,7 +22,7 @@ Tracks are suggestions for balancing load; each is one engineer unless noted. Pa
 | E — Voting & Summary         | Voting rounds, ballots, winner logic, session summary                                                                                                     | `voting`, `summary`        |
 | F — Voice                    | LiveKit integration, tokens, mute, presence indicators                                                                                                    | `voice`                    |
 | G — Frontend Shell & Polish  | App shell, routing, agenda side panel, dashboards, cross-cutting UI polish, Playwright smoke tests                                                        | web shell                  |
-| H — AI Assistant             | LLM config UI + test-connection, chat side panel, bubble, context assembly, tool-calling loop (web search / diagram / sticky ideation), propose-from-chat | `assistant`                |
+| H — AI Assistant             | LLM config UI + test-connection, collapsible assistant rail, context assembly, tool-calling loop (web search / diagram / sticky ideation), propose-from-chat | `assistant`                |
 
 ## Week 0 / pre-work (before coding week)
 
@@ -75,7 +75,7 @@ Tracks are suggestions for balancing load; each is one engineer unless noted. Pa
 | H     | F33 LLM config settings page + connection test; context assembly wired to live session state; SSE streaming polish (abort, error states) |
 | F     | Speaking indicators; reconnection handling; audio quality pass                                                                           |
 | G     | Results view; empty/error states across all screens                                                                                      |
-| H     | F34–F36 bubble + chat side panel UI; three tools live (web search, diagram gen, sticky ideation); F37 propose-from-chat                  |
+| H     | F34–F36 assistant rail and chat UI; three tools live (web search, diagram gen, sticky ideation); F37 propose-from-chat                     |
 | A     | Playwright smoke test of happy path; perf sanity (10 proposals × 6 clients)                                                              |
 
 **Demo:** entire session played through by team, including voting and generated summary.

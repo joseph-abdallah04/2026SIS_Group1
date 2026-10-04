@@ -498,6 +498,180 @@ export function rotatedBounds(
   };
 }
 
+/** The box around a set of boxes; `null` when there are none. */
+function unionBoxes(boxes: readonly RotatableBox[]): RotatableBox | null {
+  const first = boxes[0];
+  if (!first) return null;
+  let minX = first.x;
+  let minY = first.y;
+  let maxX = first.x + first.width;
+  let maxY = first.y + first.height;
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x);
+    minY = Math.min(minY, box.y);
+    maxX = Math.max(maxX, box.x + box.width);
+    maxY = Math.max(maxY, box.y + box.height);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** An ellipse turned about `pivot`, measured exactly rather than by its box. */
+function turnedEllipseBounds(
+  centre: ScenePoint,
+  rx: number,
+  ry: number,
+  pivot: ScenePoint,
+  degrees: number,
+): RotatableBox {
+  const at = rotatePoint(centre, pivot, degrees);
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const hx = Math.sqrt((rx * cos) ** 2 + (ry * sin) ** 2);
+  const hy = Math.sqrt((rx * sin) ** 2 + (ry * cos) ** 2);
+  return { x: at.x - hx, y: at.y - hy, width: hx * 2, height: hy * 2 };
+}
+
+/**
+ * Room left around an estimated line of text. Labels are laid out from a glyph
+ * ratio, not measured, and a heavy or wide run of letters can come out a little
+ * wider than the ratio says — the edge clamp should not shave those off.
+ */
+const TEXT_EXTENT_ALLOWANCE = 1.1;
+const TEXT_EXTENT_PAD = 2;
+
+/** The corner radius `DiagramShapeOutline` gives a box. */
+const DIAGRAM_BOX_CORNER_RADIUS = 8;
+
+/**
+ * The boxes a text element's lines occupy, in its own unturned frame, or null
+ * when it shows nothing but its box.
+ *
+ * Estimated with the same glyph ratio the wrap uses, so the two agree on what a
+ * line is, and held inside the element's own box. A text box with a fill of its
+ * own is a visible rectangle, and that rectangle is what it paints.
+ */
+function textLineBoxes(node: DiagramTurnedNode, size: DiagramNodeSize): RotatableBox[] | null {
+  if (node.fillColor && node.fillColor !== 'transparent') return null;
+  const layout = diagramNodeLabelLayout({
+    label: node.label ?? '',
+    shape: 'text',
+    width: size.width,
+    height: size.height,
+    ...(node.fontSizePreset ? { fontSizePreset: node.fontSizePreset } : {}),
+  });
+  const style = diagramNodeLabelStyle({ shape: 'text', labelAlign: node.labelAlign }, size.width);
+  const boxes: RotatableBox[] = [];
+  layout.lines.forEach((line, index) => {
+    if (line.length === 0) return;
+    const baseline = layout.firstBaselineY + index * layout.lineHeight;
+    const width =
+      line.length * layout.fontSize * DIAGRAM_GLYPH_ADVANCE_RATIO * TEXT_EXTENT_ALLOWANCE +
+      TEXT_EXTENT_PAD * 2;
+    const start =
+      style.anchor === 'start'
+        ? style.x - TEXT_EXTENT_PAD
+        : style.anchor === 'end'
+          ? style.x - width + TEXT_EXTENT_PAD
+          : style.x - width / 2;
+    // From above the tallest capital to below the deepest descender.
+    const top = baseline - layout.fontSize - TEXT_EXTENT_PAD;
+    const bottom = baseline + layout.fontSize * 0.3 + TEXT_EXTENT_PAD;
+    const left = Math.max(0, start);
+    const right = Math.min(size.width, start + width);
+    const upper = Math.max(0, top);
+    const lower = Math.min(size.height, bottom);
+    if (right <= left || lower <= upper) return;
+    boxes.push({ x: left, y: upper, width: right - left, height: lower - upper });
+  });
+  return boxes.length > 0 ? boxes : null;
+}
+
+/** What `diagramNodeTurnedExtent` needs to know about the node besides its size. */
+export type DiagramTurnedNode = Partial<
+  Pick<DiagramNode, 'shape' | 'label' | 'fontSizePreset' | 'labelAlign' | 'fillColor'>
+>;
+
+/**
+ * Where a turned node actually paints, relative to its stored top-left.
+ *
+ * `rotatedBounds` of the stored box is the box around the turned *frame*, and
+ * for anything that does not fill its frame — an ellipse, a diamond, a line of
+ * text in a wide box — that is far larger than what is drawn. Clamping by it
+ * held the element away from the sheet's edge by a gap the user could see, so
+ * every extent query goes through here instead: the drawn outline, turned.
+ *
+ * Unturned, every shape fills its own box (a text box with words in it is the
+ * exception, but it has always been measured by its box), so this returns the
+ * box exactly and nothing that is not turned moves.
+ */
+export function diagramNodeTurnedExtent(
+  size: DiagramNodeSize,
+  rotation: number | undefined,
+  node: DiagramTurnedNode = {},
+): RotatableBox {
+  const box: RotatableBox = { x: 0, y: 0, width: size.width, height: size.height };
+  if (!rotation) return box;
+  const a = size.width / 2;
+  const b = size.height / 2;
+  const centre = { x: a, y: b };
+
+  if (node.shape === 'text') {
+    const lines = textLineBoxes(node, size);
+    if (!lines) return rotatedBounds(box, rotation);
+    return unionBoxes(lines.map((line) => rotatedBounds(line, rotation, centre))) ?? box;
+  }
+
+  // Every other outline is symmetric about its centre, or fills its box from
+  // edge to edge either way up, so half a turn lands it on the same box.
+  if (rotation % 180 === 0) return box;
+
+  const polygon = node.shape ? DIAGRAM_SHAPE_POLYGONS[node.shape] : undefined;
+  if (polygon) {
+    const turned = polygon(a, b).map((vertex) =>
+      rotatePoint({ x: a + vertex.x, y: b + vertex.y }, centre, rotation),
+    );
+    const xs = turned.map((point) => point.x);
+    const ys = turned.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+  }
+
+  if (node.shape === 'ellipse') return turnedEllipseBounds(centre, a, b, centre, rotation);
+
+  if (node.shape === 'cylinder') {
+    // The silhouette is the hull of its two rims, which are as wide as the box
+    // and `cap` deep — exactly the arcs `DiagramShapeOutline` draws.
+    const cap = diagramCylinderCapHeight(size.height);
+    return (
+      unionBoxes([
+        turnedEllipseBounds({ x: a, y: cap }, a, cap, centre, rotation),
+        turnedEllipseBounds({ x: a, y: size.height - cap }, a, cap, centre, rotation),
+      ]) ?? box
+    );
+  }
+
+  if (node.shape === undefined || node.shape === 'box') {
+    // A box's corners are rounded, so at an angle its corner points are not
+    // where it reaches: the box inset by the radius, turned, then grown by it.
+    const radius = Math.min(DIAGRAM_BOX_CORNER_RADIUS, a, b);
+    const inner = rotatedBounds(
+      { x: radius, y: radius, width: size.width - radius * 2, height: size.height - radius * 2 },
+      rotation,
+      centre,
+    );
+    return {
+      x: inner.x - radius,
+      y: inner.y - radius,
+      width: inner.width + radius * 2,
+      height: inner.height + radius * 2,
+    };
+  }
+
+  return rotatedBounds(box, rotation);
+}
+
 /** The SVG transform that turns an element about its own centre, or nothing. */
 export function rotationTransform(
   box: RotatableBox,

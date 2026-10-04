@@ -41,7 +41,13 @@ function panelStyle(room: BoardPopupRoom | null): CSSProperties {
   return {
     ...(room
       ? {
-          left: room.left,
+          // Centred on the board, but kept on screen: on a board narrower
+          // than the minimum width, beside the window's edge, the middle of
+          // the board is too close to the edge for the panel to fit round it.
+          left: Math.max(
+            width / 2 + EDGE_PX,
+            Math.min(room.left, window.innerWidth - width / 2 - EDGE_PX),
+          ),
           top: room.top,
           right: 'auto',
           bottom: 'auto',

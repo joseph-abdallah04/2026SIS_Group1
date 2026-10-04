@@ -83,12 +83,20 @@ function estimatedLines(text: string, size: number): number {
     .reduce((lines, line) => lines + Math.max(1, Math.ceil(line.length / perLine)), 0);
 }
 
-function estimatedSize(text: string): number {
+/** A sticky's width and height: a square, or taller than the largest one for a note that fits none. */
+interface StickyBox {
+  width: number;
+  height: number;
+}
+
+function estimatedBox(text: string): StickyBox {
   for (const lines of STICKY_LINES) {
     const size = stickySquare(lines);
-    if (estimatedLines(text, size) <= lines) return size;
+    if (estimatedLines(text, size) <= lines) return { width: size, height: size };
   }
-  return STICKY_MAX_SIZE;
+  // Too much for the largest square: as wide as it, and as tall as its lines.
+  const lines = estimatedLines(text, STICKY_MAX_SIZE);
+  return { width: STICKY_MAX_SIZE, height: Math.max(STICKY_MAX_SIZE, stickySquare(lines)) };
 }
 
 /**
@@ -144,24 +152,30 @@ function withNoteLaidOut<T>(content: StickyContent, measure: (card: HTMLDivEleme
   }
 }
 
-/** The smallest whole-line square the note is laid out within, or null with no layout. */
-function measuredSize(content: StickyContent): number | null {
+/**
+ * The smallest whole-line square the note is laid out within, or null with no
+ * layout. A note that fits none is as wide as the largest square and as tall
+ * as it lays out there: the card grows to hold it rather than cutting it off,
+ * so anything that places cards around it has to know.
+ */
+function measuredSize(content: StickyContent): StickyBox | null {
   if (typeof document === 'undefined') return null;
   return withNoteLaidOut(content, (card) => {
+    let height = 0;
     for (const lines of STICKY_LINES) {
       const size = stickySquare(lines);
       card.style.width = `${size}px`;
-      const height = card.getBoundingClientRect().height;
+      height = card.getBoundingClientRect().height;
       // Nothing lays out a non-empty card at zero height except an environment
       // with no layout engine at all.
       if (height === 0) return null;
-      if (height <= size) return size;
+      if (height <= size) return { width: size, height: size };
     }
-    return STICKY_MAX_SIZE;
+    return { width: STICKY_MAX_SIZE, height: Math.ceil(Math.max(height, STICKY_MAX_SIZE)) };
   });
 }
 
-const measured = new Map<string, number>();
+const measured = new Map<string, StickyBox>();
 /** Enough for every note on a busy board and the edits in progress on it. */
 const MEASURED_LIMIT = 1000;
 
@@ -178,7 +192,7 @@ function measure(content: StickyContent) {
   if (known) return known;
 
   const result = measuredSize(content);
-  if (result === null) return estimatedSize(text);
+  if (result === null) return estimatedBox(text);
 
   // Only a measurement taken in the page's real font is remembered: one taken
   // while Inter is still loading was set in the fallback face, which wraps
@@ -196,5 +210,13 @@ function measure(content: StickyContent) {
  * square it fits, or the largest for a note that fits none.
  */
 export function stickySize(content: StickyContent): number {
-  return measure(content);
+  return measure(content).width;
+}
+
+/**
+ * How tall a sticky with this note is: as tall as it is wide, unless the note
+ * fits no square and the card grows past the largest one.
+ */
+export function stickyHeight(content: StickyContent): number {
+  return measure(content).height;
 }

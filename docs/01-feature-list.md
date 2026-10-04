@@ -37,14 +37,15 @@ Features are numbered (`F##`) so tickets on the Kanban board can reference them.
 
 ## 5. Shared Pinboard — module: `pinboard` (+ `realtime`)
 
-| ID  | Feature                                                   | Notes                                                                    |
-| --- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| F14 | Shared pinboard visible identically to all participants   | Single source of truth on server; state synced via WebSocket             |
-| F15 | Proposals appear for everyone in real time when submitted | Sub-second propagation                                                   |
-| F16 | Author CRUD over own proposals (move, edit, delete)       | Only the author can modify/delete their proposal; changes broadcast live |
-| F17 | Leader can remove any proposal (moderation)               | Optional safeguard                                                       |
-| F18 | Reactions on proposals (emoji-style)                      | One per person per proposal; counts visible to all                       |
-| F38 | Reuse your own earlier proposal on a later question       | Copies rather than moves; recorded like an extension (F23)               |
+| ID  | Feature                                                   | Notes                                                                                                                                                                                                                          |
+| --- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F14 | Shared pinboard visible identically to all participants   | Single source of truth on server; state synced via WebSocket                                                                                                                                                                   |
+| F15 | Proposals appear for everyone in real time when submitted | Sub-second propagation. The server places each new card clear of every card already there, so two proposed at once never land on each other                                                                                    |
+| F16 | Author CRUD over own proposals (move, edit, delete)       | Only the author can modify/delete their proposal; changes broadcast live. Moving waits for the leader to unlock the board (F40)                                                                                                |
+| F17 | Leader can remove any proposal (moderation)               | Optional safeguard                                                                                                                                                                                                             |
+| F18 | Reactions on proposals (emoji-style)                      | One per person per proposal; counts visible to all                                                                                                                                                                             |
+| F38 | Reuse your own earlier proposal on a later question       | Copies rather than moves; recorded like an extension (F23)                                                                                                                                                                     |
+| F40 | Board lock: the leader decides who may move proposals     | Per question, set under it in the agenda; every question starts locked, so only the leader moves proposals. Unlocked, members may also move their own. Positions only: proposing, editing, deleting and reacting are unchanged |
 
 ## 6. Proposal Tools — module: `tools` (UI) + `pinboard` (persistence)
 
@@ -59,11 +60,12 @@ Features are numbered (`F##`) so tickets on the Kanban board can reference them.
 
 ## 7. Agenda & Phase Progression — module: `sessions` (+ `realtime`)
 
-| ID  | Feature                                                                                   | Notes                                                                   |
-| --- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| F24 | Collapsible agenda side panel listing focus + all questions, current question highlighted | Same view for everyone                                                  |
-| F25 | Leader controls phases: start discussion → start voting → show results → next question    | Button(s) only rendered/enforced for leader; server validates authority |
-| F26 | Leader skips a question                                                                   | Recorded as `skipped` in summary                                        |
+| ID  | Feature                                                                                            | Notes                                                                                       |
+| --- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| F24 | Collapsible agenda side panel listing focus + all questions, current question highlighted          | Same view for everyone                                                                      |
+| F25 | Leader controls phases: start discussion → start voting → show results → next question             | Button(s) only rendered/enforced for leader; server validates authority                     |
+| F26 | Leader skips a question                                                                            | Recorded as `skipped` in summary                                                            |
+| F41 | Brainstorm-only questions: leader turns a question's vote off, at setup or live until voting opens | Runs discussion → answered with no vote; recorded as "Discussed" in summary with every idea |
 
 ## 8. Voting — module: `voting` (+ `realtime`)
 
@@ -88,7 +90,7 @@ Each participant gets their own AI agent available at any point during a session
 | ID  | Feature                                                                                                                                                                                   | Notes                                                                                                                                                |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | F33 | User settings page: configure LLM provider (base URL, API key, model name) + "Test connection" button                                                                                     | Key stored server-side only, never returned to the client after saving; clear success/failure feedback                                               |
-| F34 | Floating animated AI bubble (bottom-right) visible throughout a session; click expands it into a floating chat side panel on the right                                                    | Collapsible; doesn't obstruct the toolbar/pinboard                                                                                                   |
+| F34 | Collapsible assistant rail on the right of the board, the same chrome as the agenda. Opens into the private chat.                                                                        | Starts collapsed so the board stays clear. Escape does not close it. A ballot keeps the collapsed strip so the board does not resize underneath.   |
 | F35 | Context-aware chat: the agent automatically receives current session context (session title, active question + phase, recent proposals, and whatever pinboard item the user has selected) | User asks questions, gets quick answers during ideation                                                                                              |
 | F36 | Three agent tools for MVP: **web search**, **create diagram**, **sticky ideation**                                                                                                        | Web search returns sourced snippets; create-diagram produces mermaid/SVG rendered as a preview; sticky ideation generates 3–5 candidate sticky notes |
 | F37 | One-click "Propose" from the chat window: any diagram/sticky artifact the agent produced can be sent directly to the pinboard                                                             | Goes through the normal proposal pipeline; authored by the requesting user                                                                           |

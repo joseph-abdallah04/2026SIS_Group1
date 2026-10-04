@@ -28,7 +28,15 @@ const session = vi.mocked(getSession);
 const discussionTimer = vi.mocked(getDiscussionTimer);
 
 function question(id: string, status: 'discussion' | 'answered' = 'answered') {
-  return { id, sessionId: 's1', text: `Question ${id}`, position: id === 'q1' ? 0 : 1, status };
+  return {
+    id,
+    sessionId: 's1',
+    text: `Question ${id}`,
+    position: id === 'q1' ? 0 : 1,
+    status,
+    boardLocked: true,
+    votingEnabled: true,
+  };
 }
 
 function row(id: string, text: string) {

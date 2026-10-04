@@ -480,8 +480,8 @@ describe('studio table proposal card (v4)', () => {
     const texts = [...container.querySelectorAll('text')].map((node) => node.textContent);
     expect(texts).toContain('Idea');
     expect(texts).toContain('Ana');
-    // One rect per cell.
-    expect(container.querySelectorAll('rect')).toHaveLength(4);
+    // One fill per cell.
+    expect(container.querySelectorAll('rect[data-table-cell]')).toHaveLength(4);
   });
 
   it('frames a canvas that holds only a table', () => {
@@ -492,9 +492,28 @@ describe('studio table proposal card (v4)', () => {
 
   it('tints the header row so it reads as a heading', () => {
     const { container } = render(<ProposalCard item={tableItem({ tables: [table] })} />);
-    const fills = [...container.querySelectorAll('rect')].map((rect) => rect.getAttribute('fill'));
+    const fills = [...container.querySelectorAll('rect[data-table-cell]')].map((rect) =>
+      rect.getAttribute('fill'),
+    );
     // The first row is tinted and the body is not.
     expect(fills[0]).not.toBe(fills[2]);
+  });
+
+  it('draws a merged cell as one cell, with no line through it', () => {
+    const merged = {
+      ...table,
+      cells: [{ text: 'Both columns' }, {}, { text: 'Search' }, { text: 'Ana' }],
+      merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+    };
+    const { container } = render(<ProposalCard item={tableItem({ tables: [merged] })} />);
+    const fills = [...container.querySelectorAll('rect[data-table-cell]')];
+    // Three cells show: the merged one and the two below it.
+    expect(fills).toHaveLength(3);
+    expect(fills[0]).toHaveAttribute('width', '192');
+    // The only vertical line runs through the second row alone.
+    const grid = container.querySelector('path[d^="M"]')!.getAttribute('d')!;
+    expect(grid).toContain('M96 32V64');
+    expect(grid).not.toContain('M96 0V');
   });
 
   it('honours a cell fill over the header tint', () => {
@@ -503,7 +522,9 @@ describe('studio table proposal card (v4)', () => {
       cells: [{ text: 'Idea', fill: 'rose' as const }, {}, {}, {}],
     };
     const { container } = render(<ProposalCard item={tableItem({ tables: [filled] })} />);
-    const fills = [...container.querySelectorAll('rect')].map((rect) => rect.getAttribute('fill'));
+    const fills = [...container.querySelectorAll('rect[data-table-cell]')].map((rect) =>
+      rect.getAttribute('fill'),
+    );
     expect(fills).toContain('#FAE0E0');
   });
 });

@@ -219,11 +219,24 @@ export interface ServerToClientEvents {
    */
   sessionFocus(payload: { sessionId: string; questionId: string }): void;
   /**
+   * The leader locked or unlocked one question's board. Locked, only the
+   * leader may move proposals on it; unlocked, members may move their own too.
+   */
+  boardLock(payload: { sessionId: string; questionId: string; locked: boolean }): void;
+  /**
    * The leader appended a question to a live agenda (`POST /:id/questions`).
    * Clients insert this row — they do not invent one locally after the POST,
    * same rule as `sessionPhase`.
    */
   questionAdded(payload: { sessionId: string; question: Question }): void;
+  /**
+   * F41: the leader turned a question's vote on or off
+   * (`PATCH /:id/questions/:questionId`). Carries the whole row like
+   * `questionAdded`, but clients take only `votingEnabled` from it — status
+   * belongs to `sessionPhase`, and a phase change racing this event must not
+   * be rolled back by an older copy of the row.
+   */
+  questionUpdated(payload: { sessionId: string; question: Question }): void;
 
   // === pinboard module ===
   /**

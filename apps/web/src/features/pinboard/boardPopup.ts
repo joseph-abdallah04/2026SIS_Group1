@@ -94,7 +94,11 @@ function roomWithin(surface: HTMLElement | null): BoardPopupRoom | null {
  */
 export function placeAboveBoardToolbar(width: number): CSSProperties | null {
   const toolbar = document.querySelector<HTMLElement>('[data-creative-toolbar]');
-  if (!toolbar) return null;
+  // In the page but not laid out: on a board too narrow for its controls the
+  // toolbar row is `display: none`, and every rect it reports is zero — which
+  // would put the popup's foot at the window's top edge and the popup above
+  // it. Treated as no toolbar, so the popup centres on the window instead.
+  if (!toolbar || toolbar.getClientRects().length === 0) return null;
 
   const board = (
     toolbar.closest<HTMLElement>('[data-board-toolbar]') ?? toolbar

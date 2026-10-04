@@ -98,7 +98,7 @@ function renderPanel(
 ) {
   return render(
     <CreativeToolsContext.Provider value={tools(proposeArtifact)}>
-      <AssistantPanel chat={next} onClose={() => undefined} configured />
+      <AssistantPanel chat={next} configured />
     </CreativeToolsContext.Provider>,
   );
 }
@@ -152,7 +152,6 @@ describe('assistant feed scroll', () => {
             sticky('n2', 'idle'),
             reply('Here.'),
           ])}
-          onClose={() => undefined}
           configured
         />
       </CreativeToolsContext.Provider>,
@@ -171,11 +170,7 @@ describe('assistant feed scroll', () => {
 
     rerender(
       <CreativeToolsContext.Provider value={tools(async () => ({ ok: true }))}>
-        <AssistantPanel
-          chat={chat([...start, reply('Here are five.')])}
-          onClose={() => undefined}
-          configured
-        />
+        <AssistantPanel chat={chat([...start, reply('Here are five.')])} configured />
       </CreativeToolsContext.Provider>,
     );
 
@@ -187,12 +182,7 @@ describe('propose availability copy', () => {
   it('says the pinboard is locked when the question has gone to voting', () => {
     render(
       <CreativeToolsContext.Provider value={tools(async () => ({ ok: true }), false)}>
-        <AssistantPanel
-          chat={chat([sticky('n1', 'idle')])}
-          onClose={() => undefined}
-          configured
-          questionStatus="voting"
-        />
+        <AssistantPanel chat={chat([sticky('n1', 'idle')])} configured questionStatus="voting" />
       </CreativeToolsContext.Provider>,
     );
 
@@ -205,7 +195,7 @@ describe('composer availability', () => {
   it('stays disabled until the provider check has returned', () => {
     render(
       <CreativeToolsContext.Provider value={tools(async () => ({ ok: true }))}>
-        <AssistantPanel chat={chat([])} onClose={() => undefined} configured={null} />
+        <AssistantPanel chat={chat([])} configured={null} />
       </CreativeToolsContext.Provider>,
     );
 
@@ -219,7 +209,7 @@ describe('provider setup', () => {
     const user = userEvent.setup();
     render(
       <CreativeToolsContext.Provider value={tools(async () => ({ ok: true }))}>
-        <AssistantPanel chat={chat([])} onClose={() => undefined} configured={false} />
+        <AssistantPanel chat={chat([])} configured={false} />
       </CreativeToolsContext.Provider>,
     );
 
@@ -235,7 +225,6 @@ describe('provider setup', () => {
       <CreativeToolsContext.Provider value={tools(async () => ({ ok: true }))}>
         <AssistantPanel
           chat={chat([])}
-          onClose={() => undefined}
           configured={false}
           onProviderConfigured={onProviderConfigured}
         />

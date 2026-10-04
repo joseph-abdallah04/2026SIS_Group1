@@ -14,6 +14,7 @@ const deleteSession = vi.fn();
 const emitQuestionAdded = vi.fn();
 const emitQuestionFocus = vi.fn();
 const emitQuestionPhase = vi.fn();
+const emitQuestionUpdated = vi.fn();
 const emitSessionEnded = vi.fn();
 const emitSessionStarted = vi.fn();
 const endSession = vi.fn();
@@ -27,6 +28,9 @@ const listSessionsForUser = vi.fn();
 const openSessionForJoining = vi.fn();
 const resolveSessionByCode = vi.fn();
 const setQuestionPhase = vi.fn();
+const setBoardLock = vi.fn();
+const emitBoardLock = vi.fn();
+const setQuestionVoting = vi.fn();
 const startSession = vi.fn();
 const updateSessionDraft = vi.fn();
 
@@ -46,6 +50,9 @@ vi.mock('../../middleware/auth.js', () => ({
     req.userId = userId;
     next();
   },
+  // The rate limiter keys by this. No token is sent here, so every request
+  // shares the one address bucket, which is what the limit test relies on.
+  verifiedUserId: () => null,
 }));
 
 vi.mock('./service.js', () => ({
@@ -56,6 +63,7 @@ vi.mock('./service.js', () => ({
   emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
+  emitQuestionUpdated,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
@@ -68,7 +76,10 @@ vi.mock('./service.js', () => ({
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setBoardLock,
+  emitBoardLock,
   setQuestionPhase,
+  setQuestionVoting,
   startSession,
   updateSessionDraft,
 }));
@@ -454,6 +465,7 @@ describe('lifecycle broadcasts after a successful REST command', () => {
       text: 'What did we miss?',
       position: 2,
       status: 'pending',
+      votingEnabled: true,
       createdAt: new Date('2026-09-10T00:00:00.000Z'),
     };
     addSessionQuestion.mockResolvedValue(question);
@@ -469,8 +481,76 @@ describe('lifecycle broadcasts after a successful REST command', () => {
         sessionId: 's1',
         leaderId: 'u1',
         text: 'What did we miss?',
+        votingEnabled: true,
       });
       expect(emitQuestionAdded).toHaveBeenCalledWith(io, question);
+    });
+  });
+
+  it('POST /:id/questions passes a brainstorm-only choice through (F41)', async () => {
+    addSessionQuestion.mockResolvedValue({ id: 'q3', sessionId: 's1' });
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'POST',
+        path: '/api/sessions/s1/questions',
+        body: { text: 'Any ideas?', votingEnabled: false },
+      });
+      expect(res.status).toBe(201);
+      expect(addSessionQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'Any ideas?', votingEnabled: false }),
+      );
+    });
+  });
+
+  it('PATCH /:id/questions/:questionId turns the vote off and broadcasts (F41)', async () => {
+    const question = { id: 'q2', sessionId: 's1', status: 'pending', votingEnabled: false };
+    setQuestionVoting.mockResolvedValue(question);
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'PATCH',
+        path: '/api/sessions/s1/questions/q2',
+        body: { votingEnabled: false },
+      });
+      expect(res.status).toBe(200);
+      expect(setQuestionVoting).toHaveBeenCalledWith({
+        sessionId: 's1',
+        questionId: 'q2',
+        leaderId: 'u1',
+        votingEnabled: false,
+      });
+      expect(emitQuestionUpdated).toHaveBeenCalledWith(io, question);
+    });
+  });
+
+  it('PATCH /:id/questions/:questionId rejects a body without the flag', async () => {
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'PATCH',
+        path: '/api/sessions/s1/questions/q2',
+        body: { votingEnabled: 'no' },
+      });
+      expect(res.status).toBe(400);
+      expect(setQuestionVoting).not.toHaveBeenCalled();
+    });
+  });
+
+  it('PATCH /:id/questions/:questionId surfaces a locked question without broadcasting', async () => {
+    setQuestionVoting.mockRejectedValue(
+      new ApiError(409, 'Voting has already opened on this question', 'QUESTION_VOTING_LOCKED'),
+    );
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'PATCH',
+        path: '/api/sessions/s1/questions/q2',
+        body: { votingEnabled: false },
+      });
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ code: 'QUESTION_VOTING_LOCKED' });
+      expect(emitQuestionUpdated).not.toHaveBeenCalled();
     });
   });
 
@@ -510,13 +590,13 @@ describe('draft edit, delete, open, create, join', () => {
       const res = await request({
         method: 'PATCH',
         path: '/api/sessions/s1',
-        body: { title: 'New title', questions: ['What ships?'] },
+        body: { title: 'New title', questions: [{ text: 'What ships?', votingEnabled: false }] },
       });
       expect(res.status).toBe(200);
       expect(updateSessionDraft).toHaveBeenCalledWith({
         sessionId: 's1',
         leaderId: 'u1',
-        input: { title: 'New title', questions: ['What ships?'] },
+        input: { title: 'New title', questions: [{ text: 'What ships?', votingEnabled: false }] },
       });
     });
   });
@@ -560,12 +640,13 @@ describe('draft edit, delete, open, create, join', () => {
       const res = await request({
         method: 'POST',
         path: '/api/sessions',
-        body: { title: 'Roadmap', questions: ['What ships?'] },
+        body: { title: 'Roadmap', questions: [{ text: 'What ships?' }] },
       });
       expect(res.status).toBe(201);
       expect(createSession).toHaveBeenCalledWith({
         leaderId: 'u1',
-        input: { title: 'Roadmap', questions: ['What ships?'] },
+        // The schema fills in the default: a question is a vote unless told otherwise.
+        input: { title: 'Roadmap', questions: [{ text: 'What ships?', votingEnabled: true }] },
       });
     });
   });
@@ -601,5 +682,50 @@ describe('draft edit, delete, open, create, join', () => {
       expect(res.status).toBe(200);
       expect(listSessionsForUser).toHaveBeenCalledWith('u1');
     });
+  });
+});
+
+describe('POST /api/sessions/:id/board-lock', () => {
+  it('sets the lock for the question and tells the room', async () => {
+    setBoardLock.mockResolvedValue(false);
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({
+        method: 'POST',
+        path: '/api/sessions/s1/board-lock',
+        userId: 'leader-1',
+        body: { questionId: 'q1', locked: false },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ questionId: 'q1', locked: false });
+    });
+    expect(setBoardLock).toHaveBeenCalledWith({
+      sessionId: 's1',
+      questionId: 'q1',
+      leaderId: 'leader-1',
+      locked: false,
+    });
+    expect(emitBoardLock).toHaveBeenCalledWith(io, 's1', 'q1', false);
+  });
+
+  // Like the voting outcomes read: limited before the auth check, so a flood
+  // of requests is turned away before any of them reaches the database.
+  it('turns a flood of requests away before they reach the service', async () => {
+    setBoardLock.mockResolvedValue(true);
+    const { io } = createFakeIo();
+    const statuses: number[] = [];
+    await withServer(io, async (request) => {
+      for (let i = 0; i < 31; i += 1) {
+        const res = await request({
+          method: 'POST',
+          path: '/api/sessions/s1/board-lock',
+          userId: 'leader-1',
+          body: { questionId: 'q1', locked: true },
+        });
+        statuses.push(res.status);
+      }
+    });
+    expect(statuses.at(-1)).toBe(429);
+    expect(setBoardLock.mock.calls.length).toBeLessThanOrEqual(30);
   });
 });

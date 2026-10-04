@@ -45,6 +45,25 @@ function typingInto(target: EventTarget | null): boolean {
 }
 
 /**
+ * The picture on the clipboard, if there is one.
+ *
+ * Read from the clipboard's files, and failing that its items: some browsers
+ * and some apps that copy a picture put it only among the items, and a paste
+ * that looked only at the files arrived empty-handed.
+ */
+export function pastedImage(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  const file = Array.from(data.files ?? []).find(isImageFile);
+  if (file) return file;
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+    const fromItem = item.getAsFile();
+    if (fromItem && isImageFile(fromItem)) return fromItem;
+  }
+  return null;
+}
+
+/**
  * One way of bringing a picture onto the board, reached three ways.
  *
  * The toolbar's Image button opens the file picker; a file dropped on the
@@ -82,14 +101,22 @@ export function ImageImportProvider({ children }: { children: ReactNode }) {
     input.current?.click();
   }, [canImport]);
 
-  // A screenshot pasted onto the board. Left alone while anything else could
-  // want it: a text field, a sticky being written, an editor that is open.
+  // A screenshot, or a copied picture, pasted onto the board. Left alone while
+  // an editor is open, which has its own idea of what a paste means.
+  //
+  // A text field keeps any paste with words in it. A picture with none goes
+  // to the importer even then: a text field cannot take a picture, so leaving
+  // it there threw the paste away, and somebody who had last clicked in the
+  // agenda's question box saw nothing happen at all.
   useEffect(() => {
     if (!canImport || activeTool) return;
     const onPaste = (event: ClipboardEvent) => {
-      if (typingInto(event.target) || typingInto(document.activeElement)) return;
-      const file = Array.from(event.clipboardData?.files ?? []).find(isImageFile);
+      const file = pastedImage(event.clipboardData);
       if (!file) return;
+      const typing = typingInto(event.target) || typingInto(document.activeElement);
+      // Words, not just a text entry: some apps copy a picture with an empty
+      // one beside it, and that is no reason to keep the picture out.
+      if (typing && (event.clipboardData?.getData('text/plain') ?? '').trim() !== '') return;
       event.preventDefault();
       importFile(file);
     };

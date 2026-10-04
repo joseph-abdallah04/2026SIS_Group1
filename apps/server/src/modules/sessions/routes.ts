@@ -1,14 +1,17 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import {
   addSessionQuestionSchema,
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
+  setBoardLockSchema,
   setQuestionPhaseSchema,
+  setQuestionVotingSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
 
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
 import {
@@ -16,9 +19,11 @@ import {
   addSessionQuestion,
   createSession,
   deleteSession,
+  emitBoardLock,
   emitQuestionAdded,
   emitQuestionFocus,
   emitQuestionPhase,
+  emitQuestionUpdated,
   emitSessionEnded,
   emitSessionStarted,
   endSession,
@@ -31,10 +36,38 @@ import {
   listSessionsForUser,
   openSessionForJoining,
   resolveSessionByCode,
+  setBoardLock,
   setQuestionPhase,
+  setQuestionVoting,
   startSession,
   updateSessionDraft,
 } from './service.js';
+
+// Has to run before `requireAuth`, as on the voting outcomes read: CodeQL
+// wants the limiter ahead of that check. Keyed by the verified user, so a
+// second login does not open a new budget; unverified requests share one
+// address bucket. Far above anything a leader clicking a toggle would reach.
+function boardLockClientKey(req: Request): string {
+  const userId = verifiedUserId(req);
+  if (userId) return `user:${userId}`;
+  return req.ip ? `anon:${ipKeyGenerator(req.ip)}` : 'anon';
+}
+
+const LEADER_TOGGLE_LIMIT = {
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
+  keyGenerator: boardLockClientKey,
+  validate: { keyGeneratorIpFallback: false },
+} as const;
+
+const boardLockLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
+
+// F41's vote switch is a leader toggle too, so it gets the same budget and
+// keying — its own bucket, so flipping votes cannot use up the board lock's.
+const questionVotingLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
 
 /**
  * A factory, not a module-level Router, because F09's POST /:id/start
@@ -173,6 +206,36 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
+  // Lock or unlock the board: whether only the leader may move proposals.
+  sessionsRoutes.post<{ id: string }>(
+    '/:id/board-lock',
+    boardLockLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = setBoardLockSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid board lock',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const locked = await setBoardLock({
+          sessionId: req.params.id,
+          questionId: parsed.data.questionId,
+          leaderId: req.userId!,
+          locked: parsed.data.locked,
+        });
+        emitBoardLock(io, req.params.id, parsed.data.questionId, locked);
+        res.json({ questionId: parsed.data.questionId, locked });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
   // Focus question
   sessionsRoutes.post<{ id: string }>('/:id/focus', requireAuth, async (req, res, next) => {
     try {
@@ -215,6 +278,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
         sessionId: req.params.id,
         leaderId: req.userId!,
         text: parsed.data.text,
+        votingEnabled: parsed.data.votingEnabled,
       });
       emitQuestionAdded(io, question);
       res.status(201).json(question);
@@ -222,6 +286,37 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       next(err);
     }
   });
+
+  // F41: turn one question's vote on or off. Leader-only; clients pick the
+  // change up from `questionUpdated`, the same way they do for phase.
+  sessionsRoutes.patch<{ id: string; questionId: string }>(
+    '/:id/questions/:questionId',
+    questionVotingLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = setQuestionVotingSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid question change',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const question = await setQuestionVoting({
+          sessionId: req.params.id,
+          questionId: req.params.questionId,
+          leaderId: req.userId!,
+          votingEnabled: parsed.data.votingEnabled,
+        });
+        emitQuestionUpdated(io, question);
+        res.json(question);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
 
   // F32: end session
   sessionsRoutes.post<{ id: string }>('/:id/end', requireAuth, async (req, res, next) => {

@@ -1,65 +1,24 @@
 /*
  * Assistant chrome (F34).
  *
- * One shell, two shapes: a corner orb that opens into a slim right-hand rail.
+ * Two themes in this file. The glass rules are the marketing mock
+ * (`AssistantBeat`): a fixed dark panel, revealed with `is-open is-revealed`.
+ * The live session does not use them. It sits in `BoardRail`, and
+ * `.rt-assistant-dock` at the bottom repaints the same transcript classes for
+ * that light surface.
  *
- * The palette here is deliberately monochrome — near-black glass, pure white
+ * The palette of the glass is deliberately monochrome — near-black, pure white
  * type, grey for anything secondary — and it is the one place in the app that
- * does not wear the gold. That is on purpose: this is a layer floating over the
- * session rather than part of it, and the board's cream-and-gold chrome reads
- * as clutter once it is stacked on top of itself. The only colour that survives
- * inside the panel is colour that carries meaning: a sticky's own swatch in an
- * artifact preview, and red on a failure.
- *
- * THE GLASS. One surface, not stacked cards. The tint is a vertical fade:
- * almost solid black at the top (the Spotlight search field) opening into a
- * lighter, milky frost further down, where the board is supposed to show
- * through as a colour wash. A uniform dark fill reads as a grey card no
- * matter how much blur you put on it, which is why earlier passes missed.
- * Header, transcript and composer sit on that one fill — they do not paint
- * their own backgrounds.
- *
- * HOW THE MORPH WORKS, and why it is not width/height.
- *
- * The obvious version animates the box from 56px to a full rail. It stutters:
- * every frame is a fresh layout of the transcript inside, and `backdrop-filter`
- * has to re-blur a backdrop whose geometry just changed. Two of the most
- * expensive things a browser does, sixty times a second.
- *
- * So the shell is ALWAYS the full rail — same position, same size, laid out
- * once — and `clip-path` reveals it. Closed, the clip is a 56px rounded square
- * in the bottom-right corner, which is the orb. Open, it is the whole panel.
- * Nothing reflows, the blur is computed against a box that never moves, and the
- * corner radius travels with the clip so the circle genuinely becomes the rail.
- *
- * `clip-path` also clips hit-testing, so the invisible part of the shell does
- * not swallow clicks meant for the board underneath.
- *
- * The transcript does not fade in until the clip has finished travelling —
- * `is-revealed`, set from AssistantBubble. Content arriving inside a panel that
- * is still growing looks half-built, and it is the one part of this that a
- * duration alone cannot fix.
- *
- * prefers-reduced-motion at the bottom turns the whole thing into a cut.
+ * does not wear the gold. The only colour that survives inside it is colour
+ * that carries meaning: a sticky's own swatch in an artifact preview, and red
+ * on a failure. Header, transcript and composer sit on one fill.
  */
 
 .rt-assistant {
-  --rt-assistant-orb: 3.5rem;
-  --rt-assistant-ease: cubic-bezier(0.32, 0.72, 0, 1);
-  /* Kept in step with EXPAND_MS in AssistantBubble.tsx, which waits it out
-     before showing the transcript. */
-  --rt-assistant-expand: 520ms;
-
   /*
-   * The glass is a VERTICAL fade of opacity, not a flat colour. Spotlight's
-   * material is almost solid black at the top (the search field) and opens into
-   * a lighter frost at the bottom, where the board is meant to show through as
-   * a blur. A uniform tint — even a dark one — reads as a grey card, which is
-   * what this replaced.
-   *
-   * The shell always paints this fade. Closed, a black overlay sits on top so
-   * the orb reads as the dark chip; it lifts off as the panel opens. Overlay
-   * opacity interpolates reliably; two different gradient values do not.
+   * The glass is a vertical fade of opacity, not a flat colour: almost solid
+   * black at the top, opening into a lighter frost further down. A uniform
+   * tint reads as a grey card.
    */
   --rt-assistant-glass:
     linear-gradient(
@@ -90,18 +49,15 @@
   --rt-assistant-fill: rgba(255, 255, 255, 0.14);
   --rt-assistant-fill-strong: rgba(255, 255, 255, 0.22);
 
-  /* The rail's footprint, and the orb is its bottom-right corner. Fixed at all
-     times: the open/close animation never touches these. Top clears the
-     session header; bottom matches the right inset so the rail can run the
-     full height of the board. */
+  /* The marketing mock's footprint. Top clears a session header; the live
+     assistant is a dock and does not use this positioning. */
   position: fixed;
   top: 4.75rem;
   right: 1.5rem;
   bottom: 1.5rem;
   width: min(24rem, calc(100vw - 3rem));
   z-index: 35;
-  /* The shell and the launch button opt back in. Everything else here is a
-     positioning wrapper the board should be clickable through. */
+  /* The shell opts back in. Everything else here is a positioning wrapper. */
   pointer-events: none;
   color-scheme: dark;
   -webkit-font-smoothing: antialiased;
@@ -124,236 +80,16 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.12),
     0 22px 60px rgba(0, 0, 0, 0.32),
     0 2px 10px rgba(0, 0, 0, 0.18);
-  /* Promote once, up front, rather than letting the compositor discover it
-     mid-gesture — that discovery is itself a visible hitch on the first open.
-     Clip-path only while morphing: a box-shadow transition at the same time
-     (hover glow dropping off the click) makes backdrop-filter rebuild every
-     frame and the expand looks like a stutter. */
-  will-change: clip-path;
   isolation: isolate;
-  transition: clip-path var(--rt-assistant-expand) var(--rt-assistant-ease);
-}
-
-/* Extra black so the closed orb matches the dark top of the glass, not the
-   transparent bottom the clip would otherwise show. Lifts off as it opens. */
-.rt-assistant-shell::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(0, 0, 0, 0.78);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 240ms var(--rt-assistant-ease);
-}
-
-.rt-assistant.is-closed .rt-assistant-shell::after {
-  opacity: 1;
-}
-
-.rt-assistant.is-closed .rt-assistant-shell {
-  /* The bottom-right corner, rounded into a circle: the orb. */
-  clip-path: inset(
-    calc(100% - var(--rt-assistant-orb)) 0px 0px calc(100% - var(--rt-assistant-orb)) round
-      calc(var(--rt-assistant-orb) / 2)
-  );
-  pointer-events: none;
-  /* Hover glow is closed-only; keep it off the expand/collapse clip. */
-  transition:
-    clip-path var(--rt-assistant-expand) var(--rt-assistant-ease),
-    box-shadow 320ms ease;
 }
 
 .rt-assistant.is-open .rt-assistant-shell {
-  clip-path: inset(0px 0px 0px 0px round 1.75rem);
   pointer-events: auto;
 }
 
 /*
- * The invisible hit target over the orb. Outside the clipped shell so the aura
- * around it is not clipped away, and so hover is tied to the circle the user
- * can actually see rather than the whole rail-shaped footprint.
- */
-.rt-assistant-launch {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: var(--rt-assistant-orb);
-  height: var(--rt-assistant-orb);
-  padding: 0;
-  border: 0;
-  border-radius: 9999px;
-  background: transparent;
-  pointer-events: auto;
-  cursor: pointer;
-  transition: transform 260ms var(--rt-assistant-ease);
-}
-
-.rt-assistant-launch:hover,
-.rt-assistant-launch:focus-visible {
-  transform: scale(1.08);
-}
-
-.rt-assistant-launch:focus {
-  outline: none;
-}
-
-.rt-assistant-launch:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.8);
-  outline-offset: 5px;
-}
-
-/* The orb grows with its hit target, and the glass under it follows. */
-.rt-assistant:has(.rt-assistant-launch:hover) .rt-assistant-shell,
-.rt-assistant:has(.rt-assistant-launch:focus-visible) .rt-assistant-shell {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.42),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-    0 16px 40px rgba(0, 0, 0, 0.32),
-    0 0 24px rgba(255, 255, 255, 0.12);
-}
-
-.rt-assistant-mark {
-  width: 1.75rem;
-  height: 1.75rem;
-  fill: #ffffff;
-  filter: drop-shadow(0 0 7px rgba(255, 255, 255, 0.35));
-}
-
-/* The sparkle sits inside the clip, so it is hidden with the rest of the orb
-   as the panel opens. */
-.rt-assistant-orb {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: var(--rt-assistant-orb);
-  height: var(--rt-assistant-orb);
-  pointer-events: none;
-  transition:
-    opacity 200ms ease,
-    transform 260ms var(--rt-assistant-ease);
-}
-
-.rt-assistant.is-open .rt-assistant-orb {
-  opacity: 0;
-  /* Out of the way early, so it is gone before the clip reaches the corner. */
-  transition-duration: 140ms;
-}
-
-.rt-assistant:has(.rt-assistant-launch:hover) .rt-assistant-orb,
-.rt-assistant:has(.rt-assistant-launch:focus-visible) .rt-assistant-orb {
-  transform: scale(1.08);
-}
-
-/*
- * Orbiting ring — the "ready to go" cue. Hidden until hover, so an idle session
- * is not a spinning object in the corner for an hour. Silver rather than the
- * brand gold, to match the monochrome panel it belongs to.
- */
-.rt-assistant-aura,
-.rt-assistant-aura-spin,
-.rt-assistant-aura-glow {
-  position: absolute;
-  pointer-events: none;
-}
-
-.rt-assistant-aura {
-  right: -7px;
-  bottom: -7px;
-  width: calc(var(--rt-assistant-orb) + 14px);
-  height: calc(var(--rt-assistant-orb) + 14px);
-  border-radius: 9999px;
-  opacity: 0;
-  transition: opacity 240ms ease;
-}
-
-.rt-assistant.is-closed:has(.rt-assistant-launch:hover) .rt-assistant-aura,
-.rt-assistant.is-closed:has(.rt-assistant-launch:focus-visible) .rt-assistant-aura,
-.rt-assistant.is-closed.is-busy .rt-assistant-aura {
-  opacity: 1;
-}
-
-.rt-assistant-aura-spin {
-  inset: 0;
-  border-radius: inherit;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    transparent 40deg,
-    rgba(255, 255, 255, 0.2) 70deg,
-    rgba(255, 255, 255, 0.95) 105deg,
-    rgba(255, 255, 255, 0.7) 130deg,
-    transparent 165deg,
-    transparent 230deg,
-    rgba(255, 255, 255, 0.45) 280deg,
-    transparent 330deg
-  );
-  -webkit-mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - 2px),
-    #000 calc(100% - 1.5px)
-  );
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
-  animation: rt-assistant-orbit 2.6s linear infinite;
-}
-
-.rt-assistant-aura-spin--counter {
-  inset: -3px;
-  opacity: 0.4;
-  animation-duration: 5.2s;
-  animation-direction: reverse;
-  background: conic-gradient(
-    from 180deg,
-    transparent 0deg,
-    transparent 50deg,
-    rgba(255, 255, 255, 0.55) 90deg,
-    transparent 140deg,
-    transparent 210deg,
-    rgba(255, 255, 255, 0.75) 260deg,
-    transparent 310deg
-  );
-}
-
-.rt-assistant-aura-glow {
-  inset: 6px;
-  border-radius: inherit;
-  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.22), transparent 68%);
-  animation: rt-assistant-breathe 2.2s ease-in-out infinite;
-}
-
-.rt-assistant.is-closed.is-busy .rt-assistant-aura-glow {
-  animation-duration: 1.1s;
-}
-
-.rt-assistant-badge {
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 9999px;
-  background: #ffffff;
-  color: #000000;
-  box-shadow: 0 0 0 2px rgba(6, 6, 7, 0.9);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.rt-assistant-badge--dot {
-  width: 0.7rem;
-  height: 0.7rem;
-}
-
-/*
- * Inner rail. Held at zero until `is-revealed`, which AssistantBubble sets once
- * the clip has finished expanding — see the note at the top of this file.
+ * Inner rail of the marketing mock. Hidden until `is-revealed`, which
+ * AssistantBeat sets with `is-open`.
  */
 .rt-assistant-rail {
   position: relative;
@@ -364,9 +100,7 @@
   min-height: 0;
   opacity: 0;
   visibility: hidden;
-  /* Closing: leave fast, so nothing is still fading while the clip eats it.
-     Visibility waits out the fade so we do not keep painting the transcript
-     under a clip-path + blur animation. */
+  /* Stay hidden until the mock is revealed, then fade the transcript in. */
   transition:
     opacity 140ms ease,
     visibility 0s linear 140ms;
@@ -1093,12 +827,6 @@
   color: var(--rt-assistant-muted);
 }
 
-@keyframes rt-assistant-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes rt-assistant-breathe {
   0%,
   100% {
@@ -1111,18 +839,6 @@
   }
 }
 
-@keyframes rt-twinkle {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.65;
-    transform: scale(0.9);
-  }
-}
-
 @keyframes rt-caret {
   0%,
   49% {
@@ -1132,21 +848,6 @@
   100% {
     opacity: 0;
   }
-}
-
-.rt-sparkle {
-  transform-origin: center;
-  transform-box: fill-box;
-  animation: rt-twinkle 3.4s ease-in-out infinite;
-}
-
-.rt-sparkle--delayed {
-  animation-delay: 1.1s;
-}
-
-.rt-assistant:has(.rt-assistant-launch:hover) .rt-sparkle,
-.rt-assistant:has(.rt-assistant-launch:focus-visible) .rt-sparkle {
-  animation-duration: 1.15s;
 }
 
 .rt-caret {
@@ -1169,29 +870,18 @@
   .rt-assistant-shell {
     background: rgba(8, 8, 10, 0.96);
   }
-
-  .rt-assistant-shell::after {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .rt-assistant-shell,
-  .rt-assistant-shell::after,
   .rt-assistant-rail,
-  .rt-assistant.is-revealed .rt-assistant-rail,
-  .rt-assistant-orb,
-  .rt-assistant-launch,
-  .rt-assistant-aura {
+  .rt-assistant.is-revealed .rt-assistant-rail {
     transition: none;
   }
 
-  .rt-assistant-aura-spin,
-  .rt-assistant-aura-glow,
   .rt-assistant-dot--running,
   .rt-assistant-activity-label,
   .rt-assistant-stop-arc,
-  .rt-sparkle,
   .rt-caret {
     animation: none;
   }
@@ -1199,9 +889,279 @@
   .rt-assistant-activity-label {
     opacity: 1;
   }
+}
 
-  .rt-assistant-launch:hover,
-  .rt-assistant-launch:focus-visible {
-    transform: none;
-  }
+/*
+ * Session dock. The live assistant sits in `BoardRail` — the same light strip as
+ * the agenda — so these overrides repaint the transcript, composer and cards for
+ * that surface. The marketing mock keeps the glass rules above; it never carries
+ * `.rt-assistant-dock`.
+ */
+.rt-assistant-dock {
+  --rt-assistant-ink: var(--color-rt-ink);
+  --rt-assistant-muted: var(--color-rt-ink-muted);
+  --rt-assistant-faint: var(--color-rt-ink-faint);
+  --rt-assistant-line: var(--color-rt-tertiary);
+  --rt-assistant-fill: #fff;
+  --rt-assistant-fill-strong: var(--color-rt-primary-tint);
+  /* Same scale as the agenda rail: 12.5px for a line of content, 12px in a field. */
+  --rt-assistant-sticky-size: 12.5px;
+  --rt-assistant-sticky-leading: 1.375;
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-meta {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--color-rt-ink-faint);
+}
+
+.rt-assistant-dock .rt-assistant-feed {
+  /* A column of messages, not a flex scroller. Flex overflow re-lays-out on
+     every wheel tick, and a detailed diagram SVG in that layout is hit-tested
+     and repainted with it — that is the lag. Block flow plus a composited
+     scrollport moves the thread without redrawing it. */
+  display: block;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  will-change: scroll-position;
+  gap: 0;
+  padding: 0 0 0.75rem;
+  scrollbar-color: rgba(8, 12, 21, 0.22) transparent;
+}
+
+.rt-assistant-dock .rt-assistant-feed > * + * {
+  margin-top: 0.65rem;
+}
+
+/* The old flex `gap` plus this extra margin. Block flow has to say both. */
+.rt-assistant-dock .rt-assistant-feed > .rt-assistant-reply + * {
+  margin-top: 1.5rem;
+}
+
+.rt-assistant-dock .rt-assistant-feed::-webkit-scrollbar-thumb {
+  background: rgba(8, 12, 21, 0.18);
+}
+
+.rt-assistant-dock .rt-assistant-user {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  color: var(--color-rt-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.375;
+  box-shadow: 0 1px 2px rgba(8, 12, 21, 0.04);
+}
+
+.rt-assistant-dock .rt-assistant-reply,
+.rt-assistant-dock .rt-assistant-empty {
+  font-size: 12.5px;
+  line-height: 1.375;
+}
+
+.rt-assistant-dock .rt-assistant-activity-label {
+  color: var(--color-rt-ink-muted);
+  -webkit-text-fill-color: var(--color-rt-ink-muted);
+  font-size: 12.5px;
+}
+
+.rt-assistant-dock .rt-assistant-error {
+  border-color: #e7b2ac;
+  background: #fdf2f1;
+  color: #7a2e28;
+}
+
+.rt-assistant-dock .rt-assistant-composer {
+  margin: 0 -0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--color-rt-tertiary);
+}
+
+.rt-assistant-dock .rt-assistant-input,
+.rt-assistant-dock .rt-assistant-setup-form .rt-assistant-input {
+  min-height: 2rem;
+  border: 1px solid var(--color-rt-tertiary);
+  border-radius: 9999px;
+  background: var(--color-rt-surface);
+  padding: 0.35rem 0.7rem;
+  color: var(--color-rt-ink);
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: none;
+}
+
+.rt-assistant-dock .rt-assistant-input::placeholder {
+  color: var(--color-rt-ink-faint);
+}
+
+.rt-assistant-dock .rt-assistant-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-rt-secondary);
+}
+
+.rt-assistant-dock .rt-assistant-input:disabled {
+  opacity: 0.6;
+}
+
+.rt-assistant-dock .rt-assistant-send,
+.rt-assistant-dock .rt-assistant-setup-cta,
+.rt-assistant-dock .rt-assistant-action {
+  min-height: 2rem;
+  background: var(--color-rt-secondary);
+  color: var(--color-rt-ink);
+  font-size: 11px;
+}
+
+.rt-assistant-dock .rt-assistant-send {
+  padding: 0 0.65rem;
+}
+
+.rt-assistant-dock .rt-assistant-send:hover:not(:disabled),
+.rt-assistant-dock .rt-assistant-stop:hover,
+.rt-assistant-dock .rt-assistant-setup-cta:hover,
+.rt-assistant-dock .rt-assistant-action:hover:not(:disabled) {
+  background: var(--color-rt-secondary-deep);
+  color: #fff;
+}
+
+.rt-assistant-dock .rt-assistant-send:disabled {
+  opacity: 0.5;
+}
+
+.rt-assistant-dock .rt-assistant-stop {
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+}
+
+.rt-assistant-dock .rt-assistant-send:focus-visible,
+.rt-assistant-dock .rt-assistant-stop:focus-visible,
+.rt-assistant-dock .rt-assistant-action:focus-visible,
+.rt-assistant-dock .rt-assistant-icon-btn:focus-visible {
+  outline: 2px solid var(--color-rt-secondary);
+  outline-offset: 2px;
+}
+
+.rt-assistant-dock .rt-assistant-chip {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  color: var(--color-rt-ink);
+  font-size: 12px;
+}
+
+.rt-assistant-dock .rt-assistant-chip:hover {
+  border-color: var(--color-rt-secondary);
+  background: #fff;
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-setup {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  box-shadow: none;
+}
+
+.rt-assistant-dock .rt-assistant-setup p {
+  font-size: 12.5px;
+}
+
+.rt-assistant-dock .rt-assistant-setup p + p {
+  font-size: 12px;
+}
+
+.rt-assistant-dock .rt-assistant-setup-overlay {
+  inset: 0 -0.75rem;
+  background: var(--color-rt-surface-alt);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.rt-assistant-dock .rt-assistant-setup-secondary {
+  min-height: 2rem;
+  background: #fff;
+  color: var(--color-rt-ink);
+  font-size: 11px;
+  box-shadow: inset 0 0 0 1px var(--color-rt-tertiary);
+}
+
+.rt-assistant-dock .rt-assistant-setup-secondary:hover:not(:disabled) {
+  background: var(--color-rt-primary-tint);
+}
+
+.rt-assistant-dock .rt-assistant-setup-error,
+.rt-assistant-dock .rt-assistant-propose-error {
+  color: #7a2e28;
+}
+
+.rt-assistant-dock .rt-assistant-card {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(8, 12, 21, 0.04);
+}
+
+/* The paper fills the card, the same way a diagram fills its card. The board's
+   square minimum would leave a narrow note in a wide column. */
+.rt-assistant-dock .rt-assistant-sticky {
+  width: 100%;
+  min-height: 0;
+  /* Own layer: the clipped shadow otherwise re-rasterizes as the feed scrolls. */
+  transform: translateZ(0);
+}
+
+/* The preview is not clickable — Propose is the button under it. Leaving
+   pointer events on walks every node of the graph on each wheel hit-test. */
+.rt-assistant-dock .rt-assistant-card-well,
+.rt-assistant-dock .rt-assistant-diagram-fit,
+.rt-assistant-dock .rt-assistant-diagram-fit svg,
+.rt-assistant-dock .rt-assistant-card-well svg {
+  pointer-events: none;
+}
+
+.rt-assistant-dock .rt-assistant-diagram-fit {
+  transform: translateZ(0);
+}
+
+.rt-assistant-dock .rt-assistant-action--done {
+  background: #fff;
+  color: var(--color-rt-ink-muted);
+  box-shadow: inset 0 0 0 1px var(--color-rt-tertiary);
+}
+
+.rt-assistant-dock .rt-assistant-action--done:hover:not(:disabled) {
+  background: #fff;
+  color: var(--color-rt-ink-muted);
+}
+
+.rt-assistant-dock .rt-assistant-tool {
+  border: 1px solid var(--color-rt-tertiary);
+  background: #fff;
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-dot--running {
+  background: var(--color-rt-secondary-deep);
+}
+
+.rt-assistant-dock .rt-assistant-source {
+  text-decoration-color: rgba(8, 12, 21, 0.35);
+}
+
+.rt-assistant-dock .rt-assistant-source:hover {
+  text-decoration-color: var(--color-rt-ink);
+}
+
+.rt-assistant-dock .rt-assistant-icon-btn {
+  color: var(--color-rt-ink-muted);
+}
+
+.rt-assistant-dock .rt-assistant-icon-btn:hover:not(:disabled) {
+  background: var(--color-rt-primary-tint);
+  color: var(--color-rt-ink);
+}
+
+.rt-assistant-propose-error {
+  color: #ffc9c3;
 }

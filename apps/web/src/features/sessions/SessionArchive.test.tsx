@@ -53,6 +53,7 @@ function board(questionId: string, text: string, note: string): BoardResponse {
     questionText: text,
     questionPosition: questionId === 'q1' ? 0 : 1,
     questionStatus: 'discussion',
+    boardLocked: true,
     items: [sticky(questionId === 'q1' ? 'p1' : 'p2', questionId, note)],
     discussionTimer: null,
   };
@@ -76,6 +77,7 @@ const SESSION: SessionDetail = {
       text: 'What next?',
       position: 1,
       status: 'discussion',
+      votingEnabled: true,
       createdAt: new Date('2026-09-01T00:00:00.000Z'),
     },
     {
@@ -84,6 +86,7 @@ const SESSION: SessionDetail = {
       text: 'What ships first?',
       position: 0,
       status: 'answered',
+      votingEnabled: true,
       createdAt: new Date('2026-09-01T00:00:00.000Z'),
     },
   ],
@@ -115,12 +118,35 @@ describe('SessionArchive', () => {
     expect(await screen.findByText('Ship the pinboard')).toBeInTheDocument();
     expect(screen.getByText(/board is read-only/i)).toBeInTheDocument();
     expect(screen.getByText('Session ended')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'What ships first?' })).toHaveAttribute(
+    // On the step, as in the live agenda.
+    expect(screen.getByRole('button', { name: 'What ships first?' }).closest('li')).toHaveAttribute(
       'aria-current',
       'step',
     );
-    expect(screen.getByRole('button', { name: 'What next?' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: 'What next?' }).closest('li')).not.toHaveAttribute(
+      'aria-current',
+    );
     expect(screen.getByText('Not voted on')).toBeInTheDocument();
+    // The same progress track as the live agenda. The question left in
+    // discussion when the session ended is unfinished, not done.
+    expect(screen.getByRole('progressbar', { name: 'Agenda progress' })).toHaveAttribute(
+      'aria-valuetext',
+      '1 of 2 questions done',
+    );
+    // On a board too narrow to use, the bars give way to one line saying so.
+    // jsdom applies no container queries, so the classes are the contract.
+    const toolbarRow = document.querySelector('[data-board-toolbar]');
+    const zoom = document.querySelector('[data-board-zoom]');
+    const note = document.querySelector('[data-board-cramped-note]');
+    expect(toolbarRow).toHaveClass('@max-[24rem]/board:hidden');
+    expect(zoom).toHaveClass('@max-[24rem]/board:hidden');
+    expect(note).toHaveClass('hidden', '@max-[24rem]/board:flex');
+    // The bars leave the accessibility tree with the screen, so the note that
+    // explains their absence must not.
+    expect(note).not.toHaveAttribute('aria-hidden');
+    expect(note).toHaveTextContent('Widen the board to see its controls');
+    // Resizing is a layout preference, not a write, so the archive keeps it.
+    expect(screen.getByRole('separator', { name: 'Resize questions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Leave session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start discussion' })).not.toBeInTheDocument();
@@ -137,6 +163,27 @@ describe('SessionArchive', () => {
       '/api/sessions/s1/proposals?questionId=q1',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  // F41: a brainstorm was never going to be voted on, so it is not "Not voted on".
+  it('labels brainstorm-only questions Discussed, in the list and on the board', async () => {
+    render(
+      <MemoryRouter initialEntries={['/sessions/s1?view=boards&question=q1']}>
+        <SessionArchive
+          session={{
+            ...SESSION,
+            questions: SESSION.questions.map((question) => ({ ...question, votingEnabled: false })),
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Ship the pinboard')).toBeInTheDocument();
+    expect(screen.getAllByText('Discussed')).toHaveLength(2);
+    expect(screen.queryByText('Not voted on')).not.toBeInTheDocument();
+    expect(screen.queryByText('Answered')).not.toBeInTheDocument();
+    // Ended mid-discussion: discussed, like the agenda beside it says.
+    expect(screen.getByText('Q1 · Discussed')).toBeInTheDocument();
   });
 
   it('loads the next question when it is chosen, in agenda order', async () => {

@@ -8,6 +8,7 @@ import { LeaveSessionControl } from './LeaveSessionControl';
 import { useStartSession } from './useStartSession';
 import { useWaitingRoom } from './useWaitingRoom';
 import { WaitingRoomTable } from './WaitingRoomTable';
+import { NoVoteTag } from './VoteToggle';
 
 interface WaitingRoomProps {
   session: SessionDetail;
@@ -130,7 +131,8 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
                   className="flex items-baseline gap-2 rounded-2xl border border-rt-primary/35 bg-rt-primary/20 px-3 py-2 text-[13px]"
                 >
                   <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
-                  <span className="text-rt-ink">{question.text}</span>
+                  <span className="flex-1 text-rt-ink">{question.text}</span>
+                  {question.votingEnabled ? null : <NoVoteTag />}
                 </li>
               ))}
             </ol>

@@ -19,6 +19,7 @@ function board(questionId: string): BoardResponse {
     questionText: questionId,
     questionPosition: 0,
     questionStatus: 'discussion',
+    boardLocked: true,
     items: [],
     discussionTimer: null,
   };

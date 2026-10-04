@@ -59,10 +59,15 @@ import {
   TABLE_MAX_COL_WIDTH,
   TABLE_MAX_ROWS,
   TABLE_MAX_ROW_HEIGHT,
+  TABLE_MERGE_LIMIT,
   TABLE_MIN_COL_WIDTH,
   TABLE_MIN_ROW_HEIGHT,
   DIAGRAM_Z_LIMIT,
+  clearCoveredCells,
   diagramEdgeKey,
+  normalizeTableMerges,
+  tableCellIsCovered,
+  type TableMerge,
 } from './studioElements.js';
 
 // Pattern for API DTO validation: define the zod schema, export `z.infer` as the type.
@@ -181,13 +186,24 @@ export const SESSION_QUESTION_LIMIT = 50;
 
 export const questionTextSchema = z.string().trim().min(1).max(SESSION_QUESTION_TEXT_MAX);
 
+// One agenda item as the leader writes it. `votingEnabled: false` (F41) makes
+// it brainstorm-only: discussed, never voted on. Omitted means a vote, which
+// is what every question was before the choice existed.
+export const sessionQuestionInputSchema = z.object({
+  text: questionTextSchema,
+  votingEnabled: z.boolean().default(true),
+});
+
+export type SessionQuestionInput = z.infer<typeof sessionQuestionInputSchema>;
+
 // F04: title + an ordered list of questions. Order is exactly the array
 // order — the server assigns `position` from array index, so reordering
-// client-side and resubmitting is how a question list gets reordered.
+// client-side and resubmitting is how a question list gets reordered. Each
+// question carries its own vote/brainstorm choice, so it moves with its row.
 // Timer seconds are optional: omit or `null` means that clock is off.
 export const createSessionSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  questions: z.array(questionTextSchema).min(1).max(SESSION_QUESTION_LIMIT),
+  questions: z.array(sessionQuestionInputSchema).min(1).max(SESSION_QUESTION_LIMIT),
   discussionTimerSeconds: optionalTimerSeconds(DISCUSSION_TIMER_MAX_SECONDS),
   votingTimerSeconds: optionalTimerSeconds(VOTING_TIMER_MAX_SECONDS),
 });
@@ -232,6 +248,14 @@ export const setQuestionPhaseSchema = z.object({
 
 export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
 
+/** The leader locking or unlocking one question's board: whether only they may move proposals. */
+export const setBoardLockSchema = z.object({
+  questionId: z.string().min(1),
+  locked: z.boolean(),
+});
+
+export type SetBoardLockInput = z.infer<typeof setBoardLockSchema>;
+
 // Leader pointing the board at a question without changing its status — so
 // an answered question's pinboard can be shown again without reopening it.
 export const focusQuestionSchema = z.object({
@@ -241,12 +265,20 @@ export const focusQuestionSchema = z.object({
 export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
 
 // Leader appending one pending question to a live agenda. Position and
-// status are assigned server-side — the body is only the text.
-export const addSessionQuestionSchema = z.object({
-  text: questionTextSchema,
-});
+// status are assigned server-side — the body is the text and whether it
+// goes to a vote.
+export const addSessionQuestionSchema = sessionQuestionInputSchema;
 
 export type AddSessionQuestionInput = z.infer<typeof addSessionQuestionSchema>;
+
+// F41: the leader turning one question's vote on or off mid-session. Only
+// the flag — which statuses still allow the change is the server's call
+// (`setQuestionVoting`): once voting has opened, it is locked.
+export const setQuestionVotingSchema = z.object({
+  votingEnabled: z.boolean(),
+});
+
+export type SetQuestionVotingInput = z.infer<typeof setQuestionVotingSchema>;
 
 // === pinboard module ===
 
@@ -567,6 +599,22 @@ export const tableCellSchema = z.object({
 
 // v4 tables. The cell array's length against the grid's dimensions is a write
 // invariant rather than a shape rule, since it spans three fields.
+/** One merge: its top-left cell and how far it spans (contract v4.6). */
+export const tableMergeSchema = z.object({
+  row: z
+    .number()
+    .int()
+    .min(0)
+    .max(TABLE_MAX_ROWS - 1),
+  col: z
+    .number()
+    .int()
+    .min(0)
+    .max(TABLE_MAX_COLS - 1),
+  rowSpan: z.number().int().min(1).max(TABLE_MAX_ROWS),
+  colSpan: z.number().int().min(1).max(TABLE_MAX_COLS),
+});
+
 export const tableElementSchema = z.object({
   id: z.string().min(1),
   x: z.number(),
@@ -584,6 +632,7 @@ export const tableElementSchema = z.object({
   strokeColor: diagramStrokeKeySchema.optional(),
   strokeWidthPreset: diagramStrokeWidthPresetSchema.optional(),
   fontSizePreset: diagramFontSizePresetSchema.optional(),
+  merges: z.array(tableMergeSchema).max(TABLE_MERGE_LIMIT).optional(),
 });
 
 /**
@@ -656,21 +705,48 @@ const diagramReadEdgeSchema = diagramEdgeSchema.extend({
   strokeStyle: lenient(diagramStrokeStyleSchema),
 });
 
-const diagramReadTableSchema = tableElementSchema.extend({
-  cells: z.array(
-    tableCellSchema.extend({
-      fill: lenient(diagramFillKeySchema),
-      align: lenient(z.enum(TABLE_CELL_ALIGNS)),
-      bold: lenient(z.boolean()),
-      color: lenient(diagramStrokeKeySchema),
-      fontSizePreset: lenient(diagramFontSizePresetSchema),
-    }),
-  ),
-  headerRow: lenient(z.boolean()),
-  strokeColor: lenient(diagramStrokeKeySchema),
-  strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
-  fontSizePreset: lenient(diagramFontSizePresetSchema),
-});
+const diagramReadTableSchema = tableElementSchema
+  .extend({
+    cells: z.array(
+      tableCellSchema.extend({
+        fill: lenient(diagramFillKeySchema),
+        align: lenient(z.enum(TABLE_CELL_ALIGNS)),
+        bold: lenient(z.boolean()),
+        color: lenient(diagramStrokeKeySchema),
+        fontSizePreset: lenient(diagramFontSizePresetSchema),
+      }),
+    ),
+    headerRow: lenient(z.boolean()),
+    strokeColor: lenient(diagramStrokeKeySchema),
+    strokeWidthPreset: lenient(diagramStrokeWidthPresetSchema),
+    fontSizePreset: lenient(diagramFontSizePresetSchema),
+    // Read loosely, then repaired below: a bad merge is dropped, never the table.
+    merges: z.array(z.unknown()).max(TABLE_MERGE_LIMIT).optional().catch(undefined),
+  })
+  // A grid whose cell list does not match its rows and columns is repaired
+  // rather than dropped: short, it is padded with empty cells; long, the extra
+  // are cut. Everything that draws or edits a table indexes `cells` by row and
+  // column, so a mismatch would otherwise shear every row after the first.
+  // Merges are kept only where the grid can hold them, as the write path
+  // requires, so a stored table always draws as a well-formed one.
+  .transform(({ merges: rawMerges, ...table }) => {
+    const rows = table.rowHeights.length;
+    const cols = table.colWidths.length;
+    const count = rows * cols;
+    const cells = table.cells.slice(0, count);
+    while (cells.length < count) cells.push({});
+    const readable = (rawMerges ?? []).flatMap((entry) => {
+      const parsed = tableMergeSchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    });
+    const merges: TableMerge[] = normalizeTableMerges(rows, cols, readable);
+    // One shape either way, so readers see `merges` as the optional key it is.
+    const repaired: typeof table & { merges?: TableMerge[] } = { ...table, cells };
+    if (merges.length > 0) repaired.merges = merges;
+    // Whatever a merge covers is empty, as the write path requires: anything a
+    // client left there could otherwise surface the moment the cell is split.
+    return clearCoveredCells(repaired);
+  });
 
 const diagramReadPathSchema = pathElementSchema.extend({
   closed: lenient(z.boolean()),
@@ -919,6 +995,39 @@ export const diagramWriteArtifactSchema = diagramStrictArtifactSchema.superRefin
           path: ['tables', index, 'cells'],
         });
       }
+      // Merges are held to the same rule the read path repairs to: a list
+      // `normalizeTableMerges` would change is one no reader could agree on.
+      if (table.merges) {
+        const normal = normalizeTableMerges(
+          table.rowHeights.length,
+          table.colWidths.length,
+          table.merges,
+        );
+        if (normal.length !== table.merges.length) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Merged cells must be in bounds, larger than one cell and must not overlap',
+            path: ['tables', index, 'merges'],
+          });
+        } else {
+          // Only the top-left cell of a merge holds anything. Content in a
+          // covered cell is never drawn, so it could only resurface — unasked
+          // for — when the cell is split.
+          const cols = table.colWidths.length;
+          const stray = table.cells.findIndex(
+            (cell, at) =>
+              Object.keys(cell).length > 0 &&
+              tableCellIsCovered(table, Math.floor(at / cols), at % cols),
+          );
+          if (stray !== -1) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'Cells inside a merged cell must be empty',
+              path: ['tables', index, 'cells', stray],
+            });
+          }
+        }
+      }
     });
 
     const arrowIds = new Set<string>();
@@ -1049,8 +1158,19 @@ export const proposalCreateSchema = z
   .object({
     type: proposalTypeSchema,
     artifactJson: artifactWriteJsonSchema,
+    // Where the author's browser would like it. The server keeps it if it is
+    // clear of every card on the board, and moves it to the nearest clear spot
+    // if not.
     x: z.number(),
     y: z.number(),
+    /**
+     * A sticky's width as the author's browser laid it out, so the server can
+     * keep later cards clear of it. Held to the sizes a sticky can be, and
+     * ignored for every other kind, which is always the same width.
+     */
+    cardWidth: z.number().min(0).max(10_000).optional(),
+    /** Likewise its height, which is more than its width for a note too long for any square. */
+    cardHeight: z.number().min(0).max(10_000).optional(),
     extendsProposalId: z.string().optional(),
   })
   .superRefine((value, context) => {
@@ -1106,6 +1226,9 @@ export const proposalUpdateSchema = z
     artifactJson: artifactWriteJsonSchema.optional(),
     x: z.number().min(0).max(100_000).optional(),
     y: z.number().min(0).max(100_000).optional(),
+    /** A rewritten sticky's new size, as for `proposalCreate`. */
+    cardWidth: z.number().min(0).max(10_000).optional(),
+    cardHeight: z.number().min(0).max(10_000).optional(),
   })
   .superRefine((value, context) => {
     if (value.artifactJson === undefined && value.x === undefined && value.y === undefined) {

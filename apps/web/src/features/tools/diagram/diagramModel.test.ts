@@ -34,6 +34,7 @@ import {
   nodeBounds,
   nodeIdsInRect,
   normalizeRect,
+  placeNodePosition,
   pasteDiagramFragment,
   prepareDiagram,
   prepareNodeLabel,
@@ -222,6 +223,43 @@ describe('diagram node model', () => {
 });
 
 describe('prepareDiagram', () => {
+  const box = { id: 'n1', label: 'Box', x: 24, y: 24, shape: 'box' as const };
+  const tableAt = (id: string) => ({
+    id,
+    x: 200,
+    y: 200,
+    colWidths: [96, 96],
+    rowHeights: [32, 32],
+    cells: [{}, {}, {}, {}],
+  });
+
+  it('says plainly which limit a canvas is over', () => {
+    const tables = Array.from({ length: 21 }, (_, index) => tableAt(`t${index}`));
+    expect(prepareDiagram([box], [], [], [], [], tables)).toEqual({
+      ok: false,
+      error: 'A diagram can hold 20 tables at most.',
+    });
+  });
+
+  it("passes on the contract's own sentence when it refuses something", () => {
+    const misshapen = { ...tableAt('t1'), cells: [{}, {}, {}] };
+    expect(prepareDiagram([box], [], [], [], [], [misshapen])).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('one cell per column per row'),
+    });
+  });
+
+  it('drops whatever an edit left under a merge rather than refusing the canvas', () => {
+    const merged = {
+      ...tableAt('t1'),
+      cells: [{ text: 'kept' }, { text: 'stray' }, {}, {}],
+      merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+    };
+    const prepared = prepareDiagram([box], [], [], [], [], [merged]);
+    if (!prepared.ok) throw new Error(prepared.error);
+    expect(prepared.artifact.tables?.[0]?.cells[1]).toEqual({});
+  });
+
   it('rejects an empty diagram before any write is attempted', () => {
     expect(prepareDiagram([], [])).toEqual({
       ok: false,
@@ -591,12 +629,22 @@ describe('resizeNode', () => {
   const node: DiagramNode = { id: 'n1', label: 'A', x: 100, y: 100, shape: 'box' };
 
   it('moves one axis from an edge, leaving the other alone', () => {
-    const [wider] = resizeNode([node], 'n1', 'e', start, { x: 40, y: 300 });
+    // Unsnapped: this is about which axis moves, and (100, 100) is off the grid.
+    const [wider] = resizeNode([node], 'n1', 'e', start, { x: 40, y: 300 }, false);
     expect(wider).toMatchObject({ x: 100, y: 100, width: 160, height: 56 });
 
-    const [taller] = resizeNode([node], 'n1', 'n', start, { x: 300, y: -24 });
+    const [taller] = resizeNode([node], 'n1', 'n', start, { x: 300, y: -24 }, false);
     // The bottom edge stays at 156.
     expect(taller).toMatchObject({ x: 100, y: 76, width: 120, height: 80 });
+  });
+
+  it('lands the pulled edge on the grid, not just the size', () => {
+    // Left off the grid at x=101 (a group scale can do that). Snapping the size
+    // would leave the right edge at 101 + 160 = 261; the edge goes to 264.
+    const offGrid = { x: 101, y: 100, width: 120, height: 56 };
+    const [wider] = resizeNode([{ ...node, x: 101 }], 'n1', 'e', offGrid, { x: 41, y: 0 });
+    expect(wider).toMatchObject({ x: 101, width: 163 });
+    expect(wider!.x + wider!.width!).toBe(264);
   });
 
   it('keeps the proportions from an edge with Shift, about that edge', () => {
@@ -621,12 +669,12 @@ describe('resizeNode', () => {
   });
 
   it('grows from the bottom-right without moving the origin', () => {
-    const [resized] = resizeNode([node], 'n1', 'se', start, { x: 40, y: 24 });
+    const [resized] = resizeNode([node], 'n1', 'se', start, { x: 40, y: 24 }, false);
     expect(resized).toMatchObject({ x: 100, y: 100, width: 160, height: 80 });
   });
 
   it('moves the origin when the top-left corner is dragged', () => {
-    const [resized] = resizeNode([node], 'n1', 'nw', start, { x: -40, y: -24 });
+    const [resized] = resizeNode([node], 'n1', 'nw', start, { x: -40, y: -24 }, false);
     // The bottom-right stays pinned at (220, 156).
     expect(resized).toMatchObject({ x: 60, y: 76, width: 160, height: 80 });
     expect(resized!.x + resized!.width!).toBe(start.x + start.width);
@@ -661,9 +709,10 @@ describe('resizeNode', () => {
     expect(locked!.width! / locked!.height!).toBeCloseTo(start.width / start.height, 6);
   });
 
-  it('snaps the new size to the grid, or lands exactly with snapping off', () => {
+  it('snaps the pulled edges to the grid, or lands exactly with snapping off', () => {
+    // From (100, 100) the pulled corner reaches (261, 181) and lands on (264, 184).
     const [snapped] = resizeNode([node], 'n1', 'se', start, { x: 41, y: 25 }, true);
-    expect(snapped).toMatchObject({ width: 160, height: 80 });
+    expect(snapped).toMatchObject({ width: 164, height: 84 });
 
     const [free] = resizeNode([node], 'n1', 'se', start, { x: 41, y: 25 }, false);
     expect(free).toMatchObject({ width: 161, height: 81 });
@@ -1046,5 +1095,74 @@ describe('text that is typed is the text that is kept', () => {
     const prepared = prepareNodeLabel(long);
     expect(prepared.endsWith(NEWLINE)).toBe(false);
     expect(prepared.length).toBeLessThanOrEqual(DIAGRAM_LABEL_LIMIT);
+  });
+});
+
+describe('turned shapes held to the sheet by their outline', () => {
+  // A 120 x 72 ellipse turned 45 degrees reaches 49.5 from its centre, so its
+  // stored box may start 10.5 before the edge with the curve still on it.
+  const ellipse: DiagramNode = {
+    id: 'e',
+    label: '',
+    x: 400,
+    y: 300,
+    shape: 'ellipse',
+    width: 120,
+    height: 72,
+    rotation: 45,
+  };
+  const reach = 60 - Math.sqrt((60 * 60 + 36 * 36) / 2);
+
+  it('lets the curve, not the frame, meet the edge on a drag', () => {
+    const moved = moveNodesBy([ellipse], { e: { x: 400, y: 300 } }, { x: -5_000, y: 0 }, 'e')[0]!;
+    // Within a unit of the edge, never past it.
+    expect(nodeBounds(moved).x).toBeGreaterThanOrEqual(0);
+    expect(nodeBounds(moved).x).toBeLessThan(1);
+    expect(moved.x).toBeLessThan(0);
+  });
+
+  it('lets a quarter-turned box reach the edge it now stands against', () => {
+    // Stored 200 wide, it stands 100 wide; its stored corner is 50 off the
+    // sheet when its side touches the edge. The last step of the move used to
+    // clamp the stored box, which pushed it back 50 units from the edge.
+    const box: DiagramNode = {
+      id: 'b',
+      label: '',
+      x: 400,
+      y: 300,
+      shape: 'rectangle',
+      width: 200,
+      height: 100,
+      rotation: 90,
+    };
+    const moved = moveNodesBy([box], { b: { x: 400, y: 300 } }, { x: -5_000, y: 0 }, 'b')[0]!;
+    expect(moved.x).toBe(-50);
+    expect(nodeBounds(moved).x).toBe(0);
+  });
+
+  it('rounds a held position towards the sheet, not past its edge', () => {
+    const placed = placeNodePosition(
+      { x: -500, y: 200 },
+      { width: 120, height: 72 },
+      false,
+      ellipse,
+    );
+    expect(Number.isInteger(placed.x)).toBe(true);
+    expect(placed.x + reach).toBeGreaterThanOrEqual(0);
+    expect(placed.x).toBe(-10);
+  });
+
+  it('holds a turned ellipse resized against the edge by its curve', () => {
+    const atEdge: DiagramNode = { ...ellipse, x: -10 };
+    const resized = resizeNode(
+      [atEdge],
+      'e',
+      'e',
+      { x: atEdge.x, y: atEdge.y, width: 120, height: 72 },
+      { x: 40, y: 0 },
+      false,
+    )[0]!;
+    expect(resized.width).toBeGreaterThan(120);
+    expect(nodeBounds(resized).x).toBeGreaterThanOrEqual(-1e-9);
   });
 });

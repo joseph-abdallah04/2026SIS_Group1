@@ -70,6 +70,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
     loading,
     error,
     reload,
+    setBoardLocked,
     propose,
     editProposal,
     arrangeProposal,
@@ -174,6 +175,11 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
       .join(','),
   ].join('|');
 
+  // F41: read from the agenda, which `questionUpdated` keeps current, rather
+  // than the board snapshot — the leader can flip it while the board is open.
+  const questionVotingEnabled =
+    questions.find((question) => question.id === board.questionId)?.votingEnabled ?? true;
+
   const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
   const balloting = voting.phase === 'open' || voting.phase === 'closed';
   // Server already ordered the shortlist (winner / ties first when closed).
@@ -212,6 +218,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           />
           <PinboardCanvas
             board={board}
+            questionVotingEnabled={questionVotingEnabled}
             isLive={isLive}
             newItemIds={newItemIds}
             isLeader={isLeader}
@@ -279,6 +286,13 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                     ? board.items.length >= SHORTLIST_MIN
                     : undefined
                 }
+                boardLock={{
+                  locked: board.boardLocked,
+                  onToggle:
+                    isLeader && board.questionId
+                      ? () => setBoardLocked(board.questionId!, !board.boardLocked)
+                      : undefined,
+                }}
               />
             }
             myProposals={
@@ -316,20 +330,22 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                 />
               ) : null
             }
+            assistant={
+              /* Propose reads these items so it can unlock after a delete. The model
+                still reads the board server-side on every turn (F35). */
+              <AssistantBubble
+                key={sessionId}
+                sessionId={sessionId}
+                getContext={getAssistantContext}
+                boardItems={board.items}
+                questionStatus={board.questionStatus}
+                suppressed={balloting}
+              />
+            }
           />
           <SessionJoinNotices />
         </main>
         <CreativeStudio />
-        {/* Propose reads these items so it can unlock after a delete. The model
-          still reads the board server-side on every turn (F35). */}
-        <AssistantBubble
-          key={sessionId}
-          sessionId={sessionId}
-          getContext={getAssistantContext}
-          boardItems={board.items}
-          questionStatus={board.questionStatus}
-          suppressed={balloting}
-        />
       </ImageImportProvider>
     </CreativeToolsProvider>
   );

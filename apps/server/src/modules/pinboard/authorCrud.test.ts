@@ -52,7 +52,15 @@ const REWORD = {
 } as Parameters<typeof updateProposal>[0]['input'];
 
 function questionRef(status: QuestionStatus = 'discussion', sessionId = 's1') {
-  return { id: 'q1', sessionId, text: 'Q', position: 0, status };
+  return {
+    id: 'q1',
+    sessionId,
+    text: 'Q',
+    position: 0,
+    status,
+    boardLocked: false,
+    votingEnabled: true,
+  };
 }
 
 function row(overrides: Record<string, unknown> = {}) {
@@ -92,7 +100,7 @@ beforeEach(() => {
 describe('requireMutableProposal', () => {
   const q = questionRef();
   const mine = { id: 'p1', authorId: 'u1', deletedAt: null };
-  const asAuthor = { mutation: 'edit', isLeader: false } as const;
+  const asAuthor = { mutation: 'edit', isLeader: false, boardLocked: false } as const;
 
   it('returns the proposal to its own author on an open board', () => {
     expect(requireMutableProposal(mine, q, AUTHOR, asAuthor)).toBe(mine);
@@ -142,13 +150,21 @@ describe('leader moderation', () => {
 
   it('lets the leader move a proposal they did not author', () => {
     expect(
-      requireMutableProposal(someoneElses, q, LEADER, { mutation: 'move', isLeader: true }),
+      requireMutableProposal(someoneElses, q, LEADER, {
+        mutation: 'move',
+        isLeader: true,
+        boardLocked: false,
+      }),
     ).toBe(someoneElses);
   });
 
   it('lets the leader remove a proposal they did not author', () => {
     expect(
-      requireMutableProposal(someoneElses, q, LEADER, { mutation: 'delete', isLeader: true }),
+      requireMutableProposal(someoneElses, q, LEADER, {
+        mutation: 'delete',
+        isLeader: true,
+        boardLocked: false,
+      }),
     ).toBe(someoneElses);
   });
 
@@ -156,13 +172,21 @@ describe('leader moderation', () => {
   // words under its author's name.
   it('does not let the leader rewrite someone else’s content', () => {
     expect(() =>
-      requireMutableProposal(someoneElses, q, LEADER, { mutation: 'edit', isLeader: true }),
+      requireMutableProposal(someoneElses, q, LEADER, {
+        mutation: 'edit',
+        isLeader: true,
+        boardLocked: false,
+      }),
     ).toThrow(/only its author can edit it/);
   });
 
   it('still refuses a plain member removing someone else’s proposal', () => {
     expect(() =>
-      requireMutableProposal(someoneElses, q, STRANGER, { mutation: 'delete', isLeader: false }),
+      requireMutableProposal(someoneElses, q, STRANGER, {
+        mutation: 'delete',
+        isLeader: false,
+        boardLocked: false,
+      }),
     ).toThrow(/Only the author/);
   });
 
@@ -171,6 +195,7 @@ describe('leader moderation', () => {
       requireMutableProposal(someoneElses, questionRef('discussion', 'other'), LEADER, {
         mutation: 'delete',
         isLeader: true,
+        boardLocked: false,
       }),
     ).toThrow(/not found/);
   });
@@ -180,6 +205,7 @@ describe('leader moderation', () => {
       requireMutableProposal(someoneElses, questionRef('voting'), LEADER, {
         mutation: 'delete',
         isLeader: true,
+        boardLocked: false,
       }),
     ).toThrow(/the board is closed/);
   });
@@ -247,6 +273,26 @@ describe('updateProposal', () => {
   it('stamps editedAt when the content changes', async () => {
     await updateProposal({ proposalId: 'p1', actor: AUTHOR, input: REWORD });
     expect(update.mock.calls[0]?.[0].data.editedAt).toBeInstanceOf(Date);
+  });
+
+  // A longer note can need a bigger sticky, and later cards are placed clear
+  // of the size it is now.
+  it('keeps the new width of a rewritten sticky', async () => {
+    await updateProposal({
+      proposalId: 'p1',
+      actor: AUTHOR,
+      input: { ...REWORD, cardWidth: 278, cardHeight: 278 },
+    });
+    expect(update.mock.calls[0]?.[0].data).toMatchObject({ cardWidth: 278, cardHeight: 278 });
+  });
+
+  it('keeps the width it had when only the position changes', async () => {
+    await updateProposal({
+      proposalId: 'p1',
+      actor: AUTHOR,
+      input: { id: 'p1', x: 40, y: 60, cardWidth: 339 },
+    });
+    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty('cardWidth');
   });
 
   // Dragging a card is not editing it. Marking a move as an edit would put
@@ -436,7 +482,7 @@ describe('arranging the stack', () => {
   const someoneElses = { id: 'p1', authorId: 'u1', deletedAt: null };
 
   it('lets the leader restack any card, their own included', () => {
-    const arrange = { mutation: 'arrange', isLeader: true } as const;
+    const arrange = { mutation: 'arrange', isLeader: true, boardLocked: false } as const;
     expect(requireMutableProposal(someoneElses, q, LEADER, arrange)).toBe(someoneElses);
     expect(
       requireMutableProposal({ ...someoneElses, authorId: 'leader-1' }, q, LEADER, arrange),
@@ -448,7 +494,11 @@ describe('arranging the stack', () => {
   it('refuses the author, who is not the leader', () => {
     let thrown: unknown;
     try {
-      requireMutableProposal(someoneElses, q, AUTHOR, { mutation: 'arrange', isLeader: false });
+      requireMutableProposal(someoneElses, q, AUTHOR, {
+        mutation: 'arrange',
+        isLeader: false,
+        boardLocked: false,
+      });
     } catch (err) {
       thrown = err;
     }
@@ -460,6 +510,7 @@ describe('arranging the stack', () => {
       requireMutableProposal(someoneElses, questionRef('discussion', 'other'), AUTHOR, {
         mutation: 'arrange',
         isLeader: false,
+        boardLocked: false,
       }),
     ).toThrow(/not found/);
   });
@@ -469,6 +520,7 @@ describe('arranging the stack', () => {
       requireMutableProposal(someoneElses, questionRef('voting'), LEADER, {
         mutation: 'arrange',
         isLeader: true,
+        boardLocked: false,
       }),
     ).toThrow(/the board is closed/);
   });
@@ -609,4 +661,61 @@ describe('arranging the stack', () => {
     expect(aggregate).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
   });
+});
+
+// The leader can lock the board so only they move proposals around it. It is
+// about positions only: an author keeps every other right over their own.
+describe('board lock', () => {
+  const q = questionRef();
+  const mine = { id: 'p1', authorId: 'u1', deletedAt: null };
+
+  it('stops an author moving their own proposal while the board is locked', () => {
+    expect(() =>
+      requireMutableProposal(mine, q, AUTHOR, {
+        mutation: 'move',
+        isLeader: false,
+        boardLocked: true,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'BOARD_LOCKED' }));
+  });
+
+  it('lets an author move their own proposal once it is unlocked', () => {
+    expect(
+      requireMutableProposal(mine, q, AUTHOR, {
+        mutation: 'move',
+        isLeader: false,
+        boardLocked: false,
+      }),
+    ).toBe(mine);
+  });
+
+  it('still lets the leader move anything while it is locked', () => {
+    expect(
+      requireMutableProposal(mine, q, LEADER, {
+        mutation: 'move',
+        isLeader: true,
+        boardLocked: true,
+      }),
+    ).toBe(mine);
+  });
+
+  // On a closed board nothing moves for anyone, which is the reason to give.
+  it('says the question is closed before it says the board is locked', () => {
+    expect(() =>
+      requireMutableProposal(mine, questionRef('voting'), AUTHOR, {
+        mutation: 'move',
+        isLeader: false,
+        boardLocked: true,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'QUESTION_CLOSED' }));
+  });
+
+  it.each(['edit', 'delete', 'react'] as const)(
+    'leaves an author free to %s their own proposal while it is locked',
+    (mutation) => {
+      expect(
+        requireMutableProposal(mine, q, AUTHOR, { mutation, isLeader: false, boardLocked: true }),
+      ).toBe(mine);
+    },
+  );
 });

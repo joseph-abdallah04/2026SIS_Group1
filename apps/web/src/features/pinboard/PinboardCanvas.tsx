@@ -11,7 +11,14 @@ import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { useImageImport } from '../tools/image/ImageImportProvider';
 import { isImageFile } from '../tools/image/imageEncoding';
 import { stickyPlainText } from '../tools/sticky/stickyMarks';
-import { CreativeToolbar, FLOATING_BAR, TOOL_LABEL } from '../toolbar/CreativeToolbar';
+import {
+  BAR_BESIDE_ZOOM,
+  BOARD_CRAMPED_HIDDEN,
+  BOARD_CRAMPED_ONLY,
+  CreativeToolbar,
+  FLOATING_BAR,
+  TOOL_LABEL,
+} from '../toolbar/CreativeToolbar';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -19,6 +26,7 @@ import { FirstProposalHint } from './FirstProposalHint';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
 import { useProposalDrag } from './useProposalDrag';
+import { canMoveProposal } from './movePermission';
 import {
   DESK_MARGIN,
   BOARD_SIZE,
@@ -57,6 +65,11 @@ interface PinboardCanvasProps {
    */
   agenda?: ReactNode;
   /**
+   * The assistant rail, opposite the agenda. A node for the same reason:
+   * the board owns the row, and the chat owns what goes in the rail.
+   */
+  assistant?: ReactNode;
+  /**
    * F38's way to put one of your earlier proposals on the board, rendered in
    * the floating toolbar beside the creative tools. A node for the same reason
    * `agenda` is: what goes in it is fetched and wired by the page, and this
@@ -73,8 +86,8 @@ interface PinboardCanvasProps {
    * F13's roster, centred in the header. A node for the same reason `agenda`
    * is: the board owns where things sit, but not what a LiveKit roster is.
    *
-   * It was a rail on the right until F13.2, when the assistant's corner bubble
-   * and chat panel turned out to cover that side permanently.
+   * It was a rail on the right until the assistant needed that edge. The roster
+   * stayed in the header; the assistant is the right rail now.
    */
   participants?: ReactNode;
   /**
@@ -122,6 +135,11 @@ interface PinboardCanvasProps {
   readOnly?: boolean;
   /** The way back to the recap, in the header slot End/Leave uses live. */
   archiveActions?: ReactNode;
+  /**
+   * F41: false when the question on screen is brainstorm-only, so the header
+   * tells the room up front that no vote is coming. Defaults to a vote.
+   */
+  questionVotingEnabled?: boolean;
 }
 
 const PHASE_LABELS: Record<QuestionStatus, string> = {
@@ -132,6 +150,12 @@ const PHASE_LABELS: Record<QuestionStatus, string> = {
   voting: 'Voting',
   answered: 'Answered',
   skipped: 'Skipped',
+};
+
+/** F41: the two phases a brainstorm-only question reads differently in. */
+const BRAINSTORM_PHASE_LABELS: Partial<Record<QuestionStatus, string>> = {
+  discussion: 'Brainstorming',
+  answered: 'Discussed',
 };
 
 function ZoomControl({
@@ -189,12 +213,14 @@ function ZoomControl({
         title="Fit the board to the proposals"
         className={button}
       >
+        {/* The icon takes over at the same stage the word goes, so the button
+            is never empty. */}
         <span className={TOOL_LABEL}>Fit</span>
         <Scan
           aria-hidden="true"
           size={16}
           strokeWidth={1.8}
-          className="hidden @max-[36rem]/board:block"
+          className="hidden @max-[42rem]/board:block"
         />
       </button>
     </nav>
@@ -207,6 +233,7 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  assistant,
   myProposals,
   micControl,
   participants,
@@ -227,6 +254,7 @@ export function PinboardCanvas({
   onSelectProposal,
   readOnly = false,
   archiveActions,
+  questionVotingEnabled = true,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
   // A message for the pill over the toolbar. The id makes the same words said
@@ -635,12 +663,23 @@ export function PinboardCanvas({
   // than tiling out over the surrounding desk.
   const dotBackground = `radial-gradient(${DOT_COLOR} ${DOT_RADIUS}px, transparent ${DOT_RADIUS}px)`;
 
+  // An ended brainstorm left in discussion was discussed, not still going
+  // (F41) — the same reading as the archive's agenda beside it.
+  const brainstormLabel =
+    readOnly && board.questionStatus === 'discussion'
+      ? 'Discussed'
+      : board.questionStatus
+        ? BRAINSTORM_PHASE_LABELS[board.questionStatus]
+        : undefined;
   // Human wording, not the raw enum: "Q2 · pending" reads as a bug, and the
   // difference between the phases is the difference between the board taking
   // proposals and not (F25).
   const phaseLabel =
     board.questionPosition != null && board.questionStatus
-      ? `Q${board.questionPosition + 1} · ${PHASE_LABELS[board.questionStatus]}`
+      ? `Q${board.questionPosition + 1} · ${
+          (questionVotingEnabled ? undefined : brainstormLabel) ??
+          PHASE_LABELS[board.questionStatus]
+        }`
       : // No active question at all: every question has been answered or
         // skipped, so the agenda is done and the leader's move is to end it.
         'Agenda complete';
@@ -802,11 +841,9 @@ export function PinboardCanvas({
         </div>
       </header>
 
-      {/* Everything under the header. There is no footer: the agenda runs to
-          the bottom of the screen, and the toolbars float over the board
-          instead of taking a strip of it. F13's roster used to dock opposite
-          the agenda; it lives in the header now, and the board has that 256px
-          back. */}
+      {/* Everything under the header. There is no footer: the agenda and the
+          assistant run to the bottom of the screen, and the toolbars float
+          over the board instead of taking a strip of it. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
 
@@ -889,9 +926,15 @@ export function PinboardCanvas({
                     onExtend={
                       boardOpen && toolsFree && canReopen(item) ? openEditorForExtend : undefined
                     }
-                    canMove={
-                      boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
-                    }
+                    // The leader may move anything. Anyone else may move their
+                    // own, unless the leader has locked the board.
+                    canMove={canMoveProposal({
+                      boardOpen,
+                      isLeader,
+                      boardLocked: board.boardLocked,
+                      viewerId,
+                      authorId: item.authorId,
+                    })}
                     canDelete={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }
@@ -974,20 +1017,23 @@ export function PinboardCanvas({
 
             It is also the `board` container the bars size themselves against,
             so their stages follow the board's width rather than the window's
-            (the agenda rail alone moves it by 212px). The container is this
+            (the agenda rail alone moves it by up to 436px, collapsed against
+            dragged out to its widest). The container is this
             layer and not the box above because `container-type` makes its
             element the containing block for anything `fixed` inside, and
             nothing on the board should be caught by that. */}
           <div className="@container/board pointer-events-none absolute inset-0 z-20">
-            {/* A refused write, stacked above the toolbar. It stays centred
-                  when the bar shifts, because at this height it is already
-                  clear of the zoom control and the assistant orb. `bottom-19`
-                  is the bar's `bottom-6` plus its `h-11` plus an 8px gap. */}
+            {/* A refused write, stacked above the toolbar. `bottom-19` is the
+                  bar's `bottom-6` plus its `h-11` plus an 8px gap, clear of
+                  the zoom control. */}
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
               {notice ? (
+                // Kept on a board too narrow for the controls: a paste or a
+                // drop can still be refused there. Wraps rather than running
+                // past the board's edges.
                 <p
                   role="status"
-                  className="pointer-events-auto rounded-full border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-[11.5px] font-medium text-rt-secondary-deep shadow-sm"
+                  className="pointer-events-auto max-w-full rounded-2xl border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-center text-[11.5px] font-medium text-balance text-rt-secondary-deep shadow-sm"
                 >
                   {notice.text}
                 </p>
@@ -998,10 +1044,10 @@ export function PinboardCanvas({
                   into the zoom control on the left, then anchored right: the
                   centred bar (~375px) meets the zoom control (~181px, 24px in
                   from the edge, 16px gap) on a board narrower than ~816px, so
-                  52rem leaves a margin. Extra right padding clears the
-                  assistant orb in that corner. `bottom-6` clears the
-                  horizontal scrollbar. On a board too narrow even for icons
-                  (~320px) the two can still touch.
+                  52rem leaves a margin. `bottom-6` clears the horizontal
+                  scrollbar. Below 24rem even the icon-only bars would touch,
+                  so this row and the zoom control give way to a one-line
+                  note (`BOARD_CRAMPED_HIDDEN`).
 
                   The leader's shortlist bar, which takes this slot while the
                   board is closed, is wider (~490px) and meets the zoom
@@ -1013,10 +1059,10 @@ export function PinboardCanvas({
                   make lopsided, and rest just above the toolbar. */}
             <div
               data-board-toolbar
-              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${
+              className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${BOARD_CRAMPED_HIDDEN} ${
                 !boardOpen && boardOverlay
-                  ? '@max-[60rem]/board:justify-end @max-[60rem]/board:pr-[5.75rem]'
-                  : '@max-[52rem]/board:justify-end @max-[52rem]/board:pr-[5.75rem]'
+                  ? '@max-[60rem]/board:justify-end'
+                  : '@max-[52rem]/board:justify-end'
               }`}
             >
               {/* `relative` so the first-proposal hint can rise off whichever
@@ -1046,7 +1092,7 @@ export function PinboardCanvas({
                   // A sentence cannot shrink to an icon, so it truncates
                   // instead, capped at what the zoom control leaves free.
                   <p
-                    className={`${FLOATING_BAR} max-w-[calc(100cqw-18rem)] px-4 text-[12px] font-medium text-rt-ink-muted`}
+                    className={`${FLOATING_BAR} ${BAR_BESIDE_ZOOM} px-4 text-[12px] font-medium text-rt-ink-muted`}
                   >
                     <span className="truncate">{closedMessage}</span>
                   </p>
@@ -1054,10 +1100,13 @@ export function PinboardCanvas({
               </div>
             </div>
 
-            {/* Zoom, opposite the assistant: clear of the vertical
+            {/* Zoom, on the left of the board: clear of the vertical
                   scrollbar by `left-6`, and on the same baseline as the
                   main bar. */}
-            <div className="pointer-events-auto absolute bottom-6 left-6">
+            <div
+              data-board-zoom
+              className={`pointer-events-auto absolute bottom-6 left-6 ${BOARD_CRAMPED_HIDDEN}`}
+            >
               <ZoomControl
                 zoom={zoom}
                 canZoomIn={zoom !== ZOOM_LEVELS[0]}
@@ -1067,9 +1116,25 @@ export function PinboardCanvas({
                 onFit={onFit}
               />
             </div>
+
+            {/* What stands in for the bars on a board too narrow to use. The
+                bars are `display: none` there, so they leave the
+                accessibility tree as well as the screen, and this is how
+                assistive tech learns why. Not a live region: it would speak
+                up on every resize across the line. Above 24rem it is
+                `display: none` itself, so it is only ever read when true.
+                Names no tool, so it reads as true on an ended session's
+                board too. */}
+            <p
+              data-board-cramped-note
+              className={`absolute inset-x-0 bottom-6 justify-center px-4 text-center text-[11px] font-medium text-rt-ink-faint ${BOARD_CRAMPED_ONLY}`}
+            >
+              Widen the board to see its controls
+            </p>
           </div>
         </div>
 
+        {assistant}
         {ballot}
       </div>
     </div>

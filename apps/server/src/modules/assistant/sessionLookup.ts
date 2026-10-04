@@ -20,6 +20,8 @@ export interface QuestionFacts {
   id: string;
   text: string;
   status: 'pending' | 'discussion' | 'voting' | 'answered' | 'skipped';
+  /** F41: false for a brainstorm-only question — discussed, never voted on. */
+  votingEnabled: boolean;
   isCurrent: boolean;
 }
 
@@ -49,6 +51,7 @@ export async function readAgenda(sessionId: string): Promise<Agenda | null> {
       id: question.id,
       text: question.text,
       status: question.status,
+      votingEnabled: question.votingEnabled,
       isCurrent: question.id === active?.id,
     }));
 
@@ -85,7 +88,10 @@ export async function readProposalsFor(question: QuestionFacts): Promise<Proposa
  */
 export interface QuestionAnswer {
   question: QuestionFacts;
-  /** The winning proposal, or null for a question that was skipped or ended in a tie. */
+  /**
+   * The winning proposal, or null for a question that was skipped, ended in a tie, or
+   * was brainstorm-only (F41) and so never had a vote to win.
+   */
   winner: ProposalFacts | null;
 }
 

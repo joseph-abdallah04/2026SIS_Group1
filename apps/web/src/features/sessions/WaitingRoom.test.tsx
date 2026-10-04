@@ -87,6 +87,7 @@ const session: SessionDetail = {
       text: 'Question 1',
       position: 0,
       status: 'pending',
+      votingEnabled: true,
       createdAt: new Date('2026-09-05T00:00:00.000Z'),
     },
   ],
@@ -108,6 +109,19 @@ describe('WaitingRoom', () => {
     expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Joey, Leader' })).toBeInTheDocument();
     expect(screen.queryByRole('listitem', { name: 'Joey' })).not.toBeInTheDocument();
+  });
+
+  // F41: the vote is set at setup or live on the agenda, never here. The
+  // waiting room's agenda is read-only, for the leader as for everyone else.
+  it('shows the leader which questions will not be voted on, with nothing to change it', () => {
+    const brainstorm = {
+      ...session,
+      questions: session.questions.map((question) => ({ ...question, votingEnabled: false })),
+    };
+    render(<WaitingRoom session={brainstorm} onStarted={() => undefined} />);
+
+    expect(screen.getByText('No vote')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /vote/i })).not.toBeInTheDocument();
   });
 
   it('offers the microphone from the header, so the wait is a conversation', () => {

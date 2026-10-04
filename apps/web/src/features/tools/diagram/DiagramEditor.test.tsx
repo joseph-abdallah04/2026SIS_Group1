@@ -17,6 +17,8 @@ import {
   diagramNodeSize,
   effectiveDiagramNodeSize,
   diagramNodeLabelLayout,
+  inkPaintedBounds,
+  rotatedBounds,
 } from '@roundtable/shared';
 import { proposalCreateSchema, type ProposalCreateInput } from '@roundtable/shared/schemas';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -167,6 +169,18 @@ function doublePressCell(cell: Element, canvas: Element, pointerId: number) {
   fireEvent.pointerUp(canvas, { pointerId: pointerId + 1, clientX: 400, clientY: 290 });
 }
 
+/**
+ * Select a table by pressing one of its cells, then go inside it with Enter,
+ * which puts the first cell in hand.
+ *
+ * The press is stamped far in the past, so the next click a test makes on the
+ * same cell is a click, not the second half of a double press.
+ */
+function enterTable(cell: Element, canvas: Element, pointerId: number) {
+  pressNode(cell, canvas, { pointerId, time: -10_000, clientX: 400, clientY: 290 });
+  fireEvent.keyDown(canvas, { key: 'Enter' });
+}
+
 /** A property's own choices live behind its button on the bar. */
 async function openBarPanel(user: ReturnType<typeof userEvent.setup>, name: string) {
   const trigger = screen.getByRole('button', { name });
@@ -197,17 +211,6 @@ async function openMore(user: ReturnType<typeof userEvent.setup>) {
     if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
     return;
   }
-}
-
-/** Arranging moved onto the rail, in with the other canvas-wide settings. */
-async function openArrangeMenu(user: ReturnType<typeof userEvent.setup>) {
-  const trigger = screen.getByRole('button', { name: 'Arrange' });
-  if (trigger.getAttribute('aria-expanded') !== 'true') await user.click(trigger);
-}
-
-async function arrangeDiagram(user: ReturnType<typeof userEvent.setup>) {
-  await openArrangeMenu(user);
-  await user.click(screen.getByRole('button', { name: 'Arrange the diagram' }));
 }
 
 function Harness({
@@ -974,23 +977,6 @@ describe('diagram editor', () => {
 
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(screen.queryByTestId('studio-arrow')).toBeNull();
-  });
-
-  it('undoes Arrange back to the authored positions', async () => {
-    const propose = vi.fn(async (input: ProposalCreateInput) => {
-      void input;
-    });
-    render(<Harness propose={propose} />);
-    const { user } = await openDiagram();
-    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
-    await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
-    const box = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
-    const before = box.getAttribute('transform');
-    await arrangeDiagram(user);
-    expect(box.getAttribute('transform')).not.toBe(before);
-
-    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
-    expect(box).toHaveAttribute('transform', before ?? '');
   });
 
   it('deletes a connection without deleting the shapes it joined', async () => {
@@ -2244,6 +2230,26 @@ describe('diagram resize and style', () => {
     expect(node.querySelector('rect[width="200"][height="100"]')).not.toBeNull();
   });
 
+  it('still places the default size when a click wobbles a few pixels', async () => {
+    // A hand rarely holds perfectly still while clicking. Below the same slop
+    // the arrow tool uses, the press is a click, not a tiny drag-out.
+    render(<Harness propose={propose()} />);
+    const { user, canvas } = await openDiagram();
+    await armShapeTool(user);
+
+    fireEvent.pointerMove(canvas, { pointerId: 99, clientX: 200, clientY: 200 });
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 99, clientX: 200, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 99, clientX: 206, clientY: 205 });
+    // Nothing is being sized yet, so the preview is still the default footprint.
+    expect(
+      screen.getByTestId('placement-ghost').querySelector('rect[width="120"][height="56"]'),
+    ).not.toBeNull();
+    fireEvent.pointerUp(canvas, { pointerId: 99, clientX: 206, clientY: 205 });
+
+    const node = screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
+    expect(node.querySelector('rect[width="120"][height="56"]')).not.toBeNull();
+  });
+
   it('still places the default size when the press never travels', async () => {
     // Click-to-place is how every shape was made before drag-to-size, and it has
     // to keep working for anyone who does not think to drag.
@@ -2385,6 +2391,8 @@ describe('diagram resize and style', () => {
     await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
     const node = () => screen.getByRole('button', { name: 'Rounded rectangle: Unlabelled' });
     const before = node().getAttribute('transform');
+    // The exact geometry of the pull, without edges landing on the grid.
+    await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
 
     fireEvent.pointerDown(screen.getByTestId('resize-handle-se'), {
       button: 0,
@@ -2445,6 +2453,8 @@ describe('diagram resize and style', () => {
     });
     fireEvent.pointerUp(canvas, { pointerId: 177, clientX: 350, clientY: 320 });
     const weight = screen.getByTestId('ink-stroke').getAttribute('stroke-width');
+    // The exact geometry of the pull, without edges landing on the grid.
+    await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
 
     // Pulled out along the right edge alone: a drawing never stretches, so the
     // height doubles with the width.
@@ -2489,6 +2499,8 @@ describe('diagram resize and style', () => {
     fireEvent.pointerUp(canvas, { pointerId: 180, clientX: 250, clientY: 480 });
 
     expect(screen.queryByTestId('resize-handle-n')).toBeNull();
+    // The exact geometry of the pull, without edges landing on the grid.
+    await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
     fireEvent.pointerDown(screen.getByTestId('resize-handle-e'), {
       button: 0,
       pointerId: 181,
@@ -2539,6 +2551,51 @@ describe('diagram resize and style', () => {
     await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
     expect(widthOf('Rounded rectangle: Unlabelled')).toBe(120);
     expect(widthOf('Dotted rectangle: Unlabelled')).toBe(184);
+  });
+
+  it('lands a scaled selection on the grid, unless snapping is off', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+    await clickInRailMenu(user, 'Shapes', 'Add rounded rectangle');
+    await clickInRailMenu(user, 'Shapes', 'Add dotted rectangle');
+
+    // The right edge of whichever shape reaches furthest.
+    const rightEdge = () => {
+      const edges = screen.getAllByRole('button', { name: /rectangle: Unlabelled/ }).map((node) => {
+        const x = Number(/translate\((-?[\d.]+)/.exec(node.getAttribute('transform') ?? '')?.[1]);
+        const width = Number(
+          node.querySelector('rect[width]:not([data-testid])')?.getAttribute('width'),
+        );
+        return x + width;
+      });
+      return Math.max(...edges);
+    };
+    const pull = (pointerId: number) => {
+      fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+      const group = screen.getByTestId('group-frame');
+      fireEvent.pointerDown(within(group).getByTestId('resize-handle-e'), {
+        button: 0,
+        pointerId,
+        clientX: 500,
+        clientY: 200,
+      });
+      // An odd distance, so an unsnapped pull cannot land on the grid by luck.
+      fireEvent.pointerMove(canvas, { pointerId, clientX: 603, clientY: 200 });
+      fireEvent.pointerUp(canvas, { pointerId, clientX: 603, clientY: 200 });
+    };
+    const before = rightEdge();
+
+    pull(191);
+    const snapped = rightEdge();
+    // Members are rounded one by one, so the far edge is on a line to within 1.
+    expect(Math.abs(snapped - Math.round(snapped / 8) * 8)).toBeLessThanOrEqual(1);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    expect(rightEdge()).toBe(before);
+    await user.click(screen.getByRole('button', { name: 'Snap to grid' }));
+    pull(192);
+    expect(rightEdge()).toBe(before + 103);
   });
 
   it('keeps the resize grips the same size on screen at every zoom', async () => {
@@ -3127,7 +3184,7 @@ describe('diagram shapes and container groups', () => {
   });
 });
 
-describe('diagram routing and graph-aware arrange', () => {
+describe('inherited edge routing', () => {
   function propose() {
     return vi.fn(async (input: ProposalCreateInput) => {
       void input;
@@ -3143,7 +3200,6 @@ describe('diagram routing and graph-aware arrange', () => {
       type: 'diagram',
       artifactJson: {
         type: 'diagram',
-        // Deliberately scattered so Arrange has something to improve.
         nodes: [
           { id: 'n1', label: 'Client', x: 600, y: 400, shape: 'box' },
           { id: 'n2', label: 'Api', x: 40, y: 300, shape: 'box' },
@@ -3173,83 +3229,6 @@ describe('diagram routing and graph-aware arrange', () => {
     await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
     return { user, send };
   }
-
-  function positionOf(name: string): { x: number; y: number } {
-    const transform = screen.getByRole('button', { name }).getAttribute('transform')!;
-    const [, x, y] = /translate\((-?\d+), (-?\d+)\)/.exec(transform)!;
-    return { x: Number(x), y: Number(y) };
-  }
-
-  it('arranges a chain along its arrows instead of on a bare grid', async () => {
-    const { user } = await openFixture([
-      { from: 'n1', to: 'n2' },
-      { from: 'n2', to: 'n3' },
-    ]);
-
-    await arrangeDiagram(user);
-
-    // Top to bottom is the default flow.
-    expect(positionOf('Rounded rectangle: Client').y).toBeLessThan(
-      positionOf('Rounded rectangle: Api').y,
-    );
-    expect(positionOf('Rounded rectangle: Api').y).toBeLessThan(
-      positionOf('Rounded rectangle: Store').y,
-    );
-    // A single chain lines up on one column.
-    expect(positionOf('Rounded rectangle: Client').x).toBe(positionOf('Rounded rectangle: Api').x);
-  });
-
-  it('switches the flow axis when left to right is chosen', async () => {
-    const { user } = await openFixture([
-      { from: 'n1', to: 'n2' },
-      { from: 'n2', to: 'n3' },
-    ]);
-
-    await openArrangeMenu(user);
-    await user.click(screen.getByRole('button', { name: 'Arrange left to right' }));
-    await arrangeDiagram(user);
-
-    expect(positionOf('Rounded rectangle: Client').x).toBeLessThan(
-      positionOf('Rounded rectangle: Api').x,
-    );
-    expect(positionOf('Rounded rectangle: Api').x).toBeLessThan(
-      positionOf('Rounded rectangle: Store').x,
-    );
-    expect(positionOf('Rounded rectangle: Client').y).toBe(positionOf('Rounded rectangle: Api').y);
-  });
-
-  it('marks the chosen flow direction as pressed', async () => {
-    const { user } = await openFixture([{ from: 'n1', to: 'n2' }]);
-
-    await openArrangeMenu(user);
-    expect(screen.getByRole('button', { name: 'Arrange top to bottom' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Arrange left to right' }));
-
-    expect(screen.getByRole('button', { name: 'Arrange left to right' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    expect(screen.getByRole('button', { name: 'Arrange top to bottom' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-  });
-
-  it('undoes a whole arrange in one step', async () => {
-    const { user } = await openFixture([{ from: 'n1', to: 'n2' }]);
-    const before = positionOf('Rounded rectangle: Client');
-
-    await arrangeDiagram(user);
-    expect(positionOf('Rounded rectangle: Client')).not.toEqual(before);
-
-    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
-
-    expect(positionOf('Rounded rectangle: Client')).toEqual(before);
-  });
 
   it('bows a reciprocal pair into two separate curves', async () => {
     await openFixture([
@@ -3289,26 +3268,6 @@ describe('diagram routing and graph-aware arrange', () => {
     const [target, drawn] = arrow.querySelectorAll('path');
     expect(target?.getAttribute('d')).toBe(drawn?.getAttribute('d'));
     expect(target).toHaveAttribute('stroke', 'transparent');
-  });
-
-  it('proposes positions only: arrange never rewrites the arrows', async () => {
-    const { user, send } = await openFixture([
-      { from: 'n1', to: 'n2' },
-      { from: 'n2', to: 'n3' },
-    ]);
-
-    await arrangeDiagram(user);
-    await user.click(screen.getByRole('button', { name: 'Propose' }));
-
-    const input = send.mock.calls[0]?.[0];
-    expect(proposalCreateSchema.safeParse(input).success).toBe(true);
-    const artifact = input?.artifactJson;
-    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
-    expect(artifact.edges).toEqual([
-      { from: 'n1', to: 'n2' },
-      { from: 'n2', to: 'n3' },
-    ]);
-    expect(artifact.nodes.map((entry) => entry.id)).toEqual(['n1', 'n2', 'n3']);
   });
 });
 
@@ -3499,12 +3458,16 @@ describe('studio canvas', () => {
     const { user, canvas } = await openDiagram();
 
     await clickInRailMenu(user, 'Templates', 'Retro');
-    expect(screen.getByRole('button', { name: 'Dotted rectangle: Went well' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Text: Went well' })).toBeInTheDocument();
+    // Its table of actions came with it.
+    expect(screen.getByRole('button', { name: 'Cell row 1 column 1' })).toBeInTheDocument();
     expect(canvas).toHaveFocus();
 
     await user.keyboard('{Control>}z{/Control}');
 
-    expect(screen.queryByRole('button', { name: 'Dotted rectangle: Went well' })).toBeNull();
+    // All of it goes in the one step, shapes and table alike.
+    expect(screen.queryByRole('button', { name: 'Text: Went well' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cell row 1 column 1' })).toBeNull();
   });
 
   it('adds a starter frame to the canvas rather than replacing what is there', async () => {
@@ -4022,11 +3985,10 @@ describe('studio tables', () => {
     return artifact;
   }
 
-  /** Pick a size, drop a table on the canvas, and land back on the select tool. */
   /**
    * Choosing a size in the picker places the table at once — unselected, so the
-   * first thing you can do is move it. Working *in* it takes a double press,
-   * which most of these tests want, so the helper does it.
+   * first thing you can do is move it. Most of these tests want to work *in*
+   * it, so the helper selects it and goes inside, with its first cell in hand.
    */
   async function placeTable(
     user: ReturnType<typeof userEvent.setup>,
@@ -4049,18 +4011,27 @@ describe('studio tables', () => {
       clientX: 480,
       clientY: 300,
     });
-    doublePress(
-      screen.getByRole('button', { name: 'Cell row 1 column 1' }),
-      canvas,
-      pointerId,
-      400,
-      290,
-    );
+    enterTable(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, pointerId);
   }
 
-  it('offers its row and column controls without being opened first', async () => {
-    // They live on the table, so they are there from the moment it is: no
-    // selecting it, no going inside it, no menu that could come up empty.
+  /** Which cells are drawn as selected, as "row,column" pairs. */
+  function selectedCells(): string[] {
+    const cells = screen.getAllByRole('button', { name: /^Cell row \d+ column \d+$/ });
+    const washes = screen.queryAllByTestId('table-cell-selected');
+    return washes.map((wash) => {
+      const hit = cells.find(
+        (cell) =>
+          cell.getAttribute('x') === wash.getAttribute('x') &&
+          cell.getAttribute('y') === wash.getAttribute('y'),
+      )!;
+      const [, row, col] = /Cell row (\d+) column (\d+)/.exec(hit.getAttribute('aria-label')!)!;
+      return `${row},${col}`;
+    });
+  }
+
+  it('offers its row and column controls once it is selected, and not before', async () => {
+    // They used to wait invisibly round every table, so a stray press in the
+    // margin beside any table added or took away a row.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -4071,9 +4042,22 @@ describe('studio tables', () => {
     await user.click(screen.getByRole('button', { name: '3 by 3 table' }));
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 920, clientX: 480, clientY: 300 });
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 920, clientX: 480, clientY: 300 });
+    expect(screen.queryByRole('button', { name: 'Add a row' })).toBeNull();
 
+    // Selected, not gone into: the grips and the add buttons are both there.
+    pressNode(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, {
+      pointerId: 921,
+      time: -10_000,
+    });
     expect(screen.getByRole('button', { name: 'Add a row' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add a column' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resize column 1' })).toBeInTheDocument();
+    // Its frame sits on its edge like every other element's, not blown out to
+    // make room for the add buttons, which sit outside it.
+    // The table spans x=288 to 672; the frame sits 5 pixels outside it.
+    const frame = screen.getByTestId('selection-frame');
+    expect(frame).toHaveAttribute('x', '283');
+    expect(frame).toHaveAttribute('width', String(384 + 10));
   });
 
   it('places a table of the chosen size and proposes its grid', async () => {
@@ -4134,7 +4118,7 @@ describe('studio tables', () => {
     expect(table.cells[0]!.text).toBe('Question');
   });
 
-  it('opens a cell for editing on Enter and commits it on Enter again', async () => {
+  it('opens a cell for editing on Enter and finishes it with Escape', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -4146,7 +4130,7 @@ describe('studio tables', () => {
     await user.keyboard('{Enter}');
 
     const input = screen.getByRole('textbox', { name: 'Cell row 2 column 2' });
-    await user.type(input, 'Middle{Enter}');
+    await user.type(input, 'Middle{Escape}');
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
@@ -4182,11 +4166,9 @@ describe('studio tables', () => {
     await placeTable(user, canvas, 965, '2 by 2 table');
     await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
     await user.keyboard('Old');
-    await user.keyboard('{Enter}');
+    await user.keyboard('{Escape}');
 
-    // Enter commits and moves down. Steer back with the keyboard rather than a
-    // click, which would pair with the earlier press as a double press.
-    await user.keyboard('{ArrowUp}');
+    // Escape finishes on the same cell; Enter opens it again.
     await user.keyboard('{Enter}');
     await user.keyboard('New');
 
@@ -4194,7 +4176,7 @@ describe('studio tables', () => {
     expect(screen.getByRole('textbox', { name: 'Cell row 1 column 1' })).toHaveValue('New');
   });
 
-  it('abandons an edit on Escape and keeps what was there', async () => {
+  it('keeps what was typed when Escape finishes the edit', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -4205,18 +4187,19 @@ describe('studio tables', () => {
     await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
     await user.keyboard('{Enter}');
     await user.type(screen.getByRole('textbox', { name: 'Cell row 1 column 1' }), 'draft{Escape}');
+    expect(screen.queryByRole('textbox', { name: 'Cell row 1 column 1' })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
 
+    // FigJam's rule: no key throws typing away. Undo is the way back.
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
-    expect(table.cells[0]!.text).toBeUndefined();
+    expect(table.cells[0]!.text).toBe('draft');
   });
 
-  it('adds and removes rows on the table itself', async () => {
-    // Rows are added where the pointer says, not from a menu: hovering a
-    // boundary offers the "+" that belongs to it, and the body of a row offers
-    // the "−" that takes that row away.
+  it('adds rows on the table itself and takes them away from the bar', async () => {
+    // Adding is done where the pointer says, on the boundary it belongs to.
+    // Taking away is done to the rows in hand, from the bar or with Delete.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -4225,15 +4208,15 @@ describe('studio tables', () => {
 
     await placeTable(user, canvas, 425);
 
-    await user.hover(screen.getByLabelText('Add a row'));
-    await user.click(screen.getByRole('button', { name: 'Add a row' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add a row' }), { button: 0 });
     expect(screen.getByRole('button', { name: 'Cell row 4 column 1' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Delete row 1' }));
+    await openBarPanel(user, 'Rows');
+    await user.click(screen.getByRole('button', { name: 'Delete row' }));
     expect(screen.queryByRole('button', { name: 'Cell row 4 column 1' })).toBeNull();
   });
 
-  it('scales a table from its frame, clear of where rows and columns are added', async () => {
+  it('pulls only the outer column from the table edge, and scales from a corner', async () => {
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
@@ -4241,20 +4224,47 @@ describe('studio tables', () => {
     const { user, canvas } = await openDiagram();
 
     await placeTable(user, canvas, 431);
-    // Both are there at once: the frame's grips sit beyond the add strip.
+    // Both are there at once: the add buttons sit outside the frame's grips.
     expect(screen.getByRole('button', { name: 'Add a column' })).toBeInTheDocument();
-    const grip = screen.getByTestId('resize-handle-e');
 
-    // Half as wide again, from the right edge alone: every column grows, no row does.
-    fireEvent.pointerDown(grip, { button: 0, pointerId: 432, clientX: 700, clientY: 300 });
-    fireEvent.pointerMove(canvas, { pointerId: 432, clientX: 844, clientY: 300 });
-    fireEvent.pointerUp(canvas, { pointerId: 432, clientX: 844, clientY: 300 });
+    // A 3x3 table of 128-wide columns lands centred on the sheet, from x=288 to
+    // x=672. Pulled 144 to the right from its edge, only the last column grows.
+    fireEvent.pointerDown(screen.getByTestId('resize-handle-e'), {
+      button: 0,
+      pointerId: 432,
+      clientX: 677,
+      clientY: 300,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 432, clientX: 821, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 432, clientX: 821, clientY: 300 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     const artifact = propose.mock.calls[0]?.[0]?.artifactJson;
     if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
-    expect(artifact.tables?.[0]?.colWidths).toEqual([144, 144, 144]);
+    expect(artifact.tables?.[0]?.colWidths).toEqual([128, 128, 272]);
     expect(artifact.tables?.[0]?.rowHeights).toEqual([32, 32, 32]);
+  });
+
+  it('scales every column and row by one factor from a corner', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 434);
+    // Half as wide again: the right edge goes from 672 to 864.
+    const corner = screen.getByTestId('resize-handle-se');
+    fireEvent.pointerDown(corner, { button: 0, pointerId: 433, clientX: 677, clientY: 357 });
+    fireEvent.pointerMove(canvas, { pointerId: 433, clientX: 869, clientY: 357 });
+    fireEvent.pointerUp(canvas, { pointerId: 433, clientX: 869, clientY: 357 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = propose.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.tables?.[0]?.colWidths).toEqual([192, 192, 192]);
+    const rows = artifact.tables?.[0]?.rowHeights ?? [];
+    expect(new Set(rows).size).toBe(1);
   });
 
   it('inserts a row where the pointer is rather than at the end', async () => {
@@ -4269,9 +4279,11 @@ describe('studio tables', () => {
     await placeTable(user, canvas, 427);
     await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
     await user.keyboard('top');
-    await user.keyboard('{Enter}');
+    await user.keyboard('{Escape}');
 
-    await user.click(screen.getByRole('button', { name: 'Insert a row above row 1' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Insert a row above row 1' }), {
+      button: 0,
+    });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
@@ -4291,7 +4303,10 @@ describe('studio tables', () => {
     const { user, canvas } = await openDiagram();
 
     await placeTable(user, canvas, 428, '1 by 1 table');
-    expect(screen.queryByLabelText('Delete row 1')).toBeNull();
+    await openBarPanel(user, 'Rows');
+    expect(screen.getByRole('button', { name: 'Delete row' })).toBeDisabled();
+    await openBarPanel(user, 'Columns');
+    expect(screen.getByRole('button', { name: 'Delete column' })).toBeDisabled();
   });
 
   it('adds a column and keeps every row the same length', async () => {
@@ -4302,8 +4317,7 @@ describe('studio tables', () => {
     const { user, canvas } = await openDiagram();
 
     await placeTable(user, canvas, 430);
-    await user.hover(screen.getByLabelText('Add a column'));
-    await user.click(screen.getByRole('button', { name: 'Add a column' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add a column' }), { button: 0 });
 
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
@@ -4338,36 +4352,747 @@ describe('studio tables', () => {
     // A 2x2 block of a 3-wide grid: indices 0, 1, 3, 4.
     expect(table.cells[0]!.fill).toBe('blue');
     expect(table.cells[4]!.fill).toBe('blue');
-    expect(table.cells[2]!.fill).toBeUndefined();
+    expect(table.cells[5]!.fill).toBeUndefined();
   });
 
-  it('resizes a column by dragging its boundary, in one undo step', async () => {
+  it('resizes a column by dragging its boundary, once the table is selected', async () => {
+    // No going inside first: a selected table's lines can be pulled, the way
+    // FigJam's can, and the drag is one undo step.
     const propose = vi.fn(async (input: ProposalCreateInput) => {
       void input;
     });
     render(<Harness propose={propose} />);
     const { user, canvas } = await openDiagram();
 
-    await placeTable(user, canvas, 440);
-    await user.click(screen.getByRole('button', { name: 'Cell row 1 column 1' }));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '3 by 3 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 441, clientX: 480, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 441, clientX: 480, clientY: 300 });
+    pressNode(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, {
+      pointerId: 442,
+      time: -10_000,
+    });
 
-    // A 3x3 table of 96-wide columns lands centred on the 960x600 sheet, so it
-    // starts at x=336 and the first column's boundary sits at x=432.
+    // A 3x3 table of 128-wide columns lands centred on the 960x600 sheet, so it
+    // starts at x=288 and the first column's boundary sits at x=416.
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize column 1' }), {
       button: 0,
       pointerId: 445,
-      clientX: 432,
+      clientX: 416,
       clientY: 300,
     });
-    fireEvent.pointerMove(canvas, { pointerId: 445, clientX: 520, clientY: 300 });
-    fireEvent.pointerUp(canvas, { pointerId: 445, clientX: 520, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 445, clientX: 519, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 445, clientX: 519, clientY: 300 });
 
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
 
     const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
-    expect(table.colWidths[0]).toBeGreaterThan(96);
-    expect(table.colWidths[1]).toBe(96);
+    // The line landed on the grid: 519 snaps to 520, 232 from the table's left.
+    expect(table.colWidths[0]).toBe(232);
+    expect(table.colWidths[1]).toBe(128);
+  });
+
+  it('goes inside on a second click, and sweeps a block of cells by dragging', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '3 by 3 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 461, clientX: 480, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 461, clientX: 480, clientY: 300 });
+
+    const cell = (row: number, col: number) =>
+      screen.getByRole('button', { name: `Cell row ${row} column ${col}` });
+    // First click: the whole table. Second: inside it, at the cell clicked.
+    pressNode(cell(2, 2), canvas, { pointerId: 462, time: -20_000 });
+    expect(selectedCells()).toEqual([]);
+    pressNode(cell(2, 2), canvas, { pointerId: 463, time: -10_000 });
+    expect(selectedCells()).toEqual(['2,2']);
+
+    // Inside, a drag picks a block rather than moving the table.
+    fireEvent.pointerDown(cell(1, 1), { button: 0, pointerId: 464, clientX: 300, clientY: 270 });
+    fireEvent.pointerMove(canvas, { pointerId: 464, clientX: 450, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 464, clientX: 450, clientY: 300 });
+    expect(selectedCells().sort()).toEqual(['1,1', '1,2', '2,1', '2,2']);
+    // And nothing moved: the table's frame is still where it was, at x=288.
+    expect(screen.getByTestId('selection-frame')).toHaveAttribute('x', '283');
+    void user;
+  });
+
+  it('opens a cell for typing on a double press, from anywhere', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await user.click(screen.getByRole('button', { name: '2 by 2 table' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 471, clientX: 480, clientY: 300 });
+    fireEvent.pointerUp(canvas, { button: 0, pointerId: 471, clientX: 480, clientY: 300 });
+
+    doublePressCell(screen.getByRole('button', { name: 'Cell row 2 column 2' }), canvas, 472);
+    expect(screen.getByRole('textbox', { name: 'Cell row 2 column 2' })).toHaveFocus();
+  });
+
+  it('types over a cell in one undo step', async () => {
+    // Typing wrote its first character straight into the cell, then the rest
+    // when the edit was committed: two undo steps for one edit.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 480, '2 by 2 table');
+    await user.keyboard('Old{Escape}');
+    await user.keyboard('New{Escape}');
+    expect(screen.queryByRole('textbox', { name: 'Cell row 1 column 1' })).toBeNull();
+
+    // One undo takes the whole of "New" away, back to "Old".
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    expect(diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[0]!.text).toBe('Old');
+  });
+
+  it('grows a row for a second line rather than shrinking it', async () => {
+    // A committed cell passed the *change* in height to a resize that wants
+    // the height itself, so two lines shrank the row and clipped both.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 485, '2 by 2 table');
+    await user.keyboard('{Enter}');
+    const input = screen.getByRole('textbox', { name: 'Cell row 1 column 1' });
+    await user.type(input, 'first{Enter}second{Escape}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells[0]!.text).toBe('first\nsecond');
+    expect(table.rowHeights[0]).toBeGreaterThan(32);
+    expect(table.rowHeights[1]).toBe(32);
+  });
+
+  it('makes room when the text is made larger', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 490, '2 by 2 table');
+    await user.keyboard('Heading{Escape}');
+    await openBarPanel(user, 'Format text');
+    await user.click(screen.getByRole('button', { name: 'xlarge text' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    // 30px text needs more than an empty row's 32.
+    expect(table.rowHeights[0]).toBeGreaterThan(32);
+  });
+
+  it('keeps the selection on the same cells when a row goes in above it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 495);
+    await user.keyboard('{ArrowDown}');
+    expect(selectedCells()).toEqual(['2,1']);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Insert a row above row 1' }), {
+      button: 0,
+    });
+    expect(selectedCells()).toEqual(['3,1']);
+  });
+
+  it('shows what a cell is drawn with: left-aligned, and a tinted heading not bold', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 498);
+    await openBarPanel(user, 'Format text');
+    expect(screen.getByRole('button', { name: 'Align left' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Bold cell text' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('takes a whole row from its handle, and offers to copy it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 600);
+    const handle = screen.getByRole('button', { name: 'Row 2' });
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 601, clientX: 264, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 601, clientX: 264, clientY: 300 });
+
+    expect(selectedCells().sort()).toEqual(['2,1', '2,2', '2,3']);
+    expect(screen.getByRole('button', { name: 'Row 2' })).toHaveAttribute('aria-pressed', 'true');
+    // Rows picked whole are worked on as rows: the columns menu steps aside.
+    expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull();
+    await openBarPanel(user, 'Rows');
+    await user.click(screen.getByRole('button', { name: 'Duplicate row' }));
+    // The copy is what is held now, straight below the original.
+    expect(selectedCells().sort()).toEqual(['3,1', '3,2', '3,3']);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    expect(diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.rowHeights).toHaveLength(4);
+  });
+
+  it('carries a row to where it is dropped, in one undo step', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 610);
+    await user.keyboard('top{Escape}');
+
+    // The table sits from y=252, three rows of 32: the first row's middle is at
+    // 268 and the table's bottom edge at 348.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 1' }), {
+      button: 0,
+      pointerId: 611,
+      clientX: 264,
+      clientY: 268,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 611, clientX: 264, clientY: 344 });
+    // Where it will land is shown before it is let go.
+    expect(screen.getByTestId('table-drop')).toBeInTheDocument();
+    fireEvent.pointerUp(canvas, { pointerId: 611, clientX: 264, clientY: 344 });
+    expect(screen.queryByTestId('table-drop')).toBeNull();
+    expect(selectedCells().sort()).toEqual(['3,1', '3,2', '3,3']);
+
+    await user.click(screen.getByRole('button', { name: 'Undo diagram change' }));
+    await user.click(screen.getByRole('button', { name: 'Redo diagram change' }));
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells[0]!.text).toBeUndefined();
+    expect(table.cells[6]!.text).toBe('top');
+  });
+
+  it('takes whole rows away with Delete, and empties a block of cells', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 620);
+    await user.keyboard('keep{Escape}');
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 3' }), {
+      button: 0,
+      pointerId: 621,
+      clientX: 264,
+      clientY: 332,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 621, clientX: 264, clientY: 332 });
+    fireEvent.keyDown(canvas, { key: 'Delete' });
+    expect(screen.queryByRole('button', { name: 'Cell row 3 column 1' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.rowHeights).toHaveLength(2);
+    expect(table.cells[0]!.text).toBe('keep');
+  });
+
+  it('fits a column to its text on a double press of its line', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 630);
+    await user.keyboard('{ArrowDown}');
+    await user.keyboard('a heading long enough to wrap{Escape}');
+    doublePress(screen.getByRole('button', { name: 'Resize column 1' }), canvas, 631, 416, 300);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.colWidths[0]).toBeGreaterThan(128);
+    // Nothing wraps any more, so the row that grew for it is back to one line.
+    expect(table.rowHeights[1]).toBe(32);
+    expect(table.colWidths[1]).toBe(128);
+  });
+
+  it('pastes a block copied from a spreadsheet, growing the table to hold it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 640, '2 by 2 table');
+    fireEvent.paste(canvas, {
+      clipboardData: {
+        getData: () => 'Idea\tOwner\tDue\r\nSearch\tAna\tMay\r\nMaps\tBo\tJune\r\n',
+      },
+    });
+    // What was pasted is what is held.
+    expect(selectedCells()).toHaveLength(9);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.colWidths).toHaveLength(3);
+    expect(table.rowHeights).toHaveLength(3);
+    expect(table.cells.map((cell) => cell.text)).toEqual([
+      'Idea',
+      'Owner',
+      'Due',
+      'Search',
+      'Ana',
+      'May',
+      'Maps',
+      'Bo',
+      'June',
+    ]);
+  });
+
+  it('copies the cells in hand out as spreadsheet text', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 650, '2 by 2 table');
+    await user.keyboard('a{Tab}');
+    await user.keyboard('b{Escape}');
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 1' }), {
+      button: 0,
+      pointerId: 651,
+      clientX: 264,
+      clientY: 268,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 651, clientX: 264, clientY: 268 });
+
+    const setData = vi.fn();
+    fireEvent.copy(canvas, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith('text/plain', 'a\tb');
+  });
+
+  it('breaks a line on Enter and grows the row as the lines are typed', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 700);
+    await user.keyboard('{Enter}');
+    const input = screen.getByRole('textbox', { name: 'Cell row 1 column 1' });
+    await user.type(input, 'one{Enter}two{Enter}three');
+    // Still typing, and on three lines.
+    expect(input).toHaveValue('one\ntwo\nthree');
+    // The row has already made room, so the field is not running over the
+    // rows below it — before anything has been committed.
+    const firstFill = document.querySelector('rect[data-table-cell]');
+    expect(Number(firstFill?.getAttribute('height'))).toBeGreaterThan(32);
+
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells[0]!.text).toBe('one\ntwo\nthree');
+    expect(table.rowHeights[0]).toBe(Number(firstFill?.getAttribute('height')));
+  });
+
+  it('keeps a row opened up by hand as tall as it was after an edit', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 710);
+    // The first row's bottom line is at y=284; pulled down by 96.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize row 1' }), {
+      button: 0,
+      pointerId: 711,
+      clientX: 400,
+      clientY: 284,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 711, clientX: 400, clientY: 380 });
+    fireEvent.pointerUp(canvas, { pointerId: 711, clientX: 400, clientY: 380 });
+
+    await user.keyboard('{Enter}');
+    await user.keyboard('short{Escape}');
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.cells[0]!.text).toBe('short');
+    expect(table.rowHeights[0]).toBeGreaterThan(100);
+  });
+
+  it('wakes only the add button on the nearer edge of the row under the pointer', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 720);
+    const above = () => screen.getByRole('button', { name: 'Insert a row above row 2' });
+    const below = () => screen.getByRole('button', { name: 'Insert a row above row 3' });
+    // Row 2 runs from y=284 to 316: its upper half, then its lower half.
+    fireEvent.pointerMove(canvas, { clientX: 400, clientY: 290 });
+    expect(above()).toHaveAttribute('data-hot', 'true');
+    expect(below()).not.toHaveAttribute('data-hot');
+    fireEvent.pointerMove(canvas, { clientX: 400, clientY: 310 });
+    expect(above()).not.toHaveAttribute('data-hot');
+    expect(below()).toHaveAttribute('data-hot', 'true');
+    // And each carries the line that shows where its row would go, across the
+    // whole table.
+    const line = above().querySelector('[data-testid="table-insert-line"]')!;
+    expect(Number(line.getAttribute('x2')) - Number(line.getAttribute('x1'))).toBe(384);
+  });
+
+  it('lifts a carried row off the table and opens the gap it will drop into', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 730);
+    await user.keyboard('top{Escape}');
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 1' }), {
+      button: 0,
+      pointerId: 731,
+      clientX: 274,
+      clientY: 268,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 731, clientX: 274, clientY: 344 });
+
+    // The row follows the pointer, and the table has already reflowed: the gap
+    // is the third row now, from y=316.
+    expect(screen.getByTestId('table-drag-ghost')).toBeInTheDocument();
+    expect(screen.getByTestId('table-drop')).toHaveAttribute('y', '316');
+
+    fireEvent.pointerUp(canvas, { pointerId: 731, clientX: 274, clientY: 344 });
+    expect(screen.queryByTestId('table-drag-ghost')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    // The heading tint went with its row, rather than staying at the top.
+    expect(table.cells[6]).toMatchObject({ text: 'top', fill: 'neutral' });
+    expect(table.cells[0]!.fill).toBeUndefined();
+  });
+
+  it('puts carried rows back where they were on Escape', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 740);
+    await user.keyboard('top{Escape}');
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 1' }), {
+      button: 0,
+      pointerId: 741,
+      clientX: 274,
+      clientY: 268,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 741, clientX: 274, clientY: 344 });
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(screen.queryByTestId('table-drop')).toBeNull();
+    fireEvent.pointerUp(canvas, { pointerId: 741, clientX: 274, clientY: 344 });
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    expect(diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[0]!.text).toBe('top');
+  });
+
+  it('outlines the block of cells being swept', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 750);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Cell row 1 column 1' }), {
+      button: 0,
+      pointerId: 751,
+      clientX: 300,
+      clientY: 270,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 751, clientX: 450, clientY: 300 });
+    // Two columns by two rows, while the drag is still going.
+    const outline = screen.getByTestId('table-range-outline');
+    expect(outline).toHaveAttribute('width', '256');
+    expect(outline).toHaveAttribute('height', '64');
+    fireEvent.pointerUp(canvas, { pointerId: 751, clientX: 450, clientY: 300 });
+  });
+
+  it('makes room for a new line the moment Enter is pressed', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 760);
+    await user.keyboard('{Enter}');
+    const input = screen.getByRole('textbox', { name: 'Cell row 1 column 1' });
+    const firstRow = () =>
+      Number(document.querySelector('rect[data-table-cell]')?.getAttribute('height'));
+    await user.type(input, 'one');
+    expect(firstRow()).toBe(32);
+    // Nothing typed on the new line yet, and the row has already grown for it.
+    await user.type(input, '{Enter}');
+    expect(firstRow()).toBeGreaterThan(32);
+
+    // A blank last line is not kept when the edit lands.
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    expect(diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[0]!.text).toBe('one');
+  });
+
+  it('keeps the add buttons in one lane close to the table until rows get thin', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 770);
+    const addRow = () => screen.getByRole('button', { name: 'Add a row' });
+    const rowHandle = () => screen.getByRole('button', { name: 'Row 1' });
+    const laneOf = (element: Element) =>
+      Number(/translate\((-?[\d.]+)/.exec(element.getAttribute('transform') ?? '')?.[1]);
+    // Rows 32 tall have room for both: the button shares the handle's lane.
+    expect(laneOf(addRow())).toBe(-24);
+    expect(rowHandle().querySelector('rect')!.getAttribute('x')).toBe(String(-24 - 5));
+
+    // The first row pulled down to its thinnest: that side splits into two
+    // lanes, handles close in and buttons further out. Columns keep sharing.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize row 1' }), {
+      button: 0,
+      pointerId: 771,
+      clientX: 400,
+      clientY: 284,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 771, clientX: 400, clientY: 250 });
+    fireEvent.pointerUp(canvas, { pointerId: 771, clientX: 400, clientY: 250 });
+    expect(laneOf(addRow())).toBe(-34);
+    expect(rowHandle().querySelector('rect')!.getAttribute('x')).toBe(String(-14 - 5));
+    const addColumn = screen.getByRole('button', { name: 'Add a column' });
+    expect(addColumn.getAttribute('transform')).toMatch(/ -24\)$/);
+  });
+
+  it('merges a block of cells into one, and splits it again', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 780);
+    await user.keyboard('keep{Escape}');
+    // Sweep the top-left two by two.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Cell row 1 column 1' }), {
+      button: 0,
+      pointerId: 781,
+      clientX: 300,
+      clientY: 270,
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 781, clientX: 450, clientY: 300 });
+    fireEvent.pointerUp(canvas, { pointerId: 781, clientX: 450, clientY: 300 });
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+
+    // One cell where four were, holding the top-left's text.
+    const merged = screen.getByRole('button', { name: 'Merged cell rows 1–2, columns 1–2' });
+    expect(merged).toHaveAttribute('width', '256');
+    expect(screen.queryByRole('button', { name: 'Cell row 2 column 2' })).toBeNull();
+
+    // Arrows step off it from its far side.
+    await user.keyboard('{ArrowDown}');
+    await user.keyboard('{ArrowUp}');
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByTestId('table-range-outline')).toHaveAttribute('x', String(288 + 256));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const table = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!;
+    expect(table.merges).toEqual([{ row: 0, col: 0, rowSpan: 2, colSpan: 2 }]);
+    expect(table.cells[0]!.text).toBe('keep');
+  });
+
+  it('splits a merged cell held on its own', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 790);
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    await user.click(screen.getByRole('button', { name: 'Unmerge cells' }));
+    expect(screen.getByRole('button', { name: 'Cell row 1 column 2' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    expect(diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]).not.toHaveProperty('merges');
+  });
+
+  it('opens a merged cell for typing across all of it', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 800);
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    await user.keyboard('{Enter}');
+    const field = screen.getByRole('textbox', { name: 'Cell row 1 column 1' });
+    // The field is as wide as the merged cell, not its first column.
+    let frame: Element | null = field;
+    while (frame && frame.tagName.toLowerCase() !== 'foreignobject') frame = frame.parentElement;
+    expect(Number(frame?.getAttribute('width'))).toBe(256 - 2);
+  });
+
+  it('will not carry a row out of the middle of a merged cell', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 810);
+    // Merge down the first column, rows 1 and 2.
+    await user.keyboard('{Shift>}{ArrowDown}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    // Row 2's handle takes the merged cell's rows whole, rows 1 and 2.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 2' }), {
+      button: 0,
+      pointerId: 811,
+      clientX: 274,
+      clientY: 300,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 811, clientX: 274, clientY: 300 });
+    expect(screen.getByRole('button', { name: 'Row 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Row 2' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('reads the weight and size of a merged cell from the cell itself, so bold turns off', async () => {
+    // The controls read the far corner of the range, a covered cell that is
+    // always empty: Bold never lit, so every press sent "bold" and a bold
+    // merged cell could not be made plain again.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 820);
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    await openBarPanel(user, 'Format text');
+    await user.click(screen.getByRole('button', { name: 'large text' }));
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+    expect(screen.getByRole('button', { name: 'Bold cell text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'large text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Bold cell text' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const cells = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells;
+    expect(cells[0]).toMatchObject({ fontSizePreset: 'large' });
+    expect(cells[0]!.bold).toBeUndefined();
+    // Nothing was written to the cell the merge covers.
+    expect(cells[1]).toEqual({});
+  });
+
+  it('pastes one value onto a merged cell once, into the cell that shows', async () => {
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 830);
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    fireEvent.paste(canvas, { clipboardData: { getData: () => 'Pasted' } });
+    // Split again: the cell that was covered is still empty.
+    await user.click(screen.getByRole('button', { name: 'Unmerge cells' }));
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const cells = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells;
+    expect(cells[0]!.text).toBe('Pasted');
+    expect(cells[1]!.text).toBeUndefined();
+  });
+
+  it('types into the merged cell when a whole row ends inside one', async () => {
+    // A row picked by its handle ends on its last cell, which a merge covers
+    // here: typing went into a cell that is never drawn, and was lost.
+    const propose = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    render(<Harness propose={propose} />);
+    const { user, canvas } = await openDiagram();
+
+    await placeTable(user, canvas, 840);
+    await user.keyboard('{ArrowRight}');
+    await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    await user.click(screen.getByRole('button', { name: 'Merge cells' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Row 1' }), {
+      button: 0,
+      pointerId: 841,
+      clientX: 274,
+      clientY: 268,
+    });
+    fireEvent.pointerUp(canvas, { pointerId: 841, clientX: 274, clientY: 268 });
+
+    await user.keyboard('z');
+    expect(screen.getByRole('textbox', { name: 'Cell row 1 column 2' })).toHaveValue('z');
   });
 
   it('undoes a whole table in one step', async () => {
@@ -4654,7 +5379,9 @@ describe('studio table cell text', () => {
     // Picking a size picks the table up; this press puts it down.
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 7103, clientX: 480, clientY: 300 });
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 7103, clientX: 480, clientY: 300 });
-    doublePress(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 770, 400, 290);
+    enterTable(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 770);
+    // A body cell: the heading row is bold already.
+    await user.keyboard('{ArrowDown}');
 
     await openBarPanel(user, 'Format text');
     await user.click(screen.getByRole('button', { name: 'large text' }));
@@ -4664,7 +5391,7 @@ describe('studio table cell text', () => {
     await user.click(screen.getByRole('button', { name: 'Propose' }));
     await proposedAndClosed();
 
-    const cell = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[0]!;
+    const cell = diagramArtifactOf(propose.mock.calls[0]![0]).tables![0]!.cells[2]!;
     expect(cell.fontSizePreset).toBe('large');
     expect(cell.bold).toBe(true);
     expect(cell.color).toBe('rose');
@@ -4967,10 +5694,10 @@ describe('studio clipboard and snapping', () => {
     // Picking a size picks the table up; this press puts it down.
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 7106, clientX: 480, clientY: 300 });
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 7106, clientX: 480, clientY: 300 });
+    // Two quick presses open the cell for typing.
     doublePress(screen.getByRole('button', { name: 'Cell row 1 column 1' }), canvas, 705, 400, 290);
-    await user.keyboard('{Enter}');
     // Enter commits; Escape would abandon it, which is a different test.
-    await user.type(screen.getByRole('textbox', { name: 'Cell row 1 column 1' }), 'Idea{Enter}');
+    await user.type(screen.getByRole('textbox', { name: 'Cell row 1 column 1' }), 'Idea{Escape}');
 
     // Leave cell mode, then take the table whole.
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 710, clientX: 20, clientY: 20 });
@@ -5581,7 +6308,7 @@ describe('studio sub-toolbars in the editor', () => {
       'aria-expanded',
       'false',
     );
-    expect(screen.getByRole('button', { name: 'Dotted rectangle: Went well' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Text: Went well' })).toBeInTheDocument();
   });
 
   it('closes the table picker once a table has been placed', async () => {
@@ -5815,6 +6542,31 @@ describe('the text tool', () => {
     expect(artifact.nodes[0]).toMatchObject({ fontSizePreset: 'medium', width: 144, height: 36 });
   });
 
+  it('places a text box at its default width when the press only wobbles', async () => {
+    // Up and down is not a width, and a few pixels sideways is a shaky click:
+    // neither should leave a narrow box behind.
+    const send = vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+    const user = userEvent.setup();
+    render(<Harness propose={send} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 190, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 190, clientX: 305, clientY: 340 });
+    fireEvent.pointerUp(canvas, { pointerId: 190, clientX: 305, clientY: 340 });
+
+    const input = await screen.findByLabelText('Edit text label');
+    await user.type(input, 'Shaky');
+    fireEvent.blur(input);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.nodes[0]).toMatchObject({ width: 144 });
+  });
+
   it('drags a text box out to the width it was dragged, one line tall', async () => {
     const send = vi.fn(async (input: ProposalCreateInput) => {
       void input;
@@ -5946,9 +6698,9 @@ describe('tool shortcuts on the canvas', () => {
     expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('leaves a half-drawn shape alone', async () => {
-    // Mid-pen, P would abandon the anchors already placed. Enter and Escape are
-    // the way out of a shape, not the tool's own letter.
+  it('finishes a half-drawn path when another tool is picked by its letter', async () => {
+    // A letter is the keyboard's press on the rail, so it does what the rail
+    // does: the path in hand is kept, and the new tool is armed.
     const user = userEvent.setup();
     render(<Harness propose={propose()} />);
     const { canvas } = await openDiagram();
@@ -5956,9 +6708,28 @@ describe('tool shortcuts on the canvas', () => {
     await user.click(screen.getByRole('button', { name: 'Pen' }));
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 970, clientX: 200, clientY: 200 });
     fireEvent.pointerUp(canvas, { pointerId: 970, clientX: 200, clientY: 200 });
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 971, clientX: 320, clientY: 260 });
+    fireEvent.pointerUp(canvas, { pointerId: 971, clientX: 320, clientY: 260 });
 
     canvas.focus();
     await user.keyboard('v');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+  });
+
+  it('keeps drawing when the letter names the tool already in hand', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 975, clientX: 200, clientY: 200 });
+    fireEvent.pointerUp(canvas, { pointerId: 975, clientX: 200, clientY: 200 });
+
+    canvas.focus();
+    await user.keyboard('p');
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -6489,15 +7260,42 @@ describe('picking things up before putting them down', () => {
     const { canvas } = await openDiagram();
 
     await user.click(screen.getByRole('button', { name: 'Templates' }));
+    // Each offered as a picture of what it puts down.
+    expect(screen.getAllByTestId('template-thumbnail')).toHaveLength(8);
     await user.click(screen.getByRole('button', { name: 'Retro' }));
-    expect(screen.queryByRole('button', { name: 'Dotted rectangle: Went well' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Text: Went well' })).toBeNull();
 
     fireEvent.pointerMove(canvas, { pointerId: 44, clientX: 400, clientY: 300 });
-    expect(screen.getByTestId('placement-ghost')).toBeInTheDocument();
+    // The preview is the template itself, not an empty box.
+    const ghost = screen.getByTestId('placement-ghost');
+    expect(within(ghost).getByTestId('template-ghost')).toBeInTheDocument();
+    expect(within(ghost).getByText('Went well')).toBeInTheDocument();
 
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 44, clientX: 400, clientY: 300 });
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 44, clientX: 400, clientY: 300 });
-    expect(screen.getByRole('button', { name: 'Dotted rectangle: Went well' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Text: Went well' })).toBeInTheDocument();
+  });
+
+  it('puts a flowchart down with its arrows still joined to its shapes', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user } = await openDiagram();
+
+    await clickInRailMenu(user, 'Templates', 'Flowchart');
+    expect(screen.getAllByTestId('studio-arrow')).toHaveLength(4);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    // New ids, and every arrow bound to one of the shapes that came with it.
+    const ids = new Set(artifact.nodes.map((node) => node.id));
+    for (const arrow of artifact.arrows ?? []) {
+      expect(ids.has(arrow.from.elementId ?? '')).toBe(true);
+      expect(ids.has(arrow.to.elementId ?? '')).toBe(true);
+    }
+    expect(artifact.arrows?.map((arrow) => arrow.label).filter(Boolean)).toEqual(['Yes', 'No']);
+    expect(artifact.edges).toEqual([]);
   });
 
   it('greys out ink width and colour while the eraser is on', async () => {
@@ -6819,6 +7617,76 @@ describe('studio review fixes', () => {
     expect(artifact.arrows![0]!.label).toBe('keep me');
   });
 
+  it('gives an arrow its first label at Medium, typed at the size it lands at', async () => {
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user, canvas } = await openDiagram();
+
+    await drawLooseArrow(user, canvas, 955);
+    await user.click(screen.getByRole('button', { name: 'Leave this arrow pointing at nothing' }));
+    await selectLooseArrow(user, canvas, 956);
+
+    await user.click(screen.getByRole('button', { name: 'Add text' }));
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    // Not the legacy 11px it would jump from on commit.
+    expect(field).toHaveStyle({ fontSize: '16px' });
+    await user.type(field, 'calls');
+    fireEvent.blur(field);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows![0]).toMatchObject({ label: 'calls', fontSizePreset: 'medium' });
+  });
+
+  it('keeps a stored label at the size it was drawn at when it is edited', async () => {
+    // An arrow labelled before sizes existed has no preset. Giving it Medium on
+    // the next edit would suddenly enlarge a label someone laid out around.
+    const send = propose();
+    const parent: BoardItem = {
+      id: 'legacy-arrow',
+      questionId: 'question-1',
+      authorId: 'alice',
+      authorName: 'Alice',
+      type: 'diagram',
+      artifactJson: {
+        type: 'diagram',
+        nodes: [],
+        edges: [],
+        arrows: [{ id: 'a1', from: { x: 60, y: 300 }, to: { x: 300, y: 300 }, label: 'old' }],
+      },
+      x: 0,
+      y: 0,
+      z: 0,
+      createdAt: '2026-09-03T00:00:00.000Z',
+      editedAt: null,
+      extendsProposalId: null,
+      extendsFrom: null,
+      reactions: [],
+    };
+    const user = userEvent.setup();
+    render(
+      <Harness propose={send}>
+        <ExtendButton proposal={parent} />
+      </Harness>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Extend diagram fixture' }));
+    const canvas = screen.getByRole('application', { name: 'Studio canvas' });
+    mockSurface(canvas, { width: DIAGRAM_CANVAS_WIDTH, height: DIAGRAM_CANVAS_HEIGHT });
+
+    doublePress(screen.getByTestId('studio-arrow-hit'), canvas, 957, 120, 300);
+    const field = screen.getByRole('textbox', { name: 'Arrow label' });
+    await user.clear(field);
+    await user.type(field, 'renamed');
+    fireEvent.blur(field);
+
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+    expect(artifact.arrows![0]!.label).toBe('renamed');
+    expect(artifact.arrows![0]).not.toHaveProperty('fontSizePreset');
+  });
+
   it('grows the arrow label field as lines are added to it', async () => {
     // rows and the box around it were read off the stored label, so a line
     // added with Shift-Enter was clipped away until the edit was committed.
@@ -7077,5 +7945,234 @@ describe('studio robustness fixes', () => {
         artifact.nodes[0]!.height!,
       );
     });
+  });
+});
+
+describe('changing tools part-way through', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  function clickAt(canvas: Element, pointerId: number, x: number, y: number) {
+    fireEvent.pointerDown(canvas, { button: 0, pointerId, clientX: x, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId, clientX: x, clientY: y });
+  }
+
+  it('finishes the pen path when another tool is picked on the rail', async () => {
+    // The anchors stayed on the canvas, rubber band and all, under whichever
+    // tool came next — the pen was never put down.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 1200, 100, 100);
+    clickAt(canvas, 1201, 300, 100);
+    clickAt(canvas, 1202, 300, 300);
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Text' }));
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Text' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps the finished path selected when the tool picked is Select', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+    clickAt(canvas, 1210, 100, 100);
+    clickAt(canvas, 1211, 300, 200);
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+    // Selected, so it can be turned straight away.
+    expect(screen.getByTestId('rotate-zone-nw')).toBeInTheDocument();
+  });
+
+  it('drops a line with only its first end down', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Line');
+    clickAt(canvas, 1220, 200, 200);
+    expect(screen.getByTestId('path-draft')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.queryAllByTestId('studio-path')).toHaveLength(0);
+  });
+
+  it('drops an arrow with only its first end down', async () => {
+    // Placing it would put its far end wherever the pointer left the canvas,
+    // so it goes, exactly as Escape drops it.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Arrow');
+    clickAt(canvas, 1230, 200, 200);
+    fireEvent.pointerMove(canvas, { pointerId: 1231, clientX: 400, clientY: 300 });
+    expect(screen.getByTestId('arrow-draft')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Pen' }));
+
+    expect(screen.queryByTestId('arrow-draft')).toBeNull();
+    expect(screen.queryByTestId('studio-arrow')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pen' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('puts an idle tool down on Escape before anything leaves', async () => {
+    // With nothing in hand the key went straight through to the studio, which
+    // closed it when all that was meant was "stop drawing".
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    canvas.focus();
+    await user.keyboard('b');
+    expect(screen.getByRole('button', { name: 'Freehand' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // The studio leaves on an Escape nothing inside it took, so whether the
+    // editor took the key is what decides. Heard after the editor's own
+    // document listener, before the studio's on the window.
+    const taken: boolean[] = [];
+    const listen = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') taken.push(event.defaultPrevented);
+    };
+    document.addEventListener('keydown', listen);
+    try {
+      fireEvent.keyDown(canvas, { key: 'Escape' });
+      expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      // With Select armed and nothing selected, Escape is left for the studio.
+      fireEvent.keyDown(canvas, { key: 'Escape' });
+    } finally {
+      document.removeEventListener('keydown', listen);
+    }
+    expect(taken).toEqual([true, false]);
+  });
+
+  it.each([
+    ['the pen', 'p'],
+    ['the line', 'l'],
+    ['the eraser', 'e'],
+  ])('hands the canvas back from %s on Escape', async (_name, key) => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    canvas.focus();
+    await user.keyboard(key);
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'false');
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('finishes the pen path on an Escape pressed outside the form', async () => {
+    // The form hears Escape first while the pen is mid-path. With focus left
+    // outside it, the document is the only one listening, and switching to
+    // Select there stranded the anchors.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    // Armed by its letter: the rail button would open the pen's panel, and
+    // Escape closing that panel is a different, earlier step.
+    canvas.focus();
+    await user.keyboard('p');
+    clickAt(canvas, 1240, 100, 100);
+    clickAt(canvas, 1241, 260, 180);
+    canvas.blur();
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+
+    expect(screen.queryByTestId('path-draft')).toBeNull();
+    expect(screen.getAllByTestId('studio-path')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('turned elements against the edge of the sheet', () => {
+  function propose() {
+    return vi.fn(async (input: ProposalCreateInput) => {
+      void input;
+    });
+  }
+
+  it('lets a turned ellipse reach the edge with its outline, not its frame', async () => {
+    // Held by the box around its turned frame, a 45-degree ellipse stopped with
+    // a visible gap between its curve and the edge.
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await clickInRailMenu(user, 'Shapes', 'Add ellipse');
+    canvas.focus();
+    fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+    for (let press = 0; press < 60; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+    }
+
+    const node = screen.getByRole('button', { name: 'Ellipse: Unlabelled' });
+    const [x] = (node.getAttribute('transform') ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number);
+    // The stored box now hangs past the edge; the curve is what touches it.
+    // A 120 by 72 ellipse at 45 degrees reaches 49.5 from its centre, so its
+    // box can start up to 10.5 before the edge.
+    expect(x!).toBeLessThan(0);
+    expect(x!).toBeGreaterThanOrEqual(-11);
+  });
+
+  it('lets a turned diagonal stroke reach the edge with its line', async () => {
+    const user = userEvent.setup();
+    render(<Harness propose={propose()} />);
+    const { canvas } = await openDiagram();
+
+    await user.click(screen.getByRole('button', { name: 'Freehand' }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 1300, clientX: 300, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 1300, clientX: 400, clientY: 300 });
+    fireEvent.pointerMove(canvas, { pointerId: 1300, clientX: 500, clientY: 400 });
+    fireEvent.pointerUp(canvas, { pointerId: 1300, clientX: 500, clientY: 400 });
+
+    // Turned 45 degrees, the diagonal stands nearly upright: close to a line,
+    // in a box nearly three hundred wide once the frame is turned with it.
+    canvas.focus();
+    await user.keyboard('v');
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+    fireEvent.keyDown(canvas, { key: ']', shiftKey: true });
+    // More than the whole sheet's width, so only the edge can stop it.
+    for (let press = 0; press < 130; press += 1) {
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+    }
+
+    // Read off the canvas rather than a proposal, which is reframed on the way.
+    const numbers = (screen.getByTestId('ink-stroke').getAttribute('d') ?? '')
+      .match(/-?\d+(\.\d+)?/g)!
+      .map(Number);
+    const points: { x: number; y: number }[] = [];
+    for (let index = 0; index + 1 < numbers.length; index += 2) {
+      points.push({ x: numbers[index]!, y: numbers[index + 1]! });
+    }
+    // What it paints sits on the edge...
+    expect(inkPaintedBounds({ points, rotation: 45 })!.x).toBeCloseTo(0, 0);
+    // ...which the turned frame could never have let it reach: that frame now
+    // hangs well off the sheet.
+    expect(rotatedBounds(inkPaintedBounds({ points })!, 45).x).toBeLessThan(-20);
   });
 });

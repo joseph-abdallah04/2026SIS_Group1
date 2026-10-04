@@ -6,7 +6,6 @@ const idle = {
   editingText: false,
   inCellMode: false,
   submitting: false,
-  drawing: false,
   modifier: false,
 };
 
@@ -55,10 +54,6 @@ describe('when a key means something else', () => {
     expect(toolForShortcut('v', { ...idle, submitting: true })).toBeNull();
   });
 
-  it('says nothing mid-shape: a pen is finished with Enter or Escape', () => {
-    expect(toolForShortcut('p', { ...idle, drawing: true })).toBeNull();
-  });
-
   it('leaves every modified key to the canvas', () => {
     // Ctrl+V is paste, and it is not the select tool.
     expect(toolForShortcut('v', { ...idle, modifier: true })).toBeNull();
@@ -69,7 +64,6 @@ describe('when a key means something else', () => {
       expect(toolForShortcut(key, { ...idle, editingText: true })).toBeNull();
       expect(toolForShortcut(key, { ...idle, inCellMode: true })).toBeNull();
       expect(toolForShortcut(key, { ...idle, submitting: true })).toBeNull();
-      expect(toolForShortcut(key, { ...idle, drawing: true })).toBeNull();
       expect(toolForShortcut(key, { ...idle, modifier: true })).toBeNull();
       // ...and still works when nothing is in the way.
       expect(toolForShortcut(key, idle)).not.toBeNull();

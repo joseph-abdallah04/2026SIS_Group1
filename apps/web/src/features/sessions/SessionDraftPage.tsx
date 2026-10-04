@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { api, ApiClientError } from '../../lib/api';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
+import { NoVoteTag } from './VoteToggle';
 
 interface SessionDraftPageProps {
   session: SessionDetail;
@@ -64,7 +65,8 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
               className="flex items-baseline gap-2 rounded-2xl border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
             >
               <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
-              <span className="text-rt-ink">{question.text}</span>
+              <span className="flex-1 text-rt-ink">{question.text}</span>
+              {question.votingEnabled ? null : <NoVoteTag />}
             </li>
           ))}
         </ol>
