@@ -87,14 +87,21 @@ function hasReplayedReasoning(body: RequestBody): boolean {
  * A fake provider. `refusesReasoning` makes it behave like Groq; without it, it behaves like
  * a provider that accepts (or needs) the reasoning back.
  */
-function fakeProvider({ refusesReasoning }: { refusesReasoning: boolean }) {
+function fakeProvider({
+  refusesReasoning,
+}: {
+  /** Every model on the host, or only the models this returns true for. */
+  refusesReasoning: boolean | ((model: string) => boolean);
+}) {
   const bodies: RequestBody[] = [];
+  const refuses = (model: string) =>
+    typeof refusesReasoning === 'function' ? refusesReasoning(model) : refusesReasoning;
 
   const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as RequestBody;
     bodies.push(body);
 
-    if (refusesReasoning && hasReplayedReasoning(body)) {
+    if (refuses(body.model) && hasReplayedReasoning(body)) {
       return new Response(
         JSON.stringify({ error: { message: GROQ_REFUSAL, type: 'invalid_request_error' } }),
         { status: 400, headers: { 'content-type': 'application/json' } },
@@ -108,12 +115,12 @@ function fakeProvider({ refusesReasoning }: { refusesReasoning: boolean }) {
   return { fetchImpl, bodies };
 }
 
-async function runDiagramTurn(fetchImpl: typeof fetch) {
+async function runDiagramTurn(fetchImpl: typeof fetch, model = CREDENTIALS.model) {
   const events: AssistantStreamEvent[] = [];
   const sink = new ToolOutcomeSink();
 
   const outcome = await runAssistantTurn({
-    model: createAssistantModel(CREDENTIALS, { baseFetch: fetchImpl }),
+    model: createAssistantModel({ ...CREDENTIALS, model }, { baseFetch: fetchImpl }),
     instructions: 'system',
     history: [],
     message: 'Make a diagram for a simple agent loop',
@@ -168,6 +175,51 @@ describe('sending a reasoning step back to the provider', () => {
     // Second turn: no refused attempt — the field is left off from the start.
     expect(provider.bodies).toHaveLength(5);
     expect(hasReplayedReasoning(provider.bodies[4]!)).toBe(false);
+  });
+
+  it('remembers a refusal for that model only, not every model on the host', async () => {
+    // One host, many models — OpenRouter is a built-in preset. The thinking model beside a
+    // refusing one needs the field to carry its turn across the tool call.
+    const REFUSING = 'openai/gpt-oss-120b';
+    const THINKING = 'deepseek/deepseek-r1';
+    const provider = fakeProvider({ refusesReasoning: (model) => model === REFUSING });
+
+    await runDiagramTurn(provider.fetchImpl, REFUSING);
+    expect(provider.bodies).toHaveLength(3);
+
+    const { reply } = await runDiagramTurn(provider.fetchImpl, THINKING);
+
+    expect(reply).toBe('Here is the loop.');
+    expect(provider.bodies).toHaveLength(5);
+    expect(provider.bodies[4]!.model).toBe(THINKING);
+    expect(hasReplayedReasoning(provider.bodies[4]!)).toBe(true);
+  });
+
+  it('does not remember a refusal when the stripped retry fails too', async () => {
+    // A 400 can name the field without refusing it — here the provider wants it. The retry
+    // without it fails as well, which proves nothing about this model, so the next turn
+    // sends the field again.
+    const bodies: RequestBody[] = [];
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as RequestBody;
+      bodies.push(body);
+      if (!body.messages.some((message) => message.role === 'tool')) {
+        return reasoningThenToolCall();
+      }
+      return new Response(
+        JSON.stringify({ error: { message: "'reasoning_content' is required here" } }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    await expect(runDiagramTurn(fetchImpl)).rejects.toThrow(/reasoning_content/);
+    // Step one, the step two that named the field, and the stripped retry.
+    expect(bodies).toHaveLength(3);
+
+    await expect(runDiagramTurn(fetchImpl)).rejects.toThrow(/reasoning_content/);
+    // Not learned: step two goes out with the field first, again.
+    expect(bodies).toHaveLength(6);
+    expect(hasReplayedReasoning(bodies[4]!)).toBe(true);
   });
 
   it('does not retry other rejections', async () => {

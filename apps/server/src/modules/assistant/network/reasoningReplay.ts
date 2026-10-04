@@ -13,30 +13,38 @@
 //
 // Nothing in a base URL says which kind of provider it is, so this learns instead of
 // guessing. A request goes out as the SDK built it. If the provider refuses it and names
-// `reasoning_content`, the same request goes again without that field, and the host is
-// remembered for the life of the process so later requests skip the refused attempt. A
-// refused request is turned away before any generation starts, so the retry costs a round
-// trip, not tokens.
+// `reasoning_content`, the same request goes again without that field. A refused request is
+// turned away before any generation starts, so the retry costs a round trip, not tokens.
+//
+// Only a retry that then succeeds is remembered, and it is remembered for that host *and
+// model*, for the life of the process, so later requests skip the refused attempt. Not the
+// host alone: one host can serve many models (OpenRouter is a built-in preset), and the
+// DeepSeek or Kimi model next to a refusing one on the same host needs the field. Not on the
+// refusal alone either: a 400 can mention the field for other reasons — "required", or a body
+// that echoes the request — and a stripped retry that fails proves nothing about the model.
 
 const FIELD = 'reasoning_content';
 
-/** Hosts that have refused the field. Process-wide, and never large: one entry per provider. */
-const refusingHosts = new Set<string>();
+/**
+ * `host model` pairs whose stripped retry succeeded. Process-wide, and never large: one
+ * entry per refusing model actually in use.
+ */
+const refusingModels = new Set<string>();
 
-/** Test seam — forget every host learned so far. */
+/** Test seam — forget every refusal learned so far. */
 export function forgetReasoningRefusals(): void {
-  refusingHosts.clear();
+  refusingModels.clear();
 }
 
 /** Wraps a fetch so a provider that refuses replayed reasoning gets the request without it. */
 export function withReasoningReplayFallback(fetchImpl: typeof fetch): typeof fetch {
   return async (input, init) => {
-    const stripped = withoutReplayedReasoning(init?.body);
-    if (stripped === null) return fetchImpl(input, init);
+    const replay = replayedReasoning(init?.body);
+    if (replay === null) return fetchImpl(input, init);
 
-    const host = hostOf(input);
-    if (host && refusingHosts.has(host)) {
-      return fetchImpl(input, { ...init, body: stripped });
+    const key = refusalKey(input, replay.model);
+    if (key && refusingModels.has(key)) {
+      return fetchImpl(input, { ...init, body: replay.stripped });
     }
 
     const response = await fetchImpl(input, init);
@@ -44,8 +52,9 @@ export function withReasoningReplayFallback(fetchImpl: typeof fetch): typeof fet
 
     // Free the connection the refused response is holding before asking again.
     await response.body?.cancel().catch(() => undefined);
-    if (host) refusingHosts.add(host);
-    return fetchImpl(input, { ...init, body: stripped });
+    const retry = await fetchImpl(input, { ...init, body: replay.stripped });
+    if (key && retry.ok) refusingModels.add(key);
+    return retry;
   };
 }
 
@@ -54,6 +63,13 @@ export function withReasoningReplayFallback(fetchImpl: typeof fetch): typeof fet
  * when there is none to remove — which is almost every request, so that path parses nothing.
  */
 export function withoutReplayedReasoning(body: BodyInit | null | undefined): string | null {
+  return replayedReasoning(body)?.stripped ?? null;
+}
+
+/** The stripped body plus the model it was for, or `null` when there is nothing to strip. */
+function replayedReasoning(
+  body: BodyInit | null | undefined,
+): { stripped: string; model: string | null } | null {
   if (typeof body !== 'string' || !body.includes(`"${FIELD}"`)) return null;
 
   let parsed: unknown;
@@ -75,7 +91,9 @@ export function withoutReplayedReasoning(body: BodyInit | null | undefined): str
     return rest;
   });
 
-  return removed ? JSON.stringify({ ...parsed, messages }) : null;
+  if (!removed) return null;
+  const model = typeof parsed.model === 'string' && parsed.model ? parsed.model : null;
+  return { stripped: JSON.stringify({ ...parsed, messages }), model };
 }
 
 /** A 400/422 whose body names the field — the provider is refusing that, specifically. */
@@ -86,6 +104,12 @@ async function refusesReplayedReasoning(response: Response): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Where a refusal is remembered: this host, this model. `null` if either is unknown. */
+function refusalKey(input: RequestInfo | URL, model: string | null): string | null {
+  const host = hostOf(input);
+  return host && model ? `${host} ${model}` : null;
 }
 
 function hostOf(input: RequestInfo | URL): string | null {

@@ -153,10 +153,14 @@ calls. Groq's gpt-oss refuses the whole request over it, which put this under ev
 
 Nothing in a base URL says which kind a provider is, so `network/reasoningReplay.ts` learns. A
 request goes out as the SDK built it; if the provider refuses `reasoning_content` by name, the
-same request goes again without it, and the host is remembered for the life of the process so
-later requests skip the refused attempt. A refused request is turned away before generation
-starts, so the retry costs a round trip, not tokens. It wraps the SSRF-guarded fetch, so the
-resend is guarded too, and it covers chat, Test connection and the eval alike.
+same request goes again without it. If that retry succeeds, the host **and model** are
+remembered for the life of the process so later requests skip the refused attempt. The model
+matters because one host can serve many (OpenRouter is a built-in preset), and a thinking model
+beside a refusing one still needs the field. Only a successful retry counts, because a 400 can
+mention the field for other reasons, such as a provider that requires it. A refused request is
+turned away before generation starts, so the retry costs a round trip, not tokens. It wraps the
+SSRF-guarded fetch, so the resend is guarded too, and it covers chat, Test connection and the
+eval alike.
 
 ### Small models, and what happens when a model says nothing
 
