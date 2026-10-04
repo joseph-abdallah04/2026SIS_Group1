@@ -300,6 +300,9 @@ Where each code comes from:
 - **Setup, checked before the model is called** — `LLM_NOT_CONFIGURED`,
   `LLM_KEY_UNDECRYPTABLE`, `LLM_ENCRYPTION_UNCONFIGURED`, `LLM_URL_INVALID`,
   `LLM_URL_PRIVATE_HOST`, `LLM_URL_UNRESOLVABLE`.
+- **Saving a provider** (Settings and the rail's setup form, never chat) — `LLM_KEY_REQUIRED`
+  (a first save with no key), `LLM_CONFIG_SAVE_FAILED` (the row could not be written; the user
+  id goes to the server log, not the response).
 - **What the provider answered** (`describeProviderError`) — `LLM_AUTH_FAILED` (401/403),
   `LLM_QUOTA_EXCEEDED` (402, or wording that says the account is out of credit — OpenAI reports
   that as a 429), `LLM_TOOLS_UNSUPPORTED` (a 4xx saying the model cannot call tools; OpenRouter

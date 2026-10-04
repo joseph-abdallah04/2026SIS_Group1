@@ -410,6 +410,14 @@ export const ASSISTANT_ERRORS = {
     title: 'That provider address does not exist',
     hint: 'Check the base URL in your provider settings for a typo.',
   },
+  LLM_KEY_REQUIRED: {
+    title: 'An API key is needed',
+    hint: 'Enter your API key the first time you save a provider. After that you can leave it blank to keep the saved one.',
+  },
+  LLM_CONFIG_SAVE_FAILED: {
+    title: 'Your provider settings could not be saved',
+    hint: 'Log out and back in, then save again. If it keeps happening, report the code.',
+  },
 
   // What the provider said
   LLM_AUTH_FAILED: {

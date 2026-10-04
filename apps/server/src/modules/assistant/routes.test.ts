@@ -350,7 +350,9 @@ describe('llm-config endpoints (F33)', () => {
       body: JSON.stringify({ baseUrl: CONFIG.baseUrl, model: CONFIG.model }),
     });
     expect(response.status).toBe(400);
-    expect((await response.json()).code).toBe('LLM_KEY_REQUIRED');
+    const body = await response.json();
+    expect(body.code).toBe('LLM_KEY_REQUIRED');
+    expect(body.error).toBe(assistantErrorMessage('LLM_KEY_REQUIRED'));
     expect(configs.size).toBe(0);
   });
 

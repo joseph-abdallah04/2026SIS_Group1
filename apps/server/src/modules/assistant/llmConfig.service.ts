@@ -77,10 +77,11 @@ export async function saveLlmConfig(
   } catch (cause) {
     // The only realistic failure is the FK: no such user. Worth naming, because with the
     // a config row whose user has since been deleted produces exactly this.
-    console.error('assistant: failed to save LLM config', cause);
+    // The user id belongs in the server log, not in a message the browser shows.
+    console.error(`assistant: failed to save LLM config for user ${userId}`, cause);
     throw new ApiError(
       400,
-      `Could not save LLM config for user ${userId} — does that user exist?`,
+      assistantErrorMessage('LLM_CONFIG_SAVE_FAILED'),
       'LLM_CONFIG_SAVE_FAILED',
     );
   }
@@ -95,11 +96,7 @@ async function existingApiKeyEncrypted(userId: string): Promise<string> {
     select: { apiKeyEncrypted: true },
   });
   if (!row) {
-    throw new ApiError(
-      400,
-      'An API key is required the first time you save a provider.',
-      'LLM_KEY_REQUIRED',
-    );
+    throw new ApiError(400, assistantErrorMessage('LLM_KEY_REQUIRED'), 'LLM_KEY_REQUIRED');
   }
   return row.apiKeyEncrypted;
 }
