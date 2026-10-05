@@ -468,7 +468,10 @@ export function PinboardCanvas({
       panHandlers.onPointerDown(event);
       // A pan just began, or a card took the press for itself.
       if (event.defaultPrevented || event.button !== 0 || event.pointerType === 'touch') return;
-      if (movableIds.size === 0) return;
+      // Drawn whenever the board is live, cards to pick up or not: a box that
+      // only sometimes appears reads as the board ignoring the drag. With
+      // nothing this viewer may move, it simply selects nothing.
+      if (readOnly) return;
       const target = event.target as HTMLElement;
       if (target.closest('[data-proposal-card], button, a, input, textarea, [role="dialog"]')) {
         return;
