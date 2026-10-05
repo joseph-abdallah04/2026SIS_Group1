@@ -102,7 +102,9 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
         : 'Reuse something you proposed earlier';
 
   return (
-    <div ref={wrapper} className="relative">
+    // Not positioned itself, so the panel below is placed against the
+    // toolbar around it and can centre on that.
+    <div ref={wrapper}>
       {/* Dimmed rather than removed while there is nothing to reuse. The three
           buttons beside it dim the same way when the board is closed, and a
           control that comes and goes is one nobody learns is there: you would
@@ -121,12 +123,13 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
         <span className={TOOL_LABEL}>Reuse</span>
       </button>
 
-      {/* Opens upward, because the toolbar floats at the foot of the board.
-          No portal is needed: unlike a card, this is outside the canvas's
-          scale transform, so it is positioned against the page already.
-          Opens rightward from this button while the toolbar is centred, and
-          leftward once the toolbar anchors to the board's right edge: Reuse
-          is its last button, so opening rightward would run off the board. */}
+      {/* Opens upward, because the toolbar floats at the foot of the board,
+          centred on the toolbar rather than on this button, so it sits over
+          the tools it belongs with. No portal is needed: unlike a card, this
+          is outside the canvas's scale transform, so it is positioned against
+          the page already. Once a narrow board anchors the toolbar to its
+          right edge, the panel anchors there too, so it opens leftward over
+          the board instead of off it. */}
       {/* Derived rather than closed by a state write during render: if the
           button goes dead while the panel is up, the panel is simply not shown
           and the remembered state costs nothing. */}
@@ -134,7 +137,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
         <div
           role="dialog"
           aria-label="My proposals"
-          className="absolute bottom-full left-0 z-40 mb-2 @max-[52rem]/board:right-0 @max-[52rem]/board:left-auto"
+          className="absolute bottom-full left-1/2 z-40 mb-3 -translate-x-1/2 @max-[52rem]/board:right-0 @max-[52rem]/board:left-auto @max-[52rem]/board:translate-x-0"
         >
           <MyProposalsPanel
             groups={data?.groups ?? []}
@@ -142,6 +145,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
             canPropose={canPropose}
             onReuse={reuse}
             error={reuseError ?? error}
+            onClose={() => setOpen(false)}
           />
         </div>
       ) : null}

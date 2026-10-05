@@ -3,9 +3,14 @@ import userEvent from '@testing-library/user-event';
 import type { AuthoredProposalGroup, BoardItem } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MyProposalsPanel } from './MyProposalsPanel';
+import { MyProposalsPanel, timeAgo } from './MyProposalsPanel';
 
-function sticky(id: string, questionId: string, text: string): BoardItem {
+function sticky(
+  id: string,
+  questionId: string,
+  text: string,
+  createdAt = '2026-09-07T00:00:00.000Z',
+): BoardItem {
   return {
     id,
     questionId,
@@ -15,7 +20,7 @@ function sticky(id: string, questionId: string, text: string): BoardItem {
     artifactJson: { type: 'sticky', text, color: 'yellow' },
     x: 0,
     y: 0,
-    createdAt: '2026-09-07T00:00:00.000Z',
+    createdAt,
     z: 0,
     editedAt: null,
     extendsProposalId: null,
@@ -29,11 +34,12 @@ function group(
   questionText: string,
   items: BoardItem[],
   isCurrent = false,
+  questionPosition = 0,
 ): AuthoredProposalGroup {
   return {
     questionId,
     questionText,
-    questionPosition: 0,
+    questionPosition,
     questionStatus: isCurrent ? 'discussion' : 'answered',
     isCurrent,
     items,
@@ -84,12 +90,12 @@ describe('my proposals panel', () => {
     expect(onReuse.mock.calls[0]?.[0]).toMatchObject({ id: 'p1' });
   });
 
-  // Already on the board, so there is nothing to bring across. They are still
-  // listed, because leaving them out would look like the list lost them.
-  it('lists the current question without offering to reuse it', () => {
+  // Already on the board in front of you, so there is nothing to bring across.
+  it('leaves out what is already on the current question', () => {
     renderPanel();
 
-    expect(screen.getByText('The deploy')).toBeTruthy();
+    expect(screen.queryByText('The deploy')).toBeNull();
+    expect(screen.queryByText('What should we fix first?')).toBeNull();
     expect(reuseButtons()).toHaveLength(1);
   });
 
@@ -119,5 +125,113 @@ describe('my proposals panel', () => {
 
     expect(screen.getByRole('alert').textContent).toContain('Could not load');
     expect(screen.getByText('Flaky deploys')).toBeTruthy();
+  });
+});
+
+// A long session leaves a lot behind; these keep it findable.
+describe('my proposals panel with a lot to choose from', () => {
+  const Q1 = group('q1', 'What slowed us down?', [sticky('a', 'q1', 'Flaky deploys')], false, 0);
+  const Q2 = group(
+    'q2',
+    'Who are our users?',
+    [
+      sticky('b', 'q2', 'Agencies', '2026-09-07T10:00:00.000Z'),
+      sticky('c', 'q2', 'Product teams', '2026-09-07T11:00:00.000Z'),
+    ],
+    false,
+    1,
+  );
+  const NOW = group('q3', 'What do we build first?', [], true, 2);
+
+  it('narrows the list to one question', async () => {
+    renderPanel({ groups: [Q1, Q2, NOW], currentQuestionId: 'q3' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Q2' }));
+
+    expect(screen.queryByText('Flaky deploys')).toBeNull();
+    expect(screen.getByText('Agencies')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByText('Flaky deploys')).toBeTruthy();
+  });
+
+  it('shows the newest of a question’s ideas first', () => {
+    renderPanel({ groups: [Q1, Q2, NOW], currentQuestionId: 'q3' });
+
+    const texts = screen.getAllByRole('listitem').map((li) => li.textContent ?? '');
+    expect(texts.findIndex((t) => t.includes('Product teams'))).toBeLessThan(
+      texts.findIndex((t) => t.includes('Agencies')),
+    );
+  });
+
+  // A picture or a drawing has no words to search for, so the list narrows by
+  // kind instead. Drawings and diagrams are both made in the Studio.
+  it('narrows the list to one kind of idea, and back', async () => {
+    const mixed = group('q1', 'What slowed us down?', [
+      sticky('s', 'q1', 'Flaky deploys'),
+      {
+        ...sticky('d', 'q1', ''),
+        type: 'diagram',
+        artifactJson: { type: 'diagram', nodes: [], edges: [] },
+      } as BoardItem,
+      {
+        ...sticky('w', 'q1', ''),
+        type: 'drawing',
+        artifactJson: { type: 'drawing', svg: '<svg/>' },
+      } as BoardItem,
+    ]);
+    renderPanel({ groups: [mixed, NOW], currentQuestionId: 'q3' });
+
+    expect(screen.queryByRole('button', { name: 'Images' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Studio' }));
+
+    expect(screen.queryByText('Flaky deploys')).toBeNull();
+    expect(screen.getByText('Diagram')).toBeTruthy();
+    expect(screen.getByText('Drawing')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Studio' }));
+    expect(screen.getByText('Flaky deploys')).toBeTruthy();
+  });
+
+  it('keeps the filters away while there is nothing to narrow', () => {
+    renderPanel({ groups: [Q1, NOW], currentQuestionId: 'q3' });
+
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'All' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stickies' })).toBeNull();
+  });
+
+  it('heads each question with its number and status', () => {
+    renderPanel({ groups: [Q1, NOW], currentQuestionId: 'q3' });
+
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toContain('Q1 · Answered');
+  });
+
+  it('closes from the button in its corner', async () => {
+    const onClose = vi.fn();
+    render(
+      <MyProposalsPanel
+        groups={[Q1, NOW]}
+        currentQuestionId="q3"
+        canPropose
+        onReuse={vi.fn()}
+        error={null}
+        onClose={onClose}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe('timeAgo', () => {
+  const now = new Date('2026-09-07T12:00:00.000Z').getTime();
+  it.each([
+    ['2026-09-07T11:59:40.000Z', 'just now'],
+    ['2026-09-07T11:56:00.000Z', '4 min ago'],
+    ['2026-09-07T09:00:00.000Z', '3 h ago'],
+    ['2026-09-06T11:00:00.000Z', '1 day ago'],
+  ])('says %s as %s', (iso, said) => {
+    expect(timeAgo(iso, now)).toBe(said);
   });
 });
