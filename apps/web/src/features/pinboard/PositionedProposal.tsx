@@ -87,6 +87,8 @@ interface PositionedProposalProps {
   /** How many cards are stacked, so a raised card can clear every one of them. */
   stackSize: number;
   isDragging: boolean;
+  /** Picked out with others to move together. */
+  isSelected?: boolean;
   /** Omitted on a read-only board, where a card cannot be dragged. */
   dragHandlers?: DragHandlers;
   onDelete: (item: BoardItem) => Promise<void>;
@@ -203,6 +205,7 @@ export function PositionedProposal({
   stackIndex,
   stackSize,
   isDragging,
+  isSelected = false,
   dragHandlers,
   onDelete,
   onArrange,
@@ -369,10 +372,14 @@ export function PositionedProposal({
               ? 'ring-2 ring-rt-secondary bg-rt-secondary-wash'
               : ''
       } ${
-        // Which card the open menu belongs to. An outline rather than another
-        // ring, so it can sit outside the shortlist's ring without replacing it.
-        menu ? 'outline-2 outline-offset-4' : ''
+        // Which card the open menu belongs to, or that it is picked out to move
+        // with others. An outline rather than another ring, so it can sit
+        // outside the shortlist's ring without replacing it.
+        menu || isSelected ? 'outline-solid' : ''
       }`}
+      // Lets the board tell a press on a card from a press on empty board.
+      data-proposal-card=""
+      data-selected={isSelected ? 'true' : undefined}
       data-menu-open={menu ? 'true' : undefined}
       // Tells the canvas to leave this pointer gesture alone: dragging a card
       // you may move must not also pan the board underneath it. A card you may
@@ -384,7 +391,11 @@ export function PositionedProposal({
         // The shortlist ring is drawn on this wrapper, so it has to follow the
         // card's own corner: square on a sticky, rounded on every panel.
         borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
-        outlineColor: menu ? MENU_TARGET_OUTLINE : undefined,
+        outlineColor: menu || isSelected ? MENU_TARGET_OUTLINE : undefined,
+        // Divided by the zoom, so the outline stays two pixels on screen: drawn
+        // inside the scaled board, a plain 2px went to a hairline zoomed out.
+        outlineWidth: menu || isSelected ? 'calc(2px / var(--rt-board-scale, 1))' : undefined,
+        outlineOffset: menu || isSelected ? 'calc(4px / var(--rt-board-scale, 1))' : undefined,
         top: position.y,
         // The shared stack at rest. A card being dragged or showing its menu is
         // lifted clear of every card instead, so what you are working on is
@@ -422,6 +433,13 @@ export function PositionedProposal({
         // anything in the card that takes text of its own, and over a link in a
         // sticky, where opening it in a new tab or copying its address is what
         // a right-click is for.
+        // Ctrl+click picks the card out with others on the board. On a Mac
+        // the browser also treats it as a right-click and asks for a menu
+        // first, which would open this one over the selection being made.
+        if (event.ctrlKey && draggable) {
+          event.preventDefault();
+          return;
+        }
         if (!hasActions) return;
         const target = event.target as HTMLElement;
         if (target.closest('textarea, input, [contenteditable="true"], a[href]')) return;
@@ -440,6 +458,8 @@ export function PositionedProposal({
       onClick={(event) => {
         // The corner tick and the ⋯ are their own presses.
         if ((event.target as HTMLElement).closest('button')) return;
+        // A press with a modifier picked the card out; it opens nothing.
+        if (event.shiftKey || event.metaKey || event.ctrlKey) return;
         if (canToggleShortlist) {
           onToggleShortlist(item.id);
           return;

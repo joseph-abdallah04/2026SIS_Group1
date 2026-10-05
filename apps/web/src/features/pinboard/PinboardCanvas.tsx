@@ -10,6 +10,7 @@ import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { useImageImport } from '../tools/image/ImageImportProvider';
 import { isImageFile } from '../tools/image/imageEncoding';
+import { cardSize } from '../tools/proposalPlacement';
 import { stickyPlainText } from '../tools/sticky/stickyMarks';
 import {
   BAR_BESIDE_ZOOM,
@@ -26,6 +27,7 @@ import { FirstProposalHint } from './FirstProposalHint';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
 import { useProposalDrag } from './useProposalDrag';
+import { cardsInRect, rectBetween, type MarqueeRect } from './boardSelection';
 import { canMoveProposal } from './movePermission';
 import {
   DESK_MARGIN,
@@ -33,6 +35,7 @@ import {
   DOT_COLOR,
   DOT_RADIUS,
   DOT_SPACING,
+  MENU_TARGET_OUTLINE,
   ZOOM_LEVELS,
   ZOOM_SCALE,
   type ZoomLevel,
@@ -298,6 +301,26 @@ export function PinboardCanvas({
   const toolsFree = submissionStatus !== 'submitting';
   const boardOpen = !readOnly && board.questionStatus === 'discussion';
 
+  // Which cards this viewer may move right now: the leader any of them, anyone
+  // else their own while the board is unlocked, nobody once it has closed.
+  const movableIds = useMemo(
+    () =>
+      new Set(
+        board.items
+          .filter((item) =>
+            canMoveProposal({
+              boardOpen,
+              isLeader,
+              boardLocked: board.boardLocked,
+              viewerId,
+              authorId: item.authorId,
+            }),
+          )
+          .map((item) => item.id),
+      ),
+    [board.items, board.boardLocked, boardOpen, isLeader, viewerId],
+  );
+
   /**
    * Whether a proposal can be reopened in the tool that made it.
    *
@@ -325,12 +348,27 @@ export function PinboardCanvas({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const { positionOf, draggingId, dragHandlers } = useProposalDrag({
+  /**
+   * Cards picked out to move together. Only ever cards this viewer may move:
+   * the selection is for carrying a group, and a card you cannot move has no
+   * business in it. Held as ids, and read through `selection` below, which
+   * drops any that have since gone or stopped being movable.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+
+  const { positionOf, isDragging, dragHandlers } = useProposalDrag({
     items: board.items,
     scale,
     onCommit: (proposalId, at) => editProposal({ id: proposalId, x: at.x, y: at.y }),
     onError: showNotice,
+    // A press on a card that never became a drag puts the selection down, as
+    // a plain click does anywhere on a canvas.
+    onTap: () => setSelected((current) => (current.size ? new Set() : current)),
   });
+  const selection = useMemo(
+    () => new Set([...selected].filter((id) => movableIds.has(id))),
+    [movableIds, selected],
+  );
 
   // The sheet on screen. Fixed in board units, so zooming only ever changes how
   // big it looks — it never grows a board that was already there.
@@ -367,6 +405,197 @@ export function PinboardCanvas({
     // browser's again.
     zoomEnabled: !ballot,
   });
+
+  /**
+   * Picking cards out to move together.
+   *
+   * Shift, Ctrl or Cmd with a press on a card adds it to the selection or
+   * takes it out. A plain left drag across empty board draws a box, and every
+   * card it touches is selected; with Shift held the box adds to what is
+   * already selected. A plain press on empty board, or Escape, puts the
+   * selection down. A drag on any selected card then carries all of them.
+   *
+   * The left drag on empty board was kept free for exactly this: panning is
+   * the middle button, or space held.
+   */
+  const marqueeGesture = useRef<{
+    pointerId: number;
+    from: Point;
+    additive: boolean;
+    base: ReadonlySet<string>;
+  } | null>(null);
+  const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
+
+  /** A point on screen as a point on the board, the inverse of the scene's transform. */
+  const toBoard = useCallback(
+    (clientX: number, clientY: number): Point | null => {
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (!rect) return null;
+      // The same centring the scene gets when the board is smaller than the window.
+      const offsetX = Math.max(0, (viewport.width - contentWidth) / 2);
+      const offsetY = Math.max(0, (viewport.height - contentHeight) / 2);
+      return {
+        x: (clientX - rect.left - (DESK_MARGIN + offsetX - pan.x)) / scale,
+        y: (clientY - rect.top - (DESK_MARGIN + offsetY - pan.y)) / scale,
+      };
+    },
+    [
+      contentHeight,
+      contentWidth,
+      pan.x,
+      pan.y,
+      scale,
+      viewport.height,
+      viewport.width,
+      viewportRef,
+    ],
+  );
+
+  const cardsUnder = useCallback(
+    (rect: MarqueeRect) =>
+      cardsInRect(
+        board.items
+          .filter((item) => movableIds.has(item.id))
+          .map((item) => ({ id: item.id, ...positionOf(item), ...cardSize(item) })),
+        rect,
+      ),
+    [board.items, movableIds, positionOf],
+  );
+
+  const boardHandlers = {
+    ...panHandlers,
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      panHandlers.onPointerDown(event);
+      // A pan just began, or a card took the press for itself.
+      if (event.defaultPrevented || event.button !== 0) return;
+      // Drawn whenever the board is live, cards to pick up or not: a box that
+      // only sometimes appears reads as the board ignoring the drag. With
+      // nothing this viewer may move, it simply selects nothing.
+      if (readOnly) return;
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-proposal-card], button, a, input, textarea, [role="dialog"]')) {
+        return;
+      }
+      const from = toBoard(event.clientX, event.clientY);
+      if (!from) return;
+      event.preventDefault();
+      // Touch too: a finger dragged across empty board does nothing else, and
+      // without this a phone has no way to pick several cards at all.
+      marqueeGesture.current = {
+        pointerId: event.pointerId,
+        from,
+        additive: event.shiftKey || event.metaKey || event.ctrlKey,
+        base: selection,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
+      panHandlers.onPointerMove(event);
+      const active = marqueeGesture.current;
+      if (!active || active.pointerId !== event.pointerId) return;
+      const at = toBoard(event.clientX, event.clientY);
+      if (!at) return;
+      const box = rectBetween(active.from, at);
+      setMarquee(box);
+      // Selected as the box reaches them, not only when it is let go, so what
+      // the box will pick up is visible while it is being drawn. A card the
+      // box is pulled back off drops out again.
+      const hits = cardsUnder(box);
+      setSelected(new Set(active.additive ? [...active.base, ...hits] : hits));
+    },
+    onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+      panHandlers.onPointerUp(event);
+      finishMarquee(event, true);
+    },
+    onPointerCancel: (event: React.PointerEvent<HTMLElement>) => {
+      panHandlers.onPointerCancel(event);
+      finishMarquee(event, false);
+    },
+  };
+
+  function finishMarquee(event: React.PointerEvent<HTMLElement>, apply: boolean) {
+    const active = marqueeGesture.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    marqueeGesture.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setMarquee(null);
+    // Called off part-way: back to what was selected before the box.
+    if (!apply) {
+      setSelected(active.base);
+      return;
+    }
+    // The box where the pointer let go, worked out from this event rather
+    // than read back from state: pointer moves are batched, so the last box
+    // painted can be a move behind, or not painted at all.
+    const at = toBoard(event.clientX, event.clientY);
+    const box = at ? rectBetween(active.from, at) : null;
+    // Barely moved: a press on empty board, which puts the selection down.
+    if (!box || (box.width * scale < 3 && box.height * scale < 3)) {
+      setSelected(active.additive ? active.base : new Set());
+      return;
+    }
+    const hits = cardsUnder(box);
+    setSelected(new Set(active.additive ? [...active.base, ...hits] : hits));
+  }
+
+  /**
+   * The card's own drag, with the selection worked in: a press with a
+   * modifier picks the card out instead of moving it, and a press on a card
+   * that is part of a selection carries the whole selection.
+   */
+  const cardDragHandlers = {
+    ...dragHandlers,
+    onPointerDown: (item: BoardItem, event: React.PointerEvent<HTMLElement>) => {
+      if (event.button === 0 && (event.shiftKey || event.metaKey || event.ctrlKey)) {
+        // Claimed here, so the press does not also start a box on the board.
+        event.preventDefault();
+        setSelected((current) => {
+          const next = new Set([...current].filter((id) => movableIds.has(id)));
+          if (next.has(item.id)) next.delete(item.id);
+          else next.add(item.id);
+          return next;
+        });
+        return;
+      }
+      const carriesGroup = selection.has(item.id) && selection.size > 1;
+      if (!carriesGroup && selection.size > 0) setSelected(new Set());
+      dragHandlers.onPointerDown(
+        item,
+        event,
+        carriesGroup ? board.items.filter((candidate) => selection.has(candidate.id)) : undefined,
+      );
+    },
+  };
+
+  // What a screen reader hears as the selection changes, cleared included: an
+  // empty region says nothing, so "cleared" has to be said in words.
+  const [selectionAnnouncement, setSelectionAnnouncement] = useState('');
+  const announcedSize = useRef(0);
+  useEffect(() => {
+    const size = selection.size;
+    if (size === announcedSize.current) return;
+    setSelectionAnnouncement(
+      size === 0
+        ? 'Selection cleared'
+        : `${size} ${size === 1 ? 'proposal' : 'proposals'} selected`,
+    );
+    announcedSize.current = size;
+  }, [selection.size]);
+
+  // Escape puts the selection down, unless something else wants the key.
+  useEffect(() => {
+    if (selection.size === 0) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"], [role="dialog"]')) return;
+      setSelected(new Set());
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [selection.size]);
 
   /**
    * The furthest out the board may be zoomed: the point where it still covers
@@ -873,7 +1102,7 @@ export function PinboardCanvas({
               cursor: isPanning ? 'grabbing' : isSpaceHeld ? 'grab' : 'default',
               touchAction: 'none',
             }}
-            {...panHandlers}
+            {...boardHandlers}
             {...dropHandlers}
           >
             {/* Drawn empty or not: an empty board is still the board, and Fit
@@ -890,6 +1119,9 @@ export function PinboardCanvas({
                 // same width on screen however far the board is magnified.
                 transform: `translate(${Math.round(DESK_MARGIN + restX - pan.x)}px, ${Math.round(DESK_MARGIN + restY - pan.y)}px) scale(${scale})`,
                 transformOrigin: '0 0',
+                // For anything inside that must stay the same size on screen
+                // whatever the zoom, such as a selection outline.
+                ['--rt-board-scale' as string]: scale,
               }}
             >
               {/*
@@ -928,21 +1160,16 @@ export function PinboardCanvas({
                     }
                     // The leader may move anything. Anyone else may move their
                     // own, unless the leader has locked the board.
-                    canMove={canMoveProposal({
-                      boardOpen,
-                      isLeader,
-                      boardLocked: board.boardLocked,
-                      viewerId,
-                      authorId: item.authorId,
-                    })}
+                    canMove={movableIds.has(item.id)}
+                    isSelected={selection.has(item.id)}
                     canDelete={
                       boardOpen && ((viewerId !== null && item.authorId === viewerId) || isLeader)
                     }
                     canArrange={boardOpen && isLeader}
                     stackIndex={stackIndexById.get(item.id) ?? 0}
                     stackSize={board.items.length}
-                    isDragging={draggingId === item.id}
-                    dragHandlers={readOnly ? undefined : dragHandlers}
+                    isDragging={isDragging(item.id)}
+                    dragHandlers={readOnly ? undefined : cardDragHandlers}
                     onDelete={onDelete}
                     onArrange={onArrange}
                     onCopyText={onCopyText}
@@ -955,6 +1182,22 @@ export function PinboardCanvas({
                     onSelectProposal={onSelectProposal}
                   />
                 ))}
+                {marquee ? (
+                  // The box being drawn, in board units like the cards.
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute"
+                    style={{
+                      left: marquee.x,
+                      top: marquee.y,
+                      width: marquee.width,
+                      height: marquee.height,
+                      border: `${1 / scale}px solid ${MENU_TARGET_OUTLINE}`,
+                      background: `${MENU_TARGET_OUTLINE}14`,
+                      zIndex: board.items.length + 3,
+                    }}
+                  />
+                ) : null}
               </div>
             </div>
 
@@ -1026,6 +1269,11 @@ export function PinboardCanvas({
             {/* A refused write, stacked above the toolbar. `bottom-19` is the
                   bar's `bottom-6` plus its `h-11` plus an 8px gap, clear of
                   the zoom control. */}
+            {/* The outlines say what is selected; this says it to a screen
+                reader, which cannot see them. */}
+            <p role="status" className="sr-only">
+              {selectionAnnouncement}
+            </p>
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
               {notice ? (
                 // Kept on a board too narrow for the controls: a paste or a

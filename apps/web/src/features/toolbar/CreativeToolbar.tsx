@@ -89,7 +89,9 @@ export function CreativeToolbar({ children }: CreativeToolbarProps) {
       // The sticky popup rises from here, so it measures where "here" is.
       data-creative-toolbar
       aria-label="Creative tools"
-      className={FLOATING_BAR}
+      // Positioned, so a panel opened from one of its buttons can centre itself
+      // on the whole toolbar rather than on that button.
+      className={`${FLOATING_BAR} relative`}
     >
       <button
         type="button"

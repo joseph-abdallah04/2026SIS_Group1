@@ -45,9 +45,9 @@ describe('my proposals launcher', () => {
     expect(screen.getByRole('alert').textContent).toContain('Network unreachable');
   });
 
-  // Reuse is the last button on a toolbar that anchors to the board's right
-  // edge below 52rem, so from there the panel opens leftward, over the board.
-  it('opens leftward once the toolbar anchors right, and fits a narrow board', async () => {
+  // Centred over the toolbar it belongs with. Once a narrow board anchors the
+  // toolbar to its right edge, the panel anchors there too and opens leftward.
+  it('centres over the toolbar, and opens leftward on a narrow board', async () => {
     vi.mocked(api.get).mockRejectedValue(new Error('Network unreachable'));
 
     const button = renderLauncher();
@@ -55,6 +55,7 @@ describe('my proposals launcher', () => {
     await userEvent.click(button);
 
     const panel = screen.getByRole('dialog', { name: 'My proposals' });
+    expect(panel).toHaveClass('left-1/2', '-translate-x-1/2');
     expect(panel).toHaveClass('@max-[52rem]/board:right-0', '@max-[52rem]/board:left-auto');
     expect(panel.firstElementChild).toHaveClass('max-w-[calc(100cqw-3rem)]');
   });
@@ -76,5 +77,45 @@ describe('my proposals launcher', () => {
 
     await vi.waitFor(() => expect(button.getAttribute('title')).toContain('Nothing to reuse yet'));
     expect(button.hasAttribute('disabled')).toBe(true);
+  });
+
+  // It fades back into the toolbar rather than vanishing, and goes once the
+  // fade has run. With less motion asked for, it simply closes.
+  it('fades out before it goes', async () => {
+    vi.mocked(api.get).mockRejectedValue(new Error('Network unreachable'));
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query }));
+    try {
+      const button = renderLauncher();
+      await vi.waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+      await userEvent.click(button);
+      expect(screen.getByRole('dialog', { name: 'My proposals' }).firstElementChild).toHaveClass(
+        'rt-sticky-popup-rise',
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      const panel = screen.getByRole('dialog', { name: 'My proposals' });
+      expect(panel.firstElementChild).toHaveClass('rt-sticky-popup-fade');
+      await vi.waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'My proposals' })).toBeNull(),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('closes at once for anyone who has asked for less motion', async () => {
+    vi.mocked(api.get).mockRejectedValue(new Error('Network unreachable'));
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query }));
+    try {
+      const button = renderLauncher();
+      await vi.waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+      await userEvent.click(button);
+      await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      expect(screen.queryByRole('dialog', { name: 'My proposals' })).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

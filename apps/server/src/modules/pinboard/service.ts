@@ -716,6 +716,7 @@ export async function listAuthoredProposals({
           questionText: question.text,
           questionPosition: question.position,
           questionStatus: question.status,
+          votingEnabled: question.votingEnabled,
           isCurrent: question.id === active?.id,
           items,
         },
