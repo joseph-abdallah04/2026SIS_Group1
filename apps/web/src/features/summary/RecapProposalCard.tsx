@@ -78,8 +78,8 @@ export function RecapProposalCard({
       ...(isSticky
         ? [{ id: 'copy', label: 'Copy text', icon: Copy, onSelect: () => onCopyText(item) }]
         : []),
+      ...exportMenuItems(item, onExport),
     ],
-    exportMenuItems(item, onExport),
   ];
   const hasActions = sections.some((section) => section.length > 0);
 

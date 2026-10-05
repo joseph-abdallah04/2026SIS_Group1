@@ -9,7 +9,7 @@
 // document, where the card's frame would only be in the way.
 
 import { createElement, useCallback, useEffect, useRef } from 'react';
-import { FileCode2, ImageDown } from 'lucide-react';
+import { Download, FileCode2, ImageDown } from 'lucide-react';
 import {
   DRAWING_VIEWBOX_HEIGHT,
   DRAWING_VIEWBOX_WIDTH,
@@ -304,19 +304,46 @@ export async function exportProposal(item: BoardItem, format: ExportFormat): Pro
 }
 
 /**
- * The export rows for a card's actions menu: the same rows on the board and on
- * the meeting summary, so the two can never offer different things.
+ * The export row for a card's actions menu: the same on the board and on the
+ * meeting summary, so the two can never offer different things.
+ *
+ * One row however many formats there are, so the menu stays a short list of
+ * things to do. A canvas, which has a choice to make, opens it a level down —
+ * Export › As PNG, As SVG. A card with only one way out says it on the row
+ * itself, since a submenu of one is only an extra step.
  */
 export function exportMenuItems(
   item: BoardItem,
   onExport: (item: BoardItem, format: ExportFormat) => void,
 ): ProposalMenuItem[] {
-  return exportFormats(item).map((format) => ({
-    id: `export-${format}`,
-    label: exportLabel(format),
-    icon: format === 'svg' ? FileCode2 : ImageDown,
-    onSelect: () => onExport(item, format),
-  }));
+  const formats = exportFormats(item);
+  const iconFor = (format: ExportFormat) => (format === 'svg' ? FileCode2 : ImageDown);
+  const only = formats.length === 1 ? formats[0] : undefined;
+  if (only) {
+    return [
+      {
+        id: `export-${only}`,
+        label: exportLabel(only),
+        icon: iconFor(only),
+        onSelect: () => onExport(item, only),
+      },
+    ];
+  }
+  if (formats.length === 0) return [];
+  return [
+    {
+      id: 'export',
+      label: 'Export',
+      icon: Download,
+      onSelect: () => {},
+      submenu: formats.map((format) => ({
+        id: `export-${format}`,
+        label: `As ${format.toUpperCase()}`,
+        icon: iconFor(format),
+        onSelect: () => onExport(item, format),
+      })),
+    },
+  ];
 }
 
 /**

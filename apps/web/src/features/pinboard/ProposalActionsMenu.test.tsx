@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Copy, Trash2 } from 'lucide-react';
+import { Copy, Download, FileCode2, ImageDown, Trash2 } from 'lucide-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProposalActionsMenu, type ProposalMenuAnchor } from './ProposalActionsMenu';
@@ -150,5 +150,115 @@ describe('ProposalActionsMenu', () => {
 
     fireEvent.contextMenu(menu);
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+/** A menu whose Export row opens its formats a level down. */
+function renderWithSubmenu() {
+  const onClose = vi.fn();
+  const asSvg = vi.fn();
+  render(
+    <ProposalActionsMenu
+      anchor={{ kind: 'point', x: 100, y: 50 }}
+      label="Actions"
+      onClose={onClose}
+      sections={[
+        [
+          { id: 'copy', label: 'Copy text', icon: Copy, onSelect: vi.fn() },
+          {
+            id: 'export',
+            label: 'Export',
+            icon: Download,
+            onSelect: vi.fn(),
+            submenu: [
+              { id: 'png', label: 'As PNG', icon: ImageDown, onSelect: vi.fn() },
+              { id: 'svg', label: 'As SVG', icon: FileCode2, onSelect: asSvg },
+            ],
+          },
+        ],
+      ]}
+    />,
+  );
+  const exportRow = screen.getByRole('menuitem', { name: 'Export' });
+  const formats = () => screen.queryByRole('menu', { name: 'Export' });
+  return { onClose, asSvg, exportRow, formats };
+}
+
+describe('ProposalActionsMenu submenu', () => {
+  it('marks the row as opening a menu of its own', () => {
+    const { exportRow, formats } = renderWithSubmenu();
+    expect(exportRow).toHaveAttribute('aria-haspopup', 'menu');
+    expect(exportRow).toHaveAttribute('aria-expanded', 'false');
+    expect(formats()).toBeNull();
+  });
+
+  it('opens on hover without taking the focus, and closes over another row', async () => {
+    const { exportRow, formats } = renderWithSubmenu();
+    await userEvent.hover(exportRow);
+
+    expect(formats()).not.toBeNull();
+    expect(exportRow).toHaveAttribute('aria-expanded', 'true');
+    expect(within(formats()!).getByRole('menuitem', { name: 'As PNG' })).not.toHaveFocus();
+
+    await userEvent.hover(screen.getByRole('menuitem', { name: 'Copy text' }));
+    expect(formats()).toBeNull();
+  });
+
+  it('opens on the right arrow with the first format focused; the left arrow goes back', async () => {
+    const { exportRow, formats, onClose } = renderWithSubmenu();
+    exportRow.focus();
+    await userEvent.keyboard('{ArrowRight}');
+
+    expect(within(formats()!).getByRole('menuitem', { name: 'As PNG' })).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(within(formats()!).getByRole('menuitem', { name: 'As SVG' })).toHaveFocus();
+
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(formats()).toBeNull();
+    expect(exportRow).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes only the submenu on Escape, then the menu on a second', async () => {
+    const { exportRow, formats, onClose } = renderWithSubmenu();
+    await userEvent.click(exportRow);
+    expect(formats()).not.toBeNull();
+
+    await userEvent.keyboard('{Escape}');
+    expect(formats()).toBeNull();
+    expect(exportRow).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does what the chosen format says and closes', async () => {
+    const { exportRow, onClose, asSvg } = renderWithSubmenu();
+    await userEvent.click(exportRow);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'As SVG' }));
+
+    expect(asSvg).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts a press in the submenu as inside, and anywhere else as outside', async () => {
+    const { exportRow, formats, onClose } = renderWithSubmenu();
+    await userEvent.click(exportRow);
+
+    fireEvent.pointerDown(formats()!);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.pointerDown(document.body);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the arrow keys of the menu to its own rows', async () => {
+    const { exportRow } = renderWithSubmenu();
+    await userEvent.hover(exportRow);
+    exportRow.focus();
+    await userEvent.keyboard('{ArrowDown}');
+
+    // Wrapped round to the menu's first row, not down into the formats.
+    expect(screen.getByRole('menuitem', { name: 'Copy text' })).toHaveFocus();
   });
 });

@@ -251,7 +251,7 @@ describe('SessionSummaryView card actions', () => {
     // Two notes and a canvas.
     expect(buttons).toHaveLength(3);
     await userEvent.click(buttons[2]!);
-    expect(menuLabels()).toEqual(['Enlarge', 'Export as PNG', 'Export as SVG']);
+    expect(menuLabels()).toEqual(['Enlarge', 'Export']);
   });
 
   it('opens on a right-click too', () => {
@@ -274,7 +274,8 @@ describe('SessionSummaryView card actions', () => {
     render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Proposal actions' })[2]!);
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Export as SVG' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'As SVG' }));
 
     expect(
       await within(screen.getByRole('status')).findByText('Exported diagram as SVG'),

@@ -100,6 +100,11 @@ describe('studioSceneMarkup', () => {
 });
 
 describe('rasterizeProposalPreview for a studio canvas', () => {
+  it('draws a brainstorm idea (F41) in its plain frame, sketches and all', () => {
+    const png = rasterizeProposalPreview(item(FULL_SCENE), 'idea');
+    expect(png.png.subarray(1, 4).toString()).toBe('PNG');
+  });
+
   it('rasterizes a canvas holding every kind of element', () => {
     const png = rasterizeProposalPreview(item(FULL_SCENE), 'winner');
     expect(png.png.subarray(1, 4).toString()).toBe('PNG');

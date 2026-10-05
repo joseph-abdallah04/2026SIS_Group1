@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { BoardItem } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
@@ -635,19 +635,31 @@ const PICTURE: BoardItem = {
 };
 
 describe('PositionedProposal export', () => {
-  it('offers a studio canvas as a PNG and an SVG, in a group of their own', async () => {
+  it('offers a studio canvas as one Export row, with its formats a level down', async () => {
     renderMenuCard({ item: DRAWN_ON, onExtend: undefined, onExport: vi.fn() });
     await openFromButton();
 
-    expect(menuLabels()).toEqual(['Enlarge', 'Export as PNG', 'Export as SVG']);
-    expect(screen.getAllByRole('separator')).toHaveLength(1);
+    // One row in the menu's own group: no rule of its own, nothing else added.
+    expect(menuLabels()).toEqual(['Enlarge', 'Export']);
+    expect(screen.queryByRole('separator')).toBeNull();
+
+    await userEvent.hover(screen.getByRole('menuitem', { name: 'Export' }));
+    const formats = screen.getByRole('menu', { name: 'Export' });
+    expect(
+      within(formats)
+        .getAllByRole('menuitem')
+        .map((row) => row.textContent),
+    ).toEqual(['As PNG', 'As SVG']);
   });
 
-  it('offers an imported picture as the file it was stored as', async () => {
+  it('offers an imported picture as the file it was stored as, straight from the menu', async () => {
     renderMenuCard({ item: PICTURE, onExtend: undefined, onExport: vi.fn() });
     await openFromButton();
 
     expect(menuLabels()).toEqual(['Enlarge', 'Export image']);
+    expect(screen.getByRole('menuitem', { name: 'Export image' })).not.toHaveAttribute(
+      'aria-haspopup',
+    );
   });
 
   it('offers nothing to export on a sticky or an empty canvas', async () => {
@@ -660,16 +672,28 @@ describe('PositionedProposal export', () => {
     renderMenuCard({ item: DRAWN_ON, boardOpen: false, onExtend: undefined, onExport: vi.fn() });
     await openFromButton();
 
-    expect(menuLabels()).toEqual(['Enlarge', 'Export as PNG', 'Export as SVG']);
+    expect(menuLabels()).toEqual(['Enlarge', 'Export']);
   });
 
-  it('hands the card and the chosen format to the board', async () => {
+  it('hands the card and the chosen format to the board, and closes', async () => {
     const onExport = vi.fn();
     renderMenuCard({ item: DRAWN_ON, onExtend: undefined, onExport });
     await openFromButton();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Export as SVG' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'As SVG' }));
 
     expect(onExport).toHaveBeenCalledWith(DRAWN_ON, 'svg');
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('keeps a press in the formats from reaching the card underneath', async () => {
+    const onSelectProposal = vi.fn();
+    renderMenuCard({ item: DRAWN_ON, onExtend: undefined, onExport: vi.fn(), onSelectProposal });
+    await openFromButton();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+    onSelectProposal.mockClear();
+
+    fireEvent.pointerDown(screen.getByRole('menuitem', { name: 'As PNG' }));
+    expect(onSelectProposal).not.toHaveBeenCalled();
   });
 });

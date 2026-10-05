@@ -253,10 +253,9 @@ export function PositionedProposal({
       ...(onExtend
         ? [{ id: 'extend', label: 'Extend', icon: GitBranchPlus, onSelect: () => onExtend(item) }]
         : []),
+      // One row, its formats a level down, so the menu stays short.
+      ...(onExport ? exportMenuItems(item, onExport) : []),
     ],
-    // Its own group: taking a copy away is a different kind of thing from
-    // working on the card where it is.
-    onExport ? exportMenuItems(item, onExport) : [],
     canArrange
       ? [
           {
@@ -380,10 +379,6 @@ export function PositionedProposal({
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
       onContextMenu={(event) => {
-        // The browser's own menu wherever ours has nothing to offer, over
-        // anything in the card that takes text of its own, and over a link in a
-        // sticky, where opening it in a new tab or copying its address is what
-        // a right-click is for.
         // Ctrl+click picks the card out with others on the board. On a Mac
         // the browser also treats it as a right-click and asks for a menu
         // first, which would open this one over the selection being made.
@@ -391,6 +386,10 @@ export function PositionedProposal({
           event.preventDefault();
           return;
         }
+        // The browser's own menu wherever ours has nothing to offer, over
+        // anything in the card that takes text of its own, and over a link in a
+        // sticky, where opening it in a new tab or copying its address is what
+        // a right-click is for.
         if (!hasActions) return;
         const anchor = contextMenuAnchor(event, cornerAnchor);
         if (!anchor) return;
