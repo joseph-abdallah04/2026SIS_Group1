@@ -12,9 +12,17 @@ import { BoardLock } from '../pinboard/BoardLock';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
+import { useSetQuestionVoting } from '../sessions/useSetQuestionVoting';
+import { VoteToggle } from '../sessions/VoteToggle';
 import { AgendaProgress } from './AgendaProgress';
 import { summarizeAgenda, stepState } from './agendaSummary';
-import { AgendaStep, AgendaTimeline, ViewingChip, type AgendaChipTone } from './AgendaTimeline';
+import {
+  AgendaChip,
+  AgendaStep,
+  AgendaTimeline,
+  ViewingChip,
+  type AgendaChipTone,
+} from './AgendaTimeline';
 
 interface AgendaPanelProps {
   sessionId: string;
@@ -41,20 +49,35 @@ interface AgendaPanelProps {
 }
 
 /**
- * The next step the leader can take from each status, and what to call it.
+ * The next step the leader can take from a question, and what to call it.
  *
- * A subset of the server's transition table (`setQuestionPhase`) on purpose:
+ * A subset of the server's transition tables (`setQuestionPhase`) on purpose:
  * this offers the one forward move that makes sense as a button, while the
- * server owns what is *legal*. `answered` and `skipped` are absent because
+ * server owns what is *legal*. `answered` and `skipped` get nothing because
  * they are terminal, so a finished question shows no controls at all.
+ *
+ * A brainstorm-only question (F41) has no vote to open, so discussion is
+ * where it finishes: "Finish discussion" answers it with the board as it is.
  */
-const NEXT_PHASE: Partial<Record<QuestionStatus, { status: QuestionPhaseTarget; label: string }>> =
-  {
-    pending: { status: 'discussion', label: 'Start discussion' },
-    discussion: { status: 'voting', label: 'Open voting' },
+function nextPhase(question: Question): { status: QuestionPhaseTarget; label: string } | undefined {
+  switch (question.status) {
+    case 'pending':
+      return { status: 'discussion', label: 'Start discussion' };
+    case 'discussion':
+      return question.votingEnabled
+        ? { status: 'voting', label: 'Open voting' }
+        : { status: 'answered', label: 'Finish discussion' };
     // Closing a vote is F30's "End voting" on the ballot, not an agenda
     // shortcut — "Mark answered" would skip the tally and the overlay.
-  };
+    default:
+      return undefined;
+  }
+}
+
+/** F41: the vote choice can change until voting opens — the server's rule too. */
+function canChangeVote(status: QuestionStatus): boolean {
+  return status === 'pending' || status === 'discussion';
+}
 
 /**
  * Shares its remembered width with the ended session's question list, so a
@@ -63,16 +86,17 @@ const NEXT_PHASE: Partial<Record<QuestionStatus, { status: QuestionPhaseTarget; 
 const AGENDA_RESIZE = { storageKey: 'agenda', label: 'Resize agenda' };
 
 function statusChip(
-  status: QuestionStatus,
+  question: Question,
   votingPhase?: VotingPhase,
 ): { label: string; tone: AgendaChipTone } | null {
-  switch (status) {
+  switch (question.status) {
     case 'discussion':
-      return { label: 'Discussing', tone: 'cool' };
+      return { label: question.votingEnabled ? 'Discussing' : 'Brainstorming', tone: 'cool' };
     case 'voting':
       return { label: votingPhase === 'closed' ? 'Results' : 'Voting', tone: 'warm' };
     case 'answered':
-      return { label: 'Answered', tone: 'warm' };
+      // Nobody chose an answer for a brainstorm — the team discussed it.
+      return { label: question.votingEnabled ? 'Answered' : 'Discussed', tone: 'warm' };
     case 'skipped':
       return { label: 'Skipped', tone: 'neutral' };
     default:
@@ -110,9 +134,15 @@ export function AgendaPanel({
     busyQuestionId: phaseBusyId,
     error: phaseError,
   } = useSetQuestionPhase(sessionId);
+  const {
+    setVoting,
+    busyQuestionId: votingBusyId,
+    error: votingError,
+  } = useSetQuestionVoting(sessionId);
   const { focus, error: focusError } = useFocusQuestion(sessionId);
   const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
   const [draft, setDraft] = useState('');
+  const [draftVoting, setDraftVoting] = useState(true);
 
   const summary = summarizeAgenda(questions);
   const allDone = summary.total > 0 && summary.done === summary.total;
@@ -120,7 +150,7 @@ export function AgendaPanel({
     (question) => question.status === 'discussion' || question.status === 'voting',
   );
   const firstPending = questions.find((question) => question.status === 'pending');
-  const error = phaseError ?? focusError ?? addError ?? lockError;
+  const error = phaseError ?? votingError ?? focusError ?? addError ?? lockError;
 
   const onToggleLock = boardLock?.onToggle
     ? () => {
@@ -138,8 +168,11 @@ export function AgendaPanel({
 
   async function onAdd(event: FormEvent) {
     event.preventDefault();
-    const ok = await addQuestion(draft);
-    if (ok) setDraft('');
+    const ok = await addQuestion(draft, draftVoting);
+    if (ok) {
+      setDraft('');
+      setDraftVoting(true);
+    }
   }
 
   return (
@@ -163,7 +196,7 @@ export function AgendaPanel({
               const isFocused = question.id === activeQuestionId;
               const isOpen = question.id === openQuestion?.id;
               const canSkipVote = question.status !== 'voting' || votingPhase !== 'closed';
-              const next = NEXT_PHASE[question.status];
+              const next = nextPhase(question);
               // Phase controls stay on the question that is actually open, even
               // while the board is looking back at an earlier one. Pending gets
               // "Start discussion" only when nothing is open, on the next one.
@@ -180,11 +213,29 @@ export function AgendaPanel({
                 (next !== undefined ||
                   stillShortlisting ||
                   (question.status === 'voting' && canSkipVote));
-              const busy = phaseBusyId === question.id;
+              // One request per question at a time: a phase change and the vote
+              // switch (F41) both decide on the same row, so each waits for the
+              // other. The server refuses whichever loses a race anyway; this
+              // keeps the leader from starting one.
+              const phaseBusy = phaseBusyId === question.id;
+              const busy = phaseBusy || votingBusyId === question.id;
               const openVotingBlocked = next?.status === 'voting' && hasProposals === false;
               // The board is showing this one while another is still in play:
               // said out loud, so nobody mistakes the old board for the live one.
               const lookingBack = isFocused && openQuestion !== undefined && !isOpen;
+              // F41: the leader can flip any not-yet-voting question; everyone
+              // else just sees which upcoming ones will not go to a vote.
+              const voteControl = !canChangeVote(question.status) ? null : isLeader ? (
+                <VoteToggle
+                  size="sm"
+                  votingEnabled={question.votingEnabled}
+                  onChange={(votingEnabled) => void setVoting(question.id, votingEnabled)}
+                  label={`Vote on question ${index + 1}`}
+                  disabled={busy}
+                />
+              ) : question.votingEnabled ? null : (
+                <AgendaChip tone="outline">No vote</AgendaChip>
+              );
 
               return (
                 <AgendaStep
@@ -202,8 +253,15 @@ export function AgendaPanel({
                         }
                       : undefined
                   }
-                  status={statusChip(question.status, votingPhase)}
-                  extraChips={lookingBack ? <ViewingChip /> : null}
+                  status={statusChip(question, votingPhase)}
+                  extraChips={
+                    lookingBack || voteControl ? (
+                      <>
+                        {lookingBack ? <ViewingChip /> : null}
+                        {voteControl}
+                      </>
+                    ) : null
+                  }
                 >
                   {boardLock && isFocused && question.status === 'discussion' ? (
                     <div className="mt-2 flex flex-col">
@@ -230,7 +288,7 @@ export function AgendaPanel({
                             }
                             className="w-full rounded-full bg-rt-secondary px-3 py-1.5 text-[11.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60"
                           >
-                            {busy ? 'Working…' : next.label}
+                            {phaseBusy ? 'Working…' : next.label}
                           </button>
                           {openVotingBlocked ? (
                             <p className="text-[10.5px] leading-snug text-rt-ink-faint">
@@ -305,7 +363,7 @@ export function AgendaPanel({
           <label className="sr-only" htmlFor="agenda-new-question">
             New question
           </label>
-          <div className="flex gap-1.5">
+          <div className="flex items-center gap-1.5">
             <input
               autoComplete="off"
               id="agenda-new-question"
@@ -315,6 +373,13 @@ export function AgendaPanel({
               maxLength={SESSION_QUESTION_TEXT_MAX}
               disabled={adding}
               className="min-h-8 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-white px-3 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:border-rt-secondary focus-visible:ring-2 focus-visible:ring-rt-secondary/40 disabled:opacity-60"
+            />
+            <VoteToggle
+              size="sm"
+              votingEnabled={draftVoting}
+              onChange={setDraftVoting}
+              label="Vote on the new question"
+              disabled={adding}
             />
             <button
               type="submit"

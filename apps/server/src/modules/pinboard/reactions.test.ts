@@ -53,7 +53,15 @@ const AUTHOR = { id: 'u1', sessionId: 's1' };
 const OTHER = { id: 'u2', sessionId: 's1' };
 
 function questionRef(status: QuestionStatus = 'discussion', sessionId = 's1') {
-  return { id: 'q1', sessionId, text: 'Q', position: 0, status, boardLocked: false };
+  return {
+    id: 'q1',
+    sessionId,
+    text: 'Q',
+    position: 0,
+    status,
+    boardLocked: false,
+    votingEnabled: true,
+  };
 }
 
 function row(overrides: Record<string, unknown> = {}) {

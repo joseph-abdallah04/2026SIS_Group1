@@ -4,6 +4,8 @@
 // model itself. Everything between them is the code that ships, which is what makes this
 // the test that proves the docs/06 acceptance criteria ("reply appears incrementally",
 // "stream always ends with done, even on error", "keys never come back out").
+import { APICallError } from '@ai-sdk/provider';
+import { assistantErrorMessage } from '@roundtable/shared';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -50,13 +52,7 @@ vi.mock('../../db.js', () => ({
         const had = configs.delete(where.userId);
         return { count: had ? 1 : 0 };
       },
-      update: async ({
-        where,
-        data,
-      }: {
-        where: { userId: string };
-        data: Partial<ConfigRow>;
-      }) => {
+      update: async ({ where, data }: { where: { userId: string }; data: Partial<ConfigRow> }) => {
         const existing = configs.get(where.userId);
         if (!existing) throw new Error('not found');
         const row = { ...existing, ...data };
@@ -105,6 +101,8 @@ vi.mock('../voting/index.js', () => ({
 // error translation) stays real.
 const script: ScriptedTurn[][] = [];
 let lastModel: ReturnType<typeof scriptedModel> | undefined;
+/** Set to make the next "Test connection" fail the way a provider would. */
+let probeFailure: unknown;
 
 vi.mock('./provider.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./provider.js')>();
@@ -114,7 +112,10 @@ vi.mock('./provider.js', async (importOriginal) => {
       lastModel = scriptedModel(script.shift() ?? [{ text: 'ok' }]);
       return lastModel;
     },
-    probeCredentials: async () => ({ latencyMs: 12, model: 'test-model' }),
+    probeCredentials: async () => {
+      if (probeFailure !== undefined) throw probeFailure;
+      return { latencyMs: 12, model: 'test-model' };
+    },
   };
 });
 
@@ -181,9 +182,9 @@ function sessionWithQuestions(overrides: Record<string, unknown> = {}) {
     id: 's1',
     title: 'Pick a database',
     questions: [
-      { id: 'q0', text: 'What slowed us down?', position: 0, status: 'answered' },
-      { id: 'q1', text: 'Which database?', position: 1, status: 'discussion' },
-      { id: 'q2', text: 'Who owns the migration?', position: 2, status: 'pending' },
+      { id: 'q0', text: 'What slowed us down?', position: 0, status: 'answered', votingEnabled: true },
+      { id: 'q1', text: 'Which database?', position: 1, status: 'discussion', votingEnabled: true },
+      { id: 'q2', text: 'Who owns the migration?', position: 2, status: 'pending', votingEnabled: true },
     ],
     ...overrides,
   };
@@ -349,8 +350,36 @@ describe('llm-config endpoints (F33)', () => {
       body: JSON.stringify({ baseUrl: CONFIG.baseUrl, model: CONFIG.model }),
     });
     expect(response.status).toBe(400);
-    expect((await response.json()).code).toBe('LLM_KEY_REQUIRED');
+    const body = await response.json();
+    expect(body.code).toBe('LLM_KEY_REQUIRED');
+    expect(body.error).toBe(assistantErrorMessage('LLM_KEY_REQUIRED'));
     expect(configs.size).toBe(0);
+  });
+
+  it('names a failed connection test with a code and the provider’s own words', async () => {
+    probeFailure = new APICallError({
+      message: 'Invalid API Key',
+      url: 'https://api.groq.com/openai/v1/chat/completions',
+      requestBodyValues: {},
+      statusCode: 401,
+      responseBody: JSON.stringify({ error: { message: 'Invalid API Key' } }),
+    });
+    try {
+      const response = await fetch(`${base}/api/me/llm-config/test`, {
+        method: 'POST',
+        headers: authed(),
+        body: JSON.stringify(CONFIG),
+      });
+
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: assistantErrorMessage('LLM_AUTH_FAILED'),
+        code: 'LLM_AUTH_FAILED',
+        detail: 'HTTP 401 — Invalid API Key',
+      });
+    } finally {
+      probeFailure = undefined;
+    }
   });
 
   it('tests a new model against the stored key', async () => {
@@ -449,7 +478,34 @@ describe('chat stream (F35/F36)', () => {
     const frames = await readStream(await chat({ message: 'hi' }));
     expect(frames.map((f) => f.type)).toEqual(['error', 'done']);
     expect(frames[0]?.code).toBe('LLM_NOT_CONFIGURED');
+    // The standard sentence says it all; there is nothing more specific to show.
+    expect(frames[0]).not.toHaveProperty('detail');
     expect(frames.at(-1)).toMatchObject({ type: 'done', reason: 'error' });
+  });
+
+  it('turns a provider refusal into a coded frame, with the provider’s words as the detail', async () => {
+    const said =
+      "'messages.2' : for 'role:assistant' the following must be satisfied[('messages.2' : property 'reasoning_content' is unsupported)]";
+    script.push([
+      {
+        error: new APICallError({
+          message: said,
+          url: 'https://api.groq.com/openai/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 400,
+          responseBody: JSON.stringify({ error: { message: said } }),
+        }),
+      },
+    ]);
+
+    const frames = await readStream(await chat({ message: 'Make a diagram' }));
+
+    expect(frames.map((f) => f.type)).toEqual(['error', 'done']);
+    expect(frames[0]).toMatchObject({
+      code: 'LLM_REQUEST_REJECTED',
+      message: assistantErrorMessage('LLM_REQUEST_REJECTED'),
+      detail: `HTTP 400 — ${said}`,
+    });
   });
 
   it('rejects an empty message as a plain 400, before the stream opens', async () => {
@@ -547,15 +603,17 @@ describe('prompt context is server-authoritative (F35)', () => {
     getSessionWithQuestions.mockResolvedValue(
       sessionWithQuestions({
         questions: [
-          { id: 'q0', text: 'What slowed us down?', position: 0, status: 'skipped' },
-          { id: 'q1', text: 'Which database?', position: 1, status: 'discussion' },
+          { id: 'q0', text: 'What slowed us down?', position: 0, status: 'skipped', votingEnabled: true },
+          { id: 'q1', text: 'Which database?', position: 1, status: 'discussion', votingEnabled: true },
         ],
       }),
     );
 
     await readStream(await chat({ message: 'Where are we up to?' }));
 
-    expect(instructionsSent()).toContain('1. [skipped] <untrusted>What slowed us down?</untrusted>');
+    expect(instructionsSent()).toContain(
+      '1. [skipped] <untrusted>What slowed us down?</untrusted>',
+    );
   });
 
   // The board's contents left the prompt when they grew too expensive to send every turn.
@@ -592,9 +650,7 @@ describe('prompt context is server-authoritative (F35)', () => {
 
     const frames = await readStream(await chat({ message: 'hello' }));
     expect(frames.at(-1)).toMatchObject({ type: 'done', reason: 'complete' });
-    expect(instructionsSent()).toContain(
-      '2. [discussion] <untrusted>Which database?</untrusted>',
-    );
+    expect(instructionsSent()).toContain('2. [discussion] <untrusted>Which database?</untrusted>');
   });
 
   it('falls back to admitting it knows nothing only when nothing at all can be read', async () => {

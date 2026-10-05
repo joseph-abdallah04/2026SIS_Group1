@@ -1,41 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BoardItem } from '@roundtable/shared';
+import type { BoardItem, CardRect } from '@roundtable/shared';
 
-import { cardWidth } from './cardMetrics';
-import { BOARD_SIZE } from './pinboardTokens';
+import { cardSize } from '../tools/proposalPlacement';
+import { clampGroupDelta } from './boardSelection';
 
 /** Below this many pixels a pointer gesture is a click, not a drag. */
 const DRAG_THRESHOLD_PX = 3;
-
-/** Roughly a card's height; enough to keep one wholly on the sheet. */
-const CARD_FOOTPRINT_H = 260;
 
 interface Point {
   x: number;
   y: number;
 }
 
-/** Keeps a value on the sheet: never negative, never past the far edge. */
-function clamp(value: number, max: number): number {
-  return Math.round(Math.min(Math.max(value, 0), Math.max(0, max)));
+/** One card being carried, with where it started and how much board it covers. */
+interface Carried {
+  id: string;
+  /** Measured at grab time: a sticky's size depends on what it says. */
+  rect: CardRect;
 }
 
 interface Gesture {
+  /** The card under the pointer. */
   proposalId: string;
-  type: BoardItem['type'];
-  /** Measured at grab time: a sticky's width depends on what it says. */
-  width: number;
+  /** Every card moving together: just the one, or the whole selection. */
+  carried: Carried[];
   pointerId: number;
   /** Where the pointer went down, in screen pixels. */
   fromPointer: Point;
-  /** Where the card was, in board coordinates. */
-  fromCard: Point;
   /**
-   * Latest dragged position, mirrored out of React state. Pointer moves are
-   * batched, so on release the rendered `dragging` value can still be one frame
-   * behind — committing from a ref means the card is saved where it was let go.
+   * Latest offset from where the cards started, mirrored out of React state.
+   * Pointer moves are batched, so on release the rendered value can still be
+   * one frame behind — committing from a ref means the cards are saved where
+   * they were let go.
    */
-  at: Point;
+  delta: Point;
   moved: boolean;
 }
 
@@ -43,29 +41,37 @@ interface UseProposalDragArgs {
   items: readonly BoardItem[];
   /** Board-to-screen factor, so a pointer delta converts to board units. */
   scale: number;
-  /** Persist the final position. Rejecting puts the card back where it was. */
+  /** Persist one card's final position. Rejecting puts that card back where it was. */
   onCommit: (proposalId: string, position: Point) => Promise<void>;
   onError: (message: string) => void;
+  /** A press that never became a drag. */
+  onTap?: (item: BoardItem) => void;
 }
 
 /**
- * Drag-to-reposition for F16.
+ * Drag-to-reposition for F16, one card or a selection of them.
  *
  * Two deliberate choices:
  *
  * 1. Nothing is sent while the pointer is moving. docs/02 §4 allows a live
  *    broadcast of every move with a throttled write behind it, but that needs
  *    an ephemeral "someone is dragging" event the room can render, a separate
- *    channel from the persisted fact and not what F16 asks for. One write on
- *    release keeps the board authoritative and the socket quiet.
+ *    channel from the persisted fact and not what F16 asks for. One write per
+ *    card on release keeps the board authoritative and the socket quiet.
  *
- * 2. The dragged position is held locally until the server's own broadcast
- *    carries it back. Clearing it on ack instead would snap the card to its old
- *    place for the round trip, then jump again when the broadcast landed.
+ * 2. The dragged positions are held locally until the server's own broadcast
+ *    carries them back. Clearing them on ack instead would snap the cards to
+ *    their old places for the round trip, then jump again when the broadcast
+ *    landed.
+ *
+ * A group moves as one: the offset is the same for every card, and it stops
+ * at the sheet's edge for all of them, so the arrangement survives the move.
+ * Each card is still its own write, checked by the server on its own, so a
+ * card the server refuses goes back without taking the others with it.
  */
-export function useProposalDrag({ items, scale, onCommit, onError }: UseProposalDragArgs) {
+export function useProposalDrag({ items, scale, onCommit, onError, onTap }: UseProposalDragArgs) {
   const gesture = useRef<Gesture | null>(null);
-  const [dragging, setDragging] = useState<{ proposalId: string; at: Point } | null>(null);
+  const [dragging, setDragging] = useState<ReadonlyMap<string, Point> | null>(null);
   const [pending, setPending] = useState<ReadonlyMap<string, Point>>(() => new Map());
 
   // Release a held position once the board agrees with it, or once the card is
@@ -85,15 +91,17 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
 
   /** Where a card should render: mid-drag, held after a drag, or as stored. */
   const positionOf = useCallback(
-    (item: BoardItem): Point => {
-      if (dragging?.proposalId === item.id) return dragging.at;
-      return pending.get(item.id) ?? { x: item.x, y: item.y };
-    },
+    (item: BoardItem): Point =>
+      dragging?.get(item.id) ?? pending.get(item.id) ?? { x: item.x, y: item.y },
     [dragging, pending],
   );
 
+  /**
+   * Starts carrying `item`, and with it every card in `group` — the selection
+   * it belongs to, or nothing more than itself.
+   */
   const onPointerDown = useCallback(
-    (item: BoardItem, event: React.PointerEvent<HTMLElement>) => {
+    (item: BoardItem, event: React.PointerEvent<HTMLElement>, group?: readonly BoardItem[]) => {
       // Left button / touch / pen only, and never from a control inside the card.
       if (event.button !== 0) return;
       if ((event.target as HTMLElement).closest('button, textarea, a, input')) return;
@@ -104,15 +112,16 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
       // write ever attempted.
       event.preventDefault();
 
-      const from = positionOf(item);
+      const cards = group && group.some((member) => member.id === item.id) ? group : [item];
       gesture.current = {
         proposalId: item.id,
-        type: item.type,
-        width: cardWidth(item),
+        carried: cards.map((card) => ({
+          id: card.id,
+          rect: { ...positionOf(card), ...cardSize(card) },
+        })),
         pointerId: event.pointerId,
         fromPointer: { x: event.clientX, y: event.clientY },
-        fromCard: from,
-        at: from,
+        delta: { x: 0, y: 0 },
         moved: false,
       };
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -125,26 +134,33 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
       const active = gesture.current;
       if (!active || active.pointerId !== event.pointerId) return;
 
-      const dx = event.clientX - active.fromPointer.x;
-      const dy = event.clientY - active.fromPointer.y;
-      if (!active.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      const px = event.clientX - active.fromPointer.x;
+      const py = event.clientY - active.fromPointer.y;
+      if (!active.moved && Math.hypot(px, py) < DRAG_THRESHOLD_PX) return;
       active.moved = true;
 
-      // Screen pixels divided by the zoom factor: at 60% the card must follow
+      // Screen pixels divided by the zoom factor: at 60% the cards must follow
       // the pointer, which means moving further in board units than on screen.
       // Kept wholly on the sheet, so a card can never be dragged off the board
       // to somewhere nobody can pan to.
       //
       // Written to the ref as well as to state, and the ref is what gets saved:
       // pointer moves are batched, so on release the rendered value can still
-      // be a frame behind. Updating only `setDragging` here would leave the ref
-      // holding the position the drag *started* at, and every move would
-      // faithfully save the card back to where it already was.
-      active.at = {
-        x: clamp(active.fromCard.x + dx / scale, BOARD_SIZE.width - active.width),
-        y: clamp(active.fromCard.y + dy / scale, BOARD_SIZE.height - CARD_FOOTPRINT_H),
-      };
-      setDragging({ proposalId: active.proposalId, at: active.at });
+      // be a frame behind.
+      const allowed = clampGroupDelta(
+        active.carried.map((card) => card.rect),
+        px / scale,
+        py / scale,
+      );
+      active.delta = { x: Math.round(allowed.dx), y: Math.round(allowed.dy) };
+      setDragging(
+        new Map(
+          active.carried.map((card) => [
+            card.id,
+            { x: card.rect.x + active.delta.x, y: card.rect.y + active.delta.y },
+          ]),
+        ),
+      );
     },
     [scale],
   );
@@ -159,29 +175,48 @@ export function useProposalDrag({ items, scale, onCommit, onError }: UseProposal
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
 
-      const landed = active.at;
       setDragging(null);
-      if (!active.moved) return;
+      if (!active.moved) {
+        const item = items.find((candidate) => candidate.id === active.proposalId);
+        if (item && event.type === 'pointerup') onTap?.(item);
+        return;
+      }
       // Picked up and put back down: nothing to tell the room about.
-      if (landed.x === active.fromCard.x && landed.y === active.fromCard.y) return;
+      if (active.delta.x === 0 && active.delta.y === 0) return;
 
-      setPending((prev) => new Map(prev).set(active.proposalId, landed));
-      void onCommit(active.proposalId, landed).catch((err: unknown) => {
-        // The server refused the move, so the card belongs where it was.
-        setPending((prev) => {
-          const next = new Map(prev);
-          next.delete(active.proposalId);
-          return next;
-        });
-        onError(err instanceof Error ? err.message : 'Could not move that proposal');
+      const landed = active.carried.map((card) => ({
+        id: card.id,
+        at: { x: card.rect.x + active.delta.x, y: card.rect.y + active.delta.y },
+      }));
+      setPending((prev) => {
+        const next = new Map(prev);
+        for (const { id, at } of landed) next.set(id, at);
+        return next;
       });
+
+      // One notice for the whole group, however many of its moves were refused.
+      let reported = false;
+      for (const { id, at } of landed) {
+        void onCommit(id, at).catch((err: unknown) => {
+          // The server refused this move, so this card belongs where it was.
+          setPending((prev) => {
+            const next = new Map(prev);
+            next.delete(id);
+            return next;
+          });
+          if (reported) return;
+          reported = true;
+          onError(err instanceof Error ? err.message : 'Could not move that proposal');
+        });
+      }
     },
-    [onCommit, onError],
+    [items, onCommit, onError, onTap],
   );
 
   return {
     positionOf,
-    draggingId: dragging?.proposalId ?? null,
+    /** Whether this card is being carried right now. */
+    isDragging: (id: string) => dragging?.has(id) ?? false,
     dragHandlers: {
       onPointerDown,
       onPointerMove,

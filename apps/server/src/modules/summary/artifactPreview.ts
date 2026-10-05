@@ -48,7 +48,11 @@ const STICKY_PAPER: Record<string, string> = {
   green: '#EEF4F0',
 };
 
-export type FeaturedKind = 'winner' | 'tied';
+/**
+ * How a card is framed: the gold winner ring, the tie ring, or — for a
+ * brainstorm question's ideas (F41), where nothing won — a plain card border.
+ */
+export type FeaturedKind = 'winner' | 'tied' | 'idea';
 
 export interface ProposalPreviewPng {
   png: Buffer;
@@ -57,6 +61,7 @@ export interface ProposalPreviewPng {
 }
 
 function ring(kind: FeaturedKind): string {
+  if (kind === 'idea') return CARD_BORDER;
   return kind === 'winner' ? WINNER_RING : TIED_RING;
 }
 

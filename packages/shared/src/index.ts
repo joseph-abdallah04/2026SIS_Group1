@@ -70,6 +70,9 @@ export interface Question {
   text: string;
   position: number;
   status: QuestionStatus;
+  // F41: false = brainstorm-only. It runs discussion -> answered and never
+  // enters `voting`, so nobody is asked to vote on it.
+  votingEnabled: boolean;
   createdAt: Date;
 }
 
@@ -246,6 +249,11 @@ export interface AuthoredProposalGroup {
   questionText: string;
   questionPosition: number;
   questionStatus: QuestionStatus;
+  /**
+   * Whether the question has a vote. False for a brainstorm-only question
+   * (F41), whose finished state reads "Discussed" rather than "Answered".
+   */
+  votingEnabled: boolean;
   /**
    * This is the question the board is showing. Proposals here are already on
    * the current board, so they are listed for context but cannot be reused
@@ -467,12 +475,17 @@ export interface SessionRecapParticipant {
   isLeader: boolean;
 }
 
-/** One agenda item plus its shortlist and, if a vote closed, the anonymous result. */
+/**
+ * One agenda item plus its shortlist and, if a vote closed, the anonymous
+ * result. A brainstorm-only question (F41) has no vote, so `proposals` is
+ * every idea on its board instead and the vote fields stay empty.
+ */
 export interface SessionRecapQuestion {
   id: string;
   position: number;
   text: string;
   status: QuestionStatus;
+  votingEnabled: boolean;
   proposals: BoardItem[];
   winnerProposalId: string | null;
   tiedProposalIds: string[];
@@ -502,9 +515,18 @@ export interface SessionRecap {
 /**
  * Past-tense label for the recap (screen and PDF). A question left in
  * `voting` with a shortlist or result still reads as answered once the
- * session is over.
+ * session is over. A brainstorm question (F41) reads as discussed rather
+ * than answered — nobody chose an answer — and so does one the session ended
+ * on mid-discussion: it had no vote to reach, and the archive's agenda counts
+ * it as done for the same reason.
  */
 export function recapQuestionStatusLabel(question: SessionRecapQuestion): string {
+  if (!question.votingEnabled) {
+    if (question.status === 'answered' || question.status === 'discussion') {
+      return 'Discussed';
+    }
+    return question.status === 'skipped' ? 'Skipped' : 'Not reached';
+  }
   if (
     question.status === 'voting' &&
     (question.winnerProposalId ||

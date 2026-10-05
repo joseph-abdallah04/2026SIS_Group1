@@ -4,8 +4,10 @@
 // need to POST the message plus session context. So it is `fetch` + a manual read of the
 // SSE frames off the response body — same protocol, more control.
 import {
+  assistantErrorMessage,
   isAssistantStreamEvent,
   type AssistantContext,
+  type AssistantErrorCode,
   type AssistantHistoryMessage,
   type AssistantStreamEvent,
   type LlmConfigUpsert,
@@ -73,7 +75,7 @@ export async function streamAssistantChat(options: StreamAssistantChatOptions): 
       onEvent({ type: 'done', reason: 'aborted' });
       return;
     }
-    onEvent({ type: 'error', message: describe(cause, 'Could not reach the server.') });
+    onEvent(clientError('NETWORK_ERROR', describe(cause)));
     onEvent({ type: 'done', reason: 'error' });
     return;
   }
@@ -83,26 +85,39 @@ export async function streamAssistantChat(options: StreamAssistantChatOptions): 
     const body = (await response.json().catch(() => null)) as {
       error?: string;
       code?: string;
+      details?: unknown;
     } | null;
-    onEvent({
-      type: 'error',
-      message: body?.error ?? `Request failed (${response.status})`,
-      ...(body?.code ? { code: body.code } : {}),
-    });
+    if (body?.code) {
+      onEvent({
+        type: 'error',
+        message: body.error ?? assistantErrorMessage('REQUEST_FAILED'),
+        code: body.code,
+        ...(typeof body.details === 'string' ? { detail: body.details } : {}),
+      });
+    } else {
+      // No JSON from our own server: something in between answered. A gateway error from
+      // the dev proxy means the API server is not running, which is a reach problem.
+      const gateway = response.status === 502 || response.status === 503 || response.status === 504;
+      onEvent(clientError(gateway ? 'NETWORK_ERROR' : 'REQUEST_FAILED', `HTTP ${response.status}`));
+    }
     onEvent({ type: 'done', reason: 'error' });
     return;
   }
 
   if (!response.body) {
-    onEvent({ type: 'error', message: 'The server returned an empty stream.' });
+    onEvent(clientError('STREAM_EMPTY'));
     onEvent({ type: 'done', reason: 'error' });
     return;
   }
 
+  // Every stream the server writes ends with `done`, errors included. One that stops short
+  // was cut off — in development, typically the server restarting on a file save.
+  let finished = false;
   try {
     for await (const payload of readSseFrames(response.body)) {
       const parsed = safeParse(payload);
       if (parsed && isAssistantStreamEvent(parsed)) {
+        if (parsed.type === 'done') finished = true;
         onEvent(parsed);
         // A tool-running frame often shares a TCP chunk with the artifacts that
         // follow it. Yielding a frame lets the status line paint before those
@@ -115,9 +130,28 @@ export async function streamAssistantChat(options: StreamAssistantChatOptions): 
       onEvent({ type: 'done', reason: 'aborted' });
       return;
     }
-    onEvent({ type: 'error', message: describe(cause, 'The connection dropped mid-answer.') });
+    onEvent(clientError('STREAM_INTERRUPTED', describe(cause)));
+    onEvent({ type: 'done', reason: 'error' });
+    return;
+  }
+
+  if (!finished && !signal.aborted) {
+    onEvent(clientError('STREAM_INTERRUPTED', 'The stream ended without its closing frame.'));
     onEvent({ type: 'done', reason: 'error' });
   }
+}
+
+/** An error frame for failures the server never got to describe. */
+function clientError(
+  code: AssistantErrorCode,
+  detail?: string,
+): Extract<AssistantStreamEvent, { type: 'error' }> {
+  return {
+    type: 'error',
+    message: assistantErrorMessage(code),
+    code,
+    ...(detail ? { detail } : {}),
+  };
 }
 
 /** Yields the payload of each `data:` frame. Frames can straddle chunk boundaries. */
@@ -154,8 +188,8 @@ function safeParse(payload: string): unknown {
   }
 }
 
-function describe(cause: unknown, fallback: string): string {
-  return cause instanceof Error && cause.message ? cause.message : fallback;
+function describe(cause: unknown): string | undefined {
+  return cause instanceof Error && cause.message ? cause.message : undefined;
 }
 
 function yieldForPaint(): Promise<void> {

@@ -13,6 +13,8 @@ const INK = '#080c15';
 const MUTED = '#5a5f68';
 const GOLD = '#e0a33c';
 const MARGIN = 56;
+/** Space between the two columns of a brainstorm's idea grid, and between its rows. */
+const IDEA_GAP = 14;
 
 function formatWhen(iso: string | null): string | null {
   if (!iso) return null;
@@ -92,6 +94,57 @@ export function recapPdfFilename(title: string): string {
   return `${slug.length > 0 ? slug : 'session'}-recap.pdf`;
 }
 
+function ideaCount(count: number): string {
+  return count === 1 ? '1 idea' : `${count} ideas`;
+}
+
+/**
+ * F41: a brainstorm question's ideas, two to a row at half width. Every idea
+ * is shown — there is no winner to feature — so full-width cards would turn
+ * one busy board into pages of PDF. Each card already carries its author.
+ */
+function writeIdeaGrid(doc: PDFKit.PDFDocument, ideas: BoardItem[], width: number) {
+  const cellW = (width - IDEA_GAP) / 2;
+  const pageInner = doc.page.height - MARGIN * 2;
+
+  for (let start = 0; start < ideas.length; start += 2) {
+    const row = ideas.slice(start, start + 2).map((item) => {
+      try {
+        const preview = rasterizeProposalPreview(item, 'idea');
+        let displayW = cellW;
+        let displayH = displayW * (preview.height / preview.width);
+        if (displayH > pageInner) {
+          displayH = pageInner;
+          displayW = displayH * (preview.width / preview.height);
+        }
+        return { item, preview, displayW, displayH };
+      } catch {
+        return { item, preview: null, displayW: cellW, displayH: 16 };
+      }
+    });
+
+    const rowH = Math.max(...row.map((cell) => cell.displayH));
+    if (doc.y + rowH > doc.page.height - MARGIN) {
+      doc.addPage();
+    }
+    const top = doc.y;
+    row.forEach((cell, column) => {
+      const x = MARGIN + column * (cellW + IDEA_GAP);
+      if (cell.preview) {
+        doc.image(cell.preview.png, x, top, { width: cell.displayW, height: cell.displayH });
+      } else {
+        doc
+          .fillColor(MUTED)
+          .font('Helvetica')
+          .fontSize(10)
+          .text(`By ${cell.item.authorName}`, x, top, { width: cellW });
+      }
+    });
+    doc.x = MARGIN;
+    doc.y = top + rowH + IDEA_GAP;
+  }
+}
+
 function writeQuestion(
   doc: PDFKit.PDFDocument,
   question: SessionRecapQuestion,
@@ -109,6 +162,23 @@ function writeQuestion(
     .font('Helvetica')
     .fontSize(9)
     .text(recapQuestionStatusLabel(question), { width });
+
+  if (!question.votingEnabled) {
+    const ideas = question.proposals;
+    const discussed = question.status === 'answered' || question.status === 'discussion';
+    if (ideas.length > 0) {
+      doc.text(ideaCount(ideas.length), { width });
+    }
+    doc.moveDown(0.45);
+    if (ideas.length === 0) {
+      if (discussed) doc.text('No ideas were added.', { width });
+      doc.moveDown(0.8);
+      return;
+    }
+    writeIdeaGrid(doc, ideas, width);
+    doc.moveDown(0.4);
+    return;
+  }
 
   if (question.votedCount > 0) {
     const votes =

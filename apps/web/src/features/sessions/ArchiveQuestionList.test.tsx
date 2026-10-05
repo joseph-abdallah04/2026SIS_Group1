@@ -5,13 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ArchiveQuestionList } from './ArchiveQuestionList';
 
-function question(position: number, status: QuestionStatus): Question {
+function question(position: number, status: QuestionStatus, votingEnabled = true): Question {
   return {
     id: `q${position + 1}`,
     sessionId: 's1',
     text: `Question ${position + 1}`,
     position,
     status,
+    votingEnabled,
     createdAt: new Date(0),
   };
 }
@@ -39,6 +40,26 @@ describe('ArchiveQuestionList', () => {
     expect(screen.getByRole('progressbar', { name: 'Agenda progress' })).toHaveAttribute(
       'aria-valuetext',
       '2 of 4 questions done, including 1 skipped',
+    );
+  });
+
+  // F41: never put to a vote, so neither "Answered" nor "Not voted on" fits.
+  it('says a brainstorm-only question was discussed, finished or not', () => {
+    render(
+      <ArchiveQuestionList
+        questions={[question(0, 'answered', false), question(1, 'discussion', false)]}
+        activeQuestionId="q1"
+        onSelect={() => undefined}
+      />,
+    );
+
+    expect(screen.getAllByText('Discussed')).toHaveLength(2);
+    expect(screen.queryByText('Answered')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not voted on')).not.toBeInTheDocument();
+    // The node and the progress count agree with the chip: both are done.
+    expect(screen.getByRole('progressbar', { name: 'Agenda progress' })).toHaveAttribute(
+      'aria-valuetext',
+      '2 of 2 questions done',
     );
   });
 

@@ -14,13 +14,13 @@ export function useAddSessionQuestion(sessionId: string) {
   const [error, setError] = useState<string | null>(null);
 
   const addQuestion = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, votingEnabled = true): Promise<boolean> => {
       const trimmed = text.trim();
       if (!trimmed) return false;
       setBusy(true);
       setError(null);
       try {
-        await api.post(`/api/sessions/${sessionId}/questions`, { text: trimmed });
+        await api.post(`/api/sessions/${sessionId}/questions`, { text: trimmed, votingEnabled });
         return true;
       } catch (err) {
         setError(err instanceof ApiClientError ? err.message : 'Failed to add the question');

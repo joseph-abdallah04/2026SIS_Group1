@@ -4,9 +4,13 @@ import type { Question, QuestionStatus, VotingPhase } from '@roundtable/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn();
+const patch = vi.fn();
 
 vi.mock('../../lib/api', () => ({
-  api: { post: (...args: unknown[]) => post(...args) },
+  api: {
+    post: (...args: unknown[]) => post(...args),
+    patch: (...args: unknown[]) => patch(...args),
+  },
   ApiClientError: class ApiClientError extends Error {
     constructor(
       public status: number,
@@ -21,13 +25,14 @@ vi.mock('../../lib/api', () => ({
 const { AgendaPanel } = await import('./AgendaPanel');
 const { ApiClientError } = await import('../../lib/api');
 
-function question(position: number, status: QuestionStatus): Question {
+function question(position: number, status: QuestionStatus, votingEnabled = true): Question {
   return {
     id: `q${position + 1}`,
     sessionId: 's1',
     text: `Question ${position + 1}`,
     position,
     status,
+    votingEnabled,
     createdAt: '2026-09-04T00:00:00.000Z' as unknown as Question['createdAt'],
   };
 }
@@ -63,6 +68,7 @@ function renderPanel({
 beforeEach(() => {
   vi.clearAllMocks();
   post.mockResolvedValue({});
+  patch.mockResolvedValue({});
 });
 
 describe('AgendaPanel (F24)', () => {
@@ -426,6 +432,7 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
         text: 'What did we miss?',
+        votingEnabled: true,
       }),
     );
     expect(screen.queryByDisplayValue('What did we miss?')).not.toBeInTheDocument();
@@ -513,5 +520,142 @@ describe('AgendaPanel board lock', () => {
     expect(
       await screen.findByText('Only the session leader can lock the board'),
     ).toBeInTheDocument();
+  });
+});
+
+describe('AgendaPanel brainstorm-only questions (F41)', () => {
+  it('offers Finish discussion instead of Open voting, and answers the question', async () => {
+    renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
+
+    expect(screen.queryByRole('button', { name: 'Open voting' })).not.toBeInTheDocument();
+    expect(screen.getByText('Brainstorming')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Finish discussion' }));
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
+      questionId: 'q1',
+      status: 'answered',
+    });
+  });
+
+  it('does not hold Finish discussion back for an empty board — there is no shortlist to fill', () => {
+    renderPanel({
+      questions: [question(0, 'discussion', false)],
+      activeQuestionId: 'q1',
+      hasProposals: false,
+    });
+
+    expect(screen.getByRole('button', { name: 'Finish discussion' })).toBeEnabled();
+  });
+
+  it('labels a finished brainstorm Discussed, not Answered', () => {
+    renderPanel({
+      questions: [question(0, 'answered', false), question(1, 'answered')],
+      activeQuestionId: null,
+    });
+
+    expect(screen.getByText('Discussed')).toBeInTheDocument();
+    expect(screen.getByText('Answered')).toBeInTheDocument();
+  });
+
+  it('lets the leader turn a pending question into a brainstorm', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
+    const toggle = screen.getByRole('button', { name: 'Vote on question 2' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(toggle);
+
+    expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q2', {
+      votingEnabled: false,
+    });
+  });
+
+  it('lets the leader turn the vote back on mid-discussion', async () => {
+    renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
+
+    const toggle = screen.getByRole('button', { name: 'Vote on question 1' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(toggle);
+
+    expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q1', { votingEnabled: true });
+  });
+
+  it.each(['voting', 'answered', 'skipped'] as const)(
+    'offers no vote switch once a question is %s',
+    (status) => {
+      renderPanel({ questions: [question(0, status)], activeQuestionId: 'q1' });
+      expect(screen.queryByRole('button', { name: 'Vote on question 1' })).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows a participant which questions will not be voted on, with no switch', () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending', false)],
+      activeQuestionId: 'q1',
+      isLeader: false,
+    });
+
+    expect(screen.getAllByText('No vote')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /Vote on question/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the server refusing a late switch', async () => {
+    patch.mockRejectedValueOnce(
+      new ApiClientError(
+        409,
+        'Voting has already opened on this question',
+        'QUESTION_VOTING_LOCKED',
+      ),
+    );
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Vote on question 1' }));
+
+    expect(
+      await screen.findByText('Voting has already opened on this question'),
+    ).toBeInTheDocument();
+  });
+
+  // Both decide on the same row, so the leader cannot start one while the
+  // other is still on its way (the server also refuses whichever loses).
+  it('holds Open voting while the vote switch is still being saved', async () => {
+    patch.mockReturnValueOnce(new Promise(() => {}));
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Vote on question 1' }));
+
+    expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
+  });
+
+  it('holds the vote switch while a phase change is still being saved', async () => {
+    post.mockReturnValueOnce(new Promise(() => {}));
+    renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Finish discussion' }));
+
+    expect(screen.getByRole('button', { name: 'Vote on question 1' })).toBeDisabled();
+  });
+
+  it('adds a brainstorm-only question when the leader turns its vote off first', async () => {
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+
+    await userEvent.type(screen.getByLabelText('New question'), 'Any wild ideas?');
+    await userEvent.click(screen.getByRole('button', { name: 'Vote on the new question' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
+        text: 'Any wild ideas?',
+        votingEnabled: false,
+      }),
+    );
+    // Back to the default for the next one.
+    expect(screen.getByRole('button', { name: 'Vote on the new question' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 });

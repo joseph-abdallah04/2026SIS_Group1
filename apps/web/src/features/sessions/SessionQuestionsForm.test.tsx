@@ -34,7 +34,7 @@ describe('SessionQuestionsForm', () => {
     await user.click(submit);
     expect(onSubmit).toHaveBeenCalledWith({
       title: 'Roadmap',
-      questions: ['What ships first?'],
+      questions: [{ text: 'What ships first?', votingEnabled: true }],
       discussionTimerSeconds: null,
       votingTimerSeconds: null,
     });
@@ -60,10 +60,71 @@ describe('SessionQuestionsForm', () => {
 
     expect(onSubmit).toHaveBeenCalledWith({
       title: 'Roadmap',
-      questions: ['What ships first?'],
+      questions: [{ text: 'What ships first?', votingEnabled: true }],
       discussionTimerSeconds: 615,
       votingTimerSeconds: 120,
     });
+  });
+
+  it('sends a question as brainstorm-only when its Vote is turned off (F41)', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderForm(onSubmit);
+
+    await user.type(screen.getByLabelText(/focus \/ title/i), 'Roadmap');
+    await user.type(screen.getByPlaceholderText('Question 1'), 'What ships first?');
+    await user.click(screen.getByRole('button', { name: '+ Add question' }));
+    await user.type(screen.getByPlaceholderText('Question 2'), 'Any wild ideas?');
+
+    const vote2 = screen.getByRole('button', { name: 'Vote on question 2' });
+    expect(vote2).toHaveAttribute('aria-pressed', 'true');
+    await user.click(vote2);
+    expect(vote2).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questions: [
+          { text: 'What ships first?', votingEnabled: true },
+          { text: 'Any wild ideas?', votingEnabled: false },
+        ],
+      }),
+    );
+  });
+
+  it('keeps each question’s vote choice with it when the rows are reordered', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SessionQuestionsForm
+        initialTitle="Roadmap"
+        initialQuestions={[
+          { text: 'Vote on this', votingEnabled: true },
+          { text: 'Just ideas', votingEnabled: false },
+        ]}
+        submitLabel="Save changes"
+        submittingLabel="Saving…"
+        submitting={false}
+        error={null}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Vote on question 2' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await user.click(screen.getAllByRole('button', { name: 'Move question up' })[1]!);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questions: [
+          { text: 'Just ideas', votingEnabled: false },
+          { text: 'Vote on this', votingEnabled: true },
+        ],
+      }),
+    );
   });
 
   it('does not surface a zod min-length message when the form is incomplete', async () => {

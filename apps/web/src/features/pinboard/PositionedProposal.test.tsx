@@ -532,6 +532,27 @@ describe('PositionedProposal actions menu', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
+  // On a Mac, Ctrl+click is a right-click, and the browser asks for a menu
+  // before the press that selects the card. It only selects.
+  it('opens no menu on Ctrl+click of a card that can be selected', () => {
+    renderMenuCard({ isOwn: true, canMove: true, canDelete: true });
+
+    const cancelled = !fireEvent.contextMenu(screen.getByRole('article'), {
+      clientX: 10,
+      clientY: 10,
+      ctrlKey: true,
+    });
+    expect(cancelled).toBe(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('still opens the menu on a plain right-click', () => {
+    renderMenuCard({ isOwn: true, canMove: true, canDelete: true });
+
+    fireEvent.contextMenu(screen.getByRole('article'), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menu')).toBeTruthy();
+  });
+
   it('moves between items with the arrow keys, skipping disabled ones', async () => {
     // The leader's own card, already on top, so Bring to front is greyed out.
     renderMenuCard({

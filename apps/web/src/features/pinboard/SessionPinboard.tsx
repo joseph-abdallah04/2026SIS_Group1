@@ -175,6 +175,11 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
       .join(','),
   ].join('|');
 
+  // F41: read from the agenda, which `questionUpdated` keeps current, rather
+  // than the board snapshot — the leader can flip it while the board is open.
+  const questionVotingEnabled =
+    questions.find((question) => question.id === board.questionId)?.votingEnabled ?? true;
+
   const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
   const balloting = voting.phase === 'open' || voting.phase === 'closed';
   // Server already ordered the shortlist (winner / ties first when closed).
@@ -213,6 +218,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           />
           <PinboardCanvas
             board={board}
+            questionVotingEnabled={questionVotingEnabled}
             isLive={isLive}
             newItemIds={newItemIds}
             isLeader={isLeader}
