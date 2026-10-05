@@ -492,6 +492,9 @@ export function ProposalCard({
                     if (from && Math.hypot(event.clientX - from.x, event.clientY - from.y) > 4) {
                       return;
                     }
+                    // A press with a modifier picks the card out with others on
+                    // the board; it opens nothing.
+                    if (event.shiftKey || event.metaKey || event.ctrlKey) return;
                     setEnlarged(true);
                   }
                 : undefined
