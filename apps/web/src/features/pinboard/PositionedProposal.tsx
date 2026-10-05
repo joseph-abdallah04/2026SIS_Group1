@@ -433,6 +433,13 @@ export function PositionedProposal({
         // anything in the card that takes text of its own, and over a link in a
         // sticky, where opening it in a new tab or copying its address is what
         // a right-click is for.
+        // Ctrl+click picks the card out with others on the board. On a Mac
+        // the browser also treats it as a right-click and asks for a menu
+        // first, which would open this one over the selection being made.
+        if (event.ctrlKey && draggable) {
+          event.preventDefault();
+          return;
+        }
         if (!hasActions) return;
         const target = event.target as HTMLElement;
         if (target.closest('textarea, input, [contenteditable="true"], a[href]')) return;

@@ -35,11 +35,13 @@ function group(
   items: BoardItem[],
   isCurrent = false,
   questionPosition = 0,
+  votingEnabled = true,
 ): AuthoredProposalGroup {
   return {
     questionId,
     questionText,
     questionPosition,
+    votingEnabled,
     questionStatus: isCurrent ? 'discussion' : 'answered',
     isCurrent,
     items,
@@ -204,6 +206,21 @@ describe('my proposals panel with a lot to choose from', () => {
     renderPanel({ groups: [Q1, NOW], currentQuestionId: 'q3' });
 
     expect(screen.getByRole('heading', { level: 3 }).textContent).toContain('Q1 · Answered');
+  });
+
+  // A brainstorm-only question has no answer: it was discussed.
+  it('calls a finished brainstorm question discussed, not answered', () => {
+    const brainstorm = group(
+      'q1',
+      'What could we try?',
+      [sticky('b', 'q1', 'Pairing')],
+      false,
+      0,
+      false,
+    );
+    renderPanel({ groups: [brainstorm, NOW], currentQuestionId: 'q3' });
+
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toContain('Q1 · Discussed');
   });
 
   it('closes from the button in its corner', async () => {

@@ -467,7 +467,7 @@ export function PinboardCanvas({
     onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
       panHandlers.onPointerDown(event);
       // A pan just began, or a card took the press for itself.
-      if (event.defaultPrevented || event.button !== 0 || event.pointerType === 'touch') return;
+      if (event.defaultPrevented || event.button !== 0) return;
       // Drawn whenever the board is live, cards to pick up or not: a box that
       // only sometimes appears reads as the board ignoring the drag. With
       // nothing this viewer may move, it simply selects nothing.
@@ -479,6 +479,8 @@ export function PinboardCanvas({
       const from = toBoard(event.clientX, event.clientY);
       if (!from) return;
       event.preventDefault();
+      // Touch too: a finger dragged across empty board does nothing else, and
+      // without this a phone has no way to pick several cards at all.
       marqueeGesture.current = {
         pointerId: event.pointerId,
         from,
@@ -518,18 +520,24 @@ export function PinboardCanvas({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    const box = marquee;
     setMarquee(null);
     // Called off part-way: back to what was selected before the box.
     if (!apply) {
       setSelected(active.base);
       return;
     }
+    // The box where the pointer let go, worked out from this event rather
+    // than read back from state: pointer moves are batched, so the last box
+    // painted can be a move behind, or not painted at all.
+    const at = toBoard(event.clientX, event.clientY);
+    const box = at ? rectBetween(active.from, at) : null;
     // Barely moved: a press on empty board, which puts the selection down.
     if (!box || (box.width * scale < 3 && box.height * scale < 3)) {
       setSelected(active.additive ? active.base : new Set());
+      return;
     }
-    // Otherwise the box has already selected what it touches as it went.
+    const hits = cardsUnder(box);
+    setSelected(new Set(active.additive ? [...active.base, ...hits] : hits));
   }
 
   /**
@@ -560,6 +568,21 @@ export function PinboardCanvas({
       );
     },
   };
+
+  // What a screen reader hears as the selection changes, cleared included: an
+  // empty region says nothing, so "cleared" has to be said in words.
+  const [selectionAnnouncement, setSelectionAnnouncement] = useState('');
+  const announcedSize = useRef(0);
+  useEffect(() => {
+    const size = selection.size;
+    if (size === announcedSize.current) return;
+    setSelectionAnnouncement(
+      size === 0
+        ? 'Selection cleared'
+        : `${size} ${size === 1 ? 'proposal' : 'proposals'} selected`,
+    );
+    announcedSize.current = size;
+  }, [selection.size]);
 
   // Escape puts the selection down, unless something else wants the key.
   useEffect(() => {
@@ -1249,7 +1272,7 @@ export function PinboardCanvas({
             {/* The outlines say what is selected; this says it to a screen
                 reader, which cannot see them. */}
             <p role="status" className="sr-only">
-              {selection.size > 1 ? `${selection.size} proposals selected` : ''}
+              {selectionAnnouncement}
             </p>
             <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
               {notice ? (

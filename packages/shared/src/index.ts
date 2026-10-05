@@ -248,6 +248,11 @@ export interface AuthoredProposalGroup {
   questionPosition: number;
   questionStatus: QuestionStatus;
   /**
+   * Whether the question has a vote. False for a brainstorm-only question
+   * (F41), whose finished state reads "Discussed" rather than "Answered".
+   */
+  votingEnabled: boolean;
+  /**
    * This is the question the board is showing. Proposals here are already on
    * the current board, so they are listed for context but cannot be reused
    * onto it.

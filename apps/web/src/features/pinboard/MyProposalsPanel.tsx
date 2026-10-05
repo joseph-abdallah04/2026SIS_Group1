@@ -242,7 +242,12 @@ export function MyProposalsPanel({
             <QuestionSection
               key={group.questionId}
               group={group}
-              label={STATUS_LABEL[group.questionStatus]}
+              label={
+                // A brainstorm-only question has no answer, only a discussion.
+                group.questionStatus === 'answered' && !group.votingEnabled
+                  ? 'Discussed'
+                  : STATUS_LABEL[group.questionStatus]
+              }
               reusable={canReuseHere}
               onReuse={onReuse}
             />

@@ -46,7 +46,7 @@ Features are numbered (`F##`) so tickets on the Kanban board can reference them.
 | F18 | Reactions on proposals (emoji-style)                      | One per person per proposal; counts visible to all                                                                                                                                                                                                    |
 | F38 | Reuse your own earlier proposal on a later question       | Copies rather than moves; recorded like an extension (F23)                                                                                                                                                                                            |
 | F40 | Board lock: the leader decides who may move proposals     | Per question, set under it in the agenda; every question starts locked, so only the leader moves proposals. Unlocked, members may also move their own. Positions only: proposing, editing, deleting and reacting are unchanged                        |
-| F41 | Select several proposals and drag them together           | Shift/Ctrl/Cmd-click a card, or drag a box across empty board, to select; dragging any selected card moves them all as one, kept on the board. Only cards you may move can be selected (F40), and each move is checked by the server as its own write |
+| F42 | Select several proposals and drag them together           | Shift/Ctrl/Cmd-click a card, or drag a box across empty board, to select; dragging any selected card moves them all as one, kept on the board. Only cards you may move can be selected (F40), and each move is checked by the server as its own write |
 
 ## 6. Proposal Tools — module: `tools` (UI) + `pinboard` (persistence)
 
