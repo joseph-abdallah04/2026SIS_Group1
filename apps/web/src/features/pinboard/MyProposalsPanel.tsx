@@ -1,7 +1,8 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AuthoredProposalGroup, BoardItem, QuestionStatus } from '@roundtable/shared';
 import { RotateCcw, X } from 'lucide-react';
 
+import { closingFades } from '../../lib/motion';
 import { StickyText } from '../tools/sticky/StickyText';
 import type { StickyContent } from '../tools/sticky/stickyMarks';
 import { hasArtwork, ProposalArtwork } from './ProposalCard';
@@ -285,6 +286,16 @@ function QuestionSection({
   reusable: boolean;
   onReuse?: (item: BoardItem) => void;
 }) {
+  // Long notes opened up to be read in full, each across its own row.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     <section className="mt-1 mb-4 last:mb-0">
       <h3 className="mb-2 flex items-baseline gap-2 text-[12px] leading-snug">
@@ -295,8 +306,13 @@ function QuestionSection({
       </h3>
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3">
         {group.items.map((item) => (
-          <li key={item.id}>
-            <ReuseCard item={item} onReuse={reusable ? onReuse : undefined} />
+          <li key={item.id} className={expanded.has(item.id) ? 'col-span-full' : undefined}>
+            <ReuseCard
+              item={item}
+              onReuse={reusable ? onReuse : undefined}
+              expanded={expanded.has(item.id)}
+              onToggleExpanded={() => toggle(item.id)}
+            />
           </li>
         ))}
       </ul>
@@ -312,24 +328,41 @@ function QuestionSection({
  * Four lines at most. A note longer than that fades out at the foot, into the
  * sticky's own colour, rather than ending in an ellipsis: the fade says there
  * is more without a mark in the text. Measured, so a note that fits is never
- * faded. Reusing it opens the whole note in its editor anyway.
+ * faded. Opened up, it shows the whole note.
  */
-function StickyPreview({ note }: { note: StickyContent }) {
+function StickyPreview({
+  note,
+  expanded,
+  onOverflow,
+}: {
+  note: StickyContent;
+  expanded: boolean;
+  /** Whether the note runs past four lines, for the card to offer to open it. */
+  onOverflow: (overflows: boolean) => void;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
 
+  // Measured only while it is held to four lines: opened up, nothing is cut
+  // off, and the answer from before is still the right one.
   useLayoutEffect(() => {
     const element = box.current;
-    if (element) setOverflows(element.scrollHeight > element.clientHeight + 1);
-  }, [note]);
+    if (!element || expanded) return;
+    const next = element.scrollHeight > element.clientHeight + 1;
+    setOverflows(next);
+    onOverflow(next);
+  }, [expanded, note, onOverflow]);
 
+  const faded = overflows && !expanded;
   const fade = 'linear-gradient(to bottom, black 50%, transparent)';
   return (
     <div
       ref={box}
-      data-overflows={overflows ? 'true' : undefined}
-      className="mt-1.5 max-h-[4.5rem] overflow-hidden text-[13px] leading-snug wrap-break-word text-rt-ink [&>div:first-child]:font-semibold"
-      style={overflows ? { maskImage: fade, WebkitMaskImage: fade } : undefined}
+      data-overflows={faded ? 'true' : undefined}
+      className={`mt-1.5 text-[13px] leading-snug wrap-break-word text-rt-ink [&>div:first-child]:font-semibold ${
+        expanded ? '' : 'max-h-[4.5rem] overflow-hidden'
+      }`}
+      style={faded ? { maskImage: fade, WebkitMaskImage: fade } : undefined}
     >
       {/* Inert: the whole card is already the press. */}
       <StickyText note={note} links="inert" />
@@ -341,10 +374,43 @@ function StickyPreview({ note }: { note: StickyContent }) {
  * One proposal, as it looks on the board. The whole card is the reuse button,
  * with the action spelled out over it on hover and focus; a card that cannot
  * be reused is shown faded and does nothing.
+ *
+ * A sticky too long for its card offers "Show all", which opens it across the
+ * row to be read in full. It is a button of its own beside the card's, never
+ * inside it, so reading a note can never reuse it by accident.
  */
-function ReuseCard({ item, onReuse }: { item: BoardItem; onReuse?: (item: BoardItem) => void }) {
+function ReuseCard({
+  item,
+  onReuse,
+  expanded = false,
+  onToggleExpanded,
+}: {
+  item: BoardItem;
+  onReuse?: (item: BoardItem) => void;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
+}) {
+  const [overflows, setOverflows] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const artifact = item.artifactJson;
   const sticky = artifact.type === 'sticky' ? STICKY_THEMES[artifact.color] : null;
+
+  // Opened to be read, it is brought into view from its top, so the whole note
+  // is there to read without scrolling for it. Closed again, the popup moves
+  // only as far as it must to keep the card in sight. Skipped on the first
+  // render, which is not anybody opening or closing anything.
+  const settled = useRef(false);
+  useEffect(() => {
+    if (!settled.current) {
+      settled.current = true;
+      return;
+    }
+    root.current?.scrollIntoView?.({
+      block: expanded ? 'start' : 'nearest',
+      behavior: closingFades() ? 'smooth' : 'auto',
+    });
+  }, [expanded]);
+  const opens = sticky !== null && onToggleExpanded !== undefined && (overflows || expanded);
   const face = (
     <>
       <span className="text-[10px] font-semibold tracking-[0.1em] text-rt-ink-faint uppercase">
@@ -352,7 +418,7 @@ function ReuseCard({ item, onReuse }: { item: BoardItem; onReuse?: (item: BoardI
       </span>
       {sticky ? (
         artifact.type === 'sticky' ? (
-          <StickyPreview note={artifact} />
+          <StickyPreview note={artifact} expanded={expanded} onOverflow={setOverflows} />
         ) : null
       ) : (
         <div
@@ -368,19 +434,15 @@ function ReuseCard({ item, onReuse }: { item: BoardItem; onReuse?: (item: BoardI
   const surface = sticky
     ? { background: sticky.bg, boxShadow: STICKY_SHADOW }
     : { background: '#FFFFFF' };
-  const shape = `relative flex h-[9.5rem] w-full flex-col p-3 text-left ${
-    sticky ? '' : 'rounded-xl border border-rt-tertiary'
-  }`;
+  const shape = `relative flex w-full flex-col p-3 text-left ${
+    expanded ? 'min-h-[9.5rem]' : 'h-[9.5rem]'
+  } ${sticky ? '' : 'rounded-xl border border-rt-tertiary'}`;
 
-  if (!onReuse) {
-    return (
-      <div className={`${shape} opacity-55`} style={surface}>
-        {face}
-      </div>
-    );
-  }
-
-  return (
+  const card = !onReuse ? (
+    <div className={`${shape} opacity-55`} style={surface}>
+      {face}
+    </div>
+  ) : (
     <button
       type="button"
       onClick={() => onReuse(item)}
@@ -390,10 +452,13 @@ function ReuseCard({ item, onReuse }: { item: BoardItem; onReuse?: (item: BoardI
     >
       {face}
       {/* The action spelled out over the card on hover and focus. The card
-          itself stays put: it does not lift. */}
+          itself stays put: it does not lift. Opened up, it moves to the corner
+          and leaves the note readable rather than covering it. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/55 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        className={`pointer-events-none absolute inset-0 flex opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
+          expanded ? 'items-start justify-end p-2.5' : 'items-center justify-center bg-white/55'
+        }`}
       >
         <span className="inline-flex items-center gap-1.5 rounded-full bg-rt-secondary px-3.5 py-1.5 text-[12px] font-semibold text-rt-ink shadow-sm">
           <RotateCcw size={12} strokeWidth={2.2} />
@@ -401,5 +466,22 @@ function ReuseCard({ item, onReuse }: { item: BoardItem; onReuse?: (item: BoardI
         </span>
       </span>
     </button>
+  );
+
+  return (
+    // Scrolled to from its top with a little room above, clear of the edge.
+    <div ref={root} className="relative scroll-mt-3">
+      {card}
+      {opens ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={onToggleExpanded}
+          className="absolute right-2 bottom-2 z-10 rounded-full px-2 py-1 text-[11px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-ink/8 hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-rt-secondary"
+        >
+          {expanded ? 'Show less' : 'Show all'}
+        </button>
+      ) : null}
+    </div>
   );
 }

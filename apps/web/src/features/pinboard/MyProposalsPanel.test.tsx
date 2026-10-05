@@ -260,6 +260,81 @@ describe('a sticky in the reuse popup', () => {
     client.mockRestore();
   });
 
+  // Read in full without leaving the popup, and without reusing it by mistake.
+  it('opens a long note across its row, and closes it again', async () => {
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
+    const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(72);
+    try {
+      const card = renderNote({ text: 'A long note' } as Partial<BoardItem['artifactJson']>);
+      const showAll = screen.getByRole('button', { name: 'Show all' });
+      expect(showAll).toHaveAttribute('aria-expanded', 'false');
+
+      await userEvent.click(showAll);
+
+      const showLess = screen.getByRole('button', { name: 'Show less' });
+      expect(showLess).toHaveAttribute('aria-expanded', 'true');
+      expect(card.closest('li')).toHaveClass('col-span-full');
+      expect(card.querySelector('[data-overflows]')).toBeNull();
+
+      await userEvent.click(showLess);
+      expect(screen.getByRole('button', { name: 'Show all' })).toBeTruthy();
+      expect(card.closest('li')).not.toHaveClass('col-span-full');
+    } finally {
+      height.mockRestore();
+      client.mockRestore();
+    }
+  });
+
+  // Opened, it is brought into view from its top, so the whole note can be
+  // read without scrolling for it.
+  it('scrolls an opened note into view from its top', async () => {
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
+    const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(72);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      renderNote({ text: 'A long note' } as Partial<BoardItem['artifactJson']>);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show all' }));
+
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
+    } finally {
+      height.mockRestore();
+      client.mockRestore();
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it('never reuses a note from its Show all', async () => {
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
+    const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(72);
+    try {
+      const item = sticky('n', 'q1', 'A long note');
+      const onReuse = vi.fn();
+      render(
+        <MyProposalsPanel
+          groups={[group('q1', 'What slowed us down?', [item]), group('q3', 'Now?', [], true, 2)]}
+          currentQuestionId="q3"
+          canPropose
+          onReuse={onReuse}
+          error={null}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show all' }));
+      expect(onReuse).not.toHaveBeenCalled();
+    } finally {
+      height.mockRestore();
+      client.mockRestore();
+    }
+  });
+
+  it('offers nothing to open on a note that fits', () => {
+    renderNote({ text: 'Short' } as Partial<BoardItem['artifactJson']>);
+    expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull();
+  });
+
   it('leaves a note that fits unfaded', () => {
     const card = renderNote({ text: 'Short' } as Partial<BoardItem['artifactJson']>);
     expect(card.querySelector('[data-overflows]')).toBeNull();
