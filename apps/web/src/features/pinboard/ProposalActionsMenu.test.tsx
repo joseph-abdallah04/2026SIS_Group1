@@ -1,9 +1,13 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Copy, Download, FileCode2, ImageDown, Trash2 } from 'lucide-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ProposalActionsMenu, type ProposalMenuAnchor } from './ProposalActionsMenu';
+import {
+  ProposalActionsMenu,
+  SUBMENU_GRACE_MS,
+  type ProposalMenuAnchor,
+} from './ProposalActionsMenu';
 
 const MENU_WIDTH = 180;
 const MENU_HEIGHT = 120;
@@ -192,16 +196,65 @@ describe('ProposalActionsMenu submenu', () => {
     expect(formats()).toBeNull();
   });
 
-  it('opens on hover without taking the focus, and closes over another row', async () => {
+  it('opens on hover without taking the focus', async () => {
     const { exportRow, formats } = renderWithSubmenu();
     await userEvent.hover(exportRow);
 
     expect(formats()).not.toBeNull();
     expect(exportRow).toHaveAttribute('aria-expanded', 'true');
     expect(within(formats()!).getByRole('menuitem', { name: 'As PNG' })).not.toHaveFocus();
+  });
 
-    await userEvent.hover(screen.getByRole('menuitem', { name: 'Copy text' }));
-    expect(formats()).toBeNull();
+  describe('crossing another row', () => {
+    afterEach(() => vi.useRealTimers());
+
+    // Synchronous pointer events: user-event's own waits and fake timers
+    // would hold each other up.
+    const enter = (element: Element) => fireEvent.mouseEnter(element);
+
+    it('waits a beat before closing, so a diagonal move on the way in does not lose it', () => {
+      vi.useFakeTimers();
+      const { exportRow, formats } = renderWithSubmenu();
+      enter(exportRow);
+      enter(screen.getByRole('menuitem', { name: 'Copy text' }));
+
+      expect(formats()).not.toBeNull();
+      act(() => vi.advanceTimersByTime(SUBMENU_GRACE_MS));
+      expect(formats()).toBeNull();
+    });
+
+    it('stays open once the pointer reaches it', () => {
+      vi.useFakeTimers();
+      const { exportRow, formats } = renderWithSubmenu();
+      enter(exportRow);
+      enter(screen.getByRole('menuitem', { name: 'Copy text' }));
+      enter(formats()!);
+
+      act(() => vi.advanceTimersByTime(SUBMENU_GRACE_MS * 2));
+      expect(formats()).not.toBeNull();
+    });
+
+    it('stays open when the pointer comes back to its row', () => {
+      vi.useFakeTimers();
+      const { exportRow, formats } = renderWithSubmenu();
+      enter(exportRow);
+      enter(screen.getByRole('menuitem', { name: 'Copy text' }));
+      enter(exportRow);
+
+      act(() => vi.advanceTimersByTime(SUBMENU_GRACE_MS * 2));
+      expect(formats()).not.toBeNull();
+    });
+
+    it('closes at once when the keyboard moves to another row', () => {
+      const { exportRow, formats } = renderWithSubmenu();
+      // The menu opens with focus on its first row; arrow onto Export, open
+      // its submenu, then arrow back up.
+      act(() => exportRow.focus());
+      enter(exportRow);
+      act(() => screen.getByRole('menuitem', { name: 'Copy text' }).focus());
+
+      expect(formats()).toBeNull();
+    });
   });
 
   it('opens on the right arrow with the first format focused; the left arrow goes back', async () => {

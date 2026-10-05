@@ -235,7 +235,7 @@ function diagramSvg(item: BoardItem, kind: FeaturedKind): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, WHITE, kind)}
     <rect x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" rx="12" fill="${ART_BG}"/>
-    <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="0 0 ${extent.width} ${extent.height}" preserveAspectRatio="xMidYMid meet">
+    <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="${extent.x} ${extent.y} ${extent.width} ${extent.height}" preserveAspectRatio="xMidYMid meet">
       ${studioSceneMarkup(scene, item.id)}
     </svg>
     ${footer(item.authorName, height - 18)}

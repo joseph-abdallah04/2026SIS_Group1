@@ -746,6 +746,16 @@ export function diagramEdgeDash(edge: DiagramStyledEdge, strokeWidth: number): D
 // the board card renders inside a scaled viewBox and the editor inside another,
 // and both must agree on the wrap without a DOM text-measuring pass.
 const DIAGRAM_GLYPH_ADVANCE_RATIO = 0.55;
+
+/**
+ * How wide a line of text paints, estimated the way every label on a canvas is
+ * laid out — the glyph ratio, with the same allowance the edge clamp gives a
+ * heavy run of letters. For framing text that has no box of its own to be
+ * measured by, such as an arrow's label, without a DOM to measure it in.
+ */
+export function estimatedTextWidth(text: string, fontSize: number): number {
+  return text.length * fontSize * DIAGRAM_GLYPH_ADVANCE_RATIO * TEXT_EXTENT_ALLOWANCE;
+}
 /** Exported so an inline editor can pad itself to wrap exactly where a label does. */
 export const DIAGRAM_LABEL_PADDING = 12;
 export const DIAGRAM_LABEL_MAX_LINES = 3;

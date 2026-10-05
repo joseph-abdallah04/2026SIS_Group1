@@ -278,8 +278,8 @@ export function StudioArtwork({
   }
   const viewBox = (() => {
     if (fit === 'sheet') {
-      const { width, height } = diagramExtent(scene);
-      return `0 0 ${width} ${height}`;
+      const { x, y, width, height } = diagramExtent(scene);
+      return `${x} ${y} ${width} ${height}`;
     }
     const bounds = studioSceneBounds(scene);
     const pad = 12;

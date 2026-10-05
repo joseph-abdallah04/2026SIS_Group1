@@ -132,6 +132,13 @@ function placeSubmenu(row: DOMRect, width: number, height: number) {
   };
 }
 
+/**
+ * How long an open submenu waits after the pointer moves onto another row
+ * before it closes: long enough to cross a row or two on the way to it, short
+ * enough that moving on to a different action does not leave it hanging.
+ */
+export const SUBMENU_GRACE_MS = 300;
+
 const PANEL_CLASS =
   'fixed z-50 min-w-44 overflow-hidden rounded-2xl border border-rt-tertiary bg-white py-1 shadow-lg focus-visible:outline-none';
 
@@ -246,6 +253,23 @@ export function ProposalActionsMenu({
   useEffect(() => {
     closeSubmenuRef.current = closeSubmenu;
   });
+
+  /**
+   * A pending close of the submenu, from the pointer passing over another row.
+   *
+   * The way from a row to its submenu's lower items runs diagonally, across
+   * the rows beneath it. Shutting the submenu the moment one of them is
+   * crossed took it away from under the pointer on its way in; waiting a beat
+   * lets it arrive, and reaching the submenu, or coming back to its row,
+   * calls the close off.
+   */
+  const graceTimer = useRef<number | null>(null);
+  const cancelGrace = () => {
+    if (graceTimer.current === null) return;
+    window.clearTimeout(graceTimer.current);
+    graceTimer.current = null;
+  };
+  useEffect(() => cancelGrace, []);
 
   useEffect(() => {
     // Remembered before focus moves, so closing puts the keyboard back where it
@@ -381,11 +405,16 @@ export function ProposalActionsMenu({
             ? undefined
             : () => {
                 // Passing over a row opens its submenu, and passing over any
-                // other row puts an open one away, as desktop menus do.
+                // other row puts an open one away, as desktop menus do — after
+                // a beat, in case the pointer is only crossing on its way in.
+                cancelGrace();
                 if (hasSubmenu && !item.disabled) {
                   if (!expanded) setOpen({ id: item.id, focus: false });
                 } else if (parentId) {
-                  setOpen(null);
+                  graceTimer.current = window.setTimeout(() => {
+                    graceTimer.current = null;
+                    setOpen(null);
+                  }, SUBMENU_GRACE_MS);
                 }
               }
         }
@@ -393,8 +422,12 @@ export function ProposalActionsMenu({
           inSubmenu
             ? undefined
             : () => {
-                // Arrowed onto another row: the open submenu is not its.
-                if (parentId && parentId !== item.id) setOpen(null);
+                // Arrowed onto another row: the open submenu is not its. The
+                // keyboard never crosses a row by accident, so no grace here.
+                if (parentId && parentId !== item.id) {
+                  cancelGrace();
+                  setOpen(null);
+                }
               }
         }
         onClick={() => {
@@ -469,6 +502,8 @@ export function ProposalActionsMenu({
           aria-label={parent.label}
           tabIndex={-1}
           onKeyDown={onSubmenuKeyDown}
+          // Arrived: whatever row the pointer crossed on the way, it stays.
+          onMouseEnter={cancelGrace}
           {...contain}
           className={PANEL_CLASS}
           style={{

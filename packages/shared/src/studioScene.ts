@@ -6,13 +6,24 @@
 // same point and a canvas is framed the same way wherever it is drawn.
 
 import {
+  diagramEdgeRoutes,
+  diagramNodeTurnedExtent,
   effectiveDiagramNodeSize,
+  estimatedTextWidth,
   type DiagramArtifact,
   type DiagramNode,
 } from './diagramContract.js';
 import type { StrokePoint } from './drawingContract.js';
-import { arrowGeometry, type ArrowTarget, type ArrowTargetLookup } from './studioArrows.js';
 import {
+  arrowFontSize,
+  arrowGeometry,
+  arrowLabelLines,
+  type ArrowElement,
+  type ArrowTarget,
+  type ArrowTargetLookup,
+} from './studioArrows.js';
+import {
+  inkPaintedBounds,
   inkPoints,
   pathPaintedBounds,
   tableColumnOffsets,
@@ -99,6 +110,11 @@ export function arrowTargets(scene: ArrowTargetScene): Map<string, ArrowTarget> 
   // Ink and paths are freeform: the box around a stroke is mostly empty, so an
   // arrow lands where it was aimed rather than at that box's edge. Pointing at
   // a drawing should touch the drawing.
+  //
+  // Deliberately the *unturned* box plus the turn, not the painted box that
+  // `studioElementBoxes` frames a canvas with: an attachment is a fraction of
+  // the element's own frame, which turns with it, so measuring it by the turned
+  // extent would slide every arrow already attached to a turned stroke.
   for (const stroke of scene.ink ?? []) {
     const box = boundsOf(stroke.points);
     if (box) {
@@ -199,60 +215,135 @@ export function isEmptyStudioScene(scene: StudioScene): boolean {
   );
 }
 
-/**
- * The box everything on a canvas occupies: the edges of every shape, sketch,
- * path and table, and every arrow's whole route, which can reach past what it
- * points at.
- */
-export function studioSceneBounds(scene: StudioScene): {
+/** A box in canvas units. */
+export interface StudioBox {
   x: number;
   y: number;
   width: number;
   height: number;
-} {
-  const { nodes } = scene;
+}
+
+/** How far a label's halo reaches past its letters: half the halo's stroke. */
+const ARROW_LABEL_HALO = 2;
+const EDGE_LABEL_HALO = 1.5;
+/** The size a connector's label is drawn at, on the card and in the recap. */
+const EDGE_LABEL_FONT_SIZE = 9;
+
+/**
+ * The box an arrow's label paints. Centred on the label point, the way the
+ * renderers centre it, lines and halo included: a large label sits half its
+ * size and more off the line, and its letters reach past the route's own box.
+ */
+function arrowLabelBox(arrow: ArrowElement, at: { x: number; y: number }): StudioBox | null {
+  if (!arrow.label) return null;
+  const lines = arrowLabelLines(arrow.label);
+  if (lines.length === 0) return null;
+  const fontSize = arrowFontSize(arrow);
+  const width =
+    Math.max(...lines.map((line) => estimatedTextWidth(line, fontSize))) + ARROW_LABEL_HALO * 2;
+  // The renderers set lines 1.2 apart, centred on the point; one line's
+  // letters reach about half its size either side of its middle.
+  const height = (lines.length - 1) * fontSize * 1.2 + fontSize + ARROW_LABEL_HALO * 2;
+  return { x: at.x - width / 2, y: at.y - height / 2, width, height };
+}
+
+/** The box a connector's label paints, sat on its baseline at the label point. */
+function edgeLabelBox(label: string, at: { x: number; y: number }): StudioBox {
+  const width = estimatedTextWidth(label, EDGE_LABEL_FONT_SIZE) + EDGE_LABEL_HALO * 2;
+  return {
+    x: at.x - width / 2,
+    // From above the tallest capital to below the deepest descender.
+    y: at.y - EDGE_LABEL_FONT_SIZE - EDGE_LABEL_HALO,
+    width,
+    height: EDGE_LABEL_FONT_SIZE * 1.3 + EDGE_LABEL_HALO * 2,
+  };
+}
+
+/**
+ * What each element on a canvas paints, one box per element.
+ *
+ * Painted, not stored: a turned shape measured by its stored box lost the
+ * corners it turned out past that box, a sketch measured by its raw points
+ * lost the height its turn gave it, and a large label beside an arrow reached
+ * past the arrow's route. Every helper here is the one the editor already
+ * clamps and selects with, so the card, an export and the recap frame a
+ * canvas by exactly what the editor showed.
+ */
+export function studioElementBoxes(scene: StudioScene): StudioBox[] {
+  const { nodes, edges } = scene;
+  const ink = (scene.ink ?? []).map((stroke) => ({ ...stroke, points: inkPoints(stroke) }));
   const paths = scene.paths ?? [];
   const tables = scene.tables ?? [];
-  const arrows = scene.arrows ?? [];
-  const points = (scene.ink ?? []).flatMap((stroke) => inkPoints(stroke));
-  // What each path paints, not where its anchors sit: a curve can bulge past
-  // its last anchor, and the card used to crop that bulge off.
-  const boxes = [
-    ...nodes.map((node) => ({ x: node.x, y: node.y, ...effectiveDiagramNodeSize(node) })),
-    ...points.map((point) => ({ ...point, width: 0, height: 0 })),
-    ...paths
-      .map((path) => pathPaintedBounds(path))
-      .filter((box): box is NonNullable<typeof box> => box !== null),
-    ...tables.map((table) => ({ x: table.x, y: table.y, ...tableSize(table) })),
-  ];
-  const targets = arrowTargetLookup({
-    nodes,
-    ink: (scene.ink ?? []).map((stroke) => ({ ...stroke, points: inkPoints(stroke) })),
-    paths,
-    tables,
-  });
-  for (const arrow of arrows) {
-    for (const point of arrowGeometry(arrow, targets).points) {
-      boxes.push({ ...point, width: 0, height: 0 });
-    }
+  const boxes: StudioBox[] = [];
+  const add = (box: StudioBox | null) => {
+    if (box) boxes.push(box);
+  };
+
+  for (const node of nodes) {
+    const extent = diagramNodeTurnedExtent(effectiveDiagramNodeSize(node), node.rotation, node);
+    add({ ...extent, x: node.x + extent.x, y: node.y + extent.y });
   }
+  for (const stroke of ink) add(inkPaintedBounds(stroke));
+  for (const path of paths) add(pathPaintedBounds(path));
+  for (const table of tables) add({ x: table.x, y: table.y, ...tableSize(table) });
+
+  const routes = diagramEdgeRoutes(nodes, edges);
+  edges.forEach((edge, index) => {
+    const route = routes[index];
+    if (route && edge.label) add(edgeLabelBox(edge.label, { x: route.labelX, y: route.labelY }));
+  });
+
+  const targets = arrowTargetLookup({ nodes, ink, paths, tables });
+  for (const arrow of scene.arrows ?? []) {
+    const geometry = arrowGeometry(arrow, targets);
+    for (const point of geometry.points) add({ ...point, width: 0, height: 0 });
+    add(arrowLabelBox(arrow, geometry.label));
+  }
+  return boxes;
+}
+
+/**
+ * The box everything on a canvas paints: every shape, sketch, path and table
+ * as drawn — turned ones included — every arrow's whole route, which can reach
+ * past what it points at, and every label set beside a line.
+ */
+export function studioSceneBounds(scene: StudioScene): StudioBox {
+  const boxes = studioElementBoxes(scene);
   if (boxes.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
-  const left = Math.min(...boxes.map((box) => box.x));
-  const top = Math.min(...boxes.map((box) => box.y));
-  const right = Math.max(...boxes.map((box) => box.x + box.width));
-  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
+  // A loop rather than spreading into Math.min: a canvas can hold thousands of
+  // boxes, and a spread that large can exceed the engine's argument limit.
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const box of boxes) {
+    if (box.x < left) left = box.x;
+    if (box.y < top) top = box.y;
+    if (box.x + box.width > right) right = box.x + box.width;
+    if (box.y + box.height > bottom) bottom = box.y + box.height;
+  }
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 /**
- * How much room a studio canvas takes on a card: the far edge of everything on
- * it, plus the margin the card leaves around it. Measured from the sheet's
- * corner, so a canvas keeps where on the sheet its content sat.
+ * The frame a studio canvas is shown in on a card and in the recap: from the
+ * sheet's corner to the far edge of everything on it, plus the margin the card
+ * leaves. Measured from the corner, so a canvas keeps where on the sheet its
+ * content sat.
+ *
+ * The frame starts before the corner only when something paints there — a
+ * shape turned against the sheet's top edge, or a label above an arrow that
+ * runs along it — so nothing drawn is cut off, and every canvas that stays on
+ * the sheet is framed exactly as before.
  */
-export function diagramExtent(scene: StudioScene): { width: number; height: number } {
+export function diagramExtent(scene: StudioScene): StudioBox {
   const bounds = studioSceneBounds(scene);
+  const x = Math.min(0, Math.floor(bounds.x));
+  const y = Math.min(0, Math.floor(bounds.y));
   return {
-    width: Math.max(bounds.x + bounds.width, 72) + 28,
-    height: Math.max(bounds.y + bounds.height, 32) + 24,
+    x,
+    y,
+    width: Math.max(bounds.x + bounds.width, 72) + 28 - x,
+    height: Math.max(bounds.y + bounds.height, 32) + 24 - y,
   };
 }

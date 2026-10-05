@@ -134,22 +134,44 @@ async function interFontFaces(markup: string): Promise<string> {
   const weights = new Set<number>([400]);
   for (const match of markup.matchAll(/font-weight:\s*(\d{3})/g)) weights.add(Number(match[1]));
   const faces = await Promise.all(
-    [...weights]
-      .sort((a, b) => a - b)
-      .map(async (weight) => {
-        const file = INTER_FILES[weight];
-        if (!file) return '';
-        try {
-          const response = await fetch(file);
-          if (!response.ok) return '';
-          const data = await blobBase64(await response.blob());
-          return `@font-face{font-family:'Inter';font-style:normal;font-weight:${weight};src:url(data:font/woff2;base64,${data}) format('woff2');}`;
-        } catch {
-          return '';
-        }
-      }),
+    [...weights].sort((a, b) => a - b).map((weight) => interFontFace(weight)),
   );
   return faces.join('');
+}
+
+/**
+ * Each weight's `@font-face`, read once per page and kept: a second export
+ * should not fetch and re-encode the same files again. A weight that could not
+ * be read is forgotten rather than kept as missing, so the next export tries
+ * it again.
+ */
+const INTER_FACES = new Map<number, Promise<string>>();
+
+function interFontFace(weight: number): Promise<string> {
+  const known = INTER_FACES.get(weight);
+  if (known) return known;
+  const file = INTER_FILES[weight];
+  if (!file) return Promise.resolve('');
+  const face = (async () => {
+    try {
+      const response = await fetch(file);
+      if (!response.ok) return '';
+      const data = await blobBase64(await response.blob());
+      return `@font-face{font-family:'Inter';font-style:normal;font-weight:${weight};src:url(data:font/woff2;base64,${data}) format('woff2');}`;
+    } catch {
+      return '';
+    }
+  })();
+  INTER_FACES.set(weight, face);
+  void face.then((css) => {
+    if (!css) INTER_FACES.delete(weight);
+  });
+  return face;
+}
+
+/** For tests: start again, as a fresh page would. */
+export function forgetInterFontFaces(): void {
+  INTER_FACES.clear();
 }
 
 export interface ExportedSvg {
@@ -222,8 +244,58 @@ export function pngScale(width: number, height: number): number {
   return Math.min(PNG_SCALE, PNG_MAX_EDGE / Math.max(width, height, 1));
 }
 
-/** An SVG drawn into a PNG, on white, finer than its own size. */
-async function rasterizeSvg({ svg, width, height }: ExportedSvg): Promise<Blob> {
+/**
+ * An SVG with the fonts it carries taken out, for a browser that will not
+ * draw it with them in. Only ever our own `<style>`: the export puts exactly
+ * one in, holding nothing but `@font-face` rules.
+ */
+export function withoutEmbeddedFonts(svg: string): string {
+  return svg.replace(/<style>[\s\S]*?<\/style>/, '');
+}
+
+/**
+ * An image, loaded.
+ *
+ * Waited for by its `load` event, which every browser fires for an SVG, rather
+ * than by `decode()` alone: WebKit has rejected `decode()` for SVG images that
+ * load and draw perfectly well. `decode()` still runs afterwards where it
+ * works, so the draw does not stall on decoding, but its failure is not the
+ * image's.
+ */
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => {
+      void Promise.resolve()
+        .then(() => image.decode?.())
+        .catch(() => undefined)
+        .then(() => resolve(image));
+    };
+    image.onerror = () => reject(new Error('Could not read that picture'));
+    image.src = url;
+  });
+}
+
+/**
+ * An SVG drawn into a PNG, on white, finer than its own size.
+ *
+ * Tried first as it is, fonts and all. A browser that cannot draw an SVG
+ * carrying its own fonts into a canvas — one that taints the canvas for it,
+ * or fails to load it — gets a second try without them: the labels then fall
+ * back to the machine's own face, a far better result than no file.
+ */
+export async function rasterizeSvg(exported: ExportedSvg): Promise<Blob> {
+  try {
+    return await drawSvg(exported);
+  } catch (error) {
+    const plain = withoutEmbeddedFonts(exported.svg);
+    if (plain === exported.svg) throw error;
+    return drawSvg({ ...exported, svg: plain });
+  }
+}
+
+async function drawSvg({ svg, width, height }: ExportedSvg): Promise<Blob> {
   const scale = pngScale(width, height);
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width * scale));
@@ -233,17 +305,22 @@ async function rasterizeSvg({ svg, width, height }: ExportedSvg): Promise<Blob> 
 
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
-    const image = new Image();
-    image.decoding = 'async';
-    image.src = url;
-    await image.decode();
+    const image = await loadImage(url);
     context.fillStyle = BACKGROUND;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
   } finally {
     URL.revokeObjectURL(url);
   }
-  const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  // A tainted canvas throws here in some browsers rather than handing back
+  // null; either way it is a failure the caller can try again from.
+  const png = await new Promise<Blob | null>((resolve, reject) => {
+    try {
+      canvas.toBlob(resolve, 'image/png');
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error('Could not draw that picture'));
+    }
+  });
   if (!png) throw new Error('Could not draw that picture');
   return png;
 }

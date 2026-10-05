@@ -5,9 +5,12 @@ import { TINY_JPEG, TINY_PNG, TINY_WEBP } from '../tools/image/testImages';
 import {
   exportFileName,
   exportFormats,
+  forgetInterFontFaces,
   imageFile,
   pngScale,
+  rasterizeSvg,
   studioExportSvg,
+  withoutEmbeddedFonts,
 } from './proposalExport';
 
 function item(artifactJson: BoardItem['artifactJson'], authorName = 'Ada Lovelace'): BoardItem {
@@ -40,6 +43,9 @@ const CANVAS = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  // Each test starts as a fresh page would, with no fonts read yet.
+  forgetInterFontFaces();
 });
 
 describe('exportFormats', () => {
@@ -144,5 +150,142 @@ describe('pngScale', () => {
     expect(pngScale(400, 300)).toBe(3);
     expect(pngScale(4096, 100)).toBe(1);
     expect(pngScale(8192, 100)).toBe(0.5);
+  });
+});
+
+describe('studioExportSvg framing', () => {
+  it('takes in the corners of a turned shape rather than cutting them off', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new Error('offline'))),
+    );
+    const { svg } = await studioExportSvg({
+      nodes: [
+        {
+          id: 'n',
+          label: 'Turned',
+          x: 100,
+          y: 100,
+          shape: 'box',
+          width: 120,
+          height: 56,
+          rotation: 90,
+        },
+      ],
+      edges: [],
+    });
+    // Stood on end, the box paints from y=68 to y=188; the frame adds 24.
+    const [, y, , height] = /viewBox="([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)"/
+      .exec(svg)!
+      .slice(1)
+      .map(Number);
+    expect(y).toBeLessThanOrEqual(68 - 24);
+    expect(y! + height!).toBeGreaterThanOrEqual(188 + 24);
+  });
+});
+
+describe('Inter in an export', () => {
+  it('is read once per page, however many canvases are exported', async () => {
+    const fetchFont = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['woff2']) }));
+    vi.stubGlobal('fetch', fetchFont);
+
+    await studioExportSvg(CANVAS);
+    await studioExportSvg(CANVAS);
+
+    // Two weights in use (400 and the bold label's 700), fetched once each.
+    expect(fetchFont).toHaveBeenCalledTimes(2);
+  });
+
+  it('is tried again on the next export when it could not be read', async () => {
+    const fetchFont = vi.fn(async () => Promise.reject(new Error('offline')));
+    vi.stubGlobal('fetch', fetchFont);
+
+    await studioExportSvg(CANVAS);
+    await studioExportSvg(CANVAS);
+
+    expect(fetchFont).toHaveBeenCalledTimes(4);
+  });
+
+  it('comes out whole, leaving everything else in the file', () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><style>@font-face{font-family:Inter}</style><text>Hi</text></svg>';
+    expect(withoutEmbeddedFonts(svg)).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg"><text>Hi</text></svg>',
+    );
+  });
+});
+
+describe('rasterizeSvg', () => {
+  /**
+   * jsdom loads no images and has no canvas, so both are stood in for: an
+   * image that loads as soon as it is given an address, and a canvas whose
+   * draw fails the first time — the way a browser that will not draw an SVG
+   * carrying its own fonts fails.
+   */
+  function fakeBrowser({ failFirstDraw }: { failFirstDraw: boolean }) {
+    const drawn: string[] = [];
+    const sources = new Map<string, Blob>();
+    let next = 0;
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: (blob: Blob) => {
+        const url = `blob:svg-${(next += 1)}`;
+        sources.set(url, blob);
+        return url;
+      },
+      revokeObjectURL: () => {},
+    });
+    class LoadingImage {
+      decoding = 'auto';
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      decode = () => Promise.resolve();
+      set src(url: string) {
+        drawn.push(url);
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal('Image', LoadingImage);
+    let draws = 0;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      fillRect: () => {},
+      drawImage: () => {
+        draws += 1;
+        if (failFirstDraw && draws === 1) throw new DOMException('Tainted', 'SecurityError');
+      },
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) =>
+      callback(new Blob(['png'], { type: 'image/png' })),
+    );
+    return { drawn, sources };
+  }
+
+  const WITH_FONTS = {
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>@font-face{}</style><rect/></svg>',
+    width: 10,
+    height: 10,
+  };
+
+  it('draws the file as it is, fonts and all, where the browser allows it', async () => {
+    const { drawn, sources } = fakeBrowser({ failFirstDraw: false });
+    const png = await rasterizeSvg(WITH_FONTS);
+
+    expect(png.type).toBe('image/png');
+    expect(drawn).toHaveLength(1);
+    expect(await sources.get(drawn[0]!)!.text()).toContain('<style>');
+  });
+
+  it('tries again without its fonts where the browser will not draw them, rather than failing', async () => {
+    const { drawn, sources } = fakeBrowser({ failFirstDraw: true });
+    const png = await rasterizeSvg(WITH_FONTS);
+
+    expect(png.type).toBe('image/png');
+    expect(drawn).toHaveLength(2);
+    expect(await sources.get(drawn[1]!)!.text()).not.toContain('<style>');
+  });
+
+  it('still fails where there were no fonts to blame', async () => {
+    fakeBrowser({ failFirstDraw: true });
+    await expect(rasterizeSvg({ ...WITH_FONTS, svg: '<svg/>' })).rejects.toThrow('Tainted');
   });
 });
