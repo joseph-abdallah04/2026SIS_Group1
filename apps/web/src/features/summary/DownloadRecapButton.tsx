@@ -2,20 +2,9 @@ import { useState } from 'react';
 import { Download } from 'lucide-react';
 
 import { api } from '../../lib/api';
+import { saveBlob } from '../../lib/saveBlob';
 
 const FALLBACK_FILENAME = 'session-recap.pdf';
-
-/** Hand the fetched bytes to the browser's downloader under the server's filename. */
-function saveBlob(blob: Blob, filename: string): void {
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(href);
-}
 
 /**
  * S04: the recap PDF is built and sent by GET /api/sessions/:id/summary.pdf.

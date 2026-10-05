@@ -12,7 +12,9 @@ import {
 import { canShowImage } from '../tools/image/canShowImage';
 import { StickyText } from '../tools/sticky/StickyText';
 import { useCardTooltip } from './useCardTooltip';
+import { hasArtwork } from './hasArtwork';
 import { ProposalEnlarge } from './ProposalEnlarge';
+import { exportFormats, type ExportFormat } from './proposalExport';
 import { cardWidth } from './cardMetrics';
 import {
   CARD_BORDER,
@@ -56,33 +58,18 @@ interface ProposalCardProps {
    * shortlisted, where a press on a card is how a card is picked.
    */
   openOnArtworkPress?: boolean;
+  /**
+   * Save this card's artwork as a file, from the enlarged view. Left out where
+   * there is nowhere to say how it went — a ballot, the landing page — and the
+   * view then offers no export.
+   */
+  onExport?: (item: BoardItem, format: ExportFormat) => void;
 }
 
 /** The plate every card gives artwork, so a row of cards lines up. */
 const PLATE_ASPECT = 4 / 3;
 
-/**
- * Whether a proposal has a canvas worth opening.
- *
- * A sticky never has one: its card already shows every word. A drawing has one
- * once it has strokes, and a studio canvas once anything at all has been put on
- * it — a shape, a sketch, a path, a table or an arrow. An empty canvas shows
- * the same empty plate however large it is drawn.
- */
-export function hasArtwork(item: BoardItem): boolean {
-  const artifact = item.artifactJson;
-  if (artifact.type === 'drawing') return artifact.svg.trim().length > 0;
-  if (artifact.type === 'image') return canShowImage(artifact.src);
-  if (artifact.type !== 'diagram') return false;
-  return (
-    artifact.nodes.length > 0 ||
-    artifact.edges.length > 0 ||
-    (artifact.ink?.length ?? 0) > 0 ||
-    (artifact.paths?.length ?? 0) > 0 ||
-    (artifact.tables?.length ?? 0) > 0 ||
-    (artifact.arrows?.length ?? 0) > 0
-  );
-}
+export { hasArtwork };
 
 /** Clock time only. A board is one sitting, so the date is never in doubt. */
 function formatTime(iso: string): string {
@@ -383,6 +370,7 @@ export function ProposalCard({
   enlargedOpen,
   onEnlargedOpenChange,
   openOnArtworkPress = true,
+  onExport,
 }: ProposalCardProps) {
   const artifact = item.artifactJson;
   const isSticky = artifact.type === 'sticky';
@@ -414,6 +402,9 @@ export function ProposalCard({
    */
   const pressedAt = useRef<{ x: number; y: number } | null>(null);
   const opensOnPress = interactive && openable && openOnArtworkPress;
+  // The enlarged view offers the one format worth a button of its own: a PNG
+  // of a canvas, or a picture as it was stored. The menu has the rest.
+  const enlargedExport = onExport ? exportFormats(item)[0] : undefined;
   const foot = (
     <CardFoot
       item={item}
@@ -508,6 +499,10 @@ export function ProposalCard({
                 byline={foot}
                 open={enlarged}
                 onOpenChange={setEnlarged}
+                exportFormat={enlargedExport}
+                onExport={
+                  onExport && enlargedExport ? () => onExport(item, enlargedExport) : undefined
+                }
               />
             ) : null}
           </CardMedia>

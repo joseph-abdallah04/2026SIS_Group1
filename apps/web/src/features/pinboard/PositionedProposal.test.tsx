@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { BoardItem } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
 
+import { TINY_PNG } from '../tools/image/testImages';
 import { PositionedProposal } from './PositionedProposal';
 
 function stickyItem(text: string): BoardItem {
@@ -602,5 +603,52 @@ describe('PositionedProposal actions menu', () => {
 
     await openFromButton();
     expect(Number(card.style.zIndex)).toBeGreaterThan(3);
+  });
+});
+
+const PICTURE: BoardItem = {
+  ...ITEM,
+  id: 'img1',
+  type: 'image',
+  artifactJson: { type: 'image', src: TINY_PNG, width: 1, height: 1 },
+};
+
+describe('PositionedProposal export', () => {
+  it('offers a studio canvas as a PNG and an SVG, in a group of their own', async () => {
+    renderMenuCard({ item: DRAWN_ON, onExtend: undefined, onExport: vi.fn() });
+    await openFromButton();
+
+    expect(menuLabels()).toEqual(['Enlarge', 'Export as PNG', 'Export as SVG']);
+    expect(screen.getAllByRole('separator')).toHaveLength(1);
+  });
+
+  it('offers an imported picture as the file it was stored as', async () => {
+    renderMenuCard({ item: PICTURE, onExtend: undefined, onExport: vi.fn() });
+    await openFromButton();
+
+    expect(menuLabels()).toEqual(['Enlarge', 'Export image']);
+  });
+
+  it('offers nothing to export on a sticky or an empty canvas', async () => {
+    renderMenuCard({ isOwn: true, canDelete: true, onExport: vi.fn() });
+    await openFromButton();
+    expect(menuLabels()).toEqual(['Copy text', 'Edit', 'Extend', 'Delete']);
+  });
+
+  it('keeps export on a closed board, where nothing else can be done to a canvas', async () => {
+    renderMenuCard({ item: DRAWN_ON, boardOpen: false, onExtend: undefined, onExport: vi.fn() });
+    await openFromButton();
+
+    expect(menuLabels()).toEqual(['Enlarge', 'Export as PNG', 'Export as SVG']);
+  });
+
+  it('hands the card and the chosen format to the board', async () => {
+    const onExport = vi.fn();
+    renderMenuCard({ item: DRAWN_ON, onExtend: undefined, onExport });
+    await openFromButton();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Export as SVG' }));
+
+    expect(onExport).toHaveBeenCalledWith(DRAWN_ON, 'svg');
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

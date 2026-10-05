@@ -58,6 +58,29 @@ interface ProposalActionsMenuProps {
   ignore?: RefObject<HTMLElement | null>;
 }
 
+/**
+ * Where a right-click on a card opens its menu, or null to leave the browser's
+ * own menu alone.
+ *
+ * The browser's menu stays over anything in the card that takes text of its
+ * own, and over a link in a sticky, where opening it in a new tab or copying
+ * its address is what a right-click is for. The Menu key and Shift+F10 fire
+ * this too, from whatever is focused inside the card and with no pointer
+ * position, so the menu opens where the ⋯ would open it instead of in the
+ * window's corner.
+ */
+export function contextMenuAnchor(
+  event: React.MouseEvent<HTMLElement>,
+  cornerAnchor: () => ProposalMenuAnchor | null,
+): ProposalMenuAnchor | null {
+  const target = event.target as HTMLElement;
+  if (target.closest('textarea, input, [contenteditable="true"], a[href]')) return null;
+  const fromKeyboard = event.clientX === 0 && event.clientY === 0;
+  if (!fromKeyboard) return { kind: 'point', x: event.clientX, y: event.clientY };
+  const rect = event.currentTarget.getBoundingClientRect();
+  return cornerAnchor() ?? { kind: 'corner', left: rect.right, top: rect.top };
+}
+
 /** Put the menu where it was asked for, then pull it back inside the window. */
 function placeMenu(anchor: ProposalMenuAnchor, width: number, height: number) {
   const maxLeft = window.innerWidth - width - GAP;
