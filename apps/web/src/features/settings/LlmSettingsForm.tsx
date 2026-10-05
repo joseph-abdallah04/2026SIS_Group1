@@ -18,10 +18,7 @@ import { Field, Input } from '../../components/ui/Input';
 import { deleteLlmConfig, fetchLlmConfig, saveLlmConfig, testLlmConfig } from '../assistant/api';
 
 type Status =
-  | { kind: 'idle' }
-  | { kind: 'saving' }
-  | { kind: 'saved' }
-  | { kind: 'error'; message: string };
+  { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
 
 export interface LlmSettingsFormProps {
   variant?: 'page' | 'panel';
@@ -230,7 +227,16 @@ export function LlmSettingsForm({ variant = 'page', onSaved, onCancel }: LlmSett
                   testResult.model ? ` · ${testResult.model}` : ''
                 }.`
               : (testResult.error ?? 'Connection failed.')}
+            {!testResult.ok && testResult.code && (
+              <>
+                {' '}
+                <code className="rt-assistant-error-code">{testResult.code}</code>
+              </>
+            )}
           </p>
+        )}
+        {testResult && !testResult.ok && testResult.detail && (
+          <p className="rt-assistant-setup-detail">{testResult.detail}</p>
         )}
       </form>
     );
@@ -341,7 +347,16 @@ export function LlmSettingsForm({ variant = 'page', onSaved, onCancel }: LlmSett
                 testResult.model ? ` · ${testResult.model}` : ''
               }.`
             : (testResult.error ?? 'Connection failed.')}
+          {!testResult.ok && testResult.code && (
+            <>
+              {' '}
+              <code className="rounded bg-red-50 px-1 font-mono text-xs">{testResult.code}</code>
+            </>
+          )}
         </p>
+      )}
+      {testResult && !testResult.ok && testResult.detail && (
+        <p className="font-mono text-xs break-words text-red-600/80">{testResult.detail}</p>
       )}
     </section>
   );

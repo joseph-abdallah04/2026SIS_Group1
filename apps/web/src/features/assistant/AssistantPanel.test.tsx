@@ -236,3 +236,55 @@ describe('provider setup', () => {
     expect(onProviderConfigured).toHaveBeenCalledWith('gpt-4o-mini');
   });
 });
+
+describe('error notices', () => {
+  const refused: ChatEntry = {
+    kind: 'error',
+    id: 'x1',
+    message: 'The provider refused the request. Try again.',
+    code: 'LLM_REQUEST_REJECTED',
+    detail: "HTTP 400 — 'messages.2' : property 'reasoning_content' is unsupported",
+  };
+
+  it('leads with what went wrong and what to do, not with what the provider said', () => {
+    renderPanel(chat([userMsg('Make a diagram'), refused]));
+
+    expect(screen.getByText('The provider refused the request')).toBeInTheDocument();
+    expect(screen.getByText(/not something you typed/)).toBeInTheDocument();
+    expect(screen.getByText('LLM_REQUEST_REJECTED')).toBeInTheDocument();
+    // The provider's words are kept, but folded away under Details.
+    const detail = screen.getByText(/reasoning_content' is unsupported/);
+    expect(detail.closest('details')).not.toHaveAttribute('open');
+  });
+
+  it('opens the provider’s words on request', async () => {
+    renderPanel(chat([userMsg('Make a diagram'), refused]));
+
+    await userEvent.click(screen.getByText('Details'));
+
+    expect(
+      screen.getByText(/reasoning_content' is unsupported/).closest('details'),
+    ).toHaveAttribute('open');
+  });
+
+  it('says the card above still stands when the turn failed after making it', () => {
+    renderPanel(
+      chat([userMsg('Make a diagram'), sticky('n1', 'idle'), { ...refused, cardsAbove: 1 }]),
+    );
+
+    expect(screen.getByText(/The card above is complete/)).toBeInTheDocument();
+  });
+
+  it('falls back to the message for a code this build does not know', () => {
+    renderPanel(
+      chat([
+        userMsg('hi'),
+        { kind: 'error', id: 'x2', message: 'Something new went wrong.', code: 'FUTURE_CODE' },
+      ]),
+    );
+
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.getByText('Something new went wrong.')).toBeInTheDocument();
+    expect(screen.getByText('FUTURE_CODE')).toBeInTheDocument();
+  });
+});

@@ -23,6 +23,11 @@ export interface ScriptedTurn {
   /** Defaults to `tool-calls` when the turn calls tools, `stop` otherwise. */
   finishReason?: 'stop' | 'length' | 'content-filter' | 'error' | 'other' | 'tool-calls';
   usage?: { input?: number; output?: number; reasoning?: number; cached?: number };
+  /**
+   * Fail the step the way a provider does mid-stream — an `APICallError` for an HTTP refusal,
+   * say. Everything else in the turn is ignored.
+   */
+  error?: unknown;
 }
 
 /** Builds a model that plays `turns` in order, one per step of the tool loop. */
@@ -36,6 +41,8 @@ export function scriptedModel(turns: ScriptedTurn[]): MockLanguageModelV4 {
 }
 
 function chunksFor(turn: ScriptedTurn): LanguageModelV4StreamPart[] {
+  if (turn.error !== undefined) return [{ type: 'error', error: turn.error }];
+
   const chunks: LanguageModelV4StreamPart[] = [];
 
   if (turn.reasoning) {

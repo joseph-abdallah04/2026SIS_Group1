@@ -8,7 +8,12 @@
 // Rule that drives the whole design: the API key goes in and never comes back out.
 // It is AES-256-GCM encrypted at rest (docs/05 §8) and decrypted into a local variable for
 // the lifetime of one LLM call — never logged, never returned, never cached.
-import type { LlmConfigPublic, LlmConfigTestResult, LlmConfigUpsert } from '@roundtable/shared';
+import {
+  assistantErrorMessage,
+  type LlmConfigPublic,
+  type LlmConfigTestResult,
+  type LlmConfigUpsert,
+} from '@roundtable/shared';
 
 import { prisma } from '../../db.js';
 import { env } from '../../env.js';
@@ -72,10 +77,11 @@ export async function saveLlmConfig(
   } catch (cause) {
     // The only realistic failure is the FK: no such user. Worth naming, because with the
     // a config row whose user has since been deleted produces exactly this.
-    console.error('assistant: failed to save LLM config', cause);
+    // The user id belongs in the server log, not in a message the browser shows.
+    console.error(`assistant: failed to save LLM config for user ${userId}`, cause);
     throw new ApiError(
       400,
-      `Could not save LLM config for user ${userId} — does that user exist?`,
+      assistantErrorMessage('LLM_CONFIG_SAVE_FAILED'),
       'LLM_CONFIG_SAVE_FAILED',
     );
   }
@@ -90,11 +96,7 @@ async function existingApiKeyEncrypted(userId: string): Promise<string> {
     select: { apiKeyEncrypted: true },
   });
   if (!row) {
-    throw new ApiError(
-      400,
-      'An API key is required the first time you save a provider.',
-      'LLM_KEY_REQUIRED',
-    );
+    throw new ApiError(400, assistantErrorMessage('LLM_KEY_REQUIRED'), 'LLM_KEY_REQUIRED');
   }
   return row.apiKeyEncrypted;
 }
@@ -114,11 +116,7 @@ export async function getLlmCredentials(userId: string): Promise<LlmCredentials>
   });
 
   if (!row) {
-    throw new ApiError(
-      400,
-      'No LLM provider configured. Add one in Settings to use the assistant.',
-      'LLM_NOT_CONFIGURED',
-    );
+    throw new ApiError(400, assistantErrorMessage('LLM_NOT_CONFIGURED'), 'LLM_NOT_CONFIGURED');
   }
 
   try {
@@ -148,7 +146,7 @@ export async function getLlmCredentials(userId: string): Promise<LlmCredentials>
       // Almost always LLM_KEY_ENCRYPTION_SECRET changing under existing rows.
       throw new ApiError(
         400,
-        'Your stored API key could not be decrypted. Re-enter it in Settings.',
+        assistantErrorMessage('LLM_KEY_UNDECRYPTABLE'),
         'LLM_KEY_UNDECRYPTABLE',
       );
     }
@@ -182,6 +180,7 @@ export async function testLlmConfig(
     return {
       ok: false,
       error: cause instanceof ApiError ? cause.message : 'No usable configuration',
+      ...(cause instanceof ApiError && cause.code ? { code: cause.code } : {}),
     };
   }
 
@@ -193,6 +192,11 @@ export async function testLlmConfig(
     // point of the button, so it goes through the same translation as a failed turn.
     const described =
       cause instanceof ApiError ? cause : describeProviderError(cause, credentials.baseUrl);
-    return { ok: false, error: described.message };
+    return {
+      ok: false,
+      error: described.message,
+      ...(described.code ? { code: described.code } : {}),
+      ...(typeof described.details === 'string' ? { detail: described.details } : {}),
+    };
   }
 }

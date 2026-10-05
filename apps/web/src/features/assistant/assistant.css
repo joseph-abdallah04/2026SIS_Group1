@@ -270,13 +270,72 @@
 }
 
 .rt-assistant-error {
+  display: grid;
+  gap: 0.3rem;
   margin: 0;
-  padding: 0.5rem 0.75rem;
+  padding: 0.6rem 0.75rem;
   border-radius: 0.75rem;
   border: 1px solid rgba(255, 138, 128, 0.3);
   background: rgba(120, 22, 15, 0.32);
   color: #ffc9c3;
   font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.rt-assistant-error p {
+  margin: 0;
+}
+
+.rt-assistant-error-title {
+  color: #ffe4e1;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* Reassurance, not alarm: the card this turn made before failing still works. */
+.rt-assistant-error-note {
+  color: var(--rt-assistant-ink);
+}
+
+.rt-assistant-error-code-line {
+  opacity: 0.85;
+}
+
+/* One click selects the whole code, so it can be pasted into a bug report. */
+.rt-assistant-error-code {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid rgba(255, 201, 195, 0.25);
+  border-radius: 0.35rem;
+  background: rgba(0, 0, 0, 0.22);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  user-select: all;
+}
+
+/* Test connection, in the rail's setup form: what the provider said, under the verdict. */
+.rt-assistant-setup-detail {
+  margin: 0;
+  color: #fca5a5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+  opacity: 0.8;
+}
+
+.rt-assistant-error-details summary {
+  width: fit-content;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.rt-assistant-error-details p {
+  margin-top: 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
 }
 
 .rt-assistant-composer {
@@ -913,6 +972,22 @@
   border-color: #e7b2ac;
   background: #fdf2f1;
   color: #7a2e28;
+}
+
+/* The glass title is near-white pink, which vanishes on this card. */
+.rt-assistant-dock .rt-assistant-error-title {
+  color: #5c1f1a;
+}
+
+.rt-assistant-dock .rt-assistant-error-code {
+  border-color: #e7b2ac;
+  background: #fff;
+}
+
+/* Test connection's provider text, under the verdict in the rail's setup form. */
+.rt-assistant-dock .rt-assistant-setup-detail {
+  color: #7a2e28;
+  opacity: 1;
 }
 
 .rt-assistant-dock .rt-assistant-composer {
