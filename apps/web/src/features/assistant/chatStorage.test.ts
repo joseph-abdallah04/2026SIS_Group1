@@ -40,6 +40,36 @@ describe('chat persistence', () => {
     expect(loadChat(USER, SESSION)).toEqual(entries);
   });
 
+  it('keeps the code, detail and card count of an error across a refresh', () => {
+    const entries: ChatEntry[] = [
+      {
+        kind: 'error',
+        id: 'x1',
+        message: 'The provider refused the request. Try again.',
+        code: 'LLM_REQUEST_REJECTED',
+        detail: 'HTTP 400 — nope',
+        cardsAbove: 1,
+      },
+      // Saved by a build that knew only the message.
+      { kind: 'error', id: 'x2', message: 'Request failed (500)' },
+    ];
+
+    saveChat(USER, SESSION, entries);
+
+    expect(loadChat(USER, SESSION)).toEqual(entries);
+  });
+
+  it('drops malformed error fields rather than the whole error', () => {
+    sessionStorage.setItem(
+      chatStorageKey(USER, SESSION),
+      JSON.stringify([
+        { kind: 'error', id: 'x1', message: 'm', code: 42, detail: {}, cardsAbove: -3 },
+      ]),
+    );
+
+    expect(loadChat(USER, SESSION)).toEqual([{ kind: 'error', id: 'x1', message: 'm' }]);
+  });
+
   it('keeps each session separate', () => {
     saveChat(USER, 'a', [{ kind: 'user', id: 'u1', text: 'in A' }]);
     saveChat(USER, 'b', [{ kind: 'user', id: 'u1', text: 'in B' }]);
@@ -74,14 +104,18 @@ describe('chat persistence', () => {
   });
 
   it('settles a reply that was still streaming', () => {
-    saveChat(USER, SESSION, [{ kind: 'assistant', id: 'a1', text: 'Half a thou', streaming: true }]);
+    saveChat(USER, SESSION, [
+      { kind: 'assistant', id: 'a1', text: 'Half a thou', streaming: true },
+    ]);
     expect(loadChat(USER, SESSION)).toEqual([
       { kind: 'assistant', id: 'a1', text: 'Half a thou', streaming: false },
     ]);
   });
 
   it('fails a tool that was still running, and says why', () => {
-    saveChat(USER, SESSION, [{ kind: 'tool', id: 't1', toolName: 'web_search', status: 'running' }]);
+    saveChat(USER, SESSION, [
+      { kind: 'tool', id: 't1', toolName: 'web_search', status: 'running' },
+    ]);
     expect(loadChat(USER, SESSION)).toEqual([
       {
         kind: 'tool',

@@ -220,7 +220,18 @@ function reviveEntry(value: unknown): ChatEntry | null {
 
     case 'error':
       return typeof entry.message === 'string'
-        ? { kind: 'error', id, message: entry.message }
+        ? {
+            kind: 'error',
+            id,
+            message: entry.message,
+            ...(typeof entry.code === 'string' ? { code: entry.code } : {}),
+            ...(typeof entry.detail === 'string' ? { detail: entry.detail } : {}),
+            ...(typeof entry.cardsAbove === 'number' &&
+            Number.isInteger(entry.cardsAbove) &&
+            entry.cardsAbove > 0
+              ? { cardsAbove: entry.cardsAbove }
+              : {}),
+          }
         : null;
 
     default:
