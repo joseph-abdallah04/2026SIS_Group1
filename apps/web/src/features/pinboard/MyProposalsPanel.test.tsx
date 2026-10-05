@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AuthoredProposalGroup, BoardItem } from '@roundtable/shared';
 import { describe, expect, it, vi } from 'vitest';
@@ -221,6 +221,48 @@ describe('my proposals panel with a lot to choose from', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+// A long note is recognised by how it starts, formatting and all, and fades
+// out where the card runs out of room rather than ending in an ellipsis.
+describe('a sticky in the reuse popup', () => {
+  const NOW = group('q3', 'What do we build first?', [], true, 2);
+
+  function renderNote(note: Partial<BoardItem['artifactJson']>) {
+    const item = sticky('n', 'q1', 'unused');
+    item.artifactJson = { ...item.artifactJson, ...note } as BoardItem['artifactJson'];
+    renderPanel({
+      groups: [group('q1', 'What slowed us down?', [item]), NOW],
+      currentQuestionId: 'q3',
+    });
+    return screen.getByRole('button', { name: 'Reuse sticky on the current question' });
+  }
+
+  it('shows the note with its formatting', () => {
+    const card = renderNote({
+      text: ['Ship it', 'then measure'].join(String.fromCharCode(10)),
+      marks: [{ from: 0, to: 4, style: 'bold' }],
+    } as Partial<BoardItem['artifactJson']>);
+
+    const bold = within(card).getByText('Ship');
+    expect(bold.tagName).toBe('SPAN');
+    expect(bold.getAttribute('style')).toContain('font-weight');
+    expect(within(card).getByText('then measure')).toBeTruthy();
+  });
+
+  it('fades a note that runs past the card, and only then', () => {
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
+    const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(72);
+    const long = renderNote({ text: 'A long note' } as Partial<BoardItem['artifactJson']>);
+    expect(long.querySelector('[data-overflows="true"]')).not.toBeNull();
+    height.mockRestore();
+    client.mockRestore();
+  });
+
+  it('leaves a note that fits unfaded', () => {
+    const card = renderNote({ text: 'Short' } as Partial<BoardItem['artifactJson']>);
+    expect(card.querySelector('[data-overflows]')).toBeNull();
   });
 });
 

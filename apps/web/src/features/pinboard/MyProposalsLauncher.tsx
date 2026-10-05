@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { History } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 
+import { closingFades } from '../../lib/motion';
 import { TOOL_BUTTON_PAD, TOOL_LABEL } from '../toolbar/CreativeToolbar';
 import { useCreativeTools } from '../tools/CreativeToolsContext';
 import { MyProposalsPanel } from './MyProposalsPanel';
@@ -37,7 +38,32 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
   // Only a picture's reuse can fail here: everything else fails in its editor.
   const [reuseError, setReuseError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  // Fading out: still shown, for as long as the fade takes.
+  const [leaving, setLeaving] = useState(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapper = useRef<HTMLDivElement>(null);
+
+  /** Puts the panel away, fading it out first where motion is welcome. */
+  const close = useCallback(() => {
+    if (!closingFades()) {
+      setOpen(false);
+      return;
+    }
+    setLeaving(true);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    // As long as `.rt-sticky-popup-fade` runs.
+    leaveTimer.current = setTimeout(() => {
+      setOpen(false);
+      setLeaving(false);
+    }, 150);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -46,10 +72,10 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
       if (event.key !== 'Escape') return;
       // One press closes one thing: an editor may be listening for Escape too.
       event.stopPropagation();
-      setOpen(false);
+      close();
     };
     const onPointerDown = (event: PointerEvent) => {
-      if (!wrapper.current?.contains(event.target as Node)) setOpen(false);
+      if (!wrapper.current?.contains(event.target as Node)) close();
     };
 
     document.addEventListener('keydown', onKeyDown, true);
@@ -58,7 +84,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
     };
-  }, [open]);
+  }, [close, open]);
 
   const reuse = (item: BoardItem) => {
     // A picture has no editor to open a copy in, and nothing about it would be
@@ -67,7 +93,7 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
     if (item.artifactJson.type === 'image') {
       setReuseError(null);
       void proposeArtifact(item.artifactJson, { extendsProposalId: item.id }).then((result) => {
-        if (result.ok) setOpen(false);
+        if (result.ok) close();
         else setReuseError(result.error);
       });
       return;
@@ -114,7 +140,15 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
         aria-expanded={open}
         aria-haspopup="dialog"
         disabled={disabled}
-        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        onClick={() => {
+          if (open && !leaving) close();
+          else {
+            // Pressed again while it fades: it comes straight back.
+            if (leaveTimer.current) clearTimeout(leaveTimer.current);
+            setLeaving(false);
+            setOpen(true);
+          }
+        }}
         title={reason}
         aria-label="Reuse"
         className={`flex h-9 items-center gap-2 rounded-full text-[12px] font-semibold text-rt-ink-muted transition-colors hover:bg-rt-secondary-wash hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none aria-expanded:bg-rt-secondary-wash aria-expanded:text-rt-ink disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-rt-ink-muted ${TOOL_BUTTON_PAD}`}
@@ -145,7 +179,8 @@ export function MyProposalsLauncher({ sessionId, revision, canPropose }: MyPropo
             canPropose={canPropose}
             onReuse={reuse}
             error={reuseError ?? error}
-            onClose={() => setOpen(false)}
+            onClose={close}
+            leaving={leaving}
           />
         </div>
       ) : null}

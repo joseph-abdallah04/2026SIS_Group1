@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AuthoredProposalGroup, BoardItem, QuestionStatus } from '@roundtable/shared';
 import { RotateCcw, X } from 'lucide-react';
 
+import { StickyText } from '../tools/sticky/StickyText';
+import type { StickyContent } from '../tools/sticky/stickyMarks';
 import { hasArtwork, ProposalArtwork } from './ProposalCard';
 import { STICKY_SHADOW, STICKY_THEMES, THUMB_BACKGROUND } from './pinboardTokens';
 
@@ -61,6 +63,8 @@ interface MyProposalsPanelProps {
   error: string | null;
   /** Puts the panel away, from the close button in its corner. */
   onClose?: () => void;
+  /** On its way out: fades rather than vanishing. */
+  leaving?: boolean;
 }
 
 /**
@@ -91,6 +95,7 @@ export function MyProposalsPanel({
   onReuse,
   error,
   onClose,
+  leaving = false,
 }: MyProposalsPanelProps) {
   const [questionFilter, setQuestionFilter] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<Kind | null>(null);
@@ -122,100 +127,126 @@ export function MyProposalsPanel({
     .filter((group) => group.items.length > 0);
   const nothingMatches = reusableCount > 0 && shownGroups.length === 0;
 
-  return (
-    <div className="flex max-h-[min(34rem,calc(100cqh-8rem))] w-[44rem] max-w-[calc(100cqw-3rem)] flex-col overflow-hidden rounded-3xl border border-rt-tertiary bg-white shadow-[0_18px_48px_rgba(8,12,21,0.18)]">
-      <header className="shrink-0 px-5 pt-4 pb-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h2 className="text-[15px] font-semibold text-rt-ink">Reuse</h2>
-          <p className="text-[12.5px] text-rt-ink-muted">
-            Ideas you proposed earlier in this session
-          </p>
-          {onClose ? (
-            // The same close as the sticky popup's, in the same corner.
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={onClose}
-              className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rt-ink/20 text-rt-ink/70 transition-colors hover:bg-rt-ink/8 hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
-            >
-              <X aria-hidden="true" size={15} strokeWidth={2.4} />
-            </button>
-          ) : null}
-        </div>
+  // The panel's height, measured off what is inside it and eased to: a filter
+  // that shows fewer cards shrinks the panel smoothly rather than snapping it.
+  // Left to the content on the first paint, so opening does not grow from zero.
+  const content = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const measure = () => setHeight(element.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
-        {past.length > 1 || kinds.length > 1 ? (
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-            {past.length > 1 ? (
-              <div role="group" aria-label="Show ideas from" className="flex flex-wrap gap-1.5">
-                <FilterChip
-                  active={questionFilter === null}
-                  onClick={() => setQuestionFilter(null)}
-                >
-                  All
-                </FilterChip>
-                {[...past]
-                  .sort((a, b) => a.questionPosition - b.questionPosition)
-                  .map((group) => (
-                    <FilterChip
-                      key={group.questionId}
-                      active={questionFilter === group.questionId}
-                      onClick={() => setQuestionFilter(group.questionId)}
-                    >
-                      Q{group.questionPosition + 1}
-                    </FilterChip>
-                  ))}
-              </div>
-            ) : null}
-            {past.length > 1 && kinds.length > 1 ? (
-              <span aria-hidden="true" className="h-5 w-px bg-rt-tertiary" />
-            ) : null}
-            {kinds.length > 1 ? (
-              // Picking one narrows to it; picking it again shows every kind.
-              <div role="group" aria-label="Show kinds of idea" className="flex flex-wrap gap-1.5">
-                {kinds.map(({ kind, label }) => (
-                  <FilterChip
-                    key={kind}
-                    active={kindFilter === kind}
-                    onClick={() => setKindFilter((current) => (current === kind ? null : kind))}
-                  >
-                    {label}
-                  </FilterChip>
-                ))}
-              </div>
+  return (
+    // Rises from the toolbar as the sticky popup does, and fades back into it.
+    <div
+      className={`${leaving ? 'rt-sticky-popup-fade' : 'rt-sticky-popup-rise'} w-[44rem] max-w-[calc(100cqw-3rem)] overflow-hidden rounded-3xl border border-rt-tertiary bg-white shadow-[0_18px_48px_rgba(8,12,21,0.18)] transition-[height] duration-200 ease-out motion-reduce:transition-none`}
+      style={height === null ? undefined : { height }}
+    >
+      <div ref={content} className="flex max-h-[min(34rem,calc(100cqh-8rem))] flex-col">
+        <header className="shrink-0 px-5 pt-4 pb-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 className="text-[15px] font-semibold text-rt-ink">Reuse</h2>
+            <p className="text-[12.5px] text-rt-ink-muted">
+              Ideas you proposed earlier in this session
+            </p>
+            {onClose ? (
+              // The same close as the sticky popup's, in the same corner.
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={onClose}
+                className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rt-ink/20 text-rt-ink/70 transition-colors hover:bg-rt-ink/8 hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
+              >
+                <X aria-hidden="true" size={15} strokeWidth={2.4} />
+              </button>
             ) : null}
           </div>
-        ) : null}
-      </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4">
-        {error ? (
-          <p role="alert" className="mb-3 text-[12px] text-rt-secondary-deep">
-            {error}
-          </p>
-        ) : null}
+          {past.length > 1 || kinds.length > 1 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              {past.length > 1 ? (
+                <div role="group" aria-label="Show ideas from" className="flex flex-wrap gap-1.5">
+                  <FilterChip
+                    active={questionFilter === null}
+                    onClick={() => setQuestionFilter(null)}
+                  >
+                    All
+                  </FilterChip>
+                  {[...past]
+                    .sort((a, b) => a.questionPosition - b.questionPosition)
+                    .map((group) => (
+                      <FilterChip
+                        key={group.questionId}
+                        active={questionFilter === group.questionId}
+                        onClick={() => setQuestionFilter(group.questionId)}
+                      >
+                        Q{group.questionPosition + 1}
+                      </FilterChip>
+                    ))}
+                </div>
+              ) : null}
+              {past.length > 1 && kinds.length > 1 ? (
+                <span aria-hidden="true" className="h-5 w-px bg-rt-tertiary" />
+              ) : null}
+              {kinds.length > 1 ? (
+                // Picking one narrows to it; picking it again shows every kind.
+                <div
+                  role="group"
+                  aria-label="Show kinds of idea"
+                  className="flex flex-wrap gap-1.5"
+                >
+                  {kinds.map(({ kind, label }) => (
+                    <FilterChip
+                      key={kind}
+                      active={kindFilter === kind}
+                      onClick={() => setKindFilter((current) => (current === kind ? null : kind))}
+                    >
+                      {label}
+                    </FilterChip>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </header>
 
-        {reusableCount === 0 && !error ? (
-          <p className="py-2 text-[12.5px] leading-relaxed text-rt-ink-muted">
-            Nothing yet. Anything you propose in this session shows up here, ready to reuse on a
-            later question.
-          </p>
-        ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4">
+          {error ? (
+            <p role="alert" className="mb-3 text-[12px] text-rt-secondary-deep">
+              {error}
+            </p>
+          ) : null}
 
-        {nothingMatches ? (
-          <p className="py-2 text-[12.5px] text-rt-ink-muted">
-            Nothing here matches those filters.
-          </p>
-        ) : null}
+          {reusableCount === 0 && !error ? (
+            <p className="py-2 text-[12.5px] leading-relaxed text-rt-ink-muted">
+              Nothing yet. Anything you propose in this session shows up here, ready to reuse on a
+              later question.
+            </p>
+          ) : null}
 
-        {shownGroups.map((group) => (
-          <QuestionSection
-            key={group.questionId}
-            group={group}
-            label={STATUS_LABEL[group.questionStatus]}
-            reusable={canReuseHere}
-            onReuse={onReuse}
-          />
-        ))}
+          {nothingMatches ? (
+            <p className="py-2 text-[12.5px] text-rt-ink-muted">
+              Nothing here matches those filters.
+            </p>
+          ) : null}
+
+          {shownGroups.map((group) => (
+            <QuestionSection
+              key={group.questionId}
+              group={group}
+              label={STATUS_LABEL[group.questionStatus]}
+              reusable={canReuseHere}
+              onReuse={onReuse}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -274,6 +305,39 @@ function QuestionSection({
 }
 
 /**
+ * A sticky's note in a card, with its formatting: bold, lists and line breaks
+ * are often what makes a long note recognisable from its first few lines.
+ * The first line is a touch heavier, as a title would be.
+ *
+ * Four lines at most. A note longer than that fades out at the foot, into the
+ * sticky's own colour, rather than ending in an ellipsis: the fade says there
+ * is more without a mark in the text. Measured, so a note that fits is never
+ * faded. Reusing it opens the whole note in its editor anyway.
+ */
+function StickyPreview({ note }: { note: StickyContent }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (element) setOverflows(element.scrollHeight > element.clientHeight + 1);
+  }, [note]);
+
+  const fade = 'linear-gradient(to bottom, black 50%, transparent)';
+  return (
+    <div
+      ref={box}
+      data-overflows={overflows ? 'true' : undefined}
+      className="mt-1.5 max-h-[4.5rem] overflow-hidden text-[13px] leading-snug wrap-break-word text-rt-ink [&>div:first-child]:font-semibold"
+      style={overflows ? { maskImage: fade, WebkitMaskImage: fade } : undefined}
+    >
+      {/* Inert: the whole card is already the press. */}
+      <StickyText note={note} links="inert" />
+    </div>
+  );
+}
+
+/**
  * One proposal, as it looks on the board. The whole card is the reuse button,
  * with the action spelled out over it on hover and focus; a card that cannot
  * be reused is shown faded and does nothing.
@@ -287,9 +351,9 @@ function ReuseCard({ item, onReuse }: { item: BoardItem; onReuse?: (item: BoardI
         {KIND_LABEL[item.type]}
       </span>
       {sticky ? (
-        <p className="mt-1.5 max-h-[4.5rem] overflow-hidden text-[13px] leading-snug wrap-break-word whitespace-pre-line text-rt-ink">
-          {artifact.type === 'sticky' ? artifact.text : null}
-        </p>
+        artifact.type === 'sticky' ? (
+          <StickyPreview note={artifact} />
+        ) : null
       ) : (
         <div
           className="relative mt-1.5 h-[4.75rem] overflow-hidden rounded-lg"
