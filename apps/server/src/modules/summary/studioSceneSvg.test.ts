@@ -99,6 +99,48 @@ describe('studioSceneMarkup', () => {
   });
 });
 
+describe('studioSceneMarkup tables with merged cells', () => {
+  // The top row's two cells merged into one heading; the cell it covers still
+  // holds text from before the merge, which must not show through.
+  const markup = studioSceneMarkup(
+    {
+      nodes: [],
+      edges: [],
+      tables: [
+        {
+          id: 't',
+          x: 0,
+          y: 0,
+          colWidths: [96, 96],
+          rowHeights: [32, 32],
+          cells: [{ text: 'Heading' }, { text: 'Covered' }, { text: 'A' }, { text: 'B' }],
+          merges: [{ row: 0, col: 0, rowSpan: 1, colSpan: 2 }],
+        },
+      ],
+    },
+    'm',
+  );
+
+  it('fills a merged cell once, across everything it spans', () => {
+    const fills = [...markup.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)];
+    expect(fills.map((fill) => fill.slice(1).join(' '))).toEqual([
+      '0 0 192 32',
+      '0 32 96 32',
+      '96 32 96 32',
+    ]);
+  });
+
+  it('draws no grid line through the merged cell', () => {
+    // The column line starts below the merged row; the row line runs across.
+    expect(markup).toContain('d="M96 32V64M0 32H192"');
+  });
+
+  it("shows the merged cell's text and never the text it covers", () => {
+    expect(markup).toContain('>Heading</tspan>');
+    expect(markup).not.toContain('Covered');
+  });
+});
+
 describe('rasterizeProposalPreview for a studio canvas', () => {
   it('draws a brainstorm idea (F41) in its plain frame, sketches and all', () => {
     const png = rasterizeProposalPreview(item(FULL_SCENE), 'idea');

@@ -70,7 +70,7 @@ import {
 } from '@roundtable/shared';
 
 /** Inter where the machine has it, then the faces every server does. */
-const FONT_FAMILY = 'Inter, Helvetica, Arial, sans-serif';
+export const FONT_FAMILY = 'Inter, Helvetica, Arial, sans-serif';
 /** What a hollow arrow cap and a label's halo are filled with: the card's white. */
 const SURFACE = '#FFFFFF';
 /** The board card's own corner radius for a table, in table units. */

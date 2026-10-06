@@ -201,7 +201,7 @@ export async function studioExportSvg(scene: StudioScene): Promise<ExportedSvg> 
   const svg =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<svg xmlns="${SVG_NS}" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}">` +
-    (fonts ? `<style>${fonts}</style>` : '') +
+    (fonts ? `<style data-roundtable-fonts="">${fonts}</style>` : '') +
     // White rather than see-through: hollow arrowheads and the halos behind
     // labels are painted in the canvas's white, and would show as white
     // blotches on any other background.
@@ -246,11 +246,14 @@ export function pngScale(width: number, height: number): number {
 
 /**
  * An SVG with the fonts it carries taken out, for a browser that will not
- * draw it with them in. Only ever our own `<style>`: the export puts exactly
- * one in, holding nothing but `@font-face` rules.
+ * draw it with them in.
+ *
+ * Only ever the `<style>` the export put there, found by its own mark: a
+ * drawing's markup can hold a `<style>` of its own, which is the drawing, not
+ * a font, and taking it out would change what the picture shows.
  */
 export function withoutEmbeddedFonts(svg: string): string {
-  return svg.replace(/<style>[\s\S]*?<\/style>/, '');
+  return svg.replace(/<style data-roundtable-fonts="">[\s\S]*?<\/style>/, '');
 }
 
 /**
