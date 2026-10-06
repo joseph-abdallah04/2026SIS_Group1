@@ -1,0 +1,1177 @@
+/*
+ * The Colour Lab's own look. It lives in a shadow root and uses nothing from
+ * the app, so the colours being tested can never restyle the tool testing them.
+ * A neutral dark panel, so it reads against both light and dark pages.
+ */
+
+:host {
+  all: initial;
+}
+
+.cl-root {
+  --cl-bg: #17181c;
+  --cl-bg-raised: #1f2127;
+  --cl-bg-hover: #262932;
+  --cl-line: #2e313a;
+  --cl-text: #e9eaef;
+  --cl-muted: #a0a4b0;
+  --cl-faint: #6f7480;
+  --cl-accent: #7ea6ff;
+  --cl-accent-soft: rgba(126, 166, 255, 0.16);
+  --cl-ok: #4fd68a;
+  --cl-warn: #f4b94f;
+  --cl-locate: #ff3ea5;
+  --cl-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font:
+    12px/1.4 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  color: var(--cl-text);
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+.cl-root *,
+.cl-root *::before,
+.cl-root *::after {
+  box-sizing: border-box;
+}
+
+.cl-root button,
+.cl-root input {
+  font: inherit;
+  color: inherit;
+}
+
+.cl-root button {
+  cursor: pointer;
+}
+
+.cl-root :focus-visible {
+  outline: 2px solid var(--cl-accent);
+  outline-offset: 1px;
+}
+
+/* ---- Panel ---------------------------------------------------------- */
+
+.cl-panel {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  background: var(--cl-bg);
+  border: 1px solid var(--cl-line);
+  border-radius: 12px;
+  box-shadow: var(--cl-shadow);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.cl-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 12px;
+  background: var(--cl-bg-raised);
+  border-bottom: 1px solid var(--cl-line);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.cl-header[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.cl-title {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.cl-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cl-accent-soft);
+  color: var(--cl-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cl-spacer {
+  flex: 1;
+}
+
+.cl-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cl-muted);
+}
+
+.cl-icon-button:hover:not(:disabled) {
+  background: var(--cl-bg-hover);
+  color: var(--cl-text);
+}
+
+.cl-icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cl-toolbar {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 8px;
+}
+
+.cl-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  color: var(--cl-faint);
+}
+
+.cl-search:focus-within {
+  border-color: var(--cl-accent);
+}
+
+.cl-search input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+
+.cl-search input:focus-visible {
+  outline: 0;
+}
+
+.cl-search input::placeholder {
+  color: var(--cl-faint);
+}
+
+.cl-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+}
+
+.cl-tab {
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cl-muted);
+  font-weight: 500;
+}
+
+.cl-tab:hover {
+  color: var(--cl-text);
+}
+
+.cl-tab[aria-selected='true'] {
+  background: var(--cl-bg-hover);
+  color: var(--cl-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.cl-tab small {
+  margin-left: 4px;
+  color: var(--cl-faint);
+  font-size: 10.5px;
+}
+
+/* ---- List ----------------------------------------------------------- */
+
+.cl-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 6px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--cl-line) transparent;
+}
+
+.cl-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 6px 5px;
+  border: 0;
+  background: var(--cl-bg);
+  color: var(--cl-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.cl-group:hover {
+  color: var(--cl-muted);
+}
+
+.cl-group span {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.cl-empty {
+  padding: 28px 16px;
+  color: var(--cl-faint);
+  text-align: center;
+}
+
+.cl-note {
+  margin: 2px 6px 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--cl-accent-soft);
+  color: var(--cl-accent);
+  font-size: 11px;
+}
+
+.cl-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 6px;
+  border-radius: 8px;
+}
+
+.cl-row:hover,
+.cl-row[data-open='true'] {
+  background: var(--cl-bg-hover);
+}
+
+.cl-swatch {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background-color: var(--cl-original);
+}
+
+/* Half and half when changed: the old colour on the left, the new on the right. */
+.cl-swatch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--cl-current);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+.cl-swatch[data-changed='false']::after {
+  clip-path: none;
+}
+
+.cl-swatch:hover {
+  border-color: var(--cl-accent);
+}
+
+/* A block, so its second line can be cut short with an ellipsis rather than run under the chips. */
+.cl-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.cl-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.cl-sub {
+  display: block;
+}
+
+.cl-name b {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-hex {
+  flex: none;
+  color: var(--cl-faint);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+
+.cl-sub {
+  overflow: hidden;
+  color: var(--cl-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cl-ok);
+  box-shadow: 0 0 0 3px rgba(79, 214, 138, 0.16);
+}
+
+.cl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 96px;
+  height: 22px;
+  padding: 0 7px 0 5px;
+  overflow: hidden;
+  border: 1px solid var(--cl-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cl-muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-chip:hover {
+  border-color: var(--cl-accent);
+  color: var(--cl-accent);
+}
+
+.cl-chip[data-following='false'] {
+  border-style: dashed;
+  color: var(--cl-faint);
+}
+
+.cl-details {
+  margin: 0 6px 6px 45px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  color: var(--cl-muted);
+  font-size: 11px;
+}
+
+.cl-details p {
+  margin: 0 0 6px;
+}
+
+.cl-details ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cl-details li {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cl-details li span:first-child {
+  flex: none;
+  color: var(--cl-faint);
+}
+
+.cl-details li span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--cl-line);
+  color: var(--cl-faint);
+  font-size: 11px;
+}
+
+.cl-footer b {
+  overflow: hidden;
+  color: var(--cl-muted);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Pill ----------------------------------------------------------- */
+
+.cl-pill {
+  position: fixed;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 13px 0 11px;
+  border: 1px solid var(--cl-line);
+  border-radius: 999px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  color: var(--cl-text);
+  font-weight: 600;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.cl-pill:hover {
+  border-color: var(--cl-accent);
+}
+
+/* ---- Picker --------------------------------------------------------- */
+
+.cl-picker {
+  position: fixed;
+  display: grid;
+  gap: 10px;
+  width: 262px;
+  max-height: calc(100vh - 16px);
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid var(--cl-line);
+  border-radius: 12px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  pointer-events: auto;
+}
+
+.cl-picker-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.cl-picker-title span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-sv {
+  position: relative;
+  height: 150px;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.cl-hue {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #f00 0%,
+    #ff0 17%,
+    #0f0 33%,
+    #0ff 50%,
+    #00f 67%,
+    #f0f 83%,
+    #f00 100%
+  );
+  cursor: pointer;
+  touch-action: none;
+}
+
+.cl-knob {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 1px 4px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.cl-fields {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.cl-field {
+  display: grid;
+  gap: 2px;
+  color: var(--cl-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.cl-field input {
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--cl-line);
+  border-radius: 6px;
+  background: var(--cl-bg-raised);
+  color: var(--cl-text);
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-transform: none;
+}
+
+.cl-field input:focus {
+  border-color: var(--cl-accent);
+  outline: 0;
+}
+
+.cl-field input[aria-invalid='true'] {
+  border-color: #f0616d;
+}
+
+.cl-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.cl-compare button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  text-align: left;
+}
+
+.cl-compare button:hover:not(:disabled) {
+  border-color: var(--cl-accent);
+}
+
+.cl-compare i {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+}
+
+.cl-compare small {
+  display: block;
+  color: var(--cl-faint);
+  font-size: 9.5px;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.cl-quick {
+  display: grid;
+  gap: 5px;
+}
+
+.cl-quick > span {
+  color: var(--cl-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.cl-quick div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.cl-quick button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+}
+
+.cl-quick button:hover {
+  border-color: var(--cl-accent);
+  transform: scale(1.1);
+}
+
+.cl-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.cl-button {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  font-weight: 500;
+}
+
+.cl-button:hover:not(:disabled) {
+  border-color: var(--cl-accent);
+  color: var(--cl-accent);
+}
+
+.cl-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Locate --------------------------------------------------------- */
+
+.cl-outline {
+  position: fixed;
+  border: 2px solid var(--cl-locate);
+  border-radius: 3px;
+  background: rgba(255, 62, 165, 0.12);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cl-swatch,
+  .cl-quick button,
+  .cl-row {
+    transition:
+      border-color 120ms ease,
+      background 120ms ease,
+      transform 120ms ease;
+  }
+}
+
+/* ---- Session 2: theme, roles, inspector -------------------------------- */
+
+/* An author rule on display beats the UA's [hidden]; the lab means it when it hides something. */
+.cl-root [hidden] {
+  display: none !important;
+}
+
+.cl-count {
+  min-width: 20px;
+  text-align: center;
+}
+
+.cl-scheme {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--cl-bg);
+}
+
+.cl-scheme button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cl-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cl-scheme button:hover {
+  color: var(--cl-text);
+}
+
+.cl-scheme button[aria-pressed='true'] {
+  background: var(--cl-bg-hover);
+  color: var(--cl-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.cl-toolbar-row {
+  display: flex;
+  gap: 6px;
+}
+
+.cl-toolbar-row .cl-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.cl-pick-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  color: var(--cl-muted);
+  font-weight: 500;
+}
+
+.cl-pick-button:hover,
+.cl-pick-button[aria-pressed='true'] {
+  border-color: var(--cl-accent);
+  color: var(--cl-accent);
+}
+
+.cl-pick-button[aria-pressed='true'] {
+  background: var(--cl-accent-soft);
+}
+
+/* The colours a slot has by role, as a row of small squares. */
+.cl-roles {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--cl-line);
+  border-radius: 6px;
+}
+
+.cl-roles i {
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.cl-role-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.cl-role-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cl-role-list i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.cl-role-list span[data-own='true'] {
+  color: var(--cl-accent);
+}
+
+.cl-role-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+}
+
+.cl-role-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cl-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cl-role-tab i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.cl-role-tab:hover {
+  color: var(--cl-text);
+}
+
+.cl-role-tab[aria-selected='true'] {
+  background: var(--cl-bg-hover);
+  color: var(--cl-text);
+}
+
+.cl-role-tab[data-own='true']::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cl-accent);
+}
+
+.cl-role-note {
+  margin: -4px 0 0;
+  color: var(--cl-faint);
+  font-size: 11px;
+}
+
+/* ---- Inspector ---- */
+
+.cl-inspector {
+  display: grid;
+  gap: 8px;
+  padding: 10px 6px 8px;
+}
+
+.cl-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cl-inspector-head code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cl-muted);
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-contrast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--cl-line);
+  border-radius: 10px;
+  background: var(--cl-bg-raised);
+}
+
+.cl-contrast-sample {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.cl-contrast b {
+  margin-right: 8px;
+  font-size: 15px;
+}
+
+.cl-contrast small {
+  display: block;
+  color: var(--cl-faint);
+  font-size: 11px;
+}
+
+.cl-verdict {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(79, 214, 138, 0.16);
+  color: var(--cl-ok);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cl-contrast[data-verdict='AA large'] .cl-verdict {
+  background: rgba(244, 185, 79, 0.16);
+  color: var(--cl-warn);
+}
+
+.cl-contrast[data-verdict='fail'] .cl-verdict {
+  background: rgba(240, 97, 109, 0.18);
+  color: #f0616d;
+}
+
+.cl-finding {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 5px 6px;
+  border-radius: 8px;
+}
+
+.cl-finding:hover {
+  background: var(--cl-bg-hover);
+}
+
+.cl-finding-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cl-finding-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ---- Choosing an element ---- */
+
+.cl-pick {
+  position: fixed;
+  inset: 0;
+  outline: 0;
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.cl-pick-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--cl-accent);
+  border-radius: 999px;
+  background: var(--cl-bg);
+  box-shadow: var(--cl-shadow);
+  color: var(--cl-text);
+  font-weight: 500;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.cl-outline-pick {
+  border-color: var(--cl-accent);
+  background: rgba(126, 166, 255, 0.16);
+}
+
+.cl-outline-inspect {
+  border-color: #ffd23e;
+  background: rgba(255, 210, 62, 0.1);
+}
+
+/* ---- Prompts: the two buttons in the footer, and the sheet they open ---- */
+.cl-footer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+}
+.cl-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cl-prompts {
+  display: flex;
+  gap: 6px;
+}
+.cl-prompt-button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  color: var(--cl-text);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cl-prompt-button:hover {
+  background: var(--cl-bg-hover);
+}
+.cl-prompt-button[aria-pressed='true'] {
+  border-color: var(--cl-accent);
+  color: var(--cl-accent);
+}
+.cl-prompt-button small {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--cl-accent-soft);
+  color: var(--cl-accent);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.cl-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 6px 10px;
+}
+.cl-sheet:focus {
+  outline: none;
+}
+.cl-sheet-title {
+  font-size: 13px;
+}
+.cl-sheet code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.cl-sheet-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0 4px 0 20px;
+  color: var(--cl-muted);
+  font-size: 12px;
+}
+.cl-sheet-warn {
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(244, 185, 79, 0.14);
+  color: var(--cl-warn);
+  font-size: 11px;
+}
+.cl-sheet-actions {
+  display: flex;
+  gap: 8px;
+}
+.cl-primary,
+.cl-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cl-root .cl-primary {
+  flex: 1;
+  border-color: var(--cl-accent);
+  background: var(--cl-accent);
+  color: #0d1220;
+}
+.cl-primary:hover {
+  filter: brightness(1.08);
+}
+.cl-secondary {
+  background: var(--cl-bg-raised);
+  color: var(--cl-text);
+}
+.cl-secondary:hover {
+  background: var(--cl-bg-hover);
+}
+.cl-sheet-meta {
+  margin: -4px 0 0;
+  color: var(--cl-faint);
+  font-size: 11px;
+}
+.cl-sheet-preview summary {
+  color: var(--cl-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.cl-sheet-preview pre {
+  max-height: 180px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--cl-line);
+  border-radius: 8px;
+  background: var(--cl-bg-raised);
+  color: var(--cl-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cl-sheet-load {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--cl-line);
+}
+.cl-file {
+  position: relative;
+  cursor: pointer;
+}
+.cl-file input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.cl-sheet-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--cl-muted);
+  font-size: 11.5px;
+}
+.cl-sheet-confirm span {
+  flex-basis: 100%;
+}

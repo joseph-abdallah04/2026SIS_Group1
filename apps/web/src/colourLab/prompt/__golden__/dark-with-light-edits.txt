@@ -1,0 +1,1451 @@
+# RoundTable colour change: dark theme
+
+Made by the Colour Lab, a developer tool, on 6 October 2026, 14:32 UTC, from branch `colour-testing` at commit `f1d9446` (it left `main` at `28bda6d`).
+You are working in the RoundTable repository, on `main` or a branch of it. This document is the whole brief: you need nothing else, and there is nobody to ask.
+
+RoundTable has no dark theme yet. A teammate designed one in the Colour Lab, a floating widget that edits every colour the app uses, live, and judged it on every page. This document turns what they settled on into exact changes. Make them, so that the app looks as it did in the lab.
+
+**Already decided, so do not revisit it:**
+
+- The theme follows the device by default, and a person can choose Light, Dark or "Match my device" in a new **Appearance** tab of Settings. The choice is kept on that device.
+- Content on the board stays light in the dark theme, like paper on a dark desk: stickies, cards, drawings, diagrams, the studio sheet. What it holds was chosen against white, and a stored drawing carries its colours inside the file, where no stylesheet reaches.
+- Exports stay light: the recap PDF, previews and downloaded card images are files, not the page.
+
+> The lab also holds 8 changes to the **light** theme, which have their own prompt. If you have not applied that one, do it first: the light values below are the lab’s light values, and the dark theme is made against them.
+
+## What changes
+
+- A way to choose the theme: light, dark, or follow the device (a script before the first paint, a small module, and an **Appearance** tab in Settings).
+- 5 brand or palette colours are another colour in the dark theme.
+- 4 new theme colours for colours that must differ by role (13 class uses and 1 var() reference move to them).
+- 4 hardcoded colours become variables, in 3 files.
+- A dark copy of the logo.
+- Content that stays light (cards, stickies, drawings, diagrams, exports) is left light.
+
+## How colours are built here
+
+- **Brand colours** are CSS custom properties in the `@theme` block of `apps/web/src/index.css`, such as `--color-rt-ink: #080c15;`. Tailwind CSS 4 makes classes from them (`text-rt-ink`, `bg-rt-ink/10`, `border-rt-ink`), and some hand-written CSS reads them with `var(--color-rt-ink)`.
+- **Tailwind palette colours** (`white`, `black`, `red-50` to `red-700`) are used too. The repository does not define them; Tailwind’s own defaults do. To change one, define it in `@theme`.
+- **Hardcoded colours** are written straight into CSS, TypeScript and SVG, in several syntaxes (`#f1c881`, `rgba(8, 12, 21, 0.12)`, `oklch(...)`). A copy of a brand colour follows it, so those copies are listed too.
+- **Server code** (`apps/server`) holds copies that are only drawn into exports (the recap PDF, previews). They are listed and marked *export*.
+- A colour can be one thing as **text** and another as a **fill**, a **border** or a **shadow**. Where that matters the document says which.
+
+## How the dark theme works
+
+- The theme is one attribute: `data-theme="light"` or `data-theme="dark"` on `<html>`. A script in `index.html` sets it before the first paint, so nothing flashes, and `lib/theme.ts` keeps it right afterwards.
+- A colour is a CSS variable, and the dark theme sets new values for those that change, under `:root[data-theme='dark']`. That block also says `color-scheme: dark`, so the browser’s own scrollbars and form controls go dark with the page.
+- A colour that has to be one thing as text and another as a fill (ink is the page text, and also the near-black of a scrim; the mustard is a bright accent as text and has to be deep as a button fill for light text to read on it) gets a **theme colour for each role**, such as `--color-rt-secondary-fill`. The classes and `var()` references that use it in that role move to it.
+- A colour written straight into the stylesheets and components as the app’s own surface or text becomes a **variable** with a light value and a dark one, such as `--rt-lit-fff7e8-fill`.
+- Content that stays light is found by the same selectors the lab used (listed in the CSS below). Inside it the variables take their light values back, `color-scheme` is `light`, and the text colour is set again, since text colour is inherited and would otherwise arrive pale.
+
+## Rules
+
+1. Make the changes in this document and no others. Do not tidy, rename or refactor anything, and do not touch a colour that is not listed.
+2. Keep each colour’s syntax, case, spacing and opacity exactly as the document gives it. A Tailwind class cannot contain a space, so `rgba(8,12,21,0.14)` inside `shadow-[…]` must stay without them.
+3. Line and column numbers are from commit f1d9446. `main` may have moved: find the text by the line shown. If it is not on `main` (the lab’s branch can carry commits `main` does not), skip it and list it in your report as "not on main".
+4. Use the script for the mechanical part: read its `--check` report first, then run it for real. If it cannot run, make the same changes by hand from the list.
+5. Keep LF line endings. Run `npx prettier --write` on every file you changed.
+6. Do not commit, push or create a branch unless you are asked to separately.
+7. Then run `npm run typecheck`, `npm run lint` and `npm run test`. A test that asserts an old colour may be updated to the new one **only** for a change listed here. Never loosen a contrast or accessibility test (for example in `diagramStyle.test.ts`): if one fails because of a new colour, leave it failing and report it.
+8. Where this document says to use judgement, use it, and say in your report what you decided and why. Where it does not, do not guess: if something does not fit, report it.
+
+## Part 1: letting the theme be chosen
+
+None of this needs a colour; it is what makes the dark theme reachable. Do it first.
+
+### 1. Set the theme before the first paint
+
+In `apps/web/index.html`, add this inside `<head>`, before the module script, so a page for someone in dark mode is never light for a moment:
+
+```html
+<script>
+(function () {
+  try {
+    var stored = localStorage.getItem('rt_theme');
+    var dark =
+      stored === 'dark' ||
+      (stored !== 'light' &&
+        window.matchMedia &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  } catch (error) {
+    document.documentElement.dataset.theme = 'light';
+  }
+})();
+</script>
+```
+
+### 2. Create these files, exactly as given
+
+They are written for this repository’s conventions and are already tested. `lib/theme.ts` keeps the theme right after the page loads, follows the device while the choice is "Match my device", and follows another tab. `AppearanceSettings.tsx` is the Appearance tab.
+
+#### `apps/web/src/lib/theme.ts`
+
+```ts
+import { useCallback, useSyncExternalStore } from 'react';
+
+/**
+ * Which theme the app is in: light, dark, or whichever the device is in.
+ *
+ * The choice lives on this device in `localStorage`, not on the server: it is a preference about
+ * a screen, and a person can want a dark laptop and a light phone. A device that has never been
+ * asked follows its own setting, which is what no key at all means.
+ *
+ * The theme itself is one attribute, `data-theme` on `<html>`, which the stylesheet reads. The
+ * inline script in `index.html` sets it before the first paint so the page does not flash light,
+ * and this file keeps it right after that.
+ *
+ * Every access to storage is wrapped: it throws in some private modes and wherever site data is
+ * blocked, and a theme is never worth failing a page over.
+ */
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type Theme = 'light' | 'dark';
+
+export const THEME_KEY = 'rt_theme';
+
+const DARK_QUERY = '(prefers-color-scheme: dark)';
+
+const listeners = new Set<() => void>();
+
+/** What was chosen on this device. Defaults to following the device. */
+export function readThemePreference(): ThemePreference {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    return stored === 'light' || stored === 'dark' ? stored : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+/** The device's own setting. Light where the browser cannot say. */
+export function deviceTheme(): Theme {
+  return window.matchMedia?.(DARK_QUERY).matches ? 'dark' : 'light';
+}
+
+export function resolveTheme(preference: ThemePreference): Theme {
+  return preference === 'system' ? deviceTheme() : preference;
+}
+
+/** Puts the theme on the page, and tells whatever is showing it. Returns the theme it set. */
+export function applyTheme(preference: ThemePreference = readThemePreference()): Theme {
+  const theme = resolveTheme(preference);
+  document.documentElement.dataset.theme = theme;
+  for (const listener of listeners) listener();
+  return theme;
+}
+
+/** Remembers a choice on this device and puts it on the page. */
+export function writeThemePreference(preference: ThemePreference): void {
+  try {
+    // Following the device is the absence of a choice, so nothing is left behind for it.
+    if (preference === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, preference);
+  } catch {
+    // The choice holds for this visit; only its memory is lost.
+  }
+  applyTheme(preference);
+}
+
+/**
+ * Keeps the page in step with the device while the choice is to follow it, and with another tab
+ * that changes it. Call once, at start-up. Returns how to stop.
+ */
+export function followTheme(): () => void {
+  const query = window.matchMedia?.(DARK_QUERY);
+  const onDevice = (): void => {
+    if (readThemePreference() === 'system') applyTheme('system');
+  };
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key === THEME_KEY || event.key === null) applyTheme();
+  };
+  query?.addEventListener('change', onDevice);
+  window.addEventListener('storage', onStorage);
+  return () => {
+    query?.removeEventListener('change', onDevice);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** The choice on this device, and how to change it. */
+export function useThemePreference(): [ThemePreference, (next: ThemePreference) => void] {
+  const preference = useSyncExternalStore(subscribe, readThemePreference, () => 'system' as const);
+  const set = useCallback((next: ThemePreference) => writeThemePreference(next), []);
+  return [preference, set];
+}
+
+/**
+ * The theme that is showing, light or dark, for a component whose picture depends on it. Not the
+ * choice: a device that follows its own setting is one or the other at any moment.
+ */
+export function useResolvedTheme(): Theme {
+  return useSyncExternalStore(
+    subscribe,
+    () => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'),
+    () => 'light' as const,
+  );
+}
+```
+
+#### `apps/web/src/lib/theme.test.ts`
+
+```ts
+import { renderHook, act } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  THEME_KEY,
+  applyTheme,
+  followTheme,
+  readThemePreference,
+  resolveTheme,
+  useResolvedTheme,
+  useThemePreference,
+  writeThemePreference,
+} from './theme';
+
+/** A stand-in for `matchMedia` whose answer can be changed, like a device switching theme. */
+function installDevice(dark: boolean) {
+  const handlers = new Set<() => void>();
+  const query = {
+    matches: dark,
+    addEventListener: (_: string, handler: () => void) => handlers.add(handler),
+    removeEventListener: (_: string, handler: () => void) => handlers.delete(handler),
+  };
+  window.matchMedia = vi.fn().mockReturnValue(query);
+  return {
+    set(next: boolean) {
+      query.matches = next;
+      for (const handler of handlers) handler();
+    },
+    listening: () => handlers.size,
+  };
+}
+
+beforeEach(() => {
+  delete document.documentElement.dataset.theme;
+});
+
+afterEach(() => {
+  // @ts-expect-error The suite has no matchMedia, on purpose, and puts it back that way.
+  delete window.matchMedia;
+  vi.restoreAllMocks();
+});
+
+describe('readThemePreference', () => {
+  it('follows the device until a choice is made', () => {
+    expect(readThemePreference()).toBe('system');
+  });
+
+  it('reads a choice, and ignores anything it does not know', () => {
+    localStorage.setItem(THEME_KEY, 'dark');
+    expect(readThemePreference()).toBe('dark');
+    localStorage.setItem(THEME_KEY, 'light');
+    expect(readThemePreference()).toBe('light');
+    localStorage.setItem(THEME_KEY, 'purple');
+    expect(readThemePreference()).toBe('system');
+  });
+
+  it('does not fail where storage is blocked', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect(readThemePreference()).toBe('system');
+  });
+});
+
+describe('resolveTheme', () => {
+  it('is the choice, or the device when the choice is to follow it', () => {
+    installDevice(true);
+    expect(resolveTheme('light')).toBe('light');
+    expect(resolveTheme('dark')).toBe('dark');
+    expect(resolveTheme('system')).toBe('dark');
+  });
+
+  it('is light where the browser cannot say', () => {
+    expect(resolveTheme('system')).toBe('light');
+  });
+});
+
+describe('applyTheme and writeThemePreference', () => {
+  it('puts the theme on the page', () => {
+    expect(applyTheme('dark')).toBe('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
+  it('remembers a choice, and forgets it when the choice is to follow the device', () => {
+    installDevice(false);
+    writeThemePreference('dark');
+    expect(localStorage.getItem(THEME_KEY)).toBe('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    writeThemePreference('system');
+    expect(localStorage.getItem(THEME_KEY)).toBeNull();
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('still changes the page where storage is blocked', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('full');
+    });
+    writeThemePreference('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+});
+
+describe('followTheme', () => {
+  it('follows the device while the choice is to follow it', () => {
+    const device = installDevice(false);
+    applyTheme();
+    const stop = followTheme();
+    device.set(true);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    device.set(false);
+    expect(document.documentElement.dataset.theme).toBe('light');
+    stop();
+    expect(device.listening()).toBe(0);
+  });
+
+  it('does not follow it once a choice is made', () => {
+    const device = installDevice(false);
+    writeThemePreference('light');
+    const stop = followTheme();
+    device.set(true);
+    expect(document.documentElement.dataset.theme).toBe('light');
+    stop();
+  });
+
+  it('follows a choice made in another tab', () => {
+    installDevice(false);
+    const stop = followTheme();
+    localStorage.setItem(THEME_KEY, 'dark');
+    window.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY }));
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    stop();
+  });
+
+  it('works where there is no way to ask the device', () => {
+    const stop = followTheme();
+    expect(() => stop()).not.toThrow();
+  });
+});
+
+describe('useThemePreference', () => {
+  it('gives the choice and changes it', () => {
+    installDevice(false);
+    const { result } = renderHook(() => useThemePreference());
+    expect(result.current[0]).toBe('system');
+    act(() => result.current[1]('dark'));
+    expect(result.current[0]).toBe('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    act(() => result.current[1]('system'));
+    expect(result.current[0]).toBe('system');
+  });
+});
+
+describe('useResolvedTheme', () => {
+  it('is the theme that is showing, and follows it as it changes', () => {
+    const device = installDevice(false);
+    applyTheme();
+    const stop = followTheme();
+    const { result } = renderHook(() => useResolvedTheme());
+    expect(result.current).toBe('light');
+    act(() => device.set(true));
+    expect(result.current).toBe('dark');
+    act(() => writeThemePreference('light'));
+    expect(result.current).toBe('light');
+    stop();
+  });
+});
+```
+
+#### `apps/web/src/features/settings/AppearanceSettings.tsx`
+
+```tsx
+import { type ThemePreference, useThemePreference } from '../../lib/theme';
+
+const OPTIONS: { value: ThemePreference; label: string; hint: string }[] = [
+  {
+    value: 'system',
+    label: 'Match my device',
+    hint: 'Light or dark, whichever your device is set to.',
+  },
+  { value: 'light', label: 'Light', hint: 'Always light.' },
+  { value: 'dark', label: 'Dark', hint: 'Always dark.' },
+];
+
+/**
+ * The Appearance tab of Settings: light, dark, or follow the device. The choice is kept on this
+ * device only, and takes effect at once.
+ */
+export function AppearanceSettings() {
+  const [preference, setPreference] = useThemePreference();
+
+  return (
+    <section aria-labelledby="appearance-heading">
+      <h2 id="appearance-heading" className="text-sm font-semibold text-rt-ink">
+        Theme
+      </h2>
+      <p className="mt-1 max-w-xl text-sm text-rt-ink-muted">
+        Choose how RoundTable looks on this device. Cards, drawings and diagrams on the board stay
+        light in the dark theme, like paper on a dark desk.
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby="appearance-heading"
+        className="mt-6 flex max-w-xl flex-col gap-3"
+      >
+        {OPTIONS.map(({ value, label, hint }) => (
+          <label
+            key={value}
+            className="flex cursor-pointer items-start gap-3 rounded-xl border border-rt-tertiary bg-rt-surface p-4 has-[:checked]:border-rt-secondary has-[:checked]:bg-rt-secondary-wash has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-rt-primary-deep"
+          >
+            <input
+              type="radio"
+              name="theme"
+              value={value}
+              checked={preference === value}
+              onChange={() => setPreference(value)}
+              className="mt-1 accent-rt-secondary"
+            />
+            <span className="flex flex-col">
+              <span className="text-sm font-semibold text-rt-ink">{label}</span>
+              <span className="text-sm text-rt-ink-muted">{hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+```
+
+#### `apps/web/src/features/settings/AppearanceSettings.test.tsx`
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { THEME_KEY } from '../../lib/theme';
+import { AppearanceSettings } from './AppearanceSettings';
+
+beforeEach(() => {
+  delete document.documentElement.dataset.theme;
+});
+
+afterEach(() => {
+  delete document.documentElement.dataset.theme;
+});
+
+describe('AppearanceSettings', () => {
+  it('offers light, dark, and following the device, and starts on following it', () => {
+    render(<AppearanceSettings />);
+    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    expect(screen.getByRole('radio', { name: /match my device/i })).toBeChecked();
+  });
+
+  it('reflects what was chosen before', () => {
+    localStorage.setItem(THEME_KEY, 'dark');
+    render(<AppearanceSettings />);
+    expect(screen.getByRole('radio', { name: /^dark/i })).toBeChecked();
+  });
+
+  it('changes the theme at once, and remembers it on this device', async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSettings />);
+
+    await user.click(screen.getByRole('radio', { name: /^dark/i }));
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(localStorage.getItem(THEME_KEY)).toBe('dark');
+    expect(screen.getByRole('radio', { name: /^dark/i })).toBeChecked();
+
+    await user.click(screen.getByRole('radio', { name: /^light/i }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(localStorage.getItem(THEME_KEY)).toBe('light');
+  });
+
+  it('forgets the choice when it goes back to following the device', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(THEME_KEY, 'dark');
+    render(<AppearanceSettings />);
+
+    await user.click(screen.getByRole('radio', { name: /match my device/i }));
+    expect(localStorage.getItem(THEME_KEY)).toBeNull();
+    expect(screen.getByRole('radio', { name: /match my device/i })).toBeChecked();
+  });
+});
+```
+
+### 3. Start it, and put the tab in Settings
+
+- In `apps/web/src/main.tsx`, import `followTheme` from `./lib/theme` and call `followTheme();` once, before the app is rendered.
+- In `apps/web/src/features/settings/SettingsPage.tsx`, add an **Appearance** tab after the last tab in the list, with id `appearance`, and render `<AppearanceSettings />` in a panel that follows the pattern of the others (`role="tabpanel"`, `id="settings-panel-appearance"`, `aria-labelledby="settings-tab-appearance"`, `hidden` when it is not the selected tab, and kept mounted). For example:
+
+```tsx
+import { AppearanceSettings } from './AppearanceSettings';
+
+  { id: 'appearance', label: 'Appearance' },
+
+<div
+  role="tabpanel"
+  id="settings-panel-appearance"
+  aria-labelledby="settings-tab-appearance"
+  hidden={tab !== 'appearance'}
+>
+  <AppearanceSettings />
+</div>
+```
+
+- Update `SettingsPage.test.tsx` only where it counts or lists the tabs.
+
+## Part 2: the colours
+
+Most of this is mechanical, so it is done by one script, given at the end of this document. Save it as `colour-lab-apply.mjs` in the repository root, then:
+
+```
+node colour-lab-apply.mjs --check   # reads and reports, writes nothing
+node colour-lab-apply.mjs           # makes the changes
+```
+
+It writes the dark theme into the stylesheet between two marker comments (so running it twice leaves one copy), adds the role colours to `@theme`, moves the classes and `var()` references that use them, and replaces the hardcoded colours listed below. Its report has one line for each thing it did: `APPLIED`, `ALREADY`, `SKIPPED` with the reason, `THEME`, `CONFLICT` where the repository already has a different value, `BLOCK`, `COPY`, `CLASSES` with a count to compare, and `STRAY` for a use of a class in a file the lab never saw, which you handle the same way. Delete the script when you are done.
+
+### The CSS the script writes
+
+It goes at the end of `apps/web/src/index.css`, after Tailwind’s own rules, which is what lets it win over the theme colours.
+
+```css
+/* The light values of hardcoded colours that are different in the dark theme. */
+:root {
+  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);
+  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);
+  --rt-lit-f7f4ee-fill: #f7f4ee;
+  --rt-lit-ffffff-fill: #ffffff;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  /* Brand and palette colours */
+  --color-rt-secondary-deep: #d2b98a;
+  --color-rt-surface: #16181d;
+  --color-rt-ink: #eceef3;
+  --color-rt-tertiary: #383c47;
+  --color-red-600: #ff7a7f;
+  /* Colours set apart by role */
+  --color-rt-ink-fill: #07080b;
+  --color-rt-secondary-fill-soft: #e0a33c;
+  --color-white-fill: #1c1f26;
+  /* Hardcoded colours */
+  --rt-lit-080c15-shadow-a120: rgba(8, 12, 21, 0.12);
+  --rt-lit-080c15-shadow-a140: rgba(8, 12, 21, 0.14);
+  --rt-lit-f7f4ee-fill: #13110e;
+  --rt-lit-ffffff-fill: #16181d;
+}
+
+/* Content that stays light, like paper on a dark desk: it gets the light values back. */
+:root[data-theme='dark'] :where(
+  article:has([data-card-plate], [data-sticky-note]),
+  [data-proposal-card],
+  [role="dialog"][aria-label*=" by "],
+  [role="dialog"][aria-labelledby="sticky-composer-label"],
+  div:has(> svg[aria-label="Drawing canvas"]),
+  svg:has([data-testid="diagram-sheet"]),
+  button[aria-label$=" ink"],
+  span.absolute.rounded-xl[style*="rotate"],
+  .rt-assistant-sticky,
+  .rt-assistant-card-well,
+  .rt-assistant-diagram-fit
+) {
+  color-scheme: light;
+  color: var(--color-rt-ink);
+  --color-rt-secondary-deep: #7a6a4c;
+  --color-rt-surface: #ffffff;
+  --color-rt-ink: #101828;
+  --color-rt-tertiary: #cfcfcf;
+  --color-red-600: #c0392b;
+  --color-rt-ink-fill: #101828;
+  --color-rt-secondary-fill-soft: #8a5c12;
+  --color-white-fill: #ffffff;
+  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);
+  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);
+  --rt-lit-f7f4ee-fill: #f7f4ee;
+  --rt-lit-ffffff-fill: #ffffff;
+}
+```
+
+### Brand and palette colours
+
+Set on the root in the dark theme. Their light values are the app’s own.
+
+| Colour | Light | Dark |
+| --- | --- | --- |
+| `--color-rt-secondary-deep` (Secondary deep) | `#7a6a4c` | `#d2b98a` |
+| `--color-rt-surface` (Surface) | `#ffffff` | `#16181d` |
+| `--color-rt-ink` (Ink) | `#101828` | `#eceef3` |
+| `--color-rt-tertiary` (Border grey) | `#cfcfcf` | `#383c47` |
+| `--color-red-600` (Red 600) | `#c0392b` | `#ff7a7f` |
+
+### Colours that differ by role
+
+Each is added to the `@theme` block (so Tailwind makes classes from it) with its light value, and given its dark value in the dark theme. The uses of the colour in that role then move to it.
+
+- `--color-rt-ink-fill`: light `#101828` → dark `#07080b`. It is `rt-ink` as a fill, with opacity 60%.
+  - Classes: rename `(bg|from|via|to|fill|accent|placeholder)-rt-ink` to `…-rt-ink-fill`, keeping any `/opacity`, but only where the opacity is 60%. In: `apps/web/src/features/b/B.tsx` ×2.
+- `--color-rt-secondary-fill-soft`: light `#8a5c12` → dark `#e0a33c`. It is `rt-secondary` as a fill, with opacity 10%.
+  - Classes: rename `(bg|from|via|to|fill|accent|placeholder)-rt-secondary` to `…-rt-secondary-fill-soft`, keeping any `/opacity`, but only where the opacity is 10%. In: `apps/web/src/features/a/A.tsx` ×2.
+- `--color-rt-secondary-fill`: light `#8a5c12` → dark `#8a5c12`. It is `rt-secondary` as a fill, with opacity none.
+  - Classes: rename `(bg|from|via|to|fill|accent|placeholder)-rt-secondary` to `…-rt-secondary-fill`, keeping any `/opacity`, but only where the opacity is none. In: `apps/web/src/features/a/A.tsx` ×3, `apps/web/src/features/b/B.tsx` ×4.
+  - `var(--color-rt-secondary)` becomes `var(--color-rt-secondary-fill)` at: `apps/web/src/index.css:40`.
+- `--color-white-fill`: light `#ffffff` → dark `#1c1f26`. It is `white` as a fill, with opacity none.
+  - Classes: rename `(bg|from|via|to|fill|accent|placeholder)-white` to `…-white-fill`, keeping any `/opacity`, but only where the opacity is none. In: `apps/web/src/features/b/B.tsx` ×2.
+
+### Hardcoded colours that become variables
+
+Each is `line:column`, the text now there, and what replaces it. In a stylesheet this is mechanical. **In a `.ts` or `.tsx` file the colour may be read by code**, to work out a contrast or to paint a canvas, and a variable cannot be read that way: after the script, look at each of those and, where the value is parsed or computed, put it back as it was and say so in your report. A colour that is only a CSS value (a `style` prop, a class, an SVG attribute) is right as a variable.
+
+#### `apps/web/src/features/marketing/cta.ts` (check how each is used)
+
+- 4:60  `rgba(8,12,21,0.14)` → `var(--rt-lit-080c15-shadow-a140)`  — class shadow-[…]
+
+#### `apps/web/src/features/marketing/LandingNav.tsx` (check how each is used)
+
+- 34:66  `#f7f4ee` → `color:var(--rt-lit-f7f4ee-fill)`  — class bg-[…]
+
+#### `apps/web/src/index.css`
+
+- 20:25  `rgba(8, 12, 21, 0.12)` → `var(--rt-lit-080c15-shadow-a120)`  — .rt-card
+- 21:14  `#ffffff` → `var(--rt-lit-ffffff-fill)`  — .rt-card
+
+### The logo
+
+The logo is a picture shown with `<img>`, which cannot read the page’s variables, so it has a dark twin. The script copies `packages/shared/src/assets/roundtable-logo.svg` to `packages/shared/src/assets/roundtable-logo-dark.svg` and changes these colours in the copy:
+
+- 3:16  `black` → `#eceef3`
+
+Then add `"./assets/roundtable-logo-dark.svg": "./src/assets/roundtable-logo-dark.svg"` to the `exports` of `packages/shared/package.json`, next to the light logo’s entry, and make `apps/web/src/components/RoundTableLogo.tsx` choose between the two by the theme that is showing. Replace its contents with:
+
+```tsx
+import logoUrl from '@roundtable/shared/assets/roundtable-logo.svg';
+import logoDarkUrl from '@roundtable/shared/assets/roundtable-logo-dark.svg';
+
+import { useResolvedTheme } from '../lib/theme';
+
+interface RoundTableLogoProps {
+  className?: string;
+}
+
+export function RoundTableLogo({ className = 'h-7 w-auto shrink-0' }: RoundTableLogoProps) {
+  const theme = useResolvedTheme();
+  return (
+    <img
+      src={theme === 'dark' ? logoDarkUrl : logoUrl}
+      alt="RoundTable"
+      className={className}
+      draggable={false}
+    />
+  );
+}
+```
+
+## What stays as it is
+
+These hardcoded colours would be different in a dark theme, and are **left alone on purpose**, because they are paper, or are drawn into a file, or are read by code. Do not convert them. (This is only a check that nothing here was missed: if a file below is not on `main`, ignore it.)
+
+- `apps/server/src/modules/summary/pdf.ts`: 1 colour — drawn into exports (PDF, previews), not the page (export).
+- `apps/web/src/features/pinboard/pinboardTokens.ts`: 2 colours — the paper of a card or a sticky (paper).
+
+A file on `main` that is not named in this document, and holds colours, is **chrome** unless it draws content that stays light. If you meet one, convert it the way the others are and say so in your report.
+
+## Look at it
+
+Run the app (`npm run dev`) and look at each of these in **both** themes, switching with Settings → Appearance and also by changing the device’s own setting while "Match my device" is chosen:
+
+- the landing page, log in, sign up, and the dashboard;
+- Settings (the Appearance tab, and that the choice survives a reload);
+- creating and editing a session, the lobby, and joining one;
+- a live board with every kind of card (sticky, drawing, diagram), the card menu, enlarging a card, the assistant panel, and the studio;
+- voting, the results, and the recap.
+
+In the dark theme the app’s own surfaces and text must be dark and readable, and **cards, stickies, drawings, diagrams, the studio sheet and the sticky composer must stay light**. Look for anything pale on pale, dark on dark, or a white patch left in a dark page, and for a flash of the wrong theme on reload. Fix what is plainly a missed colour in the way the others were fixed; report anything that is a judgement.
+
+## When the changes are made
+
+1. `git diff --stat` should show the files named in this document and no others.
+2. Run `npm run typecheck`, `npm run lint`, `npm run test` and `npx prettier --check` on the changed files. Fix only what a listed change broke.
+
+## Report
+
+End with a short report:
+
+- how many changes were made, and the script’s `SUMMARY` line;
+- everything skipped, with the reason (not on `main`, text not found, count differs);
+- every test you changed, and every test that still fails;
+- anything you did that this document did not ask for, and each place you used judgement, and anything that surprised you.
+
+## The script file
+
+```js
+// Colour Lab apply script. Run from the root of the repository: node colour-lab-apply.mjs
+// Add --check first to see what it would do without writing anything.
+import fs from 'node:fs';
+import path from 'node:path';
+
+// ---- text functions
+/** A word character, for telling `#fff` from the start of `#ffffff`. */
+const isWord = (ch) => /[0-9A-Za-z_]/.test(ch);
+
+/** Whether `text` stands at `start` in `line` as a whole token, not as the front of a longer one. */
+function standsAt(line, start, text) {
+  if (!line.startsWith(text, start)) return false;
+  const last = text.charAt(text.length - 1);
+  return !(isWord(last) && isWord(line.charAt(start + text.length)));
+}
+
+/** Snippets are cut at this length when the lab writes them. */
+const ANCHOR_LENGTH = 160;
+
+const readsAs = (line, anchor) => line.trim().slice(0, ANCHOR_LENGTH) === anchor;
+
+/** The `nth` whole-token occurrence of `text` in `line`, as an index, or -1. */
+function occurrence(line, text, nth) {
+  let from = 0;
+  let seen = -1;
+  for (;;) {
+    const index = line.indexOf(text, from);
+    if (index < 0) return -1;
+    if (standsAt(line, index, text) && !isWord(line.charAt(index - 1)) && ++seen === nth) {
+      return index;
+    }
+    from = index + 1;
+  }
+}
+
+/**
+ * Where an edit belongs in a file's lines: `{ line, start, old }` (0-based), `'already'` when
+ * the new text is there, or `null` when it cannot be found.
+ *
+ * Exactly where the lab saw it is tried first. Failing that, a line that reads the same,
+ * nearest first, since a file that has gained or lost a few lines is still the same file.
+ */
+function locate(lines, edit, after = null) {
+  const home = edit.line - 1;
+  const start = edit.col - 1;
+  const here = lines[home];
+  if (here !== undefined) {
+    // Looked for first: the new text can begin with the old.
+    if (standsAt(here, start, edit.new)) return 'already';
+    for (const old of edit.olds) {
+      if (standsAt(here, start, old)) return { line: home, start, old };
+    }
+  }
+  for (let distance = 0; distance <= 400; distance++) {
+    const candidates = distance === 0 ? [home] : [home - distance, home + distance];
+    for (const index of candidates) {
+      const line = lines[index];
+      if (line === undefined) continue;
+      // The line as it reads once the edits are made: they have been, and the file has moved since.
+      if (after !== null && readsAs(line, after)) return 'already';
+      if (!readsAs(line, edit.anchor)) continue;
+      for (const old of edit.olds) {
+        const found = occurrence(line, old, edit.nth);
+        if (found >= 0) return { line: index, start: found, old };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * What each edited line reads as once all its edits are made, keyed by line and anchor, so an
+ * edit can be known as done after the line has moved. Lines the anchor cut short are left out:
+ * what came after the cut is not known.
+ */
+function afterAnchors(edits) {
+  const groups = new Map();
+  for (const edit of edits) {
+    const key = edit.line + '|' + edit.anchor;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(edit);
+  }
+  const out = new Map();
+  for (const [key, group] of groups) {
+    const anchor = group[0].anchor;
+    if (anchor.length >= ANCHOR_LENGTH) continue;
+    const spots = group.map((edit) => ({
+      index: occurrence(anchor, edit.olds[0], edit.nth),
+      old: edit.olds[0],
+      new: edit.new,
+    }));
+    if (spots.some((spot) => spot.index < 0)) continue;
+    spots.sort((a, b) => b.index - a.index);
+    let text = anchor;
+    for (const spot of spots)
+      text = text.slice(0, spot.index) + spot.new + text.slice(spot.index + spot.old.length);
+    out.set(key, text.slice(0, ANCHOR_LENGTH));
+  }
+  return out;
+}
+
+/**
+ * Applies positional edits to one file's text. Lines keep their endings, so a file that
+ * uses CRLF still does. Edits on one line are made right to left so none moves another.
+ */
+function applyEdits(text, edits) {
+  const lines = text.split('\n');
+  const applied = [];
+  const already = [];
+  const skipped = [];
+  const jobs = [];
+  const after = afterAnchors(edits);
+
+  for (const edit of edits) {
+    const found = locate(lines, edit, after.get(edit.line + '|' + edit.anchor) ?? null);
+    if (found === 'already') already.push(edit);
+    else if (found === null) {
+      skipped.push({
+        edit,
+        reason: 'that text is not in the file where the lab saw it, or it has been changed already',
+      });
+    } else jobs.push({ edit, ...found });
+  }
+
+  jobs.sort((a, b) => a.line - b.line || b.start - a.start);
+  let last = null;
+  for (const job of jobs) {
+    if (last && last.line === job.line && job.start + job.old.length > last.start) {
+      skipped.push({ edit: job.edit, reason: 'it overlaps another edit' });
+      continue;
+    }
+    const line = lines[job.line];
+    lines[job.line] =
+      line.slice(0, job.start) + job.edit.new + line.slice(job.start + job.old.length);
+    applied.push(job.edit);
+    last = job;
+  }
+  return { text: lines.join('\n'), applied, already, skipped };
+}
+
+/** The index of the brace that closes the one at `open`, stepping over comments and strings. */
+function closingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const ch = text.charAt(i);
+    if (ch === '/' && text.charAt(i + 1) === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end < 0) return -1;
+      i = end + 1;
+    } else if (ch === '"' || ch === "'") {
+      for (i++; i < text.length && text.charAt(i) !== ch; i++) {
+        if (text.charAt(i) === '\\') i++;
+      }
+    } else if (ch === '{') depth++;
+    else if (ch === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+const sameValue = (a, b) =>
+  a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Adds custom properties to the `@theme` block that defines the colours, after the last of
+ * them. A name that is already there is left alone: `present` when it has the value asked
+ * for, `conflicts` when it has another, for someone to decide.
+ */
+function addToTheme(text, entries) {
+  const open = /@theme\b[^{]*\{/g;
+  let block = null;
+  for (let m = open.exec(text); m !== null && block === null; m = open.exec(text)) {
+    const start = m.index + m[0].length;
+    const end = closingBrace(text, start - 1);
+    if (end > 0 && text.slice(start, end).includes('--color-')) block = { start, end };
+  }
+  if (block === null) {
+    return {
+      text,
+      added: [],
+      present: [],
+      conflicts: [],
+      error: 'there is no @theme block with colours in it',
+    };
+  }
+
+  const inside = text.slice(block.start, block.end);
+  // A declaration ends before its line break, a carriage return included.
+  const declaration = /^([ \t]*)(--[\w-]+)[ \t]*:[ \t]*([^;\r\n]+);[^\r\n]*$/gm;
+  const existing = new Map();
+  let anchor = -1;
+  let indent = '  ';
+  for (let m = declaration.exec(inside); m !== null; m = declaration.exec(inside)) {
+    existing.set(m[2], m[3]);
+    if (m[2].startsWith('--color-')) {
+      anchor = m.index + m[0].length;
+      indent = m[1];
+    }
+  }
+
+  const added = [];
+  const present = [];
+  const conflicts = [];
+  const lines = [];
+  for (const entry of entries) {
+    const have = existing.get(entry.name);
+    if (have === undefined) {
+      added.push(entry.name);
+      lines.push(
+        indent +
+          entry.name +
+          ': ' +
+          entry.value +
+          ';' +
+          (entry.note ? ' /* ' + entry.note + ' */' : ''),
+      );
+    } else if (sameValue(have, entry.value)) present.push(entry.name);
+    else conflicts.push({ name: entry.name, have, want: entry.value });
+  }
+  if (lines.length === 0) return { text, added, present, conflicts };
+
+  const eol = lineEnding(text);
+  const at = block.start + anchor;
+  return {
+    text: text.slice(0, at) + eol + lines.join(eol) + text.slice(at),
+    added,
+    present,
+    conflicts,
+  };
+}
+
+/**
+ * Puts a block of text in a file between two marker comments, replacing what was between
+ * them if they are there already, so running the script twice leaves one copy.
+ */
+function setBlock(text, marker, block) {
+  const begin = '/* colour-lab:' + marker + ' begin */';
+  const end = '/* colour-lab:' + marker + ' end */';
+  const eol = lineEnding(text);
+  const body = (begin + '\n' + block.replace(/\n+$/, '') + '\n' + end).split('\n').join(eol);
+  const from = text.indexOf(begin);
+  const to = text.indexOf(end);
+  if (from >= 0 && to > from) return text.slice(0, from) + body + text.slice(to + end.length);
+  const trimmed = text.replace(/\s+$/, '');
+  return trimmed + eol + eol + body + eol;
+}
+
+/** The line ending a text uses, so that what is added to it does not mix two. */
+function lineEnding(text) {
+  return text.includes('\r\n') ? '\r\n' : '\n';
+}
+
+/** `40` or `[0.4]` after the slash of a class, as a fraction. */
+function opacityOf(text) {
+  const value = text.startsWith('[') ? parseFloat(text.slice(1, -1)) : parseInt(text, 10) / 100;
+  return Number.isFinite(value) ? value : 1;
+}
+
+/**
+ * The pattern for the classes a rule is about: a utility from `rule.prefixes`, then the colour
+ * `rule.from`, then perhaps an opacity. Group 1 is the utility, group 2 the opacity.
+ */
+function classPattern(rule) {
+  const name = rule.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(
+    '(?<![\\w-])(' + rule.prefixes + ')-' + name + '(?:\\/(\\d{1,3}|\\[[\\d.]+\\]))?(?![\\w-])',
+    'g',
+  );
+}
+
+/** Whether a rule covers a class set at this opacity. 1 stands for no opacity at all. */
+function covers(rule, opacity) {
+  if (rule.alphas === null) return true;
+  const alpha = opacity === undefined ? 1 : opacityOf(opacity);
+  return rule.alphas.some((a) => Math.abs(a - alpha) < 0.0005);
+}
+
+/** Renames the classes a rule covers, to the colour `rule.to`. Returns the new text and how many. */
+function renameClasses(text, rule) {
+  let count = 0;
+  const next = text.replace(classPattern(rule), (match, prefix, opacity) => {
+    if (!covers(rule, opacity)) return match;
+    count++;
+    const cut = prefix.length + 1;
+    return match.slice(0, cut) + rule.to + match.slice(cut + rule.from.length);
+  });
+  return { text: next, count };
+}
+
+/** How many classes a rule covers in a text, for finding the ones the lab did not list. */
+function countClasses(text, rule) {
+  let count = 0;
+  for (const m of text.matchAll(classPattern(rule))) if (covers(rule, m[2])) count++;
+  return count;
+}
+
+// ---- the plan, and what is done with it
+const PLAN = {
+ "copies": [
+  {"from":"packages/shared/src/assets/roundtable-logo.svg","to":"packages/shared/src/assets/roundtable-logo-dark.svg"}
+ ],
+ "edits": [
+  {"file":"apps/web/src/index.css","line":40,"col":15,"olds":["var(--color-rt-secondary)"],"new":"var(--color-rt-secondary-fill)","nth":0,"anchor":"background: var(--color-rt-secondary);"},
+  {"file":"apps/web/src/index.css","line":20,"col":25,"olds":["rgba(8, 12, 21, 0.12)","rgba(16, 24, 40, 0.12)"],"new":"var(--rt-lit-080c15-shadow-a120)","nth":0,"anchor":"box-shadow: 0 8px 24px rgba(8, 12, 21, 0.12);"},
+  {"file":"apps/web/src/index.css","line":21,"col":14,"olds":["#ffffff"],"new":"var(--rt-lit-ffffff-fill)","nth":0,"anchor":"background: #ffffff;"},
+  {"file":"apps/web/src/features/marketing/cta.ts","line":4,"col":60,"olds":["rgba(8,12,21,0.14)","rgba(16,24,40,0.14)"],"new":"var(--rt-lit-080c15-shadow-a140)","nth":0,"anchor":"export const cta = `bg-rt-secondary shadow-[0_8px_20px_rgba(8,12,21,0.14)]`;"},
+  {"file":"apps/web/src/features/marketing/LandingNav.tsx","line":34,"col":66,"olds":["#f7f4ee"],"new":"color:var(--rt-lit-f7f4ee-fill)","nth":0,"anchor":"<header className=\"sticky top-0 bg-[#f7f4ee]/85 backdrop-blur\">"},
+  {"file":"packages/shared/src/assets/roundtable-logo-dark.svg","line":3,"col":16,"olds":["black"],"new":"#eceef3","nth":0,"anchor":"<path fill=\"black\" d=\"M0 0\"/>"}
+ ],
+ "theme": {"file":"apps/web/src/index.css","entries":[{"name":"--color-rt-ink-fill","value":"#101828","note":"rt-ink as fill"},{"name":"--color-rt-secondary-fill-soft","value":"#8a5c12","note":"rt-secondary as fill"},{"name":"--color-rt-secondary-fill","value":"#8a5c12","note":"rt-secondary as fill"},{"name":"--color-white-fill","value":"#ffffff","note":"white as fill"}]},
+ "blocks": [
+  {"file":"apps/web/src/index.css","marker":"dark-theme","text":"/* The light values of hardcoded colours that are different in the dark theme. */\n:root {\n  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);\n  --rt-lit-f7f4ee-fill: #f7f4ee;\n  --rt-lit-ffffff-fill: #ffffff;\n}\n\n:root[data-theme='dark'] {\n  color-scheme: dark;\n  /* Brand and palette colours */\n  --color-rt-secondary-deep: #d2b98a;\n  --color-rt-surface: #16181d;\n  --color-rt-ink: #eceef3;\n  --color-rt-tertiary: #383c47;\n  --color-red-600: #ff7a7f;\n  /* Colours set apart by role */\n  --color-rt-ink-fill: #07080b;\n  --color-rt-secondary-fill-soft: #e0a33c;\n  --color-white-fill: #1c1f26;\n  /* Hardcoded colours */\n  --rt-lit-080c15-shadow-a120: rgba(8, 12, 21, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(8, 12, 21, 0.14);\n  --rt-lit-f7f4ee-fill: #13110e;\n  --rt-lit-ffffff-fill: #16181d;\n}\n\n/* Content that stays light, like paper on a dark desk: it gets the light values back. */\n:root[data-theme='dark'] :where(\n  article:has([data-card-plate], [data-sticky-note]),\n  [data-proposal-card],\n  [role=\"dialog\"][aria-label*=\" by \"],\n  [role=\"dialog\"][aria-labelledby=\"sticky-composer-label\"],\n  div:has(> svg[aria-label=\"Drawing canvas\"]),\n  svg:has([data-testid=\"diagram-sheet\"]),\n  button[aria-label$=\" ink\"],\n  span.absolute.rounded-xl[style*=\"rotate\"],\n  .rt-assistant-sticky,\n  .rt-assistant-card-well,\n  .rt-assistant-diagram-fit\n) {\n  color-scheme: light;\n  color: var(--color-rt-ink);\n  --color-rt-secondary-deep: #7a6a4c;\n  --color-rt-surface: #ffffff;\n  --color-rt-ink: #101828;\n  --color-rt-tertiary: #cfcfcf;\n  --color-red-600: #c0392b;\n  --color-rt-ink-fill: #101828;\n  --color-rt-secondary-fill-soft: #8a5c12;\n  --color-white-fill: #ffffff;\n  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);\n  --rt-lit-f7f4ee-fill: #f7f4ee;\n  --rt-lit-ffffff-fill: #ffffff;\n}"}
+ ],
+ "classes": [
+  {"rule":{"from":"rt-ink","to":"rt-ink-fill","prefixes":"bg|from|via|to|fill|accent|placeholder","alphas":[0.6]},"files":[{"file":"apps/web/src/features/b/B.tsx","expected":2}],"seen":["apps/web/src/features/b/B.tsx"]},
+  {"rule":{"from":"rt-secondary","to":"rt-secondary-fill-soft","prefixes":"bg|from|via|to|fill|accent|placeholder","alphas":[0.1]},"files":[{"file":"apps/web/src/features/a/A.tsx","expected":2}],"seen":["apps/web/src/features/a/A.tsx","apps/web/src/features/b/B.tsx"]},
+  {"rule":{"from":"rt-secondary","to":"rt-secondary-fill","prefixes":"bg|from|via|to|fill|accent|placeholder","alphas":[1]},"files":[{"file":"apps/web/src/features/a/A.tsx","expected":3},{"file":"apps/web/src/features/b/B.tsx","expected":4}],"seen":["apps/web/src/features/a/A.tsx","apps/web/src/features/b/B.tsx"]},
+  {"rule":{"from":"white","to":"white-fill","prefixes":"bg|from|via|to|fill|accent|placeholder","alphas":[1]},"files":[{"file":"apps/web/src/features/b/B.tsx","expected":2}],"seen":["apps/web/src/features/b/B.tsx"]}
+ ],
+ "created": ["apps/web/src/features/settings/AppearanceSettings.tsx"],
+ "scan": ["apps/web/src","packages/shared/src"],
+ "watch": []
+};
+
+const check = process.argv.includes('--check');
+const root = process.cwd();
+const out = [];
+const tally = {
+  applied: 0,
+  already: 0,
+  skipped: 0,
+  added: 0,
+  conflicts: 0,
+  mismatches: 0,
+  strays: 0,
+  tests: 0,
+};
+
+const absolute = (file) => path.join(root, file);
+const files = new Map();
+
+function read(file) {
+  if (files.has(file)) return files.get(file);
+  let text = null;
+  try {
+    text = fs.readFileSync(absolute(file), 'utf8');
+  } catch {
+    text = null;
+  }
+  files.set(file, text);
+  return text;
+}
+
+const write = (file, text) => files.set(file, text);
+
+// 0. Copies, so that the edits can be made to the copy. A copy that is there already is left alone.
+for (const copy of PLAN.copies) {
+  if (read(copy.to) !== null) {
+    out.push('COPY     ' + copy.to + ' is already there');
+    continue;
+  }
+  const source = read(copy.from);
+  if (source === null) {
+    out.push(
+      'SKIPPED  ' + copy.from + '  (the file is not on this branch: ' + copy.to + ' not made)',
+    );
+    tally.skipped++;
+    continue;
+  }
+  write(copy.to, source);
+  out.push('COPY     ' + copy.from + ' -> ' + copy.to);
+}
+
+// 1. Edits at a place in a file. First, so that the places are still where the lab saw them.
+const byFile = new Map();
+for (const edit of PLAN.edits) {
+  if (!byFile.has(edit.file)) byFile.set(edit.file, []);
+  byFile.get(edit.file).push(edit);
+}
+for (const [file, edits] of byFile) {
+  const text = read(file);
+  if (text === null) {
+    for (const edit of edits) {
+      out.push(
+        'SKIPPED  ' +
+          file +
+          ':' +
+          edit.line +
+          ':' +
+          edit.col +
+          '  ' +
+          edit.olds[0] +
+          ' -> ' +
+          edit.new +
+          '   (the file is not on this branch)',
+      );
+      tally.skipped++;
+    }
+    continue;
+  }
+  const result = applyEdits(text, edits);
+  write(file, result.text);
+  tally.applied += result.applied.length;
+  tally.already += result.already.length;
+  for (const edit of result.applied) {
+    out.push(
+      'APPLIED  ' +
+        file +
+        ':' +
+        edit.line +
+        ':' +
+        edit.col +
+        '  ' +
+        edit.olds[0] +
+        ' -> ' +
+        edit.new,
+    );
+  }
+  for (const edit of result.already) {
+    out.push('ALREADY  ' + file + ':' + edit.line + ':' + edit.col + '  ' + edit.new);
+  }
+  for (const { edit, reason } of result.skipped) {
+    out.push(
+      'SKIPPED  ' +
+        file +
+        ':' +
+        edit.line +
+        ':' +
+        edit.col +
+        '  ' +
+        edit.olds[0] +
+        ' -> ' +
+        edit.new +
+        '   (' +
+        reason +
+        ')',
+    );
+    tally.skipped++;
+  }
+}
+
+// 2. New colours in the @theme block.
+if (PLAN.theme && PLAN.theme.entries.length > 0) {
+  const text = read(PLAN.theme.file);
+  if (text === null) {
+    out.push(
+      'SKIPPED  ' +
+        PLAN.theme.file +
+        '  (the file is not on this branch: ' +
+        PLAN.theme.entries.length +
+        ' theme colours not added)',
+    );
+    tally.skipped += PLAN.theme.entries.length;
+  } else {
+    const result = addToTheme(text, PLAN.theme.entries);
+    if (result.error) {
+      out.push('SKIPPED  ' + PLAN.theme.file + '  (' + result.error + ')');
+      tally.skipped += PLAN.theme.entries.length;
+    } else write(PLAN.theme.file, result.text);
+    for (const name of result.added) out.push('THEME    + ' + name);
+    for (const name of result.present)
+      out.push('THEME    = ' + name + ' (already there with that value)');
+    for (const c of result.conflicts) {
+      out.push(
+        'CONFLICT ' +
+          c.name +
+          ' is already ' +
+          c.have +
+          ' and the lab wants ' +
+          c.want +
+          ': decide which stands',
+      );
+      tally.conflicts++;
+    }
+    tally.added += result.added.length;
+  }
+}
+
+// 3. Blocks of CSS, each between two marker comments.
+for (const block of PLAN.blocks) {
+  const text = read(block.file);
+  if (text === null) {
+    out.push(
+      'SKIPPED  ' +
+        block.file +
+        '  (the file is not on this branch: block ' +
+        block.marker +
+        ' not written)',
+    );
+    tally.skipped++;
+    continue;
+  }
+  const next = setBlock(text, block.marker, block.text);
+  write(block.file, next);
+  out.push(
+    'BLOCK    ' + block.marker + (next === text ? ' is already in ' : ' written to ') + block.file,
+  );
+}
+
+// 4. Classes that move to another colour.
+for (const entry of PLAN.classes) {
+  for (const { file, expected } of entry.files) {
+    const text = read(file);
+    if (text === null) {
+      out.push(
+        'SKIPPED  ' +
+          file +
+          '  (the file is not on this branch: ' +
+          expected +
+          ' x ' +
+          entry.rule.from +
+          ' not renamed)',
+      );
+      tally.skipped++;
+      continue;
+    }
+    const result = renameClasses(text, entry.rule);
+    write(file, result.text);
+    // Run before, the classes are in their new colour already.
+    const done = countClasses(text, { ...entry.rule, from: entry.rule.to });
+    if (result.count === 0 && expected > 0 && done >= expected) {
+      out.push(
+        'CLASSES  ' +
+          file +
+          '  ' +
+          entry.rule.from +
+          ' -> ' +
+          entry.rule.to +
+          '  already done (x' +
+          done +
+          ')',
+      );
+      continue;
+    }
+    const ok = result.count === expected;
+    if (!ok) tally.mismatches++;
+    out.push(
+      'CLASSES  ' +
+        file +
+        '  ' +
+        entry.rule.from +
+        ' -> ' +
+        entry.rule.to +
+        '  x' +
+        result.count +
+        ' (expected ' +
+        expected +
+        ')' +
+        (ok ? '' : '  MISMATCH'),
+    );
+  }
+}
+
+// 4b. Files this prompt tells the reader to create take the same moves. There is no count to compare.
+for (const file of PLAN.created) {
+  if (read(file) === null) {
+    out.push(
+      'SKIPPED  ' +
+        file +
+        '  (not there yet: create it first, as the prompt says, then run this again)',
+    );
+    tally.skipped++;
+    continue;
+  }
+  for (const entry of PLAN.classes) {
+    const result = renameClasses(read(file), entry.rule);
+    if (result.count === 0) continue;
+    write(file, result.text);
+    out.push(
+      'CLASSES  ' +
+        file +
+        '  ' +
+        entry.rule.from +
+        ' -> ' +
+        entry.rule.to +
+        '  x' +
+        result.count +
+        ' (a file this prompt creates)',
+    );
+  }
+}
+
+// 5. Write, unless this is only a check.
+let changed = 0;
+for (const [file, text] of files) {
+  if (text === null) continue;
+  let before = null;
+  try {
+    before = fs.readFileSync(absolute(file), 'utf8');
+  } catch {
+    before = null;
+  }
+  if (before === text) continue;
+  changed++;
+  if (!check) fs.writeFileSync(absolute(file), text);
+}
+
+// 6. The classes the lab did not list, in files it has not seen: found, not changed.
+const listed = new Set();
+for (const entry of PLAN.classes) for (const { file } of entry.files) listed.add(file);
+function* walk(dir) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(absolute(dir), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const rel = dir + '/' + entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name !== 'node_modules' && entry.name !== 'dist' && entry.name !== 'colourLab')
+        yield* walk(rel);
+    } else if (/\.(tsx?|css)$/.test(entry.name)) yield rel;
+  }
+}
+if (PLAN.classes.length > 0) {
+  for (const dir of PLAN.scan) {
+    for (const file of walk(dir)) {
+      let text = '';
+      try {
+        text =
+          files.has(file) && files.get(file) !== null
+            ? files.get(file)
+            : fs.readFileSync(absolute(file), 'utf8');
+      } catch {
+        continue;
+      }
+      for (const entry of PLAN.classes) {
+        if (entry.seen.includes(file)) continue;
+        // Any opacity: a use the lab has not seen may be at one it did not list.
+        const left = countClasses(text, { ...entry.rule, alphas: null });
+        if (left > 0) {
+          const isTest = /\.test\.[tj]sx?$/.test(file);
+          const what = isTest
+            ? ': a test that names this colour as a class. Where it checks a use that moved to ' +
+              entry.rule.to +
+              ', change what it expects'
+            : ': the lab has not seen this use. If it is one of the kind that moved to ' +
+              entry.rule.to +
+              ' (see the list), move it too';
+          out.push(
+            (isTest ? 'TEST     ' : 'STRAY    ') +
+              file +
+              '  ' +
+              left +
+              ' x ' +
+              entry.rule.from +
+              what,
+          );
+          tally.strays += left;
+        }
+      }
+    }
+  }
+}
+
+// 7. Tests that hold a value that has just changed: found, not changed.
+if (PLAN.watch.length > 0) {
+  for (const dir of PLAN.scan) {
+    for (const file of walk(dir)) {
+      if (!/\.test\.[tj]sx?$/.test(file)) continue;
+      let text = '';
+      try {
+        text = fs.readFileSync(absolute(file), 'utf8');
+      } catch {
+        continue;
+      }
+      text.split('\n').forEach((line, index) => {
+        const lower = line.toLowerCase();
+        for (const watched of PLAN.watch) {
+          if (!lower.includes(watched.old.toLowerCase())) continue;
+          out.push(
+            'TEST     ' +
+              file +
+              ':' +
+              (index + 1) +
+              '  has ' +
+              watched.old +
+              ', which is now ' +
+              watched.new,
+          );
+          tally.tests++;
+        }
+      });
+    }
+  }
+}
+
+console.log('Colour Lab apply' + (check ? ' (check only: nothing written)' : ''));
+console.log(out.join('\n'));
+console.log(
+  'SUMMARY  applied ' +
+    tally.applied +
+    ', already done ' +
+    tally.already +
+    ', skipped ' +
+    tally.skipped +
+    ', theme colours added ' +
+    tally.added +
+    ', conflicts ' +
+    tally.conflicts +
+    ', class mismatches ' +
+    tally.mismatches +
+    ', unlisted class uses ' +
+    tally.strays +
+    ', tests holding an old value ' +
+    tally.tests +
+    ', files ' +
+    (check ? 'that would change ' : 'changed ') +
+    changed,
+);
+```
+
+## The lab’s state
+
+This is what the Colour Lab loads to get back to these exact colours. You do not need it to make the changes above.
+
+```json
+{
+ "format": "colour-lab-state",
+ "version": 1,
+ "generatedAt": "2026-10-06T14:32:00.000Z",
+ "git": {
+  "sha": "f1d9446abcdef0123456789abcdef0123456789a",
+  "branch": "colour-testing",
+  "mergeBase": "28bda6dabcdef0123456789abcdef0123456789a"
+ },
+ "edits": {
+  "light": {
+   "token:rt-ink": {
+    "base": {
+     "kind": "custom",
+     "hex": "#101828"
+    }
+   },
+   "token:rt-secondary": {
+    "roles": {
+     "fill": {
+      "kind": "custom",
+      "hex": "#8a5c12"
+     }
+    }
+   },
+   "tw:red-600": {
+    "base": {
+     "kind": "custom",
+     "hex": "#c0392b"
+    }
+   }
+  },
+  "dark": {
+   "token:rt-surface": {
+    "base": {
+     "kind": "custom",
+     "hex": "#16181d"
+    }
+   }
+  }
+ }
+}
+```

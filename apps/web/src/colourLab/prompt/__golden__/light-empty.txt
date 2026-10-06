@@ -1,0 +1,6 @@
+# RoundTable colour change: light theme
+
+Made by the Colour Lab, a developer tool, on 6 October 2026, 14:32 UTC, from branch `colour-testing` at commit `f1d9446` (it left `main` at `28bda6d`).
+You are working in the RoundTable repository, on `main` or a branch of it. This document is the whole brief: you need nothing else, and there is nobody to ask.
+
+There are no light-theme changes in the lab. Nothing to do.
