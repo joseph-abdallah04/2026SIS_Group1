@@ -45,7 +45,7 @@ export function SessionEndedPage({ session }: { session: SessionDetail }) {
             <p className="mt-2 text-[13px] text-red-600">{error}</p>
           </div>
         ) : null}
-        {summary ? <SessionSummaryView summary={summary} viewerId={viewerId} /> : null}
+        {summary ? <SessionSummaryView summary={summary} viewerId={viewerId} cardActions /> : null}
 
         <div className="mt-auto flex items-center justify-between gap-4 pt-4">
           <div className="flex items-center gap-4">

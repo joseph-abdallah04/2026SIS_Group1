@@ -1,24 +1,15 @@
 import { Resvg } from '@resvg/resvg-js';
 import {
-  DIAGRAM_LABEL_INK,
   DRAWING_VIEWBOX_HEIGHT,
   DRAWING_VIEWBOX_WIDTH,
-  diagramCylinderCapHeight,
-  diagramEdgeDash,
-  diagramEdgeRoutes,
-  diagramEdgeStroke,
-  diagramEdgeStrokeWidth,
-  diagramNodeFill,
-  diagramNodeLabelLayout,
-  diagramNodeStroke,
-  diagramNodeStrokeWidth,
-  diagramNodesInDrawOrder,
-  effectiveDiagramNodeSize,
+  diagramExtent,
+  isEmptyStudioScene,
   isStorableImage,
   type BoardItem,
-  type DiagramNodeShape,
-  type DiagramNodeSize,
 } from '@roundtable/shared';
+
+import { interFontFiles } from './fonts.js';
+import { FONT_FAMILY, studioSceneMarkup, xml } from './studioSceneSvg.js';
 
 const CARD_W = 900;
 const PAD = 28;
@@ -70,14 +61,6 @@ export interface ProposalPreviewPng {
   height: number;
 }
 
-function xml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
-
 function ring(kind: FeaturedKind): string {
   if (kind === 'idea') return CARD_BORDER;
   return kind === 'winner' ? WINNER_RING : TIED_RING;
@@ -107,7 +90,7 @@ function wrapLines(text: string, charsPerLine: number, maxLines: number): string
 }
 
 function footer(authorName: string, y: number): string {
-  return `<text x="${PAD}" y="${y}" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="${MUTED}">${xml(authorName)}</text>`;
+  return `<text x="${PAD}" y="${y}" font-family="${FONT_FAMILY}" font-size="18" fill="${MUTED}">${xml(authorName)}</text>`;
 }
 
 function cardShell(height: number, fill: string, kind: FeaturedKind): string {
@@ -126,7 +109,7 @@ function stickySvg(item: BoardItem, kind: FeaturedKind): string {
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, paper, kind)}
-    <text font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="600" fill="${INK}">${tspans}</text>
+    <text font-family="${FONT_FAMILY}" font-size="28" font-weight="600" fill="${INK}">${tspans}</text>
     ${footer(item.authorName, height - 20)}
   </svg>`;
 }
@@ -228,42 +211,17 @@ function imageSvg(item: BoardItem, kind: FeaturedKind): string {
   </svg>`;
 }
 
-function shapeMarkup(
-  shape: DiagramNodeShape,
-  size: DiagramNodeSize,
-  fill: string,
-  stroke: string,
-  strokeWidth: number,
-): string {
-  const { width, height } = size;
-  const common = `fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"`;
-  switch (shape) {
-    case 'ellipse':
-      return `<ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" ${common}/>`;
-    case 'diamond':
-      return `<path d="M${width / 2},0 L${width},${height / 2} L${width / 2},${height} L0,${height / 2} Z" ${common}/>`;
-    case 'triangle':
-      return `<path d="M${width / 2},0 L${width},${height} L0,${height} Z" ${common}/>`;
-    case 'cylinder': {
-      const cap = diagramCylinderCapHeight(height);
-      return `<path d="M0,${cap} A${width / 2},${cap} 0 0 1 ${width},${cap} L${width},${height - cap} A${width / 2},${cap} 0 0 1 0,${height - cap} Z" ${common}/><path d="M0,${cap} A${width / 2},${cap} 0 0 0 ${width},${cap}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
-    }
-    case 'rectangle':
-      return `<rect width="${width}" height="${height}" ${common}/>`;
-    case 'container':
-      return `<rect width="${width}" height="${height}" rx="3" ${common} stroke-dasharray="4 3"/>`;
-    case 'text':
-      return `<rect width="${width}" height="${height}" fill="${fill}"/>`;
-    default:
-      return `<rect width="${width}" height="${height}" rx="8" ${common}/>`;
-  }
-}
-
+/**
+ * A studio canvas on its card. The canvas is drawn by `studioSceneMarkup`, in
+ * the same frame the board card gives it (`diagramExtent`), so a winner in the
+ * recap looks like the card everyone voted on — sketches, tables and arrows
+ * included.
+ */
 function diagramSvg(item: BoardItem, kind: FeaturedKind): string {
   if (item.artifactJson.type !== 'diagram') return '';
-  const { nodes, edges } = item.artifactJson;
+  const scene = item.artifactJson;
   const artW = CARD_W - PAD * 2;
-  if (nodes.length === 0) {
+  if (isEmptyStudioScene(scene)) {
     const height = PAD + 280 + FOOTER_H;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
       ${cardShell(height, WHITE, kind)}
@@ -272,64 +230,14 @@ function diagramSvg(item: BoardItem, kind: FeaturedKind): string {
     </svg>`;
   }
 
-  const svgWidth =
-    Math.max(...nodes.map((node) => node.x + effectiveDiagramNodeSize(node).width), 72) + 28;
-  const svgHeight =
-    Math.max(...nodes.map((node) => node.y + effectiveDiagramNodeSize(node).height), 32) + 24;
-  const artH = artHeight(artW, svgWidth, svgHeight);
+  const extent = diagramExtent(scene);
+  const artH = artHeight(artW, extent.width, extent.height);
   const height = PAD + artH + FOOTER_H + 12;
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const edgeRoutes = diagramEdgeRoutes(nodes, edges);
-  const arrowId = (color: string) => `rt-pdf-arrow-${item.id}-${color.replace('#', '')}`;
-  const arrowColors = [...new Set(edges.map((edge) => diagramEdgeStroke(edge)))];
-  const markers = arrowColors
-    .map(
-      (color) =>
-        `<marker id="${arrowId(color)}" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L6,3 L0,6 Z" fill="${color}"/></marker>`,
-    )
-    .join('');
-
-  const edgeMarkup = edges
-    .map((edge, index) => {
-      const from = nodeById.get(edge.from);
-      const to = nodeById.get(edge.to);
-      const route = edgeRoutes[index];
-      if (!from || !to || !route) return '';
-      const stroke = diagramEdgeStroke(edge);
-      const strokeWidth = diagramEdgeStrokeWidth(edge, 1.5);
-      const dash = diagramEdgeDash(edge, strokeWidth);
-      const dashAttr = dash.strokeDasharray ? ` stroke-dasharray="${dash.strokeDasharray}"` : '';
-      const capAttr = dash.strokeLinecap ? ` stroke-linecap="${dash.strokeLinecap}"` : '';
-      const label = edge.label
-        ? `<text x="${route.labelX}" y="${route.labelY}" text-anchor="middle" fill="#5A5F68" stroke="#F7F7F8" stroke-width="3" paint-order="stroke" font-size="9" font-family="Helvetica, Arial, sans-serif">${xml(edge.label)}</text>`
-        : '';
-      return `<path d="${xml(route.path)}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" marker-end="url(#${arrowId(stroke)})"${dashAttr}${capAttr}/>${label}`;
-    })
-    .join('');
-
-  const nodeMarkup = diagramNodesInDrawOrder(nodes)
-    .map((node) => {
-      const shape = node.shape ?? 'box';
-      const size = effectiveDiagramNodeSize(node);
-      const label = diagramNodeLabelLayout(node);
-      const fill = shape === 'text' && !node.fillColor ? 'transparent' : diagramNodeFill(node);
-      const tspans = label.lines
-        .map(
-          (line, lineIndex) =>
-            `<tspan x="${size.width / 2}" y="${label.firstBaselineY + lineIndex * label.lineHeight}">${xml(line)}</tspan>`,
-        )
-        .join('');
-      return `<g transform="translate(${node.x}, ${node.y})">${shapeMarkup(shape, size, fill, diagramNodeStroke(node, '#8CA4AC'), diagramNodeStrokeWidth(node, 1))}<text text-anchor="middle" fill="${DIAGRAM_LABEL_INK}" font-size="${label.fontSize}" font-family="Helvetica, Arial, sans-serif" font-weight="${shape === 'text' ? 600 : 400}">${tspans}</text></g>`;
-    })
-    .join('');
-
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, WHITE, kind)}
     <rect x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" rx="12" fill="${ART_BG}"/>
-    <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="0 0 ${svgWidth} ${svgHeight}">
-      <defs>${markers}</defs>
-      ${edgeMarkup}
-      ${nodeMarkup}
+    <svg x="${PAD}" y="${PAD}" width="${artW}" height="${artH}" viewBox="${extent.x} ${extent.y} ${extent.width} ${extent.height}" preserveAspectRatio="xMidYMid meet">
+      ${studioSceneMarkup(scene, item.id)}
     </svg>
     ${footer(item.authorName, height - 18)}
   </svg>`;
@@ -353,7 +261,9 @@ export function rasterizeProposalPreview(item: BoardItem, kind: FeaturedKind): P
   const svg = proposalCardSvg(item, kind);
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: 1400 },
-    font: { loadSystemFonts: true },
+    // Inter first, as the board lays labels out for it; the host's own fonts
+    // stay loaded for what Inter has no glyphs for, such as CJK names.
+    font: { fontFiles: interFontFiles(), loadSystemFonts: true, sansSerifFamily: 'Inter' },
   });
   const rendered = resvg.render();
   return {

@@ -391,4 +391,25 @@ describe('proposal enlarge', () => {
 
     expect(screen.queryByRole('button', { name: /^Enlarge/ })).toBeNull();
   });
+
+  it('saves the canvas from inside the view, where the card was given a way to', async () => {
+    const user = userEvent.setup();
+    const onExport = vi.fn();
+    render(<ProposalCard item={diagram} onExport={onExport} />);
+
+    await user.click(enlargeButton());
+    await user.click(screen.getByRole('button', { name: 'Export as PNG: diagram by Alice' }));
+
+    expect(onExport).toHaveBeenCalledWith(diagram, 'png');
+    // Saving is not looking away: the view stays open.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('offers no export where the card was given no way to report one', async () => {
+    const user = userEvent.setup();
+    render(<ProposalCard item={diagram} />);
+
+    await user.click(enlargeButton());
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull();
+  });
 });

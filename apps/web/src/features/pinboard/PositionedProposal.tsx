@@ -1,35 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  BringToFront,
-  Copy,
-  GitBranchPlus,
-  MoreHorizontal,
-  Pencil,
-  SendToBack,
-  Trash2,
-} from 'lucide-react';
+import { BringToFront, Copy, GitBranchPlus, Pencil, SendToBack, Trash2 } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 import type { ProposalArrangeInput } from '@roundtable/shared/schemas';
 
+import { CardMenuButton } from './CardMenuButton';
 import { cardWidth } from './cardMetrics';
 import { ConfirmRemoveDialog } from './ConfirmRemoveDialog';
+import { hasArtwork } from './hasArtwork';
 import {
+  contextMenuAnchor,
   ProposalActionsMenu,
   type ProposalMenuAnchor,
   type ProposalMenuItem,
 } from './ProposalActionsMenu';
 import { EnlargeIcon } from './ProposalEnlarge';
-import { hasArtwork, ProposalCard } from './ProposalCard';
+import { ProposalCard } from './ProposalCard';
+import { exportMenuItems, type ExportFormat } from './proposalExport';
 import { ReactionRow } from './ReactionRow';
 import { VoteResultBadge } from '../voting/VoteResultBadge';
 import {
-  CARD_INK,
   CARD_RADIUS,
   CARD_RADIUS_PX,
   cornerPoint,
   MENU_TARGET_OUTLINE,
-  REACTION_HOVER_FILL,
-  REACTION_ON_BORDER,
   STICKY_RADIUS,
   STICKY_RADIUS_PX,
 } from './pinboardTokens';
@@ -97,6 +90,12 @@ interface PositionedProposalProps {
   /** Put a sticky's text on the clipboard. The canvas says whether it worked. */
   onCopyText: (item: BoardItem) => void;
   /**
+   * Save this card's artwork as a file. Offered whatever state the board is
+   * in, closed and archived included: exporting changes nothing on it. The
+   * canvas says how it went.
+   */
+  onExport?: (item: BoardItem, format: ExportFormat) => void;
+  /**
    * Who the server says this client is, so the reaction row knows which chips
    * the viewer has already pressed. Null until the board is joined.
    */
@@ -118,58 +117,6 @@ interface PositionedProposalProps {
   onToggleShortlist: (id: string) => void;
   /** Last card the viewer interacted with, so the assistant can resolve "this one". */
   onSelectProposal?: (id: string) => void;
-}
-
-/**
- * The ⋯ in a card's top-right corner, opening the same actions a right-click
- * does.
- *
- * One button where the pencil and the bin used to sit side by side: a card now
- * has more actions than its corner has room for icons, and a menu is also the
- * only way in on a touchscreen, which has no right-click. So it shows on hover
- * and focus as the old controls did, and always on a device that cannot hover.
- */
-function CardMenuButton({
-  buttonRef,
-  open,
-  onToggle,
-}: {
-  buttonRef: React.RefObject<HTMLButtonElement>;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  // Pulled out by the same amount on both axes, so it sits centred on the
-  // card's top-right corner rather than tucked inside it.
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      onClick={onToggle}
-      title="Proposal actions"
-      aria-label="Proposal actions"
-      aria-haspopup="menu"
-      aria-expanded={open}
-      className={`absolute -top-2.5 -right-2.5 inline-flex h-5.5 w-5.5 items-center justify-center rounded-full border shadow-sm transition-[opacity,background-color,border-color,color] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${
-        open
-          ? // The menu opens over this spot, so the button steps out of the way
-            // rather than peeking out from under it.
-            'pointer-events-none border-rt-tertiary bg-white text-rt-ink-muted opacity-0'
-          : 'border-rt-tertiary bg-white text-rt-ink-muted opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) [@media(hover:none)]:opacity-100'
-      }`}
-      style={
-        {
-          // The slate the reaction chips hover to, so the card's controls read
-          // as one family. A hover colour cannot be an inline style, hence the
-          // variables.
-          '--rt-control-fill': REACTION_HOVER_FILL,
-          '--rt-control-edge': REACTION_ON_BORDER,
-          '--rt-control-ink': CARD_INK,
-        } as React.CSSProperties
-      }
-    >
-      <MoreHorizontal aria-hidden="true" size={13} strokeWidth={2.2} />
-    </button>
-  );
 }
 
 /** Movement past which a press on a card was a drag of it. */
@@ -210,6 +157,7 @@ export function PositionedProposal({
   onDelete,
   onArrange,
   onCopyText,
+  onExport,
   viewerId,
   onReact,
   isShortlisted,
@@ -305,6 +253,8 @@ export function PositionedProposal({
       ...(onExtend
         ? [{ id: 'extend', label: 'Extend', icon: GitBranchPlus, onSelect: () => onExtend(item) }]
         : []),
+      // One row, its formats a level down, so the menu stays short.
+      ...(onExport ? exportMenuItems(item, onExport) : []),
     ],
     canArrange
       ? [
@@ -429,10 +379,6 @@ export function PositionedProposal({
       onPointerUp={draggable ? dragHandlers.onPointerUp : undefined}
       onPointerCancel={draggable ? dragHandlers.onPointerCancel : undefined}
       onContextMenu={(event) => {
-        // The browser's own menu wherever ours has nothing to offer, over
-        // anything in the card that takes text of its own, and over a link in a
-        // sticky, where opening it in a new tab or copying its address is what
-        // a right-click is for.
         // Ctrl+click picks the card out with others on the board. On a Mac
         // the browser also treats it as a right-click and asks for a menu
         // first, which would open this one over the selection being made.
@@ -440,20 +386,15 @@ export function PositionedProposal({
           event.preventDefault();
           return;
         }
+        // The browser's own menu wherever ours has nothing to offer, over
+        // anything in the card that takes text of its own, and over a link in a
+        // sticky, where opening it in a new tab or copying its address is what
+        // a right-click is for.
         if (!hasActions) return;
-        const target = event.target as HTMLElement;
-        if (target.closest('textarea, input, [contenteditable="true"], a[href]')) return;
+        const anchor = contextMenuAnchor(event, cornerAnchor);
+        if (!anchor) return;
         event.preventDefault();
-        // The Menu key and Shift+F10 fire this too, from whatever is focused
-        // inside the card and with no pointer position, so the menu opens
-        // where the ⋯ would open it instead of in the window's corner.
-        const fromKeyboard = event.clientX === 0 && event.clientY === 0;
-        const rect = event.currentTarget.getBoundingClientRect();
-        setMenu(
-          fromKeyboard
-            ? (cornerAnchor() ?? { kind: 'corner', left: rect.right, top: rect.top })
-            : { kind: 'point', x: event.clientX, y: event.clientY },
-        );
+        setMenu(anchor);
       }}
       onClick={(event) => {
         // The corner tick and the ⋯ are their own presses.
@@ -531,6 +472,7 @@ export function PositionedProposal({
           // While the leader is shortlisting, a press on a card picks it.
           openOnArtworkPress={!canToggleShortlist}
           onEnlargedOpenChange={setEnlargedOpen}
+          onExport={onExport}
         />
 
         {/* Always there, reacting or not: once the board closes for voting,

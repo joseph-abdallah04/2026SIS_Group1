@@ -40,6 +40,31 @@ function diagramItem(nodes: DiagramNode[]): BoardItem {
 }
 
 describe('diagram proposal card', () => {
+  it('frames a shape turned against the top of the sheet without cutting it off', () => {
+    const { container } = render(
+      <ProposalCard
+        item={diagramItem([
+          {
+            id: 'n',
+            label: 'Turned',
+            x: 0,
+            y: 0,
+            shape: 'box',
+            width: 120,
+            height: 56,
+            rotation: 90,
+          },
+        ])}
+      />,
+    );
+    const [x, y] = (container.querySelector('svg[viewBox]')!.getAttribute('viewBox') ?? '')
+      .split(' ')
+      .map(Number);
+    // Stood on end at the sheet's corner, the box paints 32 units above it.
+    expect(x).toBe(0);
+    expect(y).toBeLessThanOrEqual(-32);
+  });
+
   it('renders box, container, and text shapes distinctly', () => {
     const { container } = render(
       <ProposalCard
