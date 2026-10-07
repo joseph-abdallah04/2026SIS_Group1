@@ -20,20 +20,21 @@ import {
   diagramNodeStroke,
   diagramNodeStrokeWidth,
   effectiveDiagramNodeSize,
+  diagramExtent,
   inkPoints,
   inkRotationTransform,
   inkStrokeColor,
   inkStrokeWidth,
+  isEmptyStudioScene,
   pathFill,
-  pathPaintedBounds,
   pathRotationTransform,
   pathStrokeColor,
   pathStrokeWidth,
   pathSvgData,
   strokePathData,
   studioPaintOrder,
-  tableSize,
-  type DiagramArtifact,
+  studioSceneBounds,
+  type StudioScene,
 } from '@roundtable/shared';
 
 import { DiagramShapeOutline } from '../../../components/ui/DiagramShapeOutline';
@@ -41,76 +42,9 @@ import { arrowTargetLookup } from './studioArrowTargets';
 import { StudioArrowView } from './StudioArrowView';
 import { StudioTableView } from './StudioTableView';
 
-/** What a canvas holds, whatever carries it: a proposal's artifact or a template. */
-export type StudioScene = Omit<DiagramArtifact, 'type'>;
-
-function isEmpty(scene: StudioScene): boolean {
-  return (
-    scene.nodes.length === 0 &&
-    (scene.ink?.length ?? 0) === 0 &&
-    (scene.paths?.length ?? 0) === 0 &&
-    (scene.tables?.length ?? 0) === 0 &&
-    (scene.arrows?.length ?? 0) === 0
-  );
-}
-
-/**
- * The box everything on a canvas occupies: the edges of every shape, sketch,
- * path and table, and every arrow's whole route, which can reach past what it
- * points at.
- */
-export function studioSceneBounds(scene: StudioScene): {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-} {
-  const { nodes } = scene;
-  const paths = scene.paths ?? [];
-  const tables = scene.tables ?? [];
-  const arrows = scene.arrows ?? [];
-  const points = (scene.ink ?? []).flatMap((stroke) => inkPoints(stroke));
-  // What each path paints, not where its anchors sit: a curve can bulge past
-  // its last anchor, and the card used to crop that bulge off.
-  const boxes = [
-    ...nodes.map((node) => ({ x: node.x, y: node.y, ...effectiveDiagramNodeSize(node) })),
-    ...points.map((point) => ({ ...point, width: 0, height: 0 })),
-    ...paths
-      .map((path) => pathPaintedBounds(path))
-      .filter((box): box is NonNullable<typeof box> => box !== null),
-    ...tables.map((table) => ({ x: table.x, y: table.y, ...tableSize(table) })),
-  ];
-  const targets = arrowTargetLookup({
-    nodes,
-    ink: (scene.ink ?? []).map((stroke) => ({ ...stroke, points: inkPoints(stroke) })),
-    paths,
-    tables,
-  });
-  for (const arrow of arrows) {
-    for (const point of arrowGeometry(arrow, targets).points) {
-      boxes.push({ ...point, width: 0, height: 0 });
-    }
-  }
-  if (boxes.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
-  const left = Math.min(...boxes.map((box) => box.x));
-  const top = Math.min(...boxes.map((box) => box.y));
-  const right = Math.max(...boxes.map((box) => box.x + box.width));
-  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
-
-/**
- * How much room a studio canvas takes on a card: the far edge of everything on
- * it, plus the margin the card leaves around it. Measured from the sheet's
- * corner, so a canvas keeps where on the sheet its content sat.
- */
-export function diagramExtent(scene: StudioScene): { width: number; height: number } {
-  const bounds = studioSceneBounds(scene);
-  return {
-    width: Math.max(bounds.x + bounds.width, 72) + 28,
-    height: Math.max(bounds.y + bounds.height, 32) + 24,
-  };
-}
+// The canvas type and its framing live in `@roundtable/shared`, so the card, a
+// card's export and the recap PDF frame a canvas the same way.
+export { diagramExtent, studioSceneBounds, type StudioScene } from '@roundtable/shared';
 
 /**
  * Everything on a canvas, painted in its own order, into whatever SVG it is put
@@ -339,13 +273,13 @@ export function StudioArtwork({
 }: StudioArtworkProps) {
   // A studio canvas is empty only when it holds nothing at all — a sketch, a
   // line, a table or an arrow is as much a diagram as a shape is.
-  if (isEmpty(scene)) {
+  if (isEmptyStudioScene(scene)) {
     return <div className="absolute inset-3 rounded-md border border-dashed border-rt-tertiary" />;
   }
   const viewBox = (() => {
     if (fit === 'sheet') {
-      const { width, height } = diagramExtent(scene);
-      return `0 0 ${width} ${height}`;
+      const { x, y, width, height } = diagramExtent(scene);
+      return `${x} ${y} ${width} ${height}`;
     }
     const bounds = studioSceneBounds(scene);
     const pad = 12;

@@ -1,9 +1,15 @@
 import type { BoardItem, SessionRecap } from '@roundtable/shared';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { saveBlob } from '../../lib/saveBlob';
+import { copyText } from '../../lib/copyText';
 import { cardWidth } from '../pinboard/cardMetrics';
 import { SessionSummaryView } from './SessionSummaryView';
+
+vi.mock('../../lib/saveBlob', () => ({ saveBlob: vi.fn() }));
+vi.mock('../../lib/copyText', () => ({ copyText: vi.fn(async () => true) }));
 
 function sticky(id: string, text: string): BoardItem {
   return {
@@ -204,5 +210,92 @@ describe('SessionSummaryView', () => {
 
     expect(screen.getByText('Discussed')).toBeInTheDocument();
     expect(screen.getByText('No ideas were added.')).toBeInTheDocument();
+  });
+});
+
+const CANVAS: BoardItem = {
+  ...sticky('p3', ''),
+  type: 'diagram',
+  artifactJson: {
+    type: 'diagram',
+    nodes: [{ id: 'n1', label: 'Ledger', x: 24, y: 24, shape: 'box' }],
+    edges: [],
+  },
+};
+
+const WITH_CANVAS: SessionRecap = {
+  ...RECAP,
+  questions: [
+    { ...RECAP.questions[0]!, proposals: [...RECAP.questions[0]!.proposals, CANVAS] },
+    RECAP.questions[1]!,
+  ],
+};
+
+const menuLabels = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
+
+describe('SessionSummaryView card actions', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(saveBlob).mockClear();
+  });
+
+  it('gives cards no menu unless the page asks for one', () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" />);
+    expect(screen.queryByRole('button', { name: 'Proposal actions' })).toBeNull();
+  });
+
+  it('opens the same menu as the board, less anything that changes a card', async () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    const buttons = screen.getAllByRole('button', { name: 'Proposal actions' });
+    // Two notes and a canvas.
+    expect(buttons).toHaveLength(3);
+    await userEvent.click(buttons[2]!);
+    expect(menuLabels()).toEqual(['Enlarge', 'Export']);
+  });
+
+  it('opens on a right-click too', () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    const notCancelled = fireEvent.contextMenu(screen.getByText('The API'), {
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(notCancelled).toBe(false);
+    expect(menuLabels()).toEqual(['Copy text']);
+  });
+
+  it('saves a canvas as an SVG and says so', async () => {
+    // The page's font is not reachable here; the file is saved without it.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new Error('offline'))),
+    );
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Proposal actions' })[2]!);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'As SVG' }));
+
+    expect(
+      await within(screen.getByRole('status')).findByText('Exported diagram as SVG'),
+    ).toBeInTheDocument();
+    expect(saveBlob).toHaveBeenCalledTimes(1);
+    const [blob, filename] = vi.mocked(saveBlob).mock.calls[0]!;
+    expect(filename).toMatch(/^roundtable-diagram-ada-\d{2}-\d{2}\.svg$/);
+    expect(blob.type).toBe('image/svg+xml');
+    expect(await blob.text()).toContain('>Ledger</tspan>');
+  });
+
+  it('copies a note and says so', async () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Proposal actions' })[0]!);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Copy text' }));
+
+    expect(copyText).toHaveBeenCalledWith('The API');
+    expect(
+      await within(screen.getByRole('status')).findByText('Copied to clipboard'),
+    ).toBeInTheDocument();
   });
 });

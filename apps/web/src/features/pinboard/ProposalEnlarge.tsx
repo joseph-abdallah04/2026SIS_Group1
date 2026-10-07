@@ -1,8 +1,9 @@
 import { forwardRef, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Maximize2, X, type LucideIcon } from 'lucide-react';
+import { ImageDown, Maximize2, X, type LucideIcon } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 
+import { exportLabel, type ExportFormat } from './proposalExport';
 import { popupRoomFrom, CENTRED_ON_WINDOW, EDGE_PX, type BoardPopupRoom } from './boardPopup';
 import {
   CARD_BORDER,
@@ -122,6 +123,8 @@ export function ProposalEnlarge({
   pressOutside = 'acts',
   open: openFromOutside,
   onOpenChange,
+  exportFormat,
+  onExport,
 }: {
   item: BoardItem;
   /** The card's own drawing, drawn again in the enlarged view's frame. */
@@ -152,6 +155,12 @@ export function ProposalEnlarge({
    * vote is the one thing on that screen you cannot take back by pressing again.
    */
   pressOutside?: 'acts' | 'is absorbed';
+  /**
+   * What the view's own export button saves the artwork as. Both are left out
+   * where nothing can say how an export went, and the button is not drawn.
+   */
+  exportFormat?: ExportFormat;
+  onExport?: () => void;
 }) {
   const [openHere, setOpenHere] = useState(false);
   const open = openFromOutside ?? openHere;
@@ -213,6 +222,8 @@ export function ProposalEnlarge({
           artwork={artwork}
           byline={byline}
           pressOutside={pressOutside}
+          exportFormat={onExport ? exportFormat : undefined}
+          onExport={onExport}
           // What it opens over is whatever surface the way in belongs to.
           openedFrom={buttonRef.current}
           onClose={() => setOpen(false)}
@@ -229,11 +240,15 @@ function EnlargedView({
   pressOutside,
   openedFrom,
   onClose,
+  exportFormat,
+  onExport,
 }: {
   item: BoardItem;
   artwork: ReactNode;
   byline: ReactNode;
   pressOutside: 'acts' | 'is absorbed';
+  exportFormat?: ExportFormat;
+  onExport?: () => void;
   /** The way in that was pressed, which says which surface this is over. */
   openedFrom: HTMLElement | null;
   onClose: () => void;
@@ -468,6 +483,22 @@ function EnlargedView({
             {artwork}
           </div>
         </div>
+        {/* Saving the artwork, beside the close. Outside the frame for the
+            reason the close below gives: the frame captures the pointer, and
+            would take this press for a zoom. Ahead of the close in the tab
+            order, as it is on screen. Here, where somebody is looking closely,
+            is where they most often want the thing itself. */}
+        {exportFormat && onExport ? (
+          <button
+            type="button"
+            title={exportLabel(exportFormat)}
+            aria-label={`${exportLabel(exportFormat)}: ${KIND[item.type]} by ${item.authorName}`}
+            onClick={onExport}
+            className="absolute top-3 right-13 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-rt-tertiary bg-white/90 text-rt-ink-muted shadow-sm transition-colors hover:bg-rt-surface-alt hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:outline-none"
+          >
+            <ImageDown aria-hidden="true" size={15} strokeWidth={2.2} />
+          </button>
+        ) : null}
         {/* In the corner the artwork leaves clear, where a window's close is:
             on the plate rather than beside the byline, which is about the
             proposal rather than about this view.

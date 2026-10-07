@@ -1220,51 +1220,10 @@ export function rangeAsTabularText(table: TableElement, range: CellRange): strin
 }
 
 /**
- * The inside lines of the grid as one path, in the table's own units.
- *
- * Drawn once rather than as a border round every cell: two cells stroking the
- * edge they share drew it twice, which read heavier than the outline and put a
- * darker dot on every corner where four cells met.
+ * The inside lines of the grid as one path. Lives in `@roundtable/shared` so
+ * the recap PDF rules a table exactly as the canvas does.
  */
-export function tableGridPath(
-  table: Pick<TableElement, 'colWidths' | 'rowHeights' | 'merges'>,
-): string {
-  const colOffsets = tableColumnOffsets(table);
-  const rowOffsets = tableRowOffsets(table);
-  const merges = table.merges ?? [];
-  const parts: string[] = [];
-  // Each inside line is drawn in the runs between the merged cells it would
-  // otherwise cut through; with nothing merged, each is one run end to end.
-  const across = (at: number, along: number, axis: TableAxis) =>
-    merges.some((merge) => {
-      const line = mergeSpan(merge, axis === 'col' ? 'col' : 'row');
-      const other = mergeSpan(merge, axis === 'col' ? 'row' : 'col');
-      return line.start < at && at <= line.end && along >= other.start && along <= other.end;
-    });
-  const runs = (count: number, hidden: (index: number) => boolean) => {
-    const found: [number, number][] = [];
-    let from: number | null = null;
-    for (let index = 0; index <= count; index += 1) {
-      if (index < count && !hidden(index)) from ??= index;
-      else if (from !== null) {
-        found.push([from, index]);
-        from = null;
-      }
-    }
-    return found;
-  };
-  colOffsets.slice(1, -1).forEach((x, index) => {
-    for (const [from, to] of runs(rowOffsets.length - 1, (row) => across(index + 1, row, 'col'))) {
-      parts.push(`M${x} ${rowOffsets[from]}V${rowOffsets[to]}`);
-    }
-  });
-  rowOffsets.slice(1, -1).forEach((y, index) => {
-    for (const [from, to] of runs(colOffsets.length - 1, (col) => across(index + 1, col, 'row'))) {
-      parts.push(`M${colOffsets[from]} ${y}H${colOffsets[to]}`);
-    }
-  });
-  return parts.join('');
-}
+export { tableGridPath } from '@roundtable/shared';
 
 /** Shift the whole table. Cells are laid out from x/y, so only the origin moves. */
 export function moveTableBy(table: TableElement, dx: number, dy: number): TableElement {

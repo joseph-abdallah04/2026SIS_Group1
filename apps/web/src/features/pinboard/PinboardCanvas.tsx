@@ -24,6 +24,7 @@ import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
 import { FirstProposalHint } from './FirstProposalHint';
+import { useProposalExport } from './proposalExport';
 import { PositionedProposal } from './PositionedProposal';
 import { useCanvasPan, type Point } from './useCanvasPan';
 import { useProposalDrag } from './useProposalDrag';
@@ -772,6 +773,13 @@ export function PinboardCanvas({
   );
 
   /**
+   * Save a card's artwork as a file. Said either way, in the same pill: a
+   * download shows nothing inside the page, so without the note it looks as if
+   * the menu did nothing.
+   */
+  const onExport = useProposalExport((result) => showNotice(result.text));
+
+  /**
    * Where each card sits in the shared stack, 0 at the bottom.
    *
    * By `z`, then creation order for equal values, which is how every card
@@ -1182,6 +1190,7 @@ export function PinboardCanvas({
                     onDelete={onDelete}
                     onArrange={onArrange}
                     onCopyText={onCopyText}
+                    onExport={onExport}
                     viewerId={viewerId}
                     onReact={boardOpen ? onReact : undefined}
                     isShortlisted={shortlist.includes(item.id)}
@@ -1283,15 +1292,17 @@ export function PinboardCanvas({
             <p role="status" className="sr-only">
               {selectionAnnouncement}
             </p>
-            <div className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4">
+            {/* The live region stays mounted and only its words change: one that
+                arrives together with its words is often not read out at all. */}
+            <div
+              role="status"
+              className="absolute inset-x-0 bottom-19 flex flex-col items-center gap-2 px-4"
+            >
               {notice ? (
                 // Kept on a board too narrow for the controls: a paste or a
                 // drop can still be refused there. Wraps rather than running
                 // past the board's edges.
-                <p
-                  role="status"
-                  className="pointer-events-auto max-w-full rounded-2xl border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-center text-[11.5px] font-medium text-balance text-rt-secondary-deep shadow-sm"
-                >
+                <p className="pointer-events-auto max-w-full rounded-2xl border border-rt-secondary/40 bg-white px-3.5 py-1.5 text-center text-[11.5px] font-medium text-balance text-rt-secondary-deep shadow-sm">
                   {notice.text}
                 </p>
               ) : null}

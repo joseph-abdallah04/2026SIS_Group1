@@ -831,16 +831,31 @@ function templateSize(template: StudioTemplate): DiagramNodeSize {
 }
 
 /**
- * Everything a template puts down — shapes, tables and each arrow's whole
- * route — measured the way the board card measures a canvas, so the drop
- * preview, where it lands and what the card shows all agree.
+ * Everything a template puts down — shapes, tables, each arrow's whole route
+ * and the labels beside them — measured the way the board card measures a
+ * canvas, so the drop preview, where it lands and what the card shows all
+ * agree.
+ *
+ * Widened out to whole grid steps. Where the template lands is the snapped
+ * drop point less this box's corner, and the paster snaps each shape but
+ * moves tables and arrow ends by that offset as it is: a corner off the grid —
+ * which a label's estimated width puts it — would land the tables a few units
+ * out of line with the shapes beside them.
  */
 function templateBounds(template: StudioTemplate) {
   // Templates never change, and this runs on every pointer move while one is
   // carried — arrow routes and all — so each is measured once.
   const known = TEMPLATE_BOUNDS.get(template.id);
   if (known) return known;
-  const bounds = studioSceneBounds(templateFragment(template));
+  const painted = studioSceneBounds(templateFragment(template));
+  const x = Math.floor(painted.x / DIAGRAM_GRID) * DIAGRAM_GRID;
+  const y = Math.floor(painted.y / DIAGRAM_GRID) * DIAGRAM_GRID;
+  const bounds = {
+    x,
+    y,
+    width: Math.ceil((painted.x + painted.width) / DIAGRAM_GRID) * DIAGRAM_GRID - x,
+    height: Math.ceil((painted.y + painted.height) / DIAGRAM_GRID) * DIAGRAM_GRID - y,
+  };
   TEMPLATE_BOUNDS.set(template.id, bounds);
   return bounds;
 }

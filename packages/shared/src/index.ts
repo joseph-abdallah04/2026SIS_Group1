@@ -156,6 +156,8 @@ export * from './studioElements.js';
 // v4.2 standalone arrows: their own collection, because an arrow is drawn
 // artwork with free endpoints rather than a semantic node-to-node edge.
 export * from './studioArrows.js';
+// A canvas as a whole: arrow binding targets, table grid lines and framing.
+export * from './studioScene.js';
 export * from './drawingContract.js';
 export * from './imageContract.js';
 export * from './reactionContract.js';
