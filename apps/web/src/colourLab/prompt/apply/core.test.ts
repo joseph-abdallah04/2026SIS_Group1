@@ -61,6 +61,31 @@ describe('locate', () => {
     expect(found).toMatchObject({ old: '#112233' });
   });
 
+  // The dark prompt runs after the light one, whose edits earlier on a line move what follows.
+  describe('on a line another prompt has changed', () => {
+    const changed = 'a: var(--long), #080c15;';
+    const dark = { olds: ['#080c15'], new: '#222222', anchor: 'a: #111, #080c15;' };
+
+    it('tries the columns it was told the text may have moved to', () => {
+      expect(locate([changed], edit({ line: 1, col: 10, ...dark }))).toBeNull();
+      expect(locate([changed], edit({ line: 1, col: 10, cols: [17], ...dark }))).toEqual({
+        line: 0,
+        start: 16,
+        old: '#080c15',
+      });
+    });
+
+    it('finds the line by how the other prompt left it, when the file has moved too', () => {
+      const moved = ['/* new header */', changed];
+      expect(locate(moved, edit({ line: 1, col: 10, ...dark }))).toBeNull();
+      expect(locate(moved, edit({ line: 1, col: 10, anchors: [changed], ...dark }))).toEqual({
+        line: 1,
+        start: 16,
+        old: '#080c15',
+      });
+    });
+  });
+
   it('does not take the front of a longer colour for a short one', () => {
     expect(
       locate(['color: #ffffff;'], edit({ line: 1, col: 8, olds: ['#fff'], new: '#000' })),

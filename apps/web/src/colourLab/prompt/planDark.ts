@@ -1,7 +1,8 @@
 import { type Rgb } from '../colour/convert';
 import { formatCss } from '../colour/parse';
-import { resolveSlot } from '../model/resolve';
+import { originalOf, resolveSlot } from '../model/resolve';
 import { type SlotKey, slotKind } from '../model/slots';
+import { occurrence } from './apply/core';
 import { type TextEdit, type ThemeEntry } from './apply/script';
 import { classify } from './classify';
 import { INFRA_FILES } from './infra';
@@ -32,6 +33,35 @@ const alphaSuffix = (alpha: number): string => (alpha < 1 ? `-a${Math.round(alph
 export const variableName = (slot: SlotKey, role: string, alpha: number): string =>
   `--rt-lit-${slot.replace(/^hex:#/, '')}-${role}${alphaSuffix(alpha)}`;
 
+/**
+ * How each line the light prompt edits reads once it has. The dark prompt may be applied after
+ * the light one, and then a line it edits is no longer the line the lab saw.
+ */
+function afterLightLines(edits: readonly TextEdit[]): Map<string, string> {
+  const groups = new Map<string, TextEdit[]>();
+  for (const edit of edits) {
+    const key = `${edit.file}|${edit.line}`;
+    groups.set(key, [...(groups.get(key) ?? []), edit]);
+  }
+  const out = new Map<string, string>();
+  for (const [key, group] of groups) {
+    const anchor = group[0]?.anchor ?? '';
+    if (anchor.length >= 160) continue;
+    const spots = group.map((edit) => ({
+      index: occurrence(anchor, edit.olds[0] ?? '', edit.nth),
+      old: edit.olds[0] ?? '',
+      next: edit.new,
+    }));
+    if (spots.some((spot) => spot.index < 0)) continue;
+    spots.sort((a, b) => b.index - a.index);
+    let text = anchor;
+    for (const spot of spots)
+      text = text.slice(0, spot.index) + spot.next + text.slice(spot.index + spot.old.length);
+    out.set(key, text.slice(0, 160));
+  }
+  return out;
+}
+
 /** The dark copy of the logo sits beside it. */
 const darkTwin = (file: string): string => file.replace(/\.svg$/, '-dark.svg');
 
@@ -52,6 +82,21 @@ export function planDark(inputs: PromptInputs): DarkPlan {
   const theme: ThemeEntry[] = [];
   const copies: { from: string; to: string }[] = [];
 
+  const lightPlan = planLight(inputs);
+  const afterLight = afterLightLines(lightPlan.apply.edits);
+  /** Where a colour will be once the light prompt has been applied: the line reads differently, and edits before it on the line move it. */
+  const placeAfterLight = (
+    edit: TextEdit,
+    at: { file: string; line: number; col: number },
+  ): void => {
+    const after = afterLight.get(`${at.file}|${at.line}`);
+    if (after && after !== edit.anchor) edit.anchors = [after];
+    const shift = lightPlan.apply.edits
+      .filter((e) => e.file === at.file && e.line === at.line && e.col < at.col)
+      .reduce((sum, e) => sum + e.new.length - (e.olds[0] ?? '').length, 0);
+    if (shift !== 0) edit.cols = [at.col + shift];
+  };
+
   // Brand and palette colours: those that are another colour in the dark.
   const colours: DarkColour[] = [];
   const slots: SlotKey[] = [
@@ -68,10 +113,25 @@ export function planDark(inputs: PromptInputs): DarkPlan {
 
   // Colours set apart by role.
   const roles = splitByRole(catalogue, light, dark);
+  /**
+   * A role's light value. A Tailwind colour the lab has not changed is written as itself, since
+   * its own value (an OKLCH colour) may lie outside what a hex can say.
+   */
+  const followsColour = (slot: SlotKey, rgb: Rgb): boolean => {
+    const original = originalOf(slot, light);
+    return (
+      slotKind(slot) === 'tw' &&
+      colourName(slot) !== null &&
+      original !== null &&
+      sameRgb(rgb, original)
+    );
+  };
+  const lightValue = (slot: SlotKey, rgb: Rgb): string =>
+    followsColour(slot, rgb) ? `var(--color-${colourName(slot)})` : hex6(rgb);
   for (const token of roles.tokens) {
     theme.push({
       name: `--color-${token.name}`,
-      value: hex6(token.light),
+      value: lightValue(token.slot, token.light),
       note: `${colourName(token.slot)} as ${token.role}`,
     });
   }
@@ -104,14 +164,15 @@ export function planDark(inputs: PromptInputs): DarkPlan {
       logo.to = to;
       const text = textFor(d, literal.alpha, literal.raw);
       logo.changes.push({ literal, to: text, kind });
-      edits.push(
-        editAt(
-          { ...literal, file: to },
-          [literal.raw],
-          text,
-          nthOnLine(literal, catalogue.literals),
-        ),
+      // The copy is made from the logo as the light prompt left it, if it came first.
+      const logoEdit = editAt(
+        { ...literal, file: to },
+        [...new Set([literal.raw, textFor(l, literal.alpha, literal.raw)])],
+        text,
+        nthOnLine(literal, catalogue.literals),
       );
+      placeAfterLight(logoEdit, literal);
+      edits.push(logoEdit);
       continue;
     }
 
@@ -143,7 +204,9 @@ export function planDark(inputs: PromptInputs): DarkPlan {
     const reference = `${literal.colourClass ? 'color:' : ''}var(${name})`;
     const olds = [...new Set([literal.raw, textFor(l, literal.alpha, literal.raw)])];
     replaced.push({ literal, to: reference, kind });
-    edits.push(editAt(literal, olds, reference, nthOnLine(literal, catalogue.literals)));
+    const edit = editAt(literal, olds, reference, nthOnLine(literal, catalogue.literals));
+    placeAfterLight(edit, literal);
+    edits.push(edit);
   }
 
   const sortedVariables = [...variables.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -155,12 +218,12 @@ export function planDark(inputs: PromptInputs): DarkPlan {
   const css = darkCss({
     colours: colours.map((c) => property(c.name, hex6(c.light), hex6(c.dark))),
     roles: roles.tokens
-      .filter((t) => t.dark && !sameRgb(t.light, t.dark))
-      .map((t) => property(`--color-${t.name}`, hex6(t.light), hex6(t.dark as Rgb))),
+      // One written as the colour it comes from would follow that colour into the dark, so it is set.
+      .filter((t) => t.dark && (!sameRgb(t.light, t.dark) || followsColour(t.slot, t.light)))
+      .map((t) => property(`--color-${t.name}`, lightValue(t.slot, t.light), hex6(t.dark as Rgb))),
     variables: sortedVariables.map((v) => property(v.name, v.light, v.dark)),
   });
 
-  const lightPlan = planLight(inputs);
   const apply: DarkPlan['apply'] = {
     copies: logo.to ? [{ from: logo.from, to: logo.to }] : copies,
     edits,

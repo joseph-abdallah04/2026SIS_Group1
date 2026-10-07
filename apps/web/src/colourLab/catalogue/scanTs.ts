@@ -1,7 +1,7 @@
 import { parseColour } from '../colour/parse';
 import { findColourVars } from '../colour/tokens';
 import { hexSlotKey, slotKeyForVar } from '../model/slots';
-import { roleOfName, roleOfUtility } from './roles';
+import { roleAtOffset, roleOfName, roleOfUtility } from './roles';
 import { blankTsComments, lineStartsOf, positionOf, snippetAt } from './source';
 import { type ClassUse, type FileScan, type Role } from './types';
 
@@ -55,6 +55,23 @@ function keyBefore(prefix: string): string | null {
   return key;
 }
 
+/**
+ * The role of a colour in a shadow, told apart by layer as the engine does, so a ring drawn with
+ * a shadow is a border here too. The value is the string or the arbitrary class value around the
+ * colour; in a class, Tailwind's underscores stand for spaces.
+ */
+function shadowLayerRole(lineText: string, index: number, inClass: boolean): Role {
+  const before = lineText.slice(0, index);
+  const openers = inClass ? ['['] : ["'", '"', '`'];
+  const start = Math.max(...openers.map((ch) => before.lastIndexOf(ch))) + 1;
+  const ends = (inClass ? [']'] : ["'", '"', '`'])
+    .map((ch) => lineText.indexOf(ch, index))
+    .filter((at) => at >= 0);
+  const end = ends.length > 0 ? Math.min(...ends) : lineText.length;
+  const value = lineText.slice(start, end);
+  return roleAtOffset('box-shadow', inClass ? value.replace(/_/g, ' ') : value, index - start);
+}
+
 /** A value that starts its own line takes its key from the end of the line above: `key:` then the value. */
 function keyAbove(lines: readonly string[], line: number): string | null {
   const above = (lines[line - 2] ?? '').trimEnd();
@@ -94,6 +111,8 @@ export function scanTsSource(file: string, text: string, exportOnly = false): Fi
       context = [name, key].filter((part, i, all) => part && all.indexOf(part) === i).join(' · ');
     }
 
+    if (role === 'shadow') role = shadowLayerRole(lineText, col - 1, Boolean(arbitrary?.[1]));
+
     scan.literals.push({
       slot: hexSlotKey(colour.rgba),
       file,
@@ -121,6 +140,7 @@ export function scanTsSource(file: string, text: string, exportOnly = false): Fi
     const arbitrary = ARBITRARY.exec(prefix);
     const key = keyBefore(prefix) ?? keyAbove(lines, line);
     const name = declarations[line - 1];
+    const baseRole = arbitrary?.[1] ? roleOfUtility(arbitrary[1]) : roleOfName(key ?? name ?? '');
     scan.refs.push({
       slot,
       file,
@@ -129,7 +149,10 @@ export function scanTsSource(file: string, text: string, exportOnly = false): Fi
       raw: span.text,
       name: span.name,
       alpha: span.alpha,
-      role: arbitrary?.[1] ? roleOfUtility(arbitrary[1]) : roleOfName(key ?? name ?? ''),
+      role:
+        baseRole === 'shadow'
+          ? shadowLayerRole(lines[line - 1] ?? '', col - 1, Boolean(arbitrary?.[1]))
+          : baseRole,
       context: arbitrary?.[1]
         ? `class ${arbitrary[1]}-[…]`
         : [name, key].filter((part, i, all) => part && all.indexOf(part) === i).join(' · '),

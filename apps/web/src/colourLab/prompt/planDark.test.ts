@@ -76,7 +76,7 @@ describe('planDark', () => {
     expect(logoEdits).toHaveLength(1);
     expect(logoEdits[0]).toMatchObject({
       file: 'packages/shared/src/assets/roundtable-logo-dark.svg',
-      olds: ['black'],
+      olds: ['black', '#000000'],
       new: '#eceef3',
     });
   });
@@ -115,6 +115,68 @@ describe('planDark', () => {
     });
     expect(chosen.css).toContain('--color-rt-surface: #16181d;');
     expect(chosen.variables.find((v) => v.name === '--rt-lit-ffffff-fill')?.dark).toBe('#16181d');
+  });
+
+  it('finds its colours on lines the light prompt has changed, when it is applied after it', () => {
+    const base = inputsWith({
+      light: { 'hex:#080c15': { base: custom('#101828') } },
+      dark: {},
+    });
+    // A line with two shadows, each of which the light prompt writes one character longer.
+    const card = base.catalogue.literals.find((l) => l.line === 20)!;
+    const snippet = 'box-shadow: 0 1px rgba(8,12,21,0.1), 0 2px rgba(8,12,21,0.2);';
+    const shadow = (col: number, raw: string, alpha: number) => ({
+      ...card,
+      line: 41,
+      col,
+      raw,
+      alpha,
+      snippet,
+    });
+    const both = planDark({
+      ...base,
+      catalogue: {
+        ...base.catalogue,
+        literals: [
+          ...base.catalogue.literals,
+          shadow(19, 'rgba(8,12,21,0.1)', 0.1),
+          shadow(44, 'rgba(8,12,21,0.2)', 0.2),
+        ],
+      },
+    });
+
+    const cardEdit = both.apply.edits.find((e) => e.line === 20 && e.file.endsWith('index.css'));
+    expect(cardEdit?.olds).toEqual(['rgba(8, 12, 21, 0.12)', 'rgba(16, 24, 40, 0.12)']);
+    expect(cardEdit?.anchors).toEqual(['box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);']);
+    // The first shadow is where the lab saw it; the second has moved one along.
+    const [first, second] = both.apply.edits.filter((e) => e.line === 41);
+    expect(first?.cols).toBeUndefined();
+    expect(second?.cols).toEqual([45]);
+    expect(second?.anchors).toEqual([
+      'box-shadow: 0 1px rgba(16,24,40,0.1), 0 2px rgba(16,24,40,0.2);',
+    ]);
+    // Edits on lines the light prompt leaves alone carry nothing extra.
+    const plain = dark().apply.edits;
+    expect(plain.every((e) => e.anchors === undefined && e.cols === undefined)).toBe(true);
+  });
+
+  it('writes a Tailwind colour it has not changed as itself, and still sets it in the dark', () => {
+    // White, as a fill, is the surface in the dark: its light value is Tailwind's own white.
+    expect(plan.apply.theme?.entries.find((e) => e.name === '--color-white-fill')?.value).toBe(
+      'var(--color-white)',
+    );
+    expect(plan.css).toContain('--color-white-fill: #1c1f26;');
+    // Kept the same in the dark while white itself changes, it is still set there, or it would
+    // follow white into the dark.
+    const kept = dark({
+      edits: {
+        light: {},
+        dark: { 'tw:white': { base: custom('#eeeeee'), roles: { fill: custom('#ffffff') } } },
+      },
+    });
+    const [, darkBlock = ''] = kept.css.split('\n}\n');
+    expect(darkBlock).toContain('--color-white: #eeeeee;');
+    expect(darkBlock).toContain('--color-white-fill: #ffffff;');
   });
 
   it('counts the light changes the lab also holds, so the reader can be told to apply them first', () => {

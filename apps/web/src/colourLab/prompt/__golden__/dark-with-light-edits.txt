@@ -569,7 +569,7 @@ It goes at the end of `apps/web/src/index.css`, after Tailwind’s own rules, wh
   --color-red-600: #c0392b;
   --color-rt-ink-fill: #101828;
   --color-rt-secondary-fill-soft: #8a5c12;
-  --color-white-fill: #ffffff;
+  --color-white-fill: var(--color-white);
   --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);
   --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);
   --rt-lit-f7f4ee-fill: #f7f4ee;
@@ -733,13 +733,16 @@ function occurrence(line, text, nth) {
  */
 function locate(lines, edit, after = null) {
   const home = edit.line - 1;
-  const start = edit.col - 1;
   const here = lines[home];
   if (here !== undefined) {
-    // Looked for first: the new text can begin with the old.
-    if (standsAt(here, start, edit.new)) return 'already';
-    for (const old of edit.olds) {
-      if (standsAt(here, start, old)) return { line: home, start, old };
+    // Where the lab saw it, and where an earlier prompt's edits on the line will have moved it.
+    const starts = [edit.col - 1, ...(edit.cols ?? []).map((col) => col - 1)];
+    for (const start of starts) {
+      // Looked for first: the new text can begin with the old.
+      if (standsAt(here, start, edit.new)) return 'already';
+      for (const old of edit.olds) {
+        if (standsAt(here, start, old)) return { line: home, start, old };
+      }
     }
   }
   for (let distance = 0; distance <= 400; distance++) {
@@ -749,7 +752,9 @@ function locate(lines, edit, after = null) {
       if (line === undefined) continue;
       // The line as it reads once the edits are made: they have been, and the file has moved since.
       if (after !== null && readsAs(line, after)) return 'already';
-      if (!readsAs(line, edit.anchor)) continue;
+      // The line as the lab saw it, or as another prompt (the light one) will have left it.
+      const readings = edit.anchors ? [edit.anchor, ...edit.anchors] : [edit.anchor];
+      if (!readings.some((reading) => readsAs(line, reading))) continue;
       for (const old of edit.olds) {
         const found = occurrence(line, old, edit.nth);
         if (found >= 0) return { line: index, start: found, old };
@@ -991,15 +996,15 @@ const PLAN = {
  ],
  "edits": [
   {"file":"apps/web/src/index.css","line":40,"col":15,"olds":["var(--color-rt-secondary)"],"new":"var(--color-rt-secondary-fill)","nth":0,"anchor":"background: var(--color-rt-secondary);"},
-  {"file":"apps/web/src/index.css","line":20,"col":25,"olds":["rgba(8, 12, 21, 0.12)","rgba(16, 24, 40, 0.12)"],"new":"var(--rt-lit-080c15-shadow-a120)","nth":0,"anchor":"box-shadow: 0 8px 24px rgba(8, 12, 21, 0.12);"},
+  {"file":"apps/web/src/index.css","line":20,"col":25,"olds":["rgba(8, 12, 21, 0.12)","rgba(16, 24, 40, 0.12)"],"new":"var(--rt-lit-080c15-shadow-a120)","nth":0,"anchor":"box-shadow: 0 8px 24px rgba(8, 12, 21, 0.12);","anchors":["box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);"]},
   {"file":"apps/web/src/index.css","line":21,"col":14,"olds":["#ffffff"],"new":"var(--rt-lit-ffffff-fill)","nth":0,"anchor":"background: #ffffff;"},
   {"file":"apps/web/src/features/marketing/cta.ts","line":4,"col":60,"olds":["rgba(8,12,21,0.14)","rgba(16,24,40,0.14)"],"new":"var(--rt-lit-080c15-shadow-a140)","nth":0,"anchor":"export const cta = `bg-rt-secondary shadow-[0_8px_20px_rgba(8,12,21,0.14)]`;"},
   {"file":"apps/web/src/features/marketing/LandingNav.tsx","line":34,"col":66,"olds":["#f7f4ee"],"new":"color:var(--rt-lit-f7f4ee-fill)","nth":0,"anchor":"<header className=\"sticky top-0 bg-[#f7f4ee]/85 backdrop-blur\">"},
-  {"file":"packages/shared/src/assets/roundtable-logo-dark.svg","line":3,"col":16,"olds":["black"],"new":"#eceef3","nth":0,"anchor":"<path fill=\"black\" d=\"M0 0\"/>"}
+  {"file":"packages/shared/src/assets/roundtable-logo-dark.svg","line":3,"col":16,"olds":["black","#000000"],"new":"#eceef3","nth":0,"anchor":"<path fill=\"black\" d=\"M0 0\"/>"}
  ],
- "theme": {"file":"apps/web/src/index.css","entries":[{"name":"--color-rt-ink-fill","value":"#101828","note":"rt-ink as fill"},{"name":"--color-rt-secondary-fill-soft","value":"#8a5c12","note":"rt-secondary as fill"},{"name":"--color-rt-secondary-fill","value":"#8a5c12","note":"rt-secondary as fill"},{"name":"--color-white-fill","value":"#ffffff","note":"white as fill"}]},
+ "theme": {"file":"apps/web/src/index.css","entries":[{"name":"--color-rt-ink-fill","value":"#101828","note":"rt-ink as fill"},{"name":"--color-rt-secondary-fill-soft","value":"#8a5c12","note":"rt-secondary as fill"},{"name":"--color-rt-secondary-fill","value":"#8a5c12","note":"rt-secondary as fill"},{"name":"--color-white-fill","value":"var(--color-white)","note":"white as fill"}]},
  "blocks": [
-  {"file":"apps/web/src/index.css","marker":"dark-theme","text":"/* The light values of hardcoded colours that are different in the dark theme. */\n:root {\n  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);\n  --rt-lit-f7f4ee-fill: #f7f4ee;\n  --rt-lit-ffffff-fill: #ffffff;\n}\n\n:root[data-theme='dark'] {\n  color-scheme: dark;\n  /* Brand and palette colours */\n  --color-rt-secondary-deep: #d2b98a;\n  --color-rt-surface: #16181d;\n  --color-rt-ink: #eceef3;\n  --color-rt-tertiary: #383c47;\n  --color-red-600: #ff7a7f;\n  /* Colours set apart by role */\n  --color-rt-ink-fill: #07080b;\n  --color-rt-secondary-fill-soft: #e0a33c;\n  --color-white-fill: #1c1f26;\n  /* Hardcoded colours */\n  --rt-lit-080c15-shadow-a120: rgba(8, 12, 21, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(8, 12, 21, 0.14);\n  --rt-lit-f7f4ee-fill: #13110e;\n  --rt-lit-ffffff-fill: #16181d;\n}\n\n/* Content that stays light, like paper on a dark desk: it gets the light values back. */\n:root[data-theme='dark'] :where(\n  article:has([data-card-plate], [data-sticky-note]),\n  [data-proposal-card],\n  [role=\"dialog\"][aria-label*=\" by \"],\n  [role=\"dialog\"][aria-labelledby=\"sticky-composer-label\"],\n  div:has(> svg[aria-label=\"Drawing canvas\"]),\n  svg:has([data-testid=\"diagram-sheet\"]),\n  button[aria-label$=\" ink\"],\n  span.absolute.rounded-xl[style*=\"rotate\"],\n  .rt-assistant-sticky,\n  .rt-assistant-card-well,\n  .rt-assistant-diagram-fit\n) {\n  color-scheme: light;\n  color: var(--color-rt-ink);\n  --color-rt-secondary-deep: #7a6a4c;\n  --color-rt-surface: #ffffff;\n  --color-rt-ink: #101828;\n  --color-rt-tertiary: #cfcfcf;\n  --color-red-600: #c0392b;\n  --color-rt-ink-fill: #101828;\n  --color-rt-secondary-fill-soft: #8a5c12;\n  --color-white-fill: #ffffff;\n  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);\n  --rt-lit-f7f4ee-fill: #f7f4ee;\n  --rt-lit-ffffff-fill: #ffffff;\n}"}
+  {"file":"apps/web/src/index.css","marker":"dark-theme","text":"/* The light values of hardcoded colours that are different in the dark theme. */\n:root {\n  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);\n  --rt-lit-f7f4ee-fill: #f7f4ee;\n  --rt-lit-ffffff-fill: #ffffff;\n}\n\n:root[data-theme='dark'] {\n  color-scheme: dark;\n  /* Brand and palette colours */\n  --color-rt-secondary-deep: #d2b98a;\n  --color-rt-surface: #16181d;\n  --color-rt-ink: #eceef3;\n  --color-rt-tertiary: #383c47;\n  --color-red-600: #ff7a7f;\n  /* Colours set apart by role */\n  --color-rt-ink-fill: #07080b;\n  --color-rt-secondary-fill-soft: #e0a33c;\n  --color-white-fill: #1c1f26;\n  /* Hardcoded colours */\n  --rt-lit-080c15-shadow-a120: rgba(8, 12, 21, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(8, 12, 21, 0.14);\n  --rt-lit-f7f4ee-fill: #13110e;\n  --rt-lit-ffffff-fill: #16181d;\n}\n\n/* Content that stays light, like paper on a dark desk: it gets the light values back. */\n:root[data-theme='dark'] :where(\n  article:has([data-card-plate], [data-sticky-note]),\n  [data-proposal-card],\n  [role=\"dialog\"][aria-label*=\" by \"],\n  [role=\"dialog\"][aria-labelledby=\"sticky-composer-label\"],\n  div:has(> svg[aria-label=\"Drawing canvas\"]),\n  svg:has([data-testid=\"diagram-sheet\"]),\n  button[aria-label$=\" ink\"],\n  span.absolute.rounded-xl[style*=\"rotate\"],\n  .rt-assistant-sticky,\n  .rt-assistant-card-well,\n  .rt-assistant-diagram-fit\n) {\n  color-scheme: light;\n  color: var(--color-rt-ink);\n  --color-rt-secondary-deep: #7a6a4c;\n  --color-rt-surface: #ffffff;\n  --color-rt-ink: #101828;\n  --color-rt-tertiary: #cfcfcf;\n  --color-red-600: #c0392b;\n  --color-rt-ink-fill: #101828;\n  --color-rt-secondary-fill-soft: #8a5c12;\n  --color-white-fill: var(--color-white);\n  --rt-lit-080c15-shadow-a120: rgba(16, 24, 40, 0.12);\n  --rt-lit-080c15-shadow-a140: rgba(16, 24, 40, 0.14);\n  --rt-lit-f7f4ee-fill: #f7f4ee;\n  --rt-lit-ffffff-fill: #ffffff;\n}"}
  ],
  "classes": [
   {"rule":{"from":"rt-ink","to":"rt-ink-fill","prefixes":"bg|from|via|to|fill|accent|placeholder","alphas":[0.6]},"files":[{"file":"apps/web/src/features/b/B.tsx","expected":2}],"seen":["apps/web/src/features/b/B.tsx"]},

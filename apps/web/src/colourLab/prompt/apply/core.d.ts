@@ -11,6 +11,10 @@ export interface TextEdit {
   nth: number;
   /** The line as the lab saw it, trimmed and cut at 160 characters. */
   anchor: string;
+  /** Other ways the line may read: as the light prompt leaves it, for the dark prompt. */
+  anchors?: string[];
+  /** Other columns the text may start at on its line: where the light prompt's edits move it. */
+  cols?: number[];
 }
 
 export interface ThemeEntry {

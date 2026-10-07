@@ -59,6 +59,51 @@ handling (useful only when debugging the lab).
 Everything you change is kept in your browser (`localStorage`), per theme, and survives a reload.
 It is not shared with anyone until you make a prompt.
 
+## Presets
+
+**Presets** in the panel’s toolbar opens a sheet of whole palettes, to compare directions in one
+click. A preset sets both themes at once, so apply one and flip **Light / Dark** to see both. The
+toolbar says which preset is showing, and _changed since_ once you have edited it.
+
+**Recommended** are six pastel palettes, each with a light and a dark theme, plus **RoundTable**,
+the app as it is, to come back to:
+
+| Preset        | Kind       | In short                                                        |
+| ------------- | ---------- | --------------------------------------------------------------- |
+| Peach Sorbet  | one colour | apricot washes, peach buttons, cocoa accents; close to today    |
+| Lavender Haze | one colour | lilac washes, periwinkle buttons, plum accents; quiet           |
+| Sage Garden   | one colour | sage and mint washes, eucalyptus accents; light and unhurried   |
+| Powder Blue   | one colour | sky washes, cornflower buttons, navy accents; calm              |
+| Macaron       | playful    | lilac buttons, peach chrome, mint for what is live, cream page  |
+| Sherbet Pop   | playful    | coral-pink buttons, butter-yellow chrome, aqua for what is live |
+
+Below a line marked **Inspired by the logo** are three more, taken from the logo’s own colours
+(the slate table, the white ring, the black seats and the one mustard seat):
+
+| Preset    | In short                                                                        |
+| --------- | ------------------------------------------------------------------------------- |
+| Logo      | the logo as it is: slate desk and bars, white sheets and cards, mustard buttons |
+| Logo Mist | the logo in pastel: a pale slate mist, butter-mustard buttons                   |
+| Head Seat | the logo turned round: a warm mustard room, slate buttons                       |
+
+These are not pastel (the logo’s mustard is what it is), but pass the same contrast checks. Text
+that sits straight on the slate is kept dark enough to read there.
+
+A preset changes everything, not only the brand colours: sticky papers, card plates, drawing inks
+and the hardcoded colours move into its hues (reds stay red, since they mean _error_). Every
+preset is checked for contrast in both themes: body text, muted text, text on the button, links
+and labels all pass WCAG AA on the page and on cards. In the dark themes, paper still stays light.
+
+**Yours** holds the palettes you save. Type a name under _Save current colours as a preset_ and
+press **Save**. Each saved preset can be applied, renamed, downloaded as a small `.json` file, or
+deleted. When you apply one and change it, **Save changes** updates it. A teammate adds your file
+with _Add a preset from a file…_ (or loads it as colours with _Load colours from a prompt…_).
+Saved presets are kept in the browser apart from the colours, so _Reset_ never loses them.
+
+Applying a preset replaces the colours you have. If they are not saved as a preset, the sheet asks
+first. A preset is ordinary lab colours once applied, so the prompts work the same way: apply the
+preset you like, then make the light and dark prompts.
+
 ## Making a prompt
 
 At the bottom of the panel are **Create light prompt** and **Create dark prompt**. Each opens a
@@ -118,6 +163,10 @@ labelled from its own name; give it a friendly one in `colourLab/model/brand.ts`
   are rewritten on the fly.
 - A colour that is only a Tailwind palette default (`red-600`) cannot be linked to a brand token, since
   the app does not define it. The prompt defines it in the theme.
+- The dark prompt decides what stays light **by file** (every hardcoded colour in the diagram
+  editor counts as paper), where the lab decides by element. So a toolbar floating over the diagram
+  keeps its light-theme shadow in the app’s dark theme. With a preset this is a slightly different
+  tint of a faint shadow, and nothing else.
 - The dark prompt makes an app that is dark; it does not make decisions the lab did not: where
   the app’s own code reads a colour (to measure a contrast, to paint a canvas), the prompt says to
   keep it and report.
@@ -128,11 +177,12 @@ labelled from its own name; give it a friendly one in `colourLab/model/brand.ts`
 apps/web/src/colourLab/
   colour/      parsing, converting and measuring colours; reading values out of CSS
   catalogue/   reads the source for every colour: tokens, hardcoded colours, classes, var() uses
-  model/       the colours as slots, how they link, resolve and differ by role and theme; the dark palette
+  model/       the colours as slots, how they link, resolve and differ by role and theme; the dark palette;
+               presets/ the recommended palettes and how a palette becomes edits
   engine/      repaints the page: one stylesheet of variables, and the rules and elements that read them
   detect/      which colours a page uses; what paints an element (Pick)
   host/        the shadow-DOM host, the top layer, and the shield that keeps the page’s handlers off it
-  ui/          the panel, picker, rows, inspector, prompt sheet
+  ui/          the panel, picker, rows, inspector, prompt and preset sheets
   prompt/      the two prompts: what to change, the apply script, the dark theme’s code
   node/        the Vite plugin that serves the catalogue
 ```

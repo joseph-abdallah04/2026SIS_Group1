@@ -1175,3 +1175,160 @@
 .cl-sheet-confirm span {
   flex-basis: 100%;
 }
+
+/* ---- Presets: the bar under the search, and the sheet of palettes ---- */
+.cl-preset-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 2px;
+  color: var(--cl-faint);
+  font-size: 11px;
+}
+.cl-preset-bar > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-preset-bar b {
+  color: var(--cl-text);
+  font-weight: 600;
+}
+.cl-preset-bar i {
+  color: var(--cl-warn);
+  font-style: normal;
+}
+.cl-preset-bar .cl-chip {
+  max-width: none;
+  cursor: pointer;
+}
+.cl-preset-bar .cl-chip[aria-pressed='true'] {
+  border-color: var(--cl-accent);
+  color: var(--cl-accent);
+}
+.cl-preset-group {
+  margin: 4px 2px 6px;
+  color: var(--cl-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* A rule across the list with its words in the middle: what follows comes from somewhere else. */
+.cl-preset-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 2px 8px;
+  color: var(--cl-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.cl-preset-divider::before,
+.cl-preset-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--cl-line);
+}
+.cl-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cl-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--cl-line);
+  border-radius: 10px;
+  background: var(--cl-bg-raised);
+}
+.cl-preset[data-applied='true'] {
+  border-color: var(--cl-accent);
+}
+.cl-preset-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.cl-preset-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cl-accent-soft);
+  color: var(--cl-accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.cl-preset-mood {
+  margin: 0;
+  color: var(--cl-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.cl-preset-strips {
+  display: flex;
+  gap: 6px;
+}
+.cl-preset-strip {
+  display: flex;
+  flex: 1;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--cl-line);
+  border-radius: 6px;
+}
+.cl-preset-strip > span {
+  flex: 1;
+}
+.cl-preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cl-preset-actions .cl-secondary {
+  height: 28px;
+  padding: 0 10px;
+}
+.cl-root .cl-danger {
+  border-color: #b94a48;
+  color: #ffb4ab;
+}
+.cl-preset-rename,
+.cl-preset-save input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--cl-line);
+  border-radius: 7px;
+  background: var(--cl-bg);
+  color: var(--cl-text);
+  font-size: 12px;
+}
+.cl-preset-save {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+.cl-preset-save .cl-primary {
+  flex: 0 0 auto;
+}
+.cl-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}

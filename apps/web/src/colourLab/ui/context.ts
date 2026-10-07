@@ -3,12 +3,14 @@ import { createContext, useContext, useMemo, useSyncExternalStore } from 'react'
 import { type Catalogue } from '../catalogue/types';
 import { type ColourEngine, type EngineSnapshot } from '../engine/engine';
 import { type SlotView, buildSlotViews } from '../model/views';
+import { type PresetStore } from '../model/presetStore';
 import { type LabState, type LabStore } from '../model/store';
 
 export interface LabContextValue {
   store: LabStore;
   engine: ColourEngine;
   catalogue: Catalogue;
+  presets: PresetStore;
 }
 
 export const LabContext = createContext<LabContextValue | null>(null);

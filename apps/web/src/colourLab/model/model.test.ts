@@ -507,3 +507,42 @@ describe('LabStore', () => {
     expect(() => store.flush()).not.toThrow();
   });
 });
+
+describe('a colour with a wash', () => {
+  const originals = new Map([['token:rt-ink', ink]]);
+  const input = (spec: SchemeEdits[string]['base']): ResolveInput => ({
+    scheme: 'dark',
+    originals,
+    defaultLinks: new Map(),
+    edits: { 'token:rt-ink': { base: spec } },
+  });
+  const spec = { kind: 'custom' as const, hex: '#07080b', wash: { upTo: 0.22, hex: '#eceef3' } };
+
+  it('is the wash when used thinly and the colour itself otherwise', () => {
+    expect(resolveSlot('token:rt-ink', 'fill', input(spec), 0.05)).toEqual({
+      r: 236,
+      g: 238,
+      b: 243,
+    });
+    expect(resolveSlot('token:rt-ink', 'fill', input(spec), 0.22)).toEqual({
+      r: 236,
+      g: 238,
+      b: 243,
+    });
+    expect(resolveSlot('token:rt-ink', 'fill', input(spec), 0.6)).toEqual({ r: 7, g: 8, b: 11 });
+    // With no opacity given, it is the solid colour.
+    expect(resolveSlot('token:rt-ink', 'other', input(spec))).toEqual({ r: 7, g: 8, b: 11 });
+  });
+
+  it('is kept when stored, and dropped when it is not a colour', () => {
+    const raw = JSON.stringify({ edits: { dark: { 'token:rt-ink': { base: spec } } } });
+    expect(parseStored(raw).edits.dark['token:rt-ink']?.base).toEqual(spec);
+    const broken = JSON.stringify({
+      edits: { dark: { 'token:rt-ink': { base: { ...spec, wash: { upTo: 0.2, hex: 'nope' } } } } },
+    });
+    expect(parseStored(broken).edits.dark['token:rt-ink']?.base).toEqual({
+      kind: 'custom',
+      hex: '#07080b',
+    });
+  });
+});

@@ -14,11 +14,21 @@ export interface UiState {
   search: string;
 }
 
+/** The preset the colours came from, so the panel can name it, and tell when they have been changed since. */
+export interface AppliedPreset {
+  id: string;
+  name: string;
+  kind: 'builtin' | 'saved';
+  /** What the edits were when it was applied or saved. */
+  fingerprint: string;
+}
+
 export interface LabState {
   scheme: Scheme;
   /** Only what the user changed. Defaults are worked out, never stored. */
   edits: Record<Scheme, SchemeEdits>;
   ui: UiState;
+  preset: AppliedPreset | null;
 }
 
 export const STORAGE_KEY = 'rt_colour_lab:v2';
@@ -31,6 +41,7 @@ export const emptyState = (): LabState => ({
   scheme: 'light',
   edits: { light: {}, dark: {} },
   ui: { ...EMPTY_UI },
+  preset: null,
 });
 
 function readSpec(value: unknown): Spec | null {
@@ -38,7 +49,16 @@ function readSpec(value: unknown): Spec | null {
   const spec = value as Record<string, unknown>;
   if (spec.kind === 'original') return { kind: 'original' };
   if (spec.kind === 'custom' && typeof spec.hex === 'string' && parseHex(spec.hex)) {
-    return { kind: 'custom', hex: spec.hex.toLowerCase() };
+    const wash = spec.wash as { upTo?: unknown; hex?: unknown } | undefined;
+    const keepsWash =
+      typeof wash?.upTo === 'number' && typeof wash.hex === 'string' && parseHex(wash.hex) !== null;
+    return keepsWash
+      ? {
+          kind: 'custom',
+          hex: spec.hex.toLowerCase(),
+          wash: { upTo: wash.upTo as number, hex: (wash.hex as string).toLowerCase() },
+        }
+      : { kind: 'custom', hex: spec.hex.toLowerCase() };
   }
   if (spec.kind === 'link' && typeof spec.slot === 'string')
     return { kind: 'link', slot: spec.slot };
@@ -76,6 +96,20 @@ function readEdits(value: unknown): SchemeEdits {
   return out;
 }
 
+function readPreset(value: unknown): AppliedPreset | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const p = value as Record<string, unknown>;
+  if (typeof p.id !== 'string' || typeof p.name !== 'string' || typeof p.fingerprint !== 'string') {
+    return null;
+  }
+  return {
+    id: p.id,
+    name: p.name,
+    kind: p.kind === 'saved' ? 'saved' : 'builtin',
+    fingerprint: p.fingerprint,
+  };
+}
+
 /** What was saved, or a fresh state for anything that does not look like it. */
 export function parseStored(raw: string | null): LabState {
   const fresh = emptyState();
@@ -88,6 +122,7 @@ export function parseStored(raw: string | null): LabState {
     return {
       scheme: data.scheme === 'dark' ? 'dark' : 'light',
       edits: { light: readEdits(edits.light), dark: readEdits(edits.dark) },
+      preset: readPreset(data.preset),
       ui: {
         x: typeof ui.x === 'number' ? ui.x : null,
         y: typeof ui.y === 'number' ? ui.y : null,
@@ -169,14 +204,24 @@ export class LabStore {
 
   /** Take another set of edits in place of these, as when colours are loaded from a prompt. */
   replaceEdits(edits: Readonly<Record<Scheme, SchemeEdits>>): void {
-    this.commit({ ...this.state, edits: { light: edits.light, dark: edits.dark } });
+    this.commit({ ...this.state, edits: { light: edits.light, dark: edits.dark }, preset: null });
+  }
+
+  /** Takes a preset's colours, for both themes, and remembers which preset they came from. */
+  applyPreset(edits: Readonly<Record<Scheme, SchemeEdits>>, preset: AppliedPreset | null): void {
+    this.commit({ ...this.state, edits: { light: edits.light, dark: edits.dark }, preset });
+  }
+
+  /** Remembers that the colours as they are now are a preset, as when they have just been saved as one. */
+  setPreset(preset: AppliedPreset | null): void {
+    this.commit({ ...this.state, preset });
   }
 
   /** Drop every edit in a scheme, or in both. */
   resetAll(scheme?: Scheme): void {
     const edits = { ...this.state.edits };
     for (const key of scheme ? [scheme] : (['light', 'dark'] as const)) edits[key] = {};
-    this.commit({ ...this.state, edits });
+    this.commit({ ...this.state, edits, preset: scheme ? this.state.preset : null });
   }
 
   setScheme(scheme: Scheme): void {
@@ -190,7 +235,10 @@ export class LabStore {
   /** Pick up what another tab saved. The panel position stays this tab's own. */
   syncEdits(): void {
     const saved = parseStored(this.read());
-    this.commit({ ...this.state, scheme: saved.scheme, edits: saved.edits }, false);
+    this.commit(
+      { ...this.state, scheme: saved.scheme, edits: saved.edits, preset: saved.preset },
+      false,
+    );
   }
 
   /** Write now rather than on the timer, for when the page is going away. */

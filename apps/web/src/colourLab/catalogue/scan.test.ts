@@ -335,6 +335,25 @@ describe('references to a colour variable', () => {
     });
   });
 
+  it('tells a ring drawn with a shadow from a soft shadow, in a style and in a class, as the engine does', () => {
+    const ts = scanTsSource(
+      'apps/web/src/features/x/Ring.tsx',
+      [
+        "const style = { boxShadow: '0 0 0 1px rgba(140,164,172,0.35), 0 4px 12px #080c15' };",
+        'const c = "shadow-[0_0_0_2px_rgba(224,163,60,1)] shadow-[0_6px_24px_rgba(8,12,21,0.14)]";',
+        "const ring = { boxShadow: '0 0 0 1px var(--color-rt-cool)' };",
+      ].join('\n'),
+    );
+    const roles = ts.literals.map((l) => [l.raw, l.role]).sort();
+    expect(roles).toEqual([
+      ['#080c15', 'shadow'],
+      ['rgba(140,164,172,0.35)', 'border'],
+      ['rgba(224,163,60,1)', 'border'],
+      ['rgba(8,12,21,0.14)', 'shadow'],
+    ]);
+    expect(ts.refs[0]).toMatchObject({ slot: 'token:rt-cool', role: 'border' });
+  });
+
   it('is gathered into the catalogue', () => {
     const merged = mergeScans(
       new Map([['apps/web/src/index.css', css]]),

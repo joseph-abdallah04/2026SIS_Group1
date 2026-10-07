@@ -6,6 +6,7 @@ import {
   Minus,
   Moon,
   Palette,
+  SwatchBook as Swatches,
   RotateCcw,
   Search,
   Sun,
@@ -55,7 +56,10 @@ interface PanelProps {
   /** The prompt being made, shown in place of everything else. */
   sheet: ReactNode;
   /** Which prompt's sheet is open, if one is. */
-  sheetKind: Scheme | null;
+  sheetKind: Scheme | 'presets' | null;
+  /** The preset the colours came from, and whether they have changed since. */
+  preset: { name: string; changed: boolean } | null;
+  onPresets: () => void;
   /** How many colours have been changed in each theme, shown on the buttons that make the prompts. */
   editCounts: Record<Scheme, number>;
   onPrompt: (kind: Scheme) => void;
@@ -81,6 +85,8 @@ export function Panel({
   sheetKind,
   editCounts,
   onPrompt,
+  preset,
+  onPresets,
 }: PanelProps) {
   const [detailsKey, setDetailsKey] = useState<SlotKey | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<Group>>(new Set());
@@ -213,6 +219,27 @@ export function Panel({
           >
             <Crosshair size={14} aria-hidden />
             Pick
+          </button>
+        </div>
+        <div className="cl-preset-bar">
+          <span title={preset ? `The colours came from ${preset.name}` : 'No preset applied'}>
+            {preset ? (
+              <>
+                Preset <b>{preset.name}</b>
+                {preset.changed && <i> · changed since</i>}
+              </>
+            ) : (
+              'No preset applied'
+            )}
+          </span>
+          <button
+            className="cl-chip"
+            aria-pressed={sheetKind === 'presets'}
+            title="Palettes to try, light and dark, and your own"
+            onClick={onPresets}
+          >
+            <Swatches size={12} aria-hidden />
+            Presets
           </button>
         </div>
         <div className="cl-tabs" role="tablist" aria-label="Which colours to show">

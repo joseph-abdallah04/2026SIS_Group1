@@ -14,6 +14,7 @@ import { pickColour, restoreDefault } from '../model/actions';
 import { type RoleKey } from '../model/roles';
 import { type SlotKey } from '../model/slots';
 import { type Scheme } from '../model/spec';
+import { PRESETS_KEY, PresetStore, fingerprintOf } from '../model/presetStore';
 import { type LabStore } from '../model/store';
 import { LabContext, type LabContextValue, useLab, useLabView } from './context';
 import { Inspector } from './Inspector';
@@ -22,6 +23,7 @@ import { Panel, Pill } from './Panel';
 import { buildDarkPrompt } from '../prompt/renderDark';
 import { buildLightPrompt, type PromptResult } from '../prompt/renderLight';
 import { Picker, type QuickColour } from './Picker';
+import { PresetSheet } from './PresetSheet';
 import { PromptSheet } from './PromptSheet';
 import { PickLayer } from './PickLayer';
 
@@ -35,10 +37,22 @@ interface Props {
   store: LabStore;
   engine: ColourEngine;
   catalogue: CatalogueSource;
+  /** Saved presets. Made here when not given. */
+  presets?: PresetStore;
 }
 
-export function ColourLab({ store, engine, catalogue: source }: Props) {
+export function ColourLab({ store, engine, catalogue: source, presets: given }: Props) {
   const [catalogue, setCatalogue] = useState(source.initial);
+  const [presets] = useState(() => given ?? new PresetStore());
+
+  // Presets saved in another tab show up here too.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === PRESETS_KEY) presets.sync();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [presets]);
   useEffect(() => source.watch(setCatalogue), [source]);
 
   // The hardcoded colours in the source are known to the engine as well as the
@@ -48,8 +62,8 @@ export function ColourLab({ store, engine, catalogue: source }: Props) {
   }, [engine, catalogue]);
 
   const context = useMemo<LabContextValue>(
-    () => ({ store, engine, catalogue }),
-    [store, engine, catalogue],
+    () => ({ store, engine, catalogue, presets }),
+    [store, engine, catalogue, presets],
   );
 
   return (
@@ -66,7 +80,7 @@ interface PickerState {
 }
 
 function Shell() {
-  const { store, engine, catalogue } = useLab();
+  const { store, engine, catalogue, presets } = useLab();
   const { state, views, snapshot } = useLabView();
   const { ui, scheme } = state;
 
@@ -77,7 +91,7 @@ function Shell() {
   const [inspected, setInspected] = useState<Element | null>(null);
   const [inherited, setInherited] = useState<Element | null>(null);
   const [settled, setSettled] = useState(0);
-  const [sheetKind, setSheetKind] = useState<Scheme | null>(null);
+  const [sheetKind, setSheetKind] = useState<Scheme | 'presets' | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Checking the page costs a little, so it is only done while the list is showing.
@@ -168,7 +182,7 @@ function Shell() {
 
   // The prompt is made only while its sheet is open, and again as the colours change under it.
   const prompt = useMemo<PromptResult | null>(() => {
-    if (!sheetKind || ui.minimised) return null;
+    if (!sheetKind || sheetKind === 'presets' || ui.minimised) return null;
     const inputs = {
       catalogue,
       originals: snapshot.originals,
@@ -187,7 +201,22 @@ function Shell() {
     [state.edits],
   );
 
-  const openPrompt = useCallback((kind: Scheme) => {
+  const presetContext = useMemo(
+    () => ({ catalogue, originals: snapshot.originals, defaultLinks: snapshot.defaultLinks }),
+    [catalogue, snapshot.originals, snapshot.defaultLinks],
+  );
+  const presetBar = useMemo(
+    () =>
+      state.preset
+        ? {
+            name: state.preset.name,
+            changed: state.preset.fingerprint !== fingerprintOf(state.edits),
+          }
+        : null,
+    [state.preset, state.edits],
+  );
+
+  const openPrompt = useCallback((kind: Scheme | 'presets') => {
     setSheetKind((open) => (open === kind ? null : kind));
     setPicker(null);
     setPicking(false);
@@ -260,7 +289,16 @@ function Shell() {
             setPicking((on) => !on);
           }}
           sheet={
-            prompt ? (
+            sheetKind === 'presets' && !ui.minimised ? (
+              <PresetSheet
+                store={store}
+                presets={presets}
+                context={presetContext}
+                edits={state.edits}
+                applied={state.preset}
+                onClose={() => setSheetKind(null)}
+              />
+            ) : prompt ? (
               <PromptSheet
                 key={prompt.kind}
                 result={prompt}
@@ -276,6 +314,8 @@ function Shell() {
           sheetKind={sheetKind}
           editCounts={editCounts}
           onPrompt={openPrompt}
+          preset={presetBar}
+          onPresets={() => openPrompt('presets')}
           inspector={
             inspection ? (
               <Inspector

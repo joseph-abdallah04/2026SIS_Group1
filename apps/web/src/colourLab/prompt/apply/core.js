@@ -42,13 +42,16 @@ export function occurrence(line, text, nth) {
  */
 export function locate(lines, edit, after = null) {
   const home = edit.line - 1;
-  const start = edit.col - 1;
   const here = lines[home];
   if (here !== undefined) {
-    // Looked for first: the new text can begin with the old.
-    if (standsAt(here, start, edit.new)) return 'already';
-    for (const old of edit.olds) {
-      if (standsAt(here, start, old)) return { line: home, start, old };
+    // Where the lab saw it, and where an earlier prompt's edits on the line will have moved it.
+    const starts = [edit.col - 1, ...(edit.cols ?? []).map((col) => col - 1)];
+    for (const start of starts) {
+      // Looked for first: the new text can begin with the old.
+      if (standsAt(here, start, edit.new)) return 'already';
+      for (const old of edit.olds) {
+        if (standsAt(here, start, old)) return { line: home, start, old };
+      }
     }
   }
   for (let distance = 0; distance <= 400; distance++) {
@@ -58,7 +61,9 @@ export function locate(lines, edit, after = null) {
       if (line === undefined) continue;
       // The line as it reads once the edits are made: they have been, and the file has moved since.
       if (after !== null && readsAs(line, after)) return 'already';
-      if (!readsAs(line, edit.anchor)) continue;
+      // The line as the lab saw it, or as another prompt (the light one) will have left it.
+      const readings = edit.anchors ? [edit.anchor, ...edit.anchors] : [edit.anchor];
+      if (!readings.some((reading) => readsAs(line, reading))) continue;
       for (const old of edit.olds) {
         const found = occurrence(line, old, edit.nth);
         if (found >= 0) return { line: index, start: found, old };

@@ -68,7 +68,8 @@ function resolveWithin(
   seen.add(key);
   const spec = effectiveSpec(slot, role, input, alpha);
   if (spec.kind === 'custom') {
-    const parsed = parseHex(spec.hex)?.rgba;
+    const hex = spec.wash && alpha <= spec.wash.upTo ? spec.wash.hex : spec.hex;
+    const parsed = parseHex(hex)?.rgba;
     return parsed ? { r: parsed.r, g: parsed.g, b: parsed.b } : original;
   }
   if (spec.kind === 'link') return resolveWithin(spec.slot, role, input, alpha, seen) ?? original;
