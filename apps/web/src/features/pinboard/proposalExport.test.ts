@@ -1,8 +1,11 @@
 import type { BoardItem } from '@roundtable/shared';
+import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { saveBlob } from '../../lib/saveBlob';
 import { TINY_JPEG, TINY_PNG, TINY_WEBP } from '../tools/image/testImages';
 import {
+  exportFile,
   exportFileName,
   exportFormats,
   forgetInterFontFaces,
@@ -10,8 +13,11 @@ import {
   pngScale,
   rasterizeSvg,
   studioExportSvg,
+  useProposalExport,
   withoutEmbeddedFonts,
 } from './proposalExport';
+
+vi.mock('../../lib/saveBlob', () => ({ saveBlob: vi.fn() }));
 
 function item(artifactJson: BoardItem['artifactJson'], authorName = 'Ada Lovelace'): BoardItem {
   return {
@@ -44,6 +50,7 @@ const CANVAS = {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.mocked(saveBlob).mockClear();
   // Each test starts as a fresh page would, with no fonts read yet.
   forgetInterFontFaces();
 });
@@ -208,84 +215,213 @@ describe('Inter in an export', () => {
 
   it('comes out whole, leaving everything else in the file', () => {
     const svg =
-      '<svg xmlns="http://www.w3.org/2000/svg"><style>@font-face{font-family:Inter}</style><text>Hi</text></svg>';
+      '<svg xmlns="http://www.w3.org/2000/svg"><style data-roundtable-fonts="">@font-face{font-family:Inter}</style><text>Hi</text></svg>';
     expect(withoutEmbeddedFonts(svg)).toBe(
       '<svg xmlns="http://www.w3.org/2000/svg"><text>Hi</text></svg>',
     );
   });
+
+  it("never touches a <style> that is not the export's own, such as a drawing's", () => {
+    const drawing =
+      '<svg xmlns="http://www.w3.org/2000/svg"><style>.ink{stroke:red}</style><path class="ink"/></svg>';
+    expect(withoutEmbeddedFonts(drawing)).toBe(drawing);
+  });
+
+  it('is marked in the file, so it is the one taken out', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, blob: async () => new Blob(['woff2']) })),
+    );
+    const { svg } = await studioExportSvg(CANVAS);
+    expect(svg).toContain('<style data-roundtable-fonts="">@font-face');
+    expect(withoutEmbeddedFonts(svg)).not.toContain('@font-face');
+  });
 });
 
-describe('rasterizeSvg', () => {
-  /**
-   * jsdom loads no images and has no canvas, so both are stood in for: an
-   * image that loads as soon as it is given an address, and a canvas whose
-   * draw fails the first time — the way a browser that will not draw an SVG
-   * carrying its own fonts fails.
-   */
-  function fakeBrowser({ failFirstDraw }: { failFirstDraw: boolean }) {
-    const drawn: string[] = [];
-    const sources = new Map<string, Blob>();
-    let next = 0;
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: (blob: Blob) => {
-        const url = `blob:svg-${(next += 1)}`;
-        sources.set(url, blob);
-        return url;
-      },
-      revokeObjectURL: () => {},
-    });
-    class LoadingImage {
-      decoding = 'auto';
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      decode = () => Promise.resolve();
-      set src(url: string) {
-        drawn.push(url);
-        queueMicrotask(() => this.onload?.());
-      }
+/**
+ * jsdom loads no images and has no canvas, so both are stood in for: an image
+ * that loads as soon as it is given an address, and a canvas whose draw can be
+ * made to fail the first time — the way a browser that will not draw an SVG
+ * carrying its own fonts fails.
+ */
+function fakeBrowser({ failFirstDraw }: { failFirstDraw: boolean }) {
+  const drawn: string[] = [];
+  const sources = new Map<string, Blob>();
+  let next = 0;
+  vi.stubGlobal('URL', {
+    ...URL,
+    createObjectURL: (blob: Blob) => {
+      const url = `blob:svg-${(next += 1)}`;
+      sources.set(url, blob);
+      return url;
+    },
+    revokeObjectURL: () => {},
+  });
+  class LoadingImage {
+    decoding = 'auto';
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    decode = () => Promise.resolve();
+    set src(url: string) {
+      drawn.push(url);
+      queueMicrotask(() => this.onload?.());
     }
-    vi.stubGlobal('Image', LoadingImage);
-    let draws = 0;
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-      fillRect: () => {},
-      drawImage: () => {
-        draws += 1;
-        if (failFirstDraw && draws === 1) throw new DOMException('Tainted', 'SecurityError');
-      },
-    } as unknown as CanvasRenderingContext2D);
-    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) =>
-      callback(new Blob(['png'], { type: 'image/png' })),
-    );
-    return { drawn, sources };
   }
+  vi.stubGlobal('Image', LoadingImage);
+  let draws = 0;
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    fillRect: () => {},
+    drawImage: () => {
+      draws += 1;
+      if (failFirstDraw && draws === 1) throw new DOMException('Tainted', 'SecurityError');
+    },
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) =>
+    callback(new Blob(['png'], { type: 'image/png' })),
+  );
+  /** The SVG text the nth draw was given. */
+  const svgOf = (index: number) => sources.get(drawn[index]!)!.text();
+  return { drawn, svgOf };
+}
 
+describe('rasterizeSvg', () => {
   const WITH_FONTS = {
-    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>@font-face{}</style><rect/></svg>',
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style data-roundtable-fonts="">@font-face{}</style><rect/></svg>',
     width: 10,
     height: 10,
   };
 
   it('draws the file as it is, fonts and all, where the browser allows it', async () => {
-    const { drawn, sources } = fakeBrowser({ failFirstDraw: false });
+    const { drawn, svgOf } = fakeBrowser({ failFirstDraw: false });
     const png = await rasterizeSvg(WITH_FONTS);
 
     expect(png.type).toBe('image/png');
     expect(drawn).toHaveLength(1);
-    expect(await sources.get(drawn[0]!)!.text()).toContain('<style>');
+    expect(await svgOf(0)).toContain('@font-face');
   });
 
   it('tries again without its fonts where the browser will not draw them, rather than failing', async () => {
-    const { drawn, sources } = fakeBrowser({ failFirstDraw: true });
+    const { drawn, svgOf } = fakeBrowser({ failFirstDraw: true });
     const png = await rasterizeSvg(WITH_FONTS);
 
     expect(png.type).toBe('image/png');
     expect(drawn).toHaveLength(2);
-    expect(await sources.get(drawn[1]!)!.text()).not.toContain('<style>');
+    expect(await svgOf(1)).not.toContain('@font-face');
   });
 
   it('still fails where there were no fonts to blame', async () => {
     fakeBrowser({ failFirstDraw: true });
     await expect(rasterizeSvg({ ...WITH_FONTS, svg: '<svg/>' })).rejects.toThrow('Tainted');
+  });
+});
+
+describe('exporting a legacy drawing', () => {
+  const drawing = (svg: string) => item({ type: 'drawing', svg });
+
+  it('draws it to a PNG at its own size, its markup otherwise as written', async () => {
+    const { drawn, svgOf } = fakeBrowser({ failFirstDraw: false });
+    const { blob, filename } = await exportFile(
+      drawing(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><style>.ink{stroke:red}</style><path class="ink" d="M0 0L10 10"/></svg>',
+      ),
+      'png',
+    );
+
+    expect(blob.type).toBe('image/png');
+    expect(filename).toBe('roundtable-drawing-ada-lovelace-14-32.png');
+    expect(drawn).toHaveLength(1);
+    const svg = await svgOf(0);
+    // Sized from its own viewBox: an SVG with no size of its own draws
+    // nothing into a canvas in Firefox.
+    expect(svg).toContain('width="400"');
+    expect(svg).toContain('height="300"');
+    expect(svg).toContain('<style>.ink{stroke:red}</style>');
+  });
+
+  it('gives a drawing with no viewBox the sheet a drawing is made on', async () => {
+    const { svgOf } = fakeBrowser({ failFirstDraw: false });
+    await exportFile(
+      drawing('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0L10 10"/></svg>'),
+      'png',
+    );
+
+    const svg = await svgOf(0);
+    expect(svg).toContain('viewBox="0 0 720 500"');
+    expect(svg).toContain('width="720"');
+    expect(svg).toContain('height="500"');
+  });
+
+  it('never strips its own <style> on a retry, and reports the failure instead', async () => {
+    const { drawn } = fakeBrowser({ failFirstDraw: true });
+    await expect(
+      exportFile(
+        drawing('<svg xmlns="http://www.w3.org/2000/svg"><style>.a{}</style><rect/></svg>'),
+        'png',
+      ),
+    ).rejects.toThrow('Tainted');
+    expect(drawn).toHaveLength(1);
+  });
+
+  it('refuses markup that is not an SVG at all', async () => {
+    fakeBrowser({ failFirstDraw: false });
+    await expect(exportFile(drawing('just some words'), 'png')).rejects.toThrow(
+      'Nothing to export',
+    );
+  });
+
+  it('is never offered as an SVG file', async () => {
+    await expect(
+      exportFile(drawing('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'svg'),
+    ).rejects.toThrow('Nothing to export');
+  });
+});
+
+describe('useProposalExport', () => {
+  const PICTURE = item({ type: 'image', src: TINY_PNG, width: 1, height: 1 });
+
+  it('ignores a second press on the same card while its export is still going', async () => {
+    const report = vi.fn();
+    const { result } = renderHook(() => useProposalExport(report));
+
+    result.current(PICTURE, 'original');
+    result.current(PICTURE, 'original');
+
+    await waitFor(() => expect(report).toHaveBeenCalledTimes(1));
+    expect(saveBlob).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith({ ok: true, text: 'Exported image' });
+  });
+
+  it('takes the next press once the export has finished', async () => {
+    const report = vi.fn();
+    const { result } = renderHook(() => useProposalExport(report));
+
+    result.current(PICTURE, 'original');
+    await waitFor(() => expect(report).toHaveBeenCalledTimes(1));
+    result.current(PICTURE, 'original');
+    await waitFor(() => expect(report).toHaveBeenCalledTimes(2));
+    expect(saveBlob).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets two different cards export at once', async () => {
+    const report = vi.fn();
+    const { result } = renderHook(() => useProposalExport(report));
+
+    result.current(PICTURE, 'original');
+    result.current({ ...PICTURE, id: 'p2' }, 'original');
+
+    await waitFor(() => expect(report).toHaveBeenCalledTimes(2));
+    expect(saveBlob).toHaveBeenCalledTimes(2);
+  });
+
+  it('says so when a card cannot be exported', async () => {
+    const report = vi.fn();
+    const { result } = renderHook(() => useProposalExport(report));
+
+    result.current(item({ type: 'sticky', text: 'Hi', color: 'yellow' }), 'png');
+
+    await waitFor(() =>
+      expect(report).toHaveBeenCalledWith({ ok: false, text: 'Could not export that sticky note' }),
+    );
+    expect(saveBlob).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,8 @@ import {
   type BoardItem,
 } from '@roundtable/shared';
 
-import { studioSceneMarkup, xml } from './studioSceneSvg.js';
+import { interFontFiles } from './fonts.js';
+import { FONT_FAMILY, studioSceneMarkup, xml } from './studioSceneSvg.js';
 
 const CARD_W = 900;
 const PAD = 28;
@@ -89,7 +90,7 @@ function wrapLines(text: string, charsPerLine: number, maxLines: number): string
 }
 
 function footer(authorName: string, y: number): string {
-  return `<text x="${PAD}" y="${y}" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="${MUTED}">${xml(authorName)}</text>`;
+  return `<text x="${PAD}" y="${y}" font-family="${FONT_FAMILY}" font-size="18" fill="${MUTED}">${xml(authorName)}</text>`;
 }
 
 function cardShell(height: number, fill: string, kind: FeaturedKind): string {
@@ -108,7 +109,7 @@ function stickySvg(item: BoardItem, kind: FeaturedKind): string {
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_W}" height="${height}">
     ${cardShell(height, paper, kind)}
-    <text font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="600" fill="${INK}">${tspans}</text>
+    <text font-family="${FONT_FAMILY}" font-size="28" font-weight="600" fill="${INK}">${tspans}</text>
     ${footer(item.authorName, height - 20)}
   </svg>`;
 }
@@ -260,7 +261,9 @@ export function rasterizeProposalPreview(item: BoardItem, kind: FeaturedKind): P
   const svg = proposalCardSvg(item, kind);
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: 1400 },
-    font: { loadSystemFonts: true },
+    // Inter first, as the board lays labels out for it; the host's own fonts
+    // stay loaded for what Inter has no glyphs for, such as CJK names.
+    font: { fontFiles: interFontFiles(), loadSystemFonts: true, sansSerifFamily: 'Inter' },
   });
   const rendered = resvg.render();
   return {

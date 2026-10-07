@@ -47,10 +47,24 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
   // Voice is not configured on this server, so there is no microphone to
   // offer. Hiding beats a permanently greyed button that explains nothing.
   // Guarded here rather than at each call site so no caller has to remember.
-  if (status === 'unavailable') return null;
+  //
+  // `failed` too: `VoiceReconnect` takes this spot until voice is back, and a
+  // greyed mute button beside it would say "muted" when what happened is that
+  // the room dropped you.
+  if (status === 'unavailable' || status === 'failed') return null;
 
   const label = name && name.length > 0 ? name : 'You';
   const action = micEnabled ? 'Mute your microphone' : 'Unmute your microphone';
+  // A mic the browser refused, or one that is not there, draws the same red as
+  // a mic you switched off. Once `VoiceNotice`'s banner has stepped aside this
+  // button is the only thing left that knows the difference, so it says so: a
+  // mark on the chip, and the words for a screen reader.
+  const problem =
+    micStatus === 'blocked'
+      ? 'blocked by your browser'
+      : micStatus === 'no-device'
+        ? 'not found'
+        : null;
 
   const title = !connected
     ? 'Voice is not connected'
@@ -70,13 +84,13 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
       // Pressed means muted: the button's job is muting, and a screen reader
       // reading "Mute, pressed" alongside the label below is unambiguous.
       aria-pressed={!micEnabled}
-      aria-label={`${label} — microphone ${micEnabled ? 'on' : 'muted'}. ${action}.`}
+      aria-label={`${label} — microphone ${problem ?? (micEnabled ? 'on' : 'muted')}. ${action}.`}
       aria-busy={busy}
       title={title}
       // Square and sized to the header's content band, so it sits level with
       // the chips beside it and the roster's 24px bubbles without making the
       // header any taller.
-      className={`flex size-6 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`relative flex size-6 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
         micEnabled
           ? // Grey, and quiet: a live microphone is the state you do not need
             // to be told about. `rt-ink-muted` rather than `rt-ink-faint`,
@@ -95,6 +109,17 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
         // A mic with a slash through it — the muted icon the ticket asks for.
         <MicOff aria-hidden="true" size={13} strokeWidth={2} />
       )}
+      {problem ? (
+        // Amber, the banner's "you should do something", ringed in the
+        // header's own background so it reads as cut out of the chip.
+        <span
+          aria-hidden="true"
+          data-mic-warning
+          className="absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full bg-rt-secondary text-[8px] leading-none font-bold text-white ring-2 ring-rt-secondary-wash"
+        >
+          !
+        </span>
+      ) : null}
     </button>
   );
 }

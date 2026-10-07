@@ -1,5 +1,5 @@
 import { CopyField } from '../../components/ui/CopyField';
-import { MicToggle, VoiceNotice, localName, useVoiceRoom } from '../voice';
+import { MicToggle, VoiceNotice, VoiceReconnect, localName, useVoiceRoom } from '../voice';
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
@@ -40,6 +40,9 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
         <RoundTableLogo />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Waiting room</span>
         <div className="ml-auto flex items-center gap-3">
+          {/* Only one of these two is ever drawn: the mic, or — once voice has
+              given up — its Reconnect in the mic's place. */}
+          <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
           <MicToggle
             name={localName(voice.participants)}
             micEnabled={voice.micEnabled}

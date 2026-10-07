@@ -312,21 +312,23 @@ describe('ParticipantCluster', () => {
       expect(screen.getByText('Joining the room…')).toBeInTheDocument();
     });
 
-    it('says voice is offline when the connection gave up', () => {
-      renderCluster([], 'failed');
-      // Never "nobody is here": you are always in your own room.
-      expect(screen.getByText(/Voice is offline/)).toBeInTheDocument();
-    });
-
     it('offers no overflow control at all', () => {
-      renderCluster([], 'failed');
+      renderCluster([], 'reconnecting');
       expect(screen.queryByRole('button', { name: /Show everyone/ })).toBeNull();
     });
   });
 
+  it('steps aside once voice has given up, for the header’s Reconnect', () => {
+    // `VoiceReconnect` says "offline" in the same header, with a way back. A
+    // second chip saying it again would cost a header that cannot wrap.
+    const { container } = renderCluster([], 'failed');
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('renders nothing when the server has no voice', () => {
-    // Unlike `failed`, there is no room to be listed in and no retry to offer,
-    // so an empty chip explaining its own emptiness is worse than no chip.
+    // No room to be listed in and no retry to offer anywhere, so an empty chip
+    // explaining its own emptiness is worse than no chip.
     const { container } = render(<ParticipantCluster participants={[]} status="unavailable" />);
 
     expect(container).toBeEmptyDOMElement();

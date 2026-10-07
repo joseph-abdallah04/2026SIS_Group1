@@ -223,6 +223,39 @@ describe('ProposalActionsMenu submenu', () => {
       expect(formats()).toBeNull();
     });
 
+    it('counts from the first row crossed, so drifting down the menu does not hold it open', () => {
+      vi.useFakeTimers();
+      render(
+        <ProposalActionsMenu
+          anchor={{ kind: 'point', x: 100, y: 50 }}
+          label="Actions"
+          onClose={vi.fn()}
+          sections={[
+            [
+              {
+                id: 'export',
+                label: 'Export',
+                icon: Download,
+                onSelect: vi.fn(),
+                submenu: [{ id: 'png', label: 'As PNG', icon: ImageDown, onSelect: vi.fn() }],
+              },
+              { id: 'copy', label: 'Copy text', icon: Copy, onSelect: vi.fn() },
+              { id: 'delete', label: 'Delete', icon: Trash2, onSelect: vi.fn() },
+            ],
+          ]}
+        />,
+      );
+      const formats = () => screen.queryByRole('menu', { name: 'Export' });
+      enter(screen.getByRole('menuitem', { name: 'Export' }));
+      enter(screen.getByRole('menuitem', { name: 'Copy text' }));
+      act(() => vi.advanceTimersByTime(SUBMENU_GRACE_MS - 100));
+      enter(screen.getByRole('menuitem', { name: 'Delete' }));
+
+      expect(formats()).not.toBeNull();
+      act(() => vi.advanceTimersByTime(100));
+      expect(formats()).toBeNull();
+    });
+
     it('stays open once the pointer reaches it', () => {
       vi.useFakeTimers();
       const { exportRow, formats } = renderWithSubmenu();

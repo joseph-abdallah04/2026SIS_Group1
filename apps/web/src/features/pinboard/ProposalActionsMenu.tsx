@@ -407,10 +407,13 @@ export function ProposalActionsMenu({
                 // Passing over a row opens its submenu, and passing over any
                 // other row puts an open one away, as desktop menus do — after
                 // a beat, in case the pointer is only crossing on its way in.
-                cancelGrace();
+                // Counted from the first row crossed: a pointer moving slowly
+                // down the menu would otherwise restart it at every row and
+                // keep the submenu open the whole way.
                 if (hasSubmenu && !item.disabled) {
+                  cancelGrace();
                   if (!expanded) setOpen({ id: item.id, focus: false });
-                } else if (parentId) {
+                } else if (parentId && graceTimer.current === null) {
                   graceTimer.current = window.setTimeout(() => {
                     graceTimer.current = null;
                     setOpen(null);

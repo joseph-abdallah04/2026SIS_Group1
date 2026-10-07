@@ -27,6 +27,7 @@ import { CreativeToolbar } from '../../toolbar/CreativeToolbar';
 import { CreativeStudio } from '../CreativeStudio';
 import { useCreativeTools } from '../CreativeToolsContext';
 import { CreativeToolsProvider } from '../CreativeToolsProvider';
+import { STUDIO_TEMPLATES } from '../studio/studioTemplates';
 import {
   DIAGRAM_CANVAS_HEIGHT,
   DIAGRAM_CANVAS_WIDTH,
@@ -7296,6 +7297,39 @@ describe('picking things up before putting them down', () => {
     }
     expect(artifact.arrows?.map((arrow) => arrow.label).filter(Boolean)).toEqual(['Yes', 'No']);
     expect(artifact.edges).toEqual([]);
+  });
+
+  it('moves a template as one piece, its free arrows in step with its snapped shapes', async () => {
+    // The matrix's axis labels reach past its grid, so the box it is placed by
+    // starts off the grid. Shapes snap on their own; arrows and tables move by
+    // the offset as it is — so that offset has to be whole grid steps, or the
+    // axes land a few units out of line with the quadrants they label.
+    const send = propose();
+    render(<Harness propose={send} />);
+    const { user } = await openDiagram();
+
+    await clickInRailMenu(user, 'Templates', 'Matrix');
+    await user.click(screen.getByRole('button', { name: 'Propose' }));
+    await proposedAndClosed();
+    const artifact = send.mock.calls[0]?.[0]?.artifactJson;
+    if (artifact?.type !== 'diagram') throw new Error('expected a diagram artifact');
+
+    const template = STUDIO_TEMPLATES.find((candidate) => candidate.id === 'matrix')!.build();
+    const moved = {
+      x: artifact.nodes[0]!.x - template.nodes[0]!.x,
+      y: artifact.nodes[0]!.y - template.nodes[0]!.y,
+    };
+    expect(Math.abs(moved.x % DIAGRAM_GRID)).toBe(0);
+    expect(Math.abs(moved.y % DIAGRAM_GRID)).toBe(0);
+    template.nodes.forEach((node, index) => {
+      expect(artifact.nodes[index]).toMatchObject({ x: node.x + moved.x, y: node.y + moved.y });
+    });
+    template.arrows.forEach((arrow, index) => {
+      expect(artifact.arrows?.[index]?.from).toMatchObject({
+        x: arrow.from.x + moved.x,
+        y: arrow.from.y + moved.y,
+      });
+    });
   });
 
   it('greys out ink width and colour while the eraser is on', async () => {
