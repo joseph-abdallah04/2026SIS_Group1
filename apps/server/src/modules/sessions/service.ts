@@ -264,8 +264,12 @@ export async function deleteSession({ sessionId, userId }: DeleteSessionArgs): P
       data: { hiddenAt: new Date() },
     });
 
+    // `userId: { not: null }`: a membership whose account was deleted can
+    // never be a dashboard viewer, so it must not keep the session alive
+    // (`hideSessionsForDeletedUser` also stamps `hiddenAt` on these going
+    // forward; this is what covers rows left behind before it existed).
     const stillOnSomeDashboard = await tx.sessionMember.count({
-      where: { sessionId, hiddenAt: null },
+      where: { sessionId, hiddenAt: null, userId: { not: null } },
     });
     if (stillOnSomeDashboard === 0) {
       await tx.session.delete({ where: { id: sessionId } });
@@ -319,6 +323,53 @@ export async function deleteDraftSessionsForUser(
   client: PrismaLike = prisma,
 ): Promise<void> {
   await client.session.deleteMany({ where: { leaderId: userId, status: 'draft' } });
+}
+
+/**
+ * Account deletion's half of the dashboard hide: every session this user was
+ * ever a member of counts as hidden for them, and any ended session that
+ * leaves with no remaining dashboard viewer is garbage-collected — the same
+ * rule `deleteSession` applies one session at a time.
+ *
+ * Needed because `SessionMember.userId` is `ON DELETE SET NULL`: without it
+ * the membership survives with no user and `hiddenAt: null`, which looks like
+ * someone who still has the session on their dashboard, so the session could
+ * never be collected even after every real member dismissed it.
+ *
+ * Covers memberships they never dismissed *and* ones they already left
+ * (`leftAt` set, `hiddenAt` still null). Rows are kept, not deleted — the
+ * membership list is history (docs/02 §4). Only ended sessions are collected;
+ * live ones cannot be reached here because `deleteAccount` refuses first.
+ *
+ * Must run before the user row is deleted (afterwards nothing links the
+ * memberships back to them), in the same transaction.
+ */
+export async function hideSessionsForDeletedUser(
+  userId: string,
+  client: PrismaLike = prisma,
+): Promise<void> {
+  const memberships = await client.sessionMember.findMany({
+    where: { userId },
+    select: { sessionId: true },
+  });
+  if (memberships.length === 0) return;
+
+  await client.sessionMember.updateMany({
+    where: { userId, hiddenAt: null },
+    data: { hiddenAt: new Date() },
+  });
+
+  const unviewed = await client.session.findMany({
+    where: {
+      id: { in: memberships.map((membership) => membership.sessionId) },
+      status: 'ended',
+      members: { none: { hiddenAt: null, userId: { not: null } } },
+    },
+    select: { id: true },
+  });
+  if (unviewed.length === 0) return;
+
+  await client.session.deleteMany({ where: { id: { in: unviewed.map((s) => s.id) } } });
 }
 
 /** Duck-typed rather than importing Prisma's error class: the `.code` is the

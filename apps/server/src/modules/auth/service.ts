@@ -6,7 +6,11 @@ import type { LoginInput, SignupInput, UpdateProfileInput } from '@roundtable/sh
 import { Prisma, type User as UserRow } from '../../generated/prisma/client.js';
 import { prisma } from '../../db.js';
 import { ApiError } from '../../middleware/error.js';
-import { deleteDraftSessionsForUser, findLiveSessionForUser } from '../sessions/index.js';
+import {
+  deleteDraftSessionsForUser,
+  findLiveSessionForUser,
+  hideSessionsForDeletedUser,
+} from '../sessions/index.js';
 import { signToken } from './jwt.js';
 
 const BCRYPT_ROUNDS = 10;
@@ -162,6 +166,13 @@ export function getCurrentUser(req: Request): Promise<User | null> {
  * outcomes down with them. Only what is entirely theirs (a draft they alone
  * are the sole member of, their own reactions, their own LLM config) is
  * actually removed.
+ *
+ * The one thing the schema cannot do is the dashboard half of that:
+ * `SET NULL` leaves a membership with no user and `hiddenAt: null`, which
+ * reads as someone who still shows the session. So the transaction also
+ * stamps `hiddenAt` on every membership of theirs and collects any ended
+ * session left with no real viewer (`hideSessionsForDeletedUser`) — otherwise
+ * an ended session they were in could never leave the database.
  */
 export async function deleteAccount(userId: string, password: string): Promise<void> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -185,6 +196,10 @@ export async function deleteAccount(userId: string, password: string): Promise<v
 
   await prisma.$transaction(async (tx) => {
     await deleteDraftSessionsForUser(userId, tx);
+    // After the drafts (their memberships are already gone with them) and
+    // before the user row: once it is deleted, `SET NULL` severs the link and
+    // there is no way left to find which memberships were theirs.
+    await hideSessionsForDeletedUser(userId, tx);
     await tx.user.delete({ where: { id: userId } });
   });
 }

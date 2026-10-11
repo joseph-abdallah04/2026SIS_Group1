@@ -25,6 +25,7 @@ export {
   getSessionWithQuestions,
   findLiveSessionForUser,
   focusQuestion,
+  hideSessionsForDeletedUser,
   joinSessionByCode,
   leaveSession,
   listSessionMembers,
