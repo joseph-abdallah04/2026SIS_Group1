@@ -14,11 +14,17 @@ const { mockPrisma } = vi.hoisted(() => ({
 }));
 vi.mock('../../db.js', () => ({ prisma: mockPrisma }));
 
-const { findLiveSessionForUser, deleteDraftSessionsForUser } = vi.hoisted(() => ({
-  findLiveSessionForUser: vi.fn(),
-  deleteDraftSessionsForUser: vi.fn(),
+const { findLiveSessionForUser, deleteDraftSessionsForUser, hideSessionsForDeletedUser } =
+  vi.hoisted(() => ({
+    findLiveSessionForUser: vi.fn(),
+    deleteDraftSessionsForUser: vi.fn(),
+    hideSessionsForDeletedUser: vi.fn(),
+  }));
+vi.mock('../sessions/index.js', () => ({
+  findLiveSessionForUser,
+  deleteDraftSessionsForUser,
+  hideSessionsForDeletedUser,
 }));
-vi.mock('../sessions/index.js', () => ({ findLiveSessionForUser, deleteDraftSessionsForUser }));
 
 const { deleteAccount, toPublicUser } = await import('./service.js');
 
@@ -106,5 +112,32 @@ describe('deleteAccount', () => {
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     expect(deleteDraftSessionsForUser).toHaveBeenCalledWith('user-1', mockPrisma);
     expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+  });
+
+  it('hides their sessions on the same transaction handle, before the user row goes', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(await userRow());
+    findLiveSessionForUser.mockResolvedValue(null);
+    mockPrisma.user.delete.mockResolvedValue(undefined);
+
+    await deleteAccount('user-1', PASSWORD);
+
+    expect(hideSessionsForDeletedUser).toHaveBeenCalledWith('user-1', mockPrisma);
+    // After the user row is deleted, SET NULL severs the link and there is no
+    // way left to find which memberships were theirs.
+    const order = (fn: { mock: { invocationCallOrder: number[] } }) =>
+      fn.mock.invocationCallOrder[0] as number;
+    expect(order(deleteDraftSessionsForUser)).toBeLessThan(order(hideSessionsForDeletedUser));
+    expect(order(hideSessionsForDeletedUser)).toBeLessThan(order(mockPrisma.user.delete));
+  });
+
+  it('does not hide or delete anything while a live session blocks the deletion', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(await userRow());
+    findLiveSessionForUser.mockResolvedValue({ id: 'session-1', title: 'Sprint planning' });
+
+    await expect(deleteAccount('user-1', PASSWORD)).rejects.toMatchObject({ status: 409 });
+
+    expect(deleteDraftSessionsForUser).not.toHaveBeenCalled();
+    expect(hideSessionsForDeletedUser).not.toHaveBeenCalled();
+    expect(mockPrisma.user.delete).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,8 @@ const sessionUpdate = vi.fn();
 const sessionUpdateMany = vi.fn();
 const sessionUpdateInTx = vi.fn();
 const sessionDelete = vi.fn();
+const sessionDeleteMany = vi.fn();
+const sessionMemberFindMany = vi.fn();
 const sessionMemberUpsert = vi.fn();
 const sessionMemberUpdateMany = vi.fn();
 const sessionMemberFindUnique = vi.fn();
@@ -80,11 +82,13 @@ vi.mock('../../db.js', () => ({
       update: sessionUpdate,
       updateMany: sessionUpdateMany,
       delete: sessionDelete,
+      deleteMany: sessionDeleteMany,
     },
     sessionMember: {
       upsert: sessionMemberUpsert,
       updateMany: sessionMemberUpdateMany,
       findUnique: sessionMemberFindUnique,
+      findMany: sessionMemberFindMany,
       update: sessionMemberUpdate,
     },
     question: {
@@ -130,6 +134,8 @@ const {
   updateSessionDraft,
   getDiscussionTimer,
   findLiveSessionForUser,
+  deleteDraftSessionsForUser,
+  hideSessionsForDeletedUser,
 } = await import('./service.js');
 
 beforeEach(() => {
@@ -617,6 +623,18 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
     await deleteSession({ sessionId: 's1', userId: 'u2' });
     expect(sessionMemberUpdate).toHaveBeenCalled();
     expect(sessionDelete).toHaveBeenCalledWith({ where: { id: 's1' } });
+  });
+
+  it('deleteSession does not let a membership with no user keep an ended session alive', async () => {
+    sessionFindUnique.mockResolvedValueOnce({ ...draftSession, status: 'ended' });
+    sessionMemberFindUnique.mockResolvedValueOnce({ id: 'm-last' });
+    sessionMemberCount.mockResolvedValueOnce(0);
+    await deleteSession({ sessionId: 's1', userId: 'u2' });
+    // A deleted account's membership (userId null, hiddenAt null) can never be
+    // a dashboard viewer, so the "who still shows this?" count must skip it.
+    expect(sessionMemberCount).toHaveBeenCalledWith({
+      where: { sessionId: 's1', hiddenAt: null, userId: { not: null } },
+    });
   });
 
   it('deleteSession rejects hiding an ended session the caller never joined', async () => {
@@ -1721,6 +1739,104 @@ describe('getDiscussionTimer', () => {
 
     votingRoundFindUnique.mockResolvedValueOnce({ status: 'closed' });
     await expect(getDiscussionTimer('s1')).resolves.toBeNull();
+  });
+});
+
+describe('deleteDraftSessionsForUser', () => {
+  it('destroys only the drafts this user leads', async () => {
+    sessionDeleteMany.mockResolvedValueOnce({ count: 2 });
+
+    await deleteDraftSessionsForUser('u1');
+
+    expect(sessionDeleteMany).toHaveBeenCalledWith({
+      where: { leaderId: 'u1', status: 'draft' },
+    });
+  });
+
+  it('runs on the caller’s transaction handle when given one', async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+
+    await deleteDraftSessionsForUser('u1', { session: { deleteMany } } as never);
+
+    expect(deleteMany).toHaveBeenCalledTimes(1);
+    expect(sessionDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('hideSessionsForDeletedUser', () => {
+  it('does nothing for a user who was never in a session', async () => {
+    sessionMemberFindMany.mockResolvedValueOnce([]);
+
+    await hideSessionsForDeletedUser('u1');
+
+    expect(sessionMemberUpdateMany).not.toHaveBeenCalled();
+    expect(sessionFindMany).not.toHaveBeenCalled();
+    expect(sessionDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('stamps hiddenAt on every membership still null, left ones included', async () => {
+    sessionMemberFindMany.mockResolvedValueOnce([{ sessionId: 's1' }, { sessionId: 's2' }]);
+    sessionFindMany.mockResolvedValueOnce([]);
+
+    await hideSessionsForDeletedUser('u1');
+
+    // No `leftAt` filter: a session they already walked out of still counts.
+    expect(sessionMemberUpdateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', hiddenAt: null },
+      data: { hiddenAt: expect.any(Date) },
+    });
+  });
+
+  it('never deletes membership rows — they are history', async () => {
+    sessionMemberFindMany.mockResolvedValueOnce([{ sessionId: 's1' }]);
+    sessionFindMany.mockResolvedValueOnce([{ id: 's1' }]);
+
+    await hideSessionsForDeletedUser('u1');
+
+    expect(sessionMemberUpdate).not.toHaveBeenCalled();
+    expect(sessionMemberUpdateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('collects an ended session with no remaining dashboard viewer', async () => {
+    sessionMemberFindMany.mockResolvedValueOnce([{ sessionId: 's1' }, { sessionId: 's2' }]);
+    sessionFindMany.mockResolvedValueOnce([{ id: 's2' }]);
+
+    await hideSessionsForDeletedUser('u1');
+
+    // Only ended sessions, only ones where nobody real still shows it — a
+    // membership with no user cannot be that viewer.
+    expect(sessionFindMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['s1', 's2'] },
+        status: 'ended',
+        members: { none: { hiddenAt: null, userId: { not: null } } },
+      },
+      select: { id: true },
+    });
+    expect(sessionDeleteMany).toHaveBeenCalledWith({ where: { id: { in: ['s2'] } } });
+  });
+
+  it('keeps an ended session other people still show', async () => {
+    sessionMemberFindMany.mockResolvedValueOnce([{ sessionId: 's1' }]);
+    sessionFindMany.mockResolvedValueOnce([]);
+
+    await hideSessionsForDeletedUser('u1');
+
+    expect(sessionMemberUpdateMany).toHaveBeenCalledTimes(1);
+    expect(sessionDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('hides before it looks for sessions to collect', async () => {
+    sessionMemberFindMany.mockResolvedValueOnce([{ sessionId: 's1' }]);
+    sessionFindMany.mockResolvedValueOnce([]);
+
+    await hideSessionsForDeletedUser('u1');
+
+    // Collecting first would count the user's own still-unhidden row as a
+    // viewer and keep a session this call is meant to free.
+    expect(sessionMemberUpdateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionFindMany.mock.invocationCallOrder[0] as number,
+    );
   });
 });
 
