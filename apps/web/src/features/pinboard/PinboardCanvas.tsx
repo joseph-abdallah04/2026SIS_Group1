@@ -1052,7 +1052,7 @@ export function PinboardCanvas({
           {shortlistControl}
           {micControl}
           {/* Two short rows in the height one pill used to take: the count
-              and the live dot above, the join code below. The join code came
+              (and an offline flag while disconnected) above, the join code below. The join code came
               up from the retired footer, and stacking it here rather than
               adding it to the row keeps the header neither taller nor wider.
               `items-end` lines both rows up against the exit button. */}
@@ -1065,21 +1065,15 @@ export function PinboardCanvas({
                 <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2 text-[10px] font-medium text-rt-secondary-deep shadow-sm">
                   Session ended
                 </span>
-              ) : (
+              ) : isLive ? null : (
+                // Only the exception is worth the room: being connected is the
+                // normal state, so it goes unsaid.
                 <div
                   className="flex h-4.5 items-center gap-1.5 rounded-full border border-rt-secondary/25 bg-white px-2 shadow-sm"
-                  title={
-                    isLive
-                      ? 'Connected: new proposals appear here as they are made'
-                      : 'Not receiving live updates; reconnecting'
-                  }
+                  title="Not receiving live updates; reconnecting"
                 >
-                  <div
-                    className={`size-1.5 rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
-                  />
-                  <span className="text-[10px] font-medium text-rt-secondary-deep">
-                    {isLive ? 'live' : 'offline'}
-                  </span>
+                  <div className="size-1.5 rounded-full bg-rt-tertiary" />
+                  <span className="text-[10px] font-medium text-rt-secondary-deep">offline</span>
                 </div>
               )}
             </div>
