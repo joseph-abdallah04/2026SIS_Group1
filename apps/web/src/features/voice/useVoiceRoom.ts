@@ -33,11 +33,12 @@ export type VoiceStatus =
   | 'reconnecting'
   | 'failed'
   /**
-   * This deployment has no LiveKit credentials, so there is no room to join
-   * and there will not be one until the server is reconfigured. Distinct from
-   * `failed`, which means "something that exists was lost and you can retry
-   * into it" — retrying this just repeats the same 503. Every piece of voice
-   * UI renders nothing in this state rather than offering a dead Reconnect.
+   * There is no room to join: this deployment has no LiveKit credentials, or
+   * this session was created with no call. Neither changes while you are in
+   * the session. Distinct from `failed`, which means "something that exists
+   * was lost and you can retry into it" — retrying this just repeats the same
+   * refusal. Every piece of voice UI renders nothing in this state rather
+   * than offering a dead Reconnect.
    */
   | 'unavailable';
 
@@ -90,12 +91,16 @@ const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
 /**
  * Join the session's LiveKit room for the lifetime of the view (F11).
  *
+ * `enabled: false` is a session with no call: the room is never acquired and
+ * no token is fetched, so it costs no LiveKit minutes, and the status reads
+ * `unavailable` so every piece of voice UI steps aside.
+ *
  * Ordering matters here: we connect first and ask for the microphone second.
  * Asking first would mean a refused prompt kept you out of the room entirely,
  * when the useful outcome is being in it and able to hear people while the
  * banner offers a retry.
  */
-export function useVoiceRoom(sessionId: string) {
+export function useVoiceRoom(sessionId: string, enabled = true) {
   const [status, setStatus] = useState<VoiceStatus>('idle');
   const [micStatus, setMicStatus] = useState<MicStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -279,7 +284,7 @@ export function useVoiceRoom(sessionId: string) {
   );
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !enabled) return;
 
     // The room outlives this effect, so that lobby -> board keeps one
     // connection rather than dropping audio at the moment the session starts.
@@ -454,8 +459,13 @@ export function useVoiceRoom(sessionId: string) {
         // right. Without this, `scheduleReconnect` fetches the same 503 five
         // more times and then overwrites this with "Lost the voice
         // connection", which is how a server that never had voice ends up
-        // offering a Reconnect button that cannot work.
-        if (err instanceof ApiClientError && err.code === 'VOICE_NOT_CONFIGURED') {
+        // offering a Reconnect button that cannot work. `VOICE_OFF` is the
+        // same answer for one session: the leader chose no call. Callers pass
+        // `enabled: false` for those, so this only catches a stale view.
+        if (
+          err instanceof ApiClientError &&
+          (err.code === 'VOICE_NOT_CONFIGURED' || err.code === 'VOICE_OFF')
+        ) {
           setStatus('unavailable');
           // Nothing renders in this state, so there is no message to carry.
           setError(null);
@@ -547,7 +557,7 @@ export function useVoiceRoom(sessionId: string) {
     };
     // `applyMicEnabled` changes only with `sessionId`, which is already here:
     // this does not cost the room an extra rebuild.
-  }, [sessionId, retryToken, applyMicEnabled]);
+  }, [sessionId, enabled, retryToken, applyMicEnabled]);
 
   /** The "mic blocked" banner's retry button. Re-prompts without rejoining. */
   const requestMicrophone = useCallback(() => applyMicEnabled(true), [applyMicEnabled]);
@@ -578,7 +588,9 @@ export function useVoiceRoom(sessionId: string) {
   }, []);
 
   return {
-    status,
+    // Derived rather than set: the effect never runs for a session with no
+    // call, so nothing would ever move `status` off its initial `idle`.
+    status: enabled ? status : ('unavailable' as const),
     micStatus,
     /** False while muted — including when muted means "never published". */
     micEnabled,

@@ -78,6 +78,9 @@ function describe(seat: ParticipantSeat, isSpeaking: boolean): string {
  * `useSustainedSpeaking` is called here rather than by the page, so the
  * re-render on every speech edge stays inside this chip instead of repainting
  * the whole header with it.
+ *
+ * A session with no call has no room, so the board feeds this from socket
+ * presence instead (`presenceParticipants`): the same chip, nobody speaking.
  */
 export function ParticipantCluster({ participants, status }: ParticipantClusterProps) {
   const [open, setOpen] = useState(false);

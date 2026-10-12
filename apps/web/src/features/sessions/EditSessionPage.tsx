@@ -54,6 +54,7 @@ export function EditSessionPage() {
             }))}
             initialDiscussionTimerSeconds={session.discussionTimerSeconds}
             initialVotingTimerSeconds={session.votingTimerSeconds}
+            initialVoiceEnabled={session.voiceEnabled}
             submitLabel="Save changes"
             submittingLabel="Saving…"
             submitting={submitting}

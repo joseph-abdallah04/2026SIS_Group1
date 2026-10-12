@@ -590,13 +590,21 @@ describe('draft edit, delete, open, create, join', () => {
       const res = await request({
         method: 'PATCH',
         path: '/api/sessions/s1',
-        body: { title: 'New title', questions: [{ text: 'What ships?', votingEnabled: false }] },
+        body: {
+          title: 'New title',
+          questions: [{ text: 'What ships?', votingEnabled: false }],
+          voiceEnabled: true,
+        },
       });
       expect(res.status).toBe(200);
       expect(updateSessionDraft).toHaveBeenCalledWith({
         sessionId: 's1',
         leaderId: 'u1',
-        input: { title: 'New title', questions: [{ text: 'What ships?', votingEnabled: false }] },
+        input: {
+          title: 'New title',
+          questions: [{ text: 'What ships?', votingEnabled: false }],
+          voiceEnabled: true,
+        },
       });
     });
   });
@@ -645,8 +653,13 @@ describe('draft edit, delete, open, create, join', () => {
       expect(res.status).toBe(201);
       expect(createSession).toHaveBeenCalledWith({
         leaderId: 'u1',
-        // The schema fills in the default: a question is a vote unless told otherwise.
-        input: { title: 'Roadmap', questions: [{ text: 'What ships?', votingEnabled: true }] },
+        // The schema fills in the defaults: a question is a vote, and the
+        // session has no call, unless told otherwise.
+        input: {
+          title: 'Roadmap',
+          questions: [{ text: 'What ships?', votingEnabled: true }],
+          voiceEnabled: false,
+        },
       });
     });
   });

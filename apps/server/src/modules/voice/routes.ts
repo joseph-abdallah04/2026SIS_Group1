@@ -38,6 +38,16 @@ voiceRoutes.post<{ sessionId: string }>(
         return;
       }
 
+      if (result.reason === 'voice-off') {
+        // The leader chose no call. Not a fault and not a permission problem,
+        // so the client can treat it like a server without voice: show none.
+        res.status(409).json({
+          error: 'This session has no call',
+          code: 'VOICE_OFF',
+        });
+        return;
+      }
+
       // Same 403 whether the session has no such member or no such session:
       // a different status for each would let anyone probe which session ids
       // are real.
