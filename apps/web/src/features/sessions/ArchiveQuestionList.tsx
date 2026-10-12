@@ -82,7 +82,6 @@ export function ArchiveQuestionList({
                 text={question.text}
                 state={stepState(question.status, true, question.votingEnabled)}
                 focused={isFocused}
-                last={index === questions.length - 1}
                 onSelect={() => {
                   if (!isFocused) onSelect(question.id);
                 }}

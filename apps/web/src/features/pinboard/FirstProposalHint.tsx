@@ -40,10 +40,8 @@ type Phase = 'hidden' | 'shown' | 'leaving';
  * open a tool, because whoever did that has found the tools.
  *
  * It sits inside the toolbar's wrapper, so it centres over the toolbar and
- * follows it when it anchors right, with no measuring. While the toolbar still
- * has its labels it is wider than the bubble, so the bubble lines up with its
- * left end; once it is only icons it is narrower, so the bubble lines up with
- * its right end instead and grows left, over the board rather than past it.
+ * follows it when it anchors left, with no measuring. From then on the bubble
+ * lines up with the toolbar's left end and grows right, over the board.
  */
 export function FirstProposalHint({
   sessionId,
@@ -105,7 +103,7 @@ export function FirstProposalHint({
       // Centred over the toolbar, and anchored with it at the same stages
       // (see the toolbar row in PinboardCanvas). The width is capped by the
       // board, not the window, so it never runs off a narrow board.
-      className="absolute bottom-full left-1/2 mb-3.5 w-max max-w-[min(19rem,calc(100cqw-3rem))] -translate-x-1/2 @max-[52rem]/board:left-0 @max-[52rem]/board:translate-x-0 @max-[42rem]/board:right-0 @max-[42rem]/board:left-auto"
+      className="absolute bottom-full left-1/2 mb-3.5 w-max max-w-[min(19rem,calc(100cqw-3rem))] -translate-x-1/2 @max-[52rem]/board:left-0 @max-[52rem]/board:translate-x-0"
     >
       <div
         // Grown from, and retracted into, the arrow's tip.
@@ -140,14 +138,13 @@ export function FirstProposalHint({
         {/* The pointer: a square turned on its corner, half tucked under the
             card. Only its outer two edges are bordered, and it is painted
             after the card so it covers the card's bottom border where they
-            meet. Over Sticky once the toolbar anchors right: from the left
-            while it has labels, and from the right once it is icons only,
-            where Sticky's middle is 143.5px in from the bar's right edge
-            (border 1 + padding 4 + Reuse, divider, Image and Studio at
-            37 + 9 + 37 + 37 + half of Sticky's 37). */}
+            meet. Over Sticky's icon once the toolbar anchors left, which
+            moves in once the labels go and the button's padding tightens:
+            border 1 + padding 4 + 10 + half the 16px icon, less half the
+            pointer's 12px. */}
         <span
           aria-hidden="true"
-          className="absolute -bottom-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 rounded-br-[3px] border-r border-b border-rt-secondary/35 bg-rt-surface @max-[52rem]/board:left-[1.65rem] @max-[42rem]/board:right-[8.6rem] @max-[42rem]/board:left-auto @max-[42rem]/board:translate-x-0"
+          className="absolute -bottom-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 rounded-br-[3px] border-r border-b border-rt-secondary/35 bg-rt-surface @max-[52rem]/board:left-[1.65rem] @max-[52rem]/board:translate-x-0 @max-[42rem]/board:left-[1.0625rem]"
         />
       </div>
     </div>

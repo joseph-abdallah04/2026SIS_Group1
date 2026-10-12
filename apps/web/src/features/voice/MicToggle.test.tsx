@@ -55,7 +55,7 @@ describe('MicToggle', () => {
     // Muted is what costs you the meeting if you miss it. A lone red icon
     // among five white chips is easy to overlook, so the fill stays.
     render(<MicToggle {...liveProps()} micEnabled={false} />);
-    expect(screen.getByRole('button')).toHaveClass('bg-red-50');
+    expect(screen.getByRole('button')).toHaveClass('bg-[#FDECEA]');
   });
 
   it('stays quiet and grey while the mic is live', () => {
@@ -63,7 +63,7 @@ describe('MicToggle', () => {
 
     const button = screen.getByRole('button');
     expect(button).toHaveClass('bg-white');
-    expect(button).not.toHaveClass('bg-red-50');
+    expect(button).not.toHaveClass('bg-[#FDECEA]');
   });
 
   it('toggles on click', async () => {

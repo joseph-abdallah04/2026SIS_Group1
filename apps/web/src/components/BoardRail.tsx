@@ -1,4 +1,5 @@
 import type { ReactNode, Ref } from 'react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
 import { useRailResize } from './useRailResize';
 
@@ -12,8 +13,9 @@ const EXPANDED_WIDTH: Record<BoardRailWidth, string> = {
 };
 
 const TITLE_CLASSES = 'text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase';
+/** The same quiet round button as the agenda's +, so the header's controls match. */
 const TOGGLE_CLASSES =
-  'inline-flex items-center justify-center text-[13px] font-semibold text-rt-primary-deep hover:opacity-70';
+  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-rt-ink-muted transition-colors hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary';
 
 interface BoardRailProps {
   /** Which edge of the board this dock sits on — flips the border and chevrons. */
@@ -93,8 +95,10 @@ export function BoardRail({
   const resizer = useRailResize({ side, storageKey: resize?.storageKey, collapsed, onToggle });
   const onLeft = side === 'left';
   const edge = onLeft ? 'border-r' : 'border-l';
-  const expandChevron = onLeft ? '›' : '‹';
-  const collapseChevron = onLeft ? '‹' : '›';
+  // A panel with its edge on the rail's side: closing it points back to that
+  // edge, opening it points away.
+  const ExpandIcon = onLeft ? PanelLeftOpen : PanelRightOpen;
+  const CollapseIcon = onLeft ? PanelLeftClose : PanelRightClose;
 
   if (collapsed) {
     return (
@@ -110,9 +114,9 @@ export function BoardRail({
           aria-expanded={false}
           aria-label={expandLabel}
           title={expandTitle ?? expandLabel}
-          className={`h-11 w-full ${TOGGLE_CLASSES}`}
+          className={TOGGLE_CLASSES}
         >
-          {expandChevron}
+          <ExpandIcon aria-hidden="true" data-rail-icon="expand" size={16} strokeWidth={2} />
         </button>
         <div className="flex w-full justify-center">
           <RailTitle vertical>{title}</RailTitle>
@@ -130,9 +134,9 @@ export function BoardRail({
       aria-expanded={true}
       aria-label={collapseLabel}
       title={collapseTitle ?? collapseLabel}
-      className={`-my-2 h-11 w-11 ${TOGGLE_CLASSES}`}
+      className={`-my-1 ${TOGGLE_CLASSES}`}
     >
-      {collapseChevron}
+      <CollapseIcon aria-hidden="true" data-rail-icon="collapse" size={16} strokeWidth={2} />
     </button>
   );
 

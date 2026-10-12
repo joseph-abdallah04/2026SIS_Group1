@@ -1317,7 +1317,7 @@ export function PinboardCanvas({
             </div>
 
             {/* The main toolbar. Centred on the board until it would run
-                  into the zoom control on the left, then anchored right: the
+                  into the zoom control on the right, then anchored left: the
                   centred bar (~375px) meets the zoom control (~181px, 24px in
                   from the edge, 16px gap) on a board narrower than ~816px, so
                   52rem leaves a margin. `bottom-6` clears the horizontal
@@ -1328,7 +1328,7 @@ export function PinboardCanvas({
                   The leader's shortlist bar, which takes this slot while the
                   board is closed, is wider (~490px) and meets the zoom
                   control on a board narrower than ~930px, so it anchors
-                  right from 60rem.
+                  left from 60rem.
 
                   Marked so the sticky popup can centre itself over the board
                   this row spans, rather than over a window the side panels
@@ -1337,8 +1337,8 @@ export function PinboardCanvas({
               data-board-toolbar
               className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${BOARD_CRAMPED_HIDDEN} ${
                 !boardOpen && boardOverlay
-                  ? '@max-[60rem]/board:justify-end'
-                  : '@max-[52rem]/board:justify-end'
+                  ? '@max-[60rem]/board:justify-start'
+                  : '@max-[52rem]/board:justify-start'
               }`}
             >
               {/* `relative` so the first-proposal hint can rise off whichever
@@ -1376,12 +1376,12 @@ export function PinboardCanvas({
               </div>
             </div>
 
-            {/* Zoom, on the left of the board: clear of the vertical
-                  scrollbar by `left-6`, and on the same baseline as the
-                  main bar. */}
+            {/* Zoom, in the board's bottom-right corner: clear of the
+                  vertical scrollbar by `right-6`, and on the same baseline
+                  as the main bar. */}
             <div
               data-board-zoom
-              className={`pointer-events-auto absolute bottom-6 left-6 ${BOARD_CRAMPED_HIDDEN}`}
+              className={`pointer-events-auto absolute right-6 bottom-6 ${BOARD_CRAMPED_HIDDEN}`}
             >
               <ZoomControl
                 zoom={zoom}

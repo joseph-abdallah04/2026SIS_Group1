@@ -56,7 +56,7 @@ const NODE_CLASS: Record<AgendaStepState, string> = {
 
 /**
  * The circle beside a question, which says what happened to it: a tick once
- * answered, a skip mark once skipped, a pulsing dot while it is in play, and
+ * answered, a skip mark once skipped, a dot while it is in play, and
  * its number while it is still to come.
  */
 function StepNode({
@@ -89,7 +89,7 @@ function StepNode({
       ) : state === 'skipped' ? (
         <SkipForward size={9} strokeWidth={2.5} />
       ) : state === 'live' ? (
-        <span className="size-2 rounded-full bg-rt-cool motion-safe:animate-pulse" />
+        <span className="size-2 rounded-full bg-rt-cool" />
       ) : (
         number
       )}
@@ -137,8 +137,6 @@ interface AgendaStepProps {
   highlighted?: boolean;
   /** Just added to the agenda: tinted for a moment so the room notices it. */
   fresh?: boolean;
-  /** Nothing below it, so no line runs on from its node. */
-  last: boolean;
   /**
    * Above the text: the card's status and timer, or "Up next" over the
    * question that follows the one in play.
@@ -194,9 +192,8 @@ interface AgendaStepProps {
 }
 
 /**
- * One question on the agenda timeline: a node in the gutter that says what
- * happened to it, joined to the next by a line that fills in as the session
- * gets through them.
+ * One question on the agenda: a node that says what happened to it, beside
+ * its text. How far the session has got is the header's progress bar.
  *
  * Past and upcoming questions are compact rows. The question the board is
  * showing is the white card with the accent edge, with its whole text, its
@@ -213,7 +210,6 @@ export function AgendaStep({
   focused,
   highlighted = false,
   fresh = false,
-  last,
   prefix,
   onSelect,
   onTextKeyDown,
@@ -288,18 +284,12 @@ export function AgendaStep({
           }`}
         />
       ) : null}
-      {/* From under this node to just above the next one, across the gap and
-          the next card's padding. Gold behind a finished question, so the
-          line fills in as the session moves down it. */}
-      {last ? null : (
-        <span
-          aria-hidden
-          className={`absolute top-[30px] -bottom-3 left-[19px] w-0.5 rounded-full ${
-            finished ? 'bg-rt-secondary/60' : 'bg-rt-tertiary/70'
-          }`}
-        />
-      )}
-      <StepNode state={state} number={number} editing={Boolean(textSlot)} />
+      {/* On the card the node sits level with its status row, which is the
+          height of the edit button beside it; elsewhere, with the first line of
+          the text. */}
+      <span className={`flex shrink-0 ${focused && prefix ? 'h-6 items-center' : ''}`}>
+        <StepNode state={state} number={number} editing={Boolean(textSlot)} />
+      </span>
       <div className={`flex min-w-0 flex-1 flex-col pt-px ${action && !textSlot ? 'pr-6' : ''}`}>
         {prefix}
         {textSlot ? (

@@ -10,6 +10,7 @@ import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/s
 
 import { BoardRail } from '../../components/BoardRail';
 import { PhaseTimer } from '../../components/PhaseTimer';
+import { CARD_INK, REACTION_HOVER_FILL, REACTION_ON_BORDER } from '../pinboard/pinboardTokens';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
@@ -253,7 +254,16 @@ function EditButton({
       onClick={onClick}
       aria-label={`Edit question ${number}`}
       title="Edit question"
-      className={`inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors hover:border-rt-ink-faint hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${className}`}
+      className={`inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors hover:border-(--rt-control-edge) hover:bg-(--rt-control-fill) hover:text-(--rt-control-ink) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${className}`}
+      style={
+        {
+          // The slate a proposal's ⋯ hovers to, so the leader's pencil reads as
+          // the same kind of control wherever it sits.
+          '--rt-control-fill': REACTION_HOVER_FILL,
+          '--rt-control-edge': REACTION_ON_BORDER,
+          '--rt-control-ink': CARD_INK,
+        } as React.CSSProperties
+      }
     >
       <Pencil aria-hidden="true" size={12} strokeWidth={2.25} />
     </button>
@@ -643,11 +653,17 @@ export function AgendaPanel({
             setDragId(question.id);
           }
           setDragOffset(travelled);
-          const under = document
-            .elementFromPoint(event.clientX, event.clientY)
-            ?.closest<HTMLElement>('[data-question-id]');
-          const targetId = under?.dataset.questionId ?? null;
-          setOverId(targetId && targetId !== question.id ? targetId : null);
+          // Which other question's row the pointer is over, from where those
+          // rows sit. Not `elementFromPoint`: the dragged row travels under the
+          // pointer, so that would only ever find the row being dragged.
+          const list = event.currentTarget.parentElement;
+          const rows = list ? [...list.querySelectorAll<HTMLElement>('[data-question-id]')] : [];
+          const target = rows.find((row) => {
+            if (row.dataset.questionId === question.id) return false;
+            const box = row.getBoundingClientRect();
+            return event.clientY >= box.top && event.clientY <= box.bottom;
+          });
+          setOverId(target?.dataset.questionId ?? null);
         },
         onPointerUp: () => {
           const moving = dragId === question.id;
@@ -764,7 +780,7 @@ export function AgendaPanel({
             // The card says where the room is: its status and clock on top,
             // the question, then what the leader can do with it.
             const cardPrefix = isCard ? (
-              <div className="mb-1.5 flex items-center gap-2">
+              <div className="mb-1.5 flex min-h-6 items-center gap-2">
                 {status ? (
                   <AgendaChip tone={status.tone}>{status.label}</AgendaChip>
                 ) : (
@@ -795,9 +811,6 @@ export function AgendaPanel({
                 focused={isCard}
                 highlighted={lookingBack}
                 fresh={freshIds.includes(question.id)}
-                // The line stops at the last question; it runs on only to a
-                // question being written, which has its own numbered node.
-                last={index === questions.length - 1 && !composing}
                 prefix={isEditing ? undefined : cardPrefix}
                 // The leader can put any question's board up to look at —
                 // finished, or still to come — without changing where the room

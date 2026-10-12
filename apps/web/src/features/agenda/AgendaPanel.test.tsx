@@ -977,12 +977,17 @@ describe('AgendaPanel reordering', () => {
     });
     const dragged = inList('Question 4').closest('li')!;
     const target = inList('Question 2').closest('li')!;
-    // jsdom lays nothing out: the pointer is over question 2's row.
-    document.elementFromPoint = () => target;
+    // jsdom lays nothing out: give each row a place in the list, so the
+    // pointer at y=150 is over question 2's row. The dragged row follows the
+    // pointer, so the target has to come from where the other rows sit.
+    inList('Question 1').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 0, 200, 90);
+    target.getBoundingClientRect = () => new DOMRect(0, 100, 200, 90);
+    inList('Question 3').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 200, 200, 90);
+    dragged.getBoundingClientRect = () => new DOMRect(0, 300, 200, 90);
 
     fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 300 });
-    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 200 });
-    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 200 });
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 150 });
+    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 150 });
 
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q4/move', {
       toQuestionId: 'q2',
