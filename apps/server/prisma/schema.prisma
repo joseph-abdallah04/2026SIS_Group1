@@ -118,6 +118,10 @@ model Question {
   // discussion -> answered and never opens a vote. The leader sets it per
   // question and may flip it until voting opens (`setQuestionVoting`).
   votingEnabled       Boolean   @default(true) @map("voting_enabled")
+  // Why the leader skipped it, when they said: part of the meeting's record,
+  // since a question passed over is a decision too. Null when not skipped, or
+  // skipped without a reason.
+  skipReason          String?   @map("skip_reason")
 
   proposals   Proposal[]
   votingRound VotingRound?

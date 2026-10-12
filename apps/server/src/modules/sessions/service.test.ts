@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { addSessionQuestionSchema, createSessionSchema, sessionCodeSchema } from '@roundtable/shared/schemas';
+import {
+  addSessionQuestionSchema,
+  createSessionSchema,
+  sessionCodeSchema,
+} from '@roundtable/shared/schemas';
 
 // The transaction shape is the interesting part here, not Prisma itself —
 // stubbed so writes can be inspected directly. The actual queries are
@@ -122,7 +126,9 @@ const {
   getActiveQuestion,
   getQuestionInSession,
   setQuestionPhase,
+  setQuestionText,
   setQuestionVoting,
+  moveQuestion,
   joinSessionByCode,
   leaveSession,
   listSessionsForUser,
@@ -178,7 +184,7 @@ describe('createSession', () => {
     ]);
   });
 
-  it('stores each question\'s vote choice with its row (F41)', async () => {
+  it("stores each question's vote choice with its row (F41)", async () => {
     await createSession({
       leaderId: 'u1',
       input: { title: 'X', questions: [q('Vote on this'), q('Just ideas', false)] },
@@ -214,7 +220,12 @@ describe('createSession', () => {
   it('stores optional timer durations as seconds, and leaves them null when omitted', async () => {
     await createSession({
       leaderId: 'u1',
-      input: { title: 'X', questions: [q('Q')], discussionTimerSeconds: 615, votingTimerSeconds: 75 },
+      input: {
+        title: 'X',
+        questions: [q('Q')],
+        discussionTimerSeconds: 615,
+        votingTimerSeconds: 75,
+      },
     });
     expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({
       discussionTimerSeconds: 615,
@@ -238,7 +249,9 @@ describe('createSessionSchema', () => {
   });
 
   it('rejects an empty title', () => {
-    expect(createSessionSchema.safeParse({ title: '', questions: [q('Scope?')] }).success).toBe(false);
+    expect(createSessionSchema.safeParse({ title: '', questions: [q('Scope?')] }).success).toBe(
+      false,
+    );
   });
 
   it('rejects a title that is only whitespace', () => {
@@ -406,9 +419,7 @@ describe('openSessionForJoining', () => {
   it('retries on a P2002 collision and succeeds on the next attempt', async () => {
     const opened = { ...draftSession, code: 'M4T7-2QRX', status: 'lobby' };
     sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(opened);
-    sessionUpdateMany
-      .mockRejectedValueOnce({ code: 'P2002' })
-      .mockResolvedValueOnce({ count: 1 });
+    sessionUpdateMany.mockRejectedValueOnce({ code: 'P2002' }).mockResolvedValueOnce({ count: 1 });
 
     const session = await openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' });
 
@@ -437,7 +448,7 @@ describe('openSessionForJoining', () => {
     expect(sessionUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('returns the winner\'s code when a concurrent open already left draft — does not mint a second one', async () => {
+  it("returns the winner's code when a concurrent open already left draft — does not mint a second one", async () => {
     const lobbySession = { ...draftSession, code: 'K7NP-3WQZ', status: 'lobby' };
     sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(lobbySession);
     sessionUpdateMany.mockResolvedValueOnce({ count: 0 });
@@ -679,18 +690,21 @@ describe('addSessionQuestion', () => {
     expect(questionCreate).not.toHaveBeenCalled();
   });
 
-  it.each(['draft', 'ended'] as const)('refuses to add a question while the session is %s', async (status) => {
-    sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
-    await expect(
-      addSessionQuestion({
-        sessionId: 's1',
-        leaderId: 'leader-1',
-        text: 'What did we miss?',
-        votingEnabled: true,
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
-    expect(questionCreate).not.toHaveBeenCalled();
-  });
+  it.each(['draft', 'ended'] as const)(
+    'refuses to add a question while the session is %s',
+    async (status) => {
+      sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
+      await expect(
+        addSessionQuestion({
+          sessionId: 's1',
+          leaderId: 'leader-1',
+          text: 'What did we miss?',
+          votingEnabled: true,
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+      expect(questionCreate).not.toHaveBeenCalled();
+    },
+  );
 
   it('appends after the current last position as pending', async () => {
     sessionFindUnique.mockResolvedValueOnce(liveSession);
@@ -1438,6 +1452,67 @@ describe('setQuestionPhase (F25/F26)', () => {
     expect(questionUpdateMany).not.toHaveBeenCalled();
   });
 
+  // Why a question was passed over is part of the meeting's record.
+  describe('skipping with a reason', () => {
+    it('keeps the reason on the question and hands it back', async () => {
+      questionFindUnique.mockResolvedValue(question({ status: 'discussion' }));
+
+      await expect(
+        setQuestionPhase({
+          sessionId: 's1',
+          questionId: 'q1',
+          leaderId: 'leader-1',
+          status: 'skipped',
+          reason: '  Out of time  ',
+        }),
+      ).resolves.toMatchObject({ status: 'skipped', skipReason: 'Out of time' });
+      expect(questionUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'skipped', skipReason: 'Out of time' }),
+        }),
+      );
+    });
+
+    it('records no reason when none is given', async () => {
+      questionFindUnique.mockResolvedValue(question({ status: 'pending' }));
+
+      await expect(advance('skipped')).resolves.toMatchObject({ skipReason: null });
+    });
+
+    it('ignores a reason sent with any other move', async () => {
+      questionFindUnique.mockResolvedValue(question({ status: 'pending' }));
+
+      await setQuestionPhase({
+        sessionId: 's1',
+        questionId: 'q1',
+        leaderId: 'leader-1',
+        status: 'discussion',
+        reason: 'Stray',
+      });
+      expect(questionUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.not.objectContaining({ skipReason: 'Stray' }) }),
+      );
+    });
+
+    // Skipping ahead ("we won't get to this") must not pull the room off the
+    // question it is still working on.
+    it('leaves the board on the question still open when one further down is skipped', async () => {
+      questionFindUnique.mockResolvedValue(question({ id: 'q3', status: 'pending' }));
+      questionFindFirst.mockResolvedValueOnce({ id: 'q2' });
+
+      await setQuestionPhase({
+        sessionId: 's1',
+        questionId: 'q3',
+        leaderId: 'leader-1',
+        status: 'skipped',
+      });
+      expect(sessionUpdateInTx).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { currentQuestionId: 'q2' },
+      });
+    });
+  });
+
   describe('a brainstorm-only question (F41)', () => {
     const brainstorm = (status: QuestionRow['status']) =>
       question({ status, votingEnabled: false });
@@ -1651,8 +1726,117 @@ describe('getQuestionInSession', () => {
         status: true,
         boardLocked: true,
         votingEnabled: true,
+        skipReason: true,
       },
     });
+  });
+});
+
+describe('setQuestionText', () => {
+  const activeSession = { leaderId: 'leader-1', status: 'active' as const };
+  const row = (status: 'pending' | 'discussion') => ({
+    id: 'q1',
+    sessionId: 's1',
+    text: 'What ships frist?',
+    position: 0,
+    status,
+    boardLocked: true,
+    votingEnabled: true,
+    createdAt: new Date('2026-09-03T00:00:00.000Z'),
+  });
+  const reword = (leaderId = 'leader-1') =>
+    setQuestionText({ sessionId: 's1', questionId: 'q1', leaderId, text: 'What ships first?' });
+
+  beforeEach(() => {
+    sessionFindUnique.mockResolvedValue(activeSession);
+    questionUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('rewords a question that has not started', async () => {
+    questionFindUnique.mockResolvedValue(row('pending'));
+
+    await expect(reword()).resolves.toMatchObject({ text: 'What ships first?' });
+    // Only while it is still pending, so a discussion starting in between wins.
+    expect(questionUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'q1', status: 'pending' },
+      data: { text: 'What ships first?' },
+    });
+  });
+
+  it('refuses once the question has started — its wording is what the room answered', async () => {
+    questionFindUnique.mockResolvedValue(row('discussion'));
+    questionUpdateMany.mockResolvedValue({ count: 0 });
+
+    await expect(reword()).rejects.toMatchObject({ code: 'QUESTION_TEXT_LOCKED' });
+  });
+
+  it('is the leader’s alone', async () => {
+    questionFindUnique.mockResolvedValue(row('pending'));
+
+    await expect(reword('someone-else')).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
+    expect(questionUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('moveQuestion', () => {
+  const activeSession = { leaderId: 'leader-1', status: 'active' as const };
+  const row = (id: string, position: number, status = 'pending') => ({
+    id,
+    sessionId: 's1',
+    text: `Question ${position + 1}`,
+    position,
+    status,
+    boardLocked: true,
+    votingEnabled: true,
+    createdAt: new Date('2026-09-03T00:00:00.000Z'),
+  });
+  const move = (direction: 'up' | 'down') =>
+    moveQuestion({ sessionId: 's1', questionId: 'q4', leaderId: 'leader-1', direction });
+
+  beforeEach(() => {
+    sessionFindUnique.mockResolvedValue(activeSession);
+    questionFindUnique.mockResolvedValue(row('q4', 3));
+    questionUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('swaps places with the question that has not started above it', async () => {
+    questionFindFirst.mockResolvedValue(row('q3', 2));
+
+    await expect(move('up')).resolves.toMatchObject([
+      { id: 'q4', position: 2 },
+      { id: 'q3', position: 3 },
+    ]);
+    expect(questionUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'q4', status: 'pending', position: 3 },
+      data: { position: 2 },
+    });
+  });
+
+  // What has been discussed is the record so far; nothing moves above it.
+  it('will not move above a question that has started', async () => {
+    questionFindFirst.mockResolvedValue(row('q3', 2, 'discussion'));
+
+    await expect(move('up')).rejects.toMatchObject({ code: 'QUESTION_CANNOT_MOVE' });
+    expect(questionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('will not move a question that has started', async () => {
+    questionFindUnique.mockResolvedValue(row('q4', 3, 'discussion'));
+
+    await expect(move('down')).rejects.toMatchObject({ code: 'QUESTION_CANNOT_MOVE' });
+  });
+
+  it('says so when there is nowhere further to go', async () => {
+    questionFindFirst.mockResolvedValue(null);
+
+    await expect(move('down')).rejects.toMatchObject({ code: 'QUESTION_CANNOT_MOVE' });
+  });
+
+  it('is a conflict when the agenda changed underneath it', async () => {
+    questionFindFirst.mockResolvedValue(row('q5', 4));
+    questionUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    await expect(move('down')).rejects.toMatchObject({ code: 'QUESTION_CHANGED' });
   });
 });
 

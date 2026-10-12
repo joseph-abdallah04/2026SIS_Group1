@@ -73,6 +73,19 @@ const RECAP: SessionRecap = {
 };
 
 describe('SessionSummaryView', () => {
+  // Why a question was passed over is part of what the meeting decided.
+  it('says why a question was skipped, when the leader gave a reason', () => {
+    const withReason = {
+      ...RECAP,
+      questions: RECAP.questions.map((question) =>
+        question.status === 'skipped' ? { ...question, skipReason: 'Out of time' } : question,
+      ),
+    };
+    render(<SessionSummaryView summary={withReason} viewerId="u2" />);
+
+    expect(screen.getByText('Skipped: Out of time')).toBeInTheDocument();
+  });
+
   it('shows who took part, the shortlist, and the winner', () => {
     render(<SessionSummaryView summary={RECAP} viewerId="u2" />);
 

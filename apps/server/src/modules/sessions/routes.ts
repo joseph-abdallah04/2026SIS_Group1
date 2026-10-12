@@ -5,8 +5,10 @@ import {
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
+  moveQuestionSchema,
   setBoardLockSchema,
   setQuestionPhaseSchema,
+  setQuestionTextSchema,
   setQuestionVotingSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
@@ -34,10 +36,12 @@ import {
   leaveSession,
   listSessionMembers,
   listSessionsForUser,
+  moveQuestion,
   openSessionForJoining,
   resolveSessionByCode,
   setBoardLock,
   setQuestionPhase,
+  setQuestionText,
   setQuestionVoting,
   startSession,
   updateSessionDraft,
@@ -198,6 +202,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
         questionId: parsed.data.questionId,
         leaderId,
         status: parsed.data.status,
+        reason: parsed.data.reason,
       });
       emitQuestionPhase(io, req.params.id, question);
       res.json(question);
@@ -312,6 +317,68 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
         });
         emitQuestionUpdated(io, question);
         res.json(question);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Reword a question that has not started. Leader-only; clients pick the
+  // change up from `questionUpdated`, like the vote switch.
+  sessionsRoutes.put<{ id: string; questionId: string }>(
+    '/:id/questions/:questionId/text',
+    questionVotingLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = setQuestionTextSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid question',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const question = await setQuestionText({
+          sessionId: req.params.id,
+          questionId: req.params.questionId,
+          leaderId: req.userId!,
+          text: parsed.data.text,
+        });
+        emitQuestionUpdated(io, question);
+        res.json(question);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Move a question that has not started one place up or down the agenda.
+  // Both questions it swaps with go out on `questionUpdated`.
+  sessionsRoutes.post<{ id: string; questionId: string }>(
+    '/:id/questions/:questionId/move',
+    questionVotingLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = moveQuestionSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid move',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const questions = await moveQuestion({
+          sessionId: req.params.id,
+          questionId: req.params.questionId,
+          leaderId: req.userId!,
+          direction: parsed.data.direction,
+        });
+        for (const question of questions) emitQuestionUpdated(io, question);
+        res.json(questions);
       } catch (err) {
         next(err);
       }

@@ -241,9 +241,14 @@ export type JoinSessionInput = z.infer<typeof joinSessionSchema>;
 // may return to it, so "un-start a discussion" is not expressible. The rest of
 // the machine (which status may follow which) is enforced server-side in
 // `setQuestionPhase`; this only bounds the shape.
+/** The longest reason the leader can give for skipping a question. */
+export const SKIP_REASON_MAX = 120;
+
 export const setQuestionPhaseSchema = z.object({
   questionId: z.string().min(1),
   status: z.enum(['discussion', 'voting', 'answered', 'skipped']),
+  /** Why, when skipping. Optional: a reason should never hold up the meeting. */
+  reason: z.string().trim().max(SKIP_REASON_MAX).optional(),
 });
 
 export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
@@ -279,6 +284,22 @@ export const setQuestionVotingSchema = z.object({
 });
 
 export type SetQuestionVotingInput = z.infer<typeof setQuestionVotingSchema>;
+
+// The leader rewording a question that has not started yet: a typo fixed
+// rather than the question removed. Once it has started its text is locked.
+export const setQuestionTextSchema = z.object({
+  text: questionTextSchema,
+});
+
+export type SetQuestionTextInput = z.infer<typeof setQuestionTextSchema>;
+
+// The leader moving a question that has not started one place up or down the
+// agenda, past another that has not started either.
+export const moveQuestionSchema = z.object({
+  direction: z.enum(['up', 'down']),
+});
+
+export type MoveQuestionInput = z.infer<typeof moveQuestionSchema>;
 
 // === pinboard module ===
 
