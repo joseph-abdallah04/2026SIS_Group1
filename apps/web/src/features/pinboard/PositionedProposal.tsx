@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BringToFront, Copy, GitBranchPlus, Pencil, SendToBack, Trash2 } from 'lucide-react';
+import { BringToFront, Check, Copy, GitBranchPlus, Pencil, SendToBack, Trash2 } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 import type { ProposalArrangeInput } from '@roundtable/shared/schemas';
 
@@ -26,6 +26,11 @@ import {
   STICKY_RADIUS,
   STICKY_RADIUS_PX,
 } from './pinboardTokens';
+
+/** The leader's shortlist tick, as wide as it is tall: the height of its label. */
+const SHORTLIST_TICK_PX = 20;
+/** Between the tick and the "Shortlisted" label beside it. */
+const SHORTLIST_GAP_PX = 4;
 
 interface DragHandlers {
   onPointerDown: (item: BoardItem, event: React.PointerEvent<HTMLElement>) => void;
@@ -172,9 +177,13 @@ export function PositionedProposal({
   const [removing, setRemoving] = useState(false);
   // Paper or panel: the difference decides the corner every highlight follows.
   const isSticky = item.artifactJson.type === 'sticky';
-  // The shortlist outline is a 2px ring, so its stroke runs 1px outside the
-  // card and the marker that sits on it follows the card's own corner.
-  const markerOffset = cornerPoint(isSticky ? STICKY_RADIUS_PX : CARD_RADIUS_PX, 1);
+  // The shortlist tick and its label share one line: the card's top edge, which
+  // runs through the middle of both. The tick sits across from where the corner
+  // turns, so rounding a card cannot leave it hanging off the outline, and the
+  // label starts just past it. The label keeps that place with or without the
+  // tick, so it does not jump when shortlisting ends.
+  const shortlistTickX = cornerPoint(isSticky ? STICKY_RADIUS_PX : CARD_RADIUS_PX, 1);
+  const shortlistLabelLeft = shortlistTickX + SHORTLIST_TICK_PX / 2 + SHORTLIST_GAP_PX;
   // Every kind reopens in the tool that made it. A sticky opens its popup, which
   // is where its formatting can be changed, so an edit keeps the note as it was
   // written rather than flattening it in a plain box on the card. The canvas
@@ -416,7 +425,10 @@ export function PositionedProposal({
     >
       {resultKind ? <VoteResultBadge kind={resultKind} /> : null}
       {isShortlisted && !resultKind ? (
-        <span className="absolute -top-2 left-2 z-10 rounded-full border border-rt-secondary bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-rt-secondary-deep">
+        <span
+          className="absolute top-0 z-20 -mt-2.5 inline-flex h-5 items-center rounded-full border border-rt-secondary bg-white px-2 text-[10px] leading-none font-semibold uppercase tracking-[0.08em] text-rt-secondary-deep shadow-sm select-none"
+          style={{ left: shortlistLabelLeft }}
+        >
           Shortlisted
         </span>
       ) : null}
@@ -428,35 +440,16 @@ export function PositionedProposal({
             event.stopPropagation();
             onToggleShortlist(item.id);
           }}
-          className={`absolute z-50 flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+          className={`absolute top-0 z-30 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border shadow-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-primary ${
             isShortlisted
               ? 'border-rt-secondary bg-rt-secondary text-white'
               : 'border-rt-secondary bg-white text-rt-secondary'
           }`}
-          style={{
-            // Centred on the corner point of the shortlist outline itself,
-            // which is the 45-degree point on the arc the card's radius cuts.
-            // Derived rather than typed, so changing what a sticky's corner
-            // looks like cannot leave this marker hanging beside it.
-            top: markerOffset,
-            left: markerOffset,
-            transform: 'translate(-50%, -50%)',
-            cursor: 'pointer',
-          }}
+          style={{ left: shortlistTickX, transform: 'translate(-50%, -50%)' }}
           aria-label={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
+          aria-pressed={isShortlisted}
         >
-          {isShortlisted ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-3 w-3"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={3}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          ) : null}
+          {isShortlisted ? <Check aria-hidden="true" size={12} strokeWidth={3} /> : null}
         </button>
       ) : null}
 
