@@ -1,8 +1,17 @@
-import { forwardRef, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { ImageDown, Maximize2, X, type LucideIcon } from 'lucide-react';
 import type { BoardItem } from '@roundtable/shared';
 
+import { showsFocusRing } from '../../lib/focus';
 import { exportLabel, type ExportFormat } from './proposalExport';
 import { popupRoomFrom, CENTRED_ON_WINDOW, EDGE_PX, type BoardPopupRoom } from './boardPopup';
 import {
@@ -170,11 +179,23 @@ export function ProposalEnlarge({
   };
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Focus comes back to the way in once it is closed, whichever way it
-  // was opened, and only once that button is on screen again.
+  // Whether whatever opened it was reached from the keyboard: this button, the
+  // card's menu, or a press on the artwork. Read in a layout effect, which runs
+  // before the view's own effect moves focus into it.
   const wasOpen = useRef(open);
+  const openedFromKeyboard = useRef(false);
+  useLayoutEffect(() => {
+    if (open && !wasOpen.current) {
+      openedFromKeyboard.current = showsFocusRing(document.activeElement);
+    }
+  }, [open]);
+
+  // Focus comes back to the way in once it is closed, and only once that
+  // button is on screen again, but only for the keyboard. Put back after a
+  // pointer opened it, focus inside the card held its hover controls and
+  // reaction chips open long after the pointer had left.
   useEffect(() => {
-    if (wasOpen.current && !open) buttonRef.current?.focus();
+    if (wasOpen.current && !open && openedFromKeyboard.current) buttonRef.current?.focus();
     wasOpen.current = open;
   }, [open]);
 

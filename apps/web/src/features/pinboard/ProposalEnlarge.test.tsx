@@ -126,15 +126,39 @@ describe('proposal enlarge', () => {
       async (user: ReturnType<typeof userEvent.setup>) =>
         user.click(screen.getByRole('button', { name: 'Close' })),
     ],
-  ])('closes on %s, handing focus back to the card', async (_, close) => {
+  ])(
+    'closes on %s, handing focus back to the card when the keyboard opened it',
+    async (_, close) => {
+      const user = userEvent.setup();
+      render(<ProposalCard item={diagram} />);
+      // jsdom has no idea of the keyboard's focus ring: this is the button as a
+      // browser shows it after Tab and Enter.
+      const button = enlargeButton();
+      const matches = button.matches.bind(button);
+      vi.spyOn(button, 'matches').mockImplementation(
+        (selector) => selector === ':focus-visible' || matches(selector),
+      );
+
+      button.focus();
+      await user.keyboard('{Enter}');
+      await close(user);
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(enlargeButton()).toHaveFocus();
+    },
+  );
+
+  // Focus put back inside the card after a click kept its hover controls and
+  // reaction chips showing once the pointer had left it.
+  it('leaves focus off the card when a pointer opened it', async () => {
     const user = userEvent.setup();
     render(<ProposalCard item={diagram} />);
 
     await user.click(enlargeButton());
-    await close(user);
+    await user.click(screen.getByRole('button', { name: 'Close' }));
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(enlargeButton()).toHaveFocus();
+    expect(enlargeButton()).not.toHaveFocus();
   });
 
   // The close is drawn over the frame, and the frame is itself a button that
