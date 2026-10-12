@@ -1,5 +1,5 @@
 import { Check, Eye, SkipForward } from 'lucide-react';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type LiHTMLAttributes, type ReactNode } from 'react';
 
 import type { AgendaStepState } from './agendaSummary';
 
@@ -59,7 +59,26 @@ const NODE_CLASS: Record<AgendaStepState, string> = {
  * answered, a skip mark once skipped, a pulsing dot while it is in play, and
  * its number while it is still to come.
  */
-function StepNode({ state, number }: { state: AgendaStepState; number: number }) {
+function StepNode({
+  state,
+  number,
+  editing = false,
+}: {
+  state: AgendaStepState;
+  number: number;
+  /** Being reworded: a dashed accent ring around its number. */
+  editing?: boolean;
+}) {
+  if (editing) {
+    return (
+      <span
+        aria-hidden
+        className="relative z-1 flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed border-rt-secondary bg-white text-[10px] font-semibold text-rt-secondary-deep tabular-nums"
+      >
+        {number}
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden
@@ -125,6 +144,11 @@ interface AgendaStepProps {
    * question that follows the one in play.
    */
   prefix?: ReactNode;
+  /**
+   * Keys on the question text: how the keyboard moves a row that can be
+   * dragged, since a drag is the pointer's.
+   */
+  onTextKeyDown?: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
   /** Present: the question text is a button that puts this question up. */
   onSelect?: () => void;
   /**
@@ -153,6 +177,18 @@ interface AgendaStepProps {
    * moves when it appears.
    */
   action?: ReactNode;
+  /** Tinted under the pointer: a row the leader can act on. */
+  hoverable?: boolean;
+  /** Can be picked up and moved: the pointer cursor, and no text selection. */
+  movable?: boolean;
+  /** Being dragged: lifted and following the pointer up and down. */
+  dragging?: boolean;
+  /** How far the dragged row has travelled from where it was, in pixels. */
+  dragOffset?: number;
+  /** Where a dragged question would land, if dropped here. */
+  dropIndicator?: 'before' | 'after' | null;
+  /** Drag and drop wiring, onto the row itself. */
+  liProps?: LiHTMLAttributes<HTMLLIElement>;
   /** Anything else on the card. */
   children?: ReactNode;
 }
@@ -180,12 +216,19 @@ export function AgendaStep({
   last,
   prefix,
   onSelect,
+  onTextKeyDown,
   status,
   extraChips,
   meta,
   note,
   textSlot,
   action,
+  hoverable = false,
+  movable = false,
+  dragging = false,
+  dragOffset = 0,
+  dropIndicator = null,
+  liProps,
   children,
 }: AgendaStepProps) {
   const stepRef = useRef<HTMLLIElement>(null);
@@ -215,22 +258,36 @@ export function AgendaStep({
 
   return (
     <li
+      {...liProps}
       ref={stepRef}
       aria-current={focused ? 'step' : undefined}
-      className={`group/step relative flex gap-2.5 rounded-2xl border px-2.5 transition-colors duration-500 ${
+      style={
+        dragging ? { ...liProps?.style, transform: `translateY(${dragOffset}px)` } : liProps?.style
+      }
+      className={`group/step relative flex gap-2.5 rounded-2xl border px-2.5 transition-[background-color,border-color,opacity,box-shadow] duration-500 ${
+        movable ? 'cursor-pointer select-none' : ''
+      } ${dragging ? 'z-10 bg-white shadow-[0_6px_16px_rgb(31_35_40/0.14)] duration-0' : ''} ${
         focused
           ? 'border-rt-secondary bg-white py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]'
-          : `py-2 ${
-              highlighted
-                ? 'border-rt-cool/40 bg-rt-cool-tint/60'
-                : textSlot
-                  ? 'border-rt-tertiary bg-white'
+          : textSlot
+            ? 'border-rt-secondary bg-white py-2.5 shadow-[0_0_0_3px_var(--color-rt-secondary-wash)]'
+            : `py-2 ${
+                highlighted
+                  ? 'border-rt-cool/40 bg-rt-cool-tint/60'
                   : fresh
                     ? 'border-transparent bg-rt-secondary-wash'
-                    : 'border-transparent'
-            }`
+                    : `border-transparent ${hoverable ? 'hover:bg-rt-ink/[0.035] focus-within:bg-rt-ink/[0.035]' : ''}`
+              }`
       }`}
     >
+      {dropIndicator ? (
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-rt-secondary ${
+            dropIndicator === 'before' ? '-top-[3px]' : '-bottom-[3px]'
+          }`}
+        />
+      ) : null}
       {/* From under this node to just above the next one, across the gap and
           the next card's padding. Gold behind a finished question, so the
           line fills in as the session moves down it. */}
@@ -242,7 +299,7 @@ export function AgendaStep({
           }`}
         />
       )}
-      <StepNode state={state} number={number} />
+      <StepNode state={state} number={number} editing={Boolean(textSlot)} />
       <div className={`flex min-w-0 flex-1 flex-col pt-px ${action && !textSlot ? 'pr-6' : ''}`}>
         {prefix}
         {textSlot ? (
@@ -251,8 +308,9 @@ export function AgendaStep({
           <button
             type="button"
             onClick={onSelect}
+            onKeyDown={onTextKeyDown}
             title={compact ? text : undefined}
-            className={`rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${textClass}`}
+            className={`cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${textClass}`}
           >
             {text}
           </button>

@@ -330,7 +330,7 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
       type: 'message',
       role: 'assistant',
       content:
-        '\n\nI stopped after several tool calls without reaching an answer — try narrowing the question.',
+        '\n\nI stopped after several tool calls without reaching an answer. Try narrowing the question.',
     });
     return { reason: 'max-steps', usage };
   }
@@ -348,7 +348,7 @@ export async function runAssistantTurn(options: RunAssistantTurnOptions): Promis
     emit({
       type: 'message',
       role: 'assistant',
-      content: 'Here they are — propose any you want onto the pinboard.',
+      content: 'Here they are. Propose any you want onto the pinboard.',
     });
     return { reason: 'complete', usage };
   }
@@ -428,9 +428,9 @@ async function replyWithoutTools(options: {
  */
 function recoverEmptyReply(finishReason: string | undefined): string {
   if (finishReason === 'length') {
-    return 'The model ran out of tokens before writing an answer — try a shorter question, or raise the output limit on your provider.';
+    return 'The model ran out of tokens before writing an answer. Try a shorter question, or raise the output limit on your provider.';
   }
-  return 'The model returned an empty reply. Try asking again — if it keeps happening, a different model on the same provider usually fixes it.';
+  return 'The model returned an empty reply. Try asking again. If it keeps happening, a different model on the same provider usually fixes it.';
 }
 
 function isToolChoiceViolation(error: unknown): boolean {
@@ -493,7 +493,12 @@ function parseStickyIdeas(text: string): string[] {
   }
   return text
     .split('\n')
-    .map((line) => line.replace(/^[\s\d.*-]+/, '').replace(/^"+|"+$/g, '').trim())
+    .map((line) =>
+      line
+        .replace(/^[\s\d.*-]+/, '')
+        .replace(/^"+|"+$/g, '')
+        .trim(),
+    )
     .filter((line) => line.length > 2 && !line.startsWith('{'))
     .slice(0, 5);
 }

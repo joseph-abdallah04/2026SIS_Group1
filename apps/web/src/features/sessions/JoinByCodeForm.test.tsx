@@ -28,7 +28,7 @@ describe('JoinByCodeForm', () => {
 
   it('stays on the dashboard and shows a notice when the code does not resolve', async () => {
     vi.mocked(api.get).mockRejectedValue(
-      new ApiClientError(404, 'Session not found — check the code', 'INVALID_CODE'),
+      new ApiClientError(404, 'Session not found. Check the code', 'INVALID_CODE'),
     );
     const user = userEvent.setup();
     render(<JoinByCodeForm />);

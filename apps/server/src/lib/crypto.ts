@@ -66,7 +66,7 @@ export function decryptSecret(token: string, secret: string): string {
   } catch (cause) {
     if (cause instanceof SecretCryptoError) throw cause;
     // Wrong key or tampered ciphertext both land here. Never leak the underlying message.
-    throw new SecretCryptoError('Could not decrypt secret — wrong key or corrupted value');
+    throw new SecretCryptoError('Could not decrypt secret: wrong key or corrupted value');
   }
 }
 

@@ -55,7 +55,7 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
       <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-6 py-10">
         <div>
           <h1 className="text-[19px] font-semibold tracking-[-0.01em]">{session.title}</h1>
-          <p className="mt-1 text-[13px] text-rt-ink-muted">Draft — not joinable yet</p>
+          <p className="mt-1 text-[13px] text-rt-ink-muted">Draft: not joinable yet</p>
         </div>
 
         <ol className="flex flex-col gap-2">

@@ -220,7 +220,7 @@ export function SessionQuestionsForm({
             maxSeconds={DISCUSSION_TIMER_MAX_SECONDS}
             value={discussionTimer}
             onChange={setDiscussionTimer}
-            hint="Starts when discussion begins. Visible to everyone. Does not end the phase — it turns red if you run over."
+            hint="Starts when discussion begins. Visible to everyone. Does not end the phase; it turns red if you run over."
           />
           <TimerDurationFields
             id="voting-timer"

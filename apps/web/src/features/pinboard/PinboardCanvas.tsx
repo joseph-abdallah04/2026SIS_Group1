@@ -20,7 +20,7 @@ import {
   FLOATING_BAR,
   TOOL_LABEL,
 } from '../toolbar/CreativeToolbar';
-import { BoardLockControl } from './BoardLock';
+import { BoardLockControl, BoardLockToast } from './BoardLock';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -71,9 +71,8 @@ interface PinboardCanvasProps {
   agenda?: ReactNode;
   /**
    * The board lock for the question on screen: whether only the leader may
-   * move proposals. In the board's navigation bar while it is being
-   * discussed, the only time anything on it can move. `onToggle` is the
-   * leader's alone.
+   * move proposals. A pill in the board's top-right corner for the leader,
+   * while it is being discussed — the only time anything on it can move.
    */
   boardLock?: { locked: boolean; onToggle?: () => Promise<void> };
   /**
@@ -185,7 +184,6 @@ function ZoomControl({
   onZoomIn,
   onZoomOut,
   onFit,
-  extra,
 }: {
   zoom: ZoomLevel;
   canZoomIn: boolean;
@@ -194,8 +192,6 @@ function ZoomControl({
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
-  /** More of the board's own controls after Fit: the board lock. */
-  extra?: ReactNode;
 }) {
   // Round buttons inside the pill rather than cells split by rules: it is the
   // same shape as the creative toolbar, so the two read as one set of controls
@@ -246,12 +242,6 @@ function ZoomControl({
           className="hidden @max-[42rem]/board:block"
         />
       </button>
-      {extra ? (
-        <>
-          <span aria-hidden="true" className="mx-1 h-5 w-px bg-rt-tertiary" />
-          {extra}
-        </>
-      ) : null}
     </nav>
   );
 }
@@ -949,7 +939,7 @@ export function PinboardCanvas({
         'Agenda complete';
 
   const closedMessage = readOnly
-    ? 'This session has ended — the board is read-only'
+    ? 'This session has ended. The board is read-only'
     : board.questionStatus === 'voting'
       ? 'Proposals are locked while this question is in voting'
       : 'This question is closed to new proposals';
@@ -1400,13 +1390,21 @@ export function PinboardCanvas({
                 onZoomIn={onZoomIn}
                 onZoomOut={onZoomOut}
                 onFit={onFit}
-                extra={
-                  boardLock && boardOpen ? (
-                    <BoardLockControl locked={boardLock.locked} onToggle={boardLock.onToggle} />
-                  ) : undefined
-                }
               />
             </div>
+
+            {/* The board lock, the leader's, as its own pill in the top-right
+                corner while the question is being discussed — the only time
+                anything on it can move. `right-6` clears the vertical
+                scrollbar, the way the zoom control's `left-6` does. */}
+            {isLeader && boardLock?.onToggle && boardOpen ? (
+              <div
+                data-board-lock
+                className={`pointer-events-auto absolute top-4 right-6 ${FLOATING_BAR} ${BOARD_CRAMPED_HIDDEN}`}
+              >
+                <BoardLockControl locked={boardLock.locked} onToggle={boardLock.onToggle} />
+              </div>
+            ) : null}
 
             {/* What stands in for the bars on a board too narrow to use. The
                 bars are `display: none` there, so they leave the
@@ -1432,7 +1430,17 @@ export function PinboardCanvas({
             way the lobby's does. After the ballot on purpose: they share
             `z-30`, and the later one paints on top — a vote covers the board,
             not voice. */}
-        {voiceNotice}
+        {/* One stack under the header, so its notices never lie on top of one
+            another: voice trouble first, then the board's own news — the
+            leader locking or unlocking it. */}
+        <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-2 px-4">
+          {voiceNotice}
+          <BoardLockToast
+            questionId={board.questionId}
+            locked={board.boardLocked}
+            enabled={!isLeader && board.questionStatus === 'discussion' && !readOnly}
+          />
+        </div>
       </div>
     </div>
   );

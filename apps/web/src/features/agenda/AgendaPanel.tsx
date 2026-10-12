@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, Lightbulb, ListChecks, Pencil, Plus, SkipForward } from 'lucide-react';
+import { Lightbulb, Pencil, Plus } from 'lucide-react';
 import {
   SHORTLIST_MIN,
   type Question,
@@ -10,7 +10,6 @@ import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/s
 
 import { BoardRail } from '../../components/BoardRail';
 import { PhaseTimer } from '../../components/PhaseTimer';
-import type { ProposalMenuItem } from '../pinboard/ProposalActionsMenu';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
@@ -18,7 +17,6 @@ import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSe
 import { useSetQuestionText } from '../sessions/useSetQuestionText';
 import { useSetQuestionVoting } from '../sessions/useSetQuestionVoting';
 import { AgendaProgress } from './AgendaProgress';
-import { AgendaRowMenu } from './AgendaRowMenu';
 import { summarizeAgenda, stepState } from './agendaSummary';
 import {
   AgendaChip,
@@ -142,14 +140,19 @@ function shortcutLabel(): string {
 }
 
 const PRIMARY_BUTTON =
-  'min-h-9 min-w-0 flex-1 rounded-full bg-rt-secondary px-3 py-1.5 text-[12.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+  'min-h-9 w-full rounded-full bg-rt-secondary px-3 py-1.5 text-[12.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
 const SECONDARY_BUTTON =
-  'min-h-9 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-white px-3 py-1.5 text-[12px] font-semibold text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+  'min-h-9 w-full rounded-full border border-rt-tertiary bg-white px-3 py-1.5 text-[12px] font-semibold text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+const QUIET_LINK =
+  'self-center rounded-sm px-1 text-[12px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary';
 const SMALL_PRIMARY =
   'rounded-full bg-rt-secondary px-3 py-1 text-[11.5px] font-semibold text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-50';
 const SMALL_TEXT_BUTTON =
   'rounded-full px-2 py-1 text-[11.5px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline';
 const EYEBROW = 'text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase';
+/** A question being written or reworded: a box, so it is plain where to type. */
+const TEXT_BOX =
+  'min-w-0 rounded-lg border border-rt-tertiary bg-white px-2.5 py-1.5 text-[12.5px] leading-snug font-medium text-rt-ink outline-none transition-[border-color,box-shadow] placeholder:font-normal placeholder:text-rt-ink-faint focus:border-rt-secondary focus:ring-2 focus:ring-rt-secondary/30 disabled:opacity-60';
 
 /** A choice in the add-question composer: pressed or not. */
 function ComposerChip({
@@ -180,6 +183,83 @@ function ComposerChip({
   );
 }
 
+/**
+ * F41: how a question finishes, as two choices side by side — a vote, or a
+ * brainstorm that ends with the board as it is.
+ */
+function EndsWith({
+  votingEnabled,
+  onChange,
+  disabled = false,
+}: {
+  votingEnabled: boolean;
+  onChange: (votingEnabled: boolean) => void;
+  disabled?: boolean;
+}) {
+  const option = (value: boolean, label: string) => {
+    const on = votingEnabled === value;
+    return (
+      <button
+        type="button"
+        role="radio"
+        aria-checked={on}
+        disabled={disabled}
+        onClick={() => {
+          if (!on) onChange(value);
+        }}
+        className={`rounded-full px-3 py-1 text-[11.5px] font-semibold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rt-secondary disabled:opacity-60 ${
+          on ? 'bg-white text-rt-ink shadow-sm' : 'text-rt-ink-muted hover:text-rt-ink'
+        }`}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+      <span id="agenda-ends-with" className="text-[11.5px] whitespace-nowrap text-rt-ink-muted">
+        Ends with
+      </span>
+      <div
+        role="radiogroup"
+        aria-labelledby="agenda-ends-with"
+        className="inline-flex rounded-full bg-rt-ink/[0.06] p-0.5"
+      >
+        {option(true, 'A vote')}
+        {option(false, 'Brainstorm')}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Opens a question to edit: its wording, and how it ends. A pencil, named for
+ * screen readers and on hover; the same button on the card and on every
+ * question still to come, so it opens the same editor wherever the leader is.
+ */
+function EditButton({
+  number,
+  onClick,
+  className = '',
+}: {
+  number: number;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-no-drag
+      onClick={onClick}
+      aria-label={`Edit question ${number}`}
+      title="Edit question"
+      className={`inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink-muted shadow-sm transition-colors hover:border-rt-ink-faint hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${className}`}
+    >
+      <Pencil aria-hidden="true" size={12} strokeWidth={2.25} />
+    </button>
+  );
+}
+
 /** The exception worth marking: a question that will not go to a vote. */
 function BrainstormChip() {
   return (
@@ -196,17 +276,15 @@ function BrainstormChip() {
  * question list.
  *
  * The question the room is on — the one in play, or the next to start when
- * nothing is — is a card, and everything the leader does with it is on that
- * card: its one primary step, and a ⋯ beside it for the rest (skipping it,
- * the vote switch). There is no separate control panel to connect it to. Each question still to come has its own ⋯ for what can be set before it
- * starts: the vote, its wording, its place in the agenda, skipping it ahead.
- * The agenda grows from its end: "Add question" is its last row, and the +
- * in the header opens the same place from wherever the list is scrolled.
+ * nothing is — is a card, and what the leader does with it is on that card:
+ * its one primary step, "Skip question" under it, and a button in its corner
+ * that opens it to edit — its wording and how it ends — until voting opens. Each question still to come shows, under the
+ * pointer, a handle to drag it to another place and an Edit button that opens
+ * it in place: its wording and how it ends.
  *
- * Participants see the same card and list with none of the controls. The
- * leader can click a finished question to put that question's pinboard back
- * on screen without reopening it. Collapse state and width are local to each
- * participant.
+ * The agenda grows from its end: "Add question" is its last row, and the + in
+ * the header opens the same place from wherever the list is scrolled.
+ * Participants see the same card and list with none of the controls.
  */
 export function AgendaPanel({
   sessionId,
@@ -219,9 +297,23 @@ export function AgendaPanel({
   timer,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
-  // The question being confirmed for skipping: the card's, or one further down.
+  // The question being confirmed for skipping: only ever the card's.
   const [skippingId, setSkippingId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
+  // A question still to come, opened to edit in place.
+  const [editing, setEditing] = useState<{
+    id: string;
+    draft: string;
+    votingEnabled: boolean;
+  } | null>(null);
+  // Dragging a question to a new place: which one, how far it has travelled,
+  // and which question's place it would take.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  // A press on a row that might become a drag, and whether the click that
+  // follows a drag should be swallowed rather than open that question's board.
+  const press = useRef<{ id: string; pointerId: number; startY: number } | null>(null);
+  const swallowClick = useRef(false);
   const {
     setPhase,
     busyQuestionId: phaseBusyId,
@@ -233,7 +325,7 @@ export function AgendaPanel({
     error: votingError,
   } = useSetQuestionVoting(sessionId);
   const { setText, busyQuestionId: textBusyId, error: textError } = useSetQuestionText(sessionId);
-  const { move, busyQuestionId: moveBusyId, error: moveError } = useMoveQuestion(sessionId);
+  const { move, place, busyQuestionId: moveBusyId, error: moveError } = useMoveQuestion(sessionId);
   const { focus, error: focusError } = useFocusQuestion(sessionId);
   const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
   const [composing, setComposing] = useState(false);
@@ -342,123 +434,97 @@ export function AgendaPanel({
     if (ok) closeComposer();
   }
 
+  /** Saves what changed in the editor: its wording, and how it ends. */
   async function onSaveEdit(event: FormEvent) {
     event.preventDefault();
     if (!editing) return;
-    const text = editing.draft.trim();
     const current = questions.find((question) => question.id === editing.id);
-    if (!text || text === current?.text) {
+    if (!current) {
       setEditing(null);
       return;
     }
-    if (await setText(editing.id, text)) setEditing(null);
+    const text = editing.draft.trim();
+    if (text && text !== current.text && !(await setText(editing.id, text))) return;
+    if (
+      editing.votingEnabled !== current.votingEnabled &&
+      !(await setVoting(editing.id, editing.votingEnabled))
+    ) {
+      return;
+    }
+    setEditing(null);
   }
 
   async function onSkip(question: Question) {
     if (await setPhase(question.id, 'skipped')) setSkippingId(null);
   }
 
-  /**
-   * What the leader can do to a question beyond its primary step: the vote
-   * while it can still change, its wording and place while it has not
-   * started, and — on the question the room is on, and only there — skipping
-   * it.
-   */
-  function menuItems(question: Question, index: number, skippable: boolean): ProposalMenuItem[] {
-    const items: ProposalMenuItem[] = [];
-    if (canChangeVote(question.status)) {
-      items.push({
-        id: 'vote',
-        label: question.votingEnabled ? 'Make brainstorm only' : 'Put to a vote',
-        icon: question.votingEnabled ? Lightbulb : ListChecks,
-        onSelect: () => void setVoting(question.id, !question.votingEnabled),
-        // Waits while a phase change or another switch on it is on its way.
-        disabled: phaseBusyId === question.id || votingBusyId === question.id,
-      });
-    }
-    if (question.status === 'pending') {
-      items.push({
-        id: 'edit',
-        label: 'Edit question',
-        icon: Pencil,
-        onSelect: () => setEditing({ id: question.id, draft: question.text }),
-      });
-      // Only past another question that has not started: what has happened is
-      // the record so far, and nothing moves above it.
-      if (questions[index - 1]?.status === 'pending') {
-        items.push({
-          id: 'up',
-          label: 'Move up',
-          icon: ArrowUp,
-          onSelect: () => void move(question.id, 'up'),
-        });
-      }
-      if (questions[index + 1]?.status === 'pending') {
-        items.push({
-          id: 'down',
-          label: 'Move down',
-          icon: ArrowDown,
-          onSelect: () => void move(question.id, 'down'),
-        });
-      }
-    }
-    if (skippable) {
-      items.push({
-        id: 'skip',
-        label: 'Skip question…',
-        icon: SkipForward,
-        onSelect: () => setSkippingId(question.id),
-      });
-    }
-    return items;
+  function startEditing(question: Question) {
+    setEditing({ id: question.id, draft: question.text, votingEnabled: question.votingEnabled });
   }
 
-  function editForm(question: Question, index: number, busy: boolean) {
+  function editor(question: Question, index: number) {
     if (editing?.id !== question.id) return undefined;
+    const busy =
+      textBusyId === question.id || votingBusyId === question.id || phaseBusyId === question.id;
     return (
-      <form onSubmit={(event) => void onSaveEdit(event)} className="flex flex-col gap-1.5">
+      <form
+        onSubmit={(event) => void onSaveEdit(event)}
+        // The editor opens without taking the cursor, so Escape puts it away
+        // from anywhere inside it, not only from the text box.
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setEditing(null);
+          }
+        }}
+        className="flex flex-col gap-2.5"
+      >
         <label className="sr-only" htmlFor={`agenda-edit-${question.id}`}>
           Question {index + 1}
         </label>
-        <input
-          autoFocus
-          autoComplete="off"
+        <textarea
           id={`agenda-edit-${question.id}`}
           value={editing.draft}
-          onChange={(event) => setEditing({ id: question.id, draft: event.target.value })}
+          rows={1}
+          onChange={(event) => setEditing({ ...editing, draft: event.target.value })}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.preventDefault();
               setEditing(null);
+            } else if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
             }
           }}
           maxLength={SESSION_QUESTION_TEXT_MAX}
           disabled={busy}
-          className="min-w-0 bg-transparent text-[12.5px] font-medium text-rt-ink outline-none disabled:opacity-60"
+          className={`field-sizing-content w-full resize-none ${TEXT_BOX}`}
         />
-        <div className="flex items-center gap-1">
-          <button
-            type="submit"
-            disabled={busy || editing.draft.trim().length === 0}
-            className={SMALL_PRIMARY}
-          >
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" onClick={() => setEditing(null)} className={SMALL_TEXT_BUTTON}>
-            Cancel
-          </button>
+        <EndsWith
+          votingEnabled={editing.votingEnabled}
+          onChange={(votingEnabled) => setEditing({ ...editing, votingEnabled })}
+          disabled={busy}
+        />
+        <div className="flex items-center justify-end gap-2">
+          <span className="flex items-center gap-1">
+            <button type="button" onClick={() => setEditing(null)} className={SMALL_TEXT_BUTTON}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || editing.draft.trim().length === 0}
+              className={SMALL_PRIMARY}
+            >
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+          </span>
         </div>
       </form>
     );
   }
 
-  /** The leader's controls on the card: the one primary step and a ⋯ for the rest. */
-  function cardControls(question: Question, index: number) {
-    const items = menuItems(question, index, canSkip);
-    const menu =
-      items.length > 0 ? (
-        <AgendaRowMenu variant="round" label={`Question ${index + 1} options`} items={items} />
-      ) : null;
+  /** The leader's controls on the card: its one primary step, then Skip. */
+  function cardControls(question: Question) {
     const notice = shortlisting
       ? // The shortlist is picked on the board, and its "Start vote" is there
         // with it: the card steps aside rather than offering a second button.
@@ -470,56 +536,157 @@ export function AgendaPanel({
     return (
       <div className="mt-3 flex flex-col gap-2">
         {notice ? <p className="text-[11.5px] leading-snug text-rt-ink-muted">{notice}</p> : null}
-        {next || shortlisting || menu ? (
-          <div className="flex items-center gap-2">
-            {next ? (
-              <button
-                type="button"
-                onClick={() => void setPhase(question.id, next.status)}
-                disabled={controlsBusy || openVotingBlocked}
-                // Named for what it does; why it cannot yet is its description,
-                // read out after the name.
-                aria-label={openVotingBlocked ? next.label : undefined}
-                aria-describedby={openVotingBlocked ? 'agenda-open-voting-why' : undefined}
-                aria-keyshortcuts="Control+Enter Meta+Enter"
-                title={openVotingBlocked ? undefined : `${next.label} (${shortcutLabel()})`}
-                className={PRIMARY_BUTTON}
-              >
-                {phaseBusy ? (
-                  'Working…'
-                ) : openVotingBlocked ? (
-                  // The reason on the button that cannot be pressed, counting
-                  // down as proposals arrive, rather than in a line elsewhere.
-                  <span className="flex flex-col items-center leading-tight">
-                    {next.label}
-                    <span
-                      id="agenda-open-voting-why"
-                      className="mt-0.5 text-[11px] font-medium text-rt-ink/70"
-                    >
-                      {proposalsShort(proposalCount)}
-                    </span>
-                  </span>
-                ) : (
-                  next.label
-                )}
-              </button>
-            ) : shortlisting ? (
-              <button
-                type="button"
-                onClick={() => void setPhase(question.id, 'discussion')}
-                disabled={controlsBusy}
-                className={SECONDARY_BUTTON}
-              >
-                Back to discussion
-              </button>
+        {next ? (
+          <button
+            type="button"
+            onClick={() => void setPhase(question.id, next.status)}
+            disabled={controlsBusy || openVotingBlocked}
+            // Named for what it does; why it cannot yet is its description,
+            // read out after the name.
+            aria-label={openVotingBlocked ? next.label : undefined}
+            aria-describedby={openVotingBlocked ? 'agenda-open-voting-why' : undefined}
+            aria-keyshortcuts="Control+Enter Meta+Enter"
+            title={openVotingBlocked ? undefined : `${next.label} (${shortcutLabel()})`}
+            className={PRIMARY_BUTTON}
+          >
+            {phaseBusy ? (
+              'Working…'
+            ) : openVotingBlocked ? (
+              // The reason on the button that cannot be pressed, counting
+              // down as proposals arrive, rather than in a line elsewhere.
+              <span className="flex flex-col items-center leading-tight">
+                {next.label}
+                <span
+                  id="agenda-open-voting-why"
+                  className="mt-0.5 text-[11px] font-medium text-rt-ink/70"
+                >
+                  {proposalsShort(proposalCount)}
+                </span>
+              </span>
             ) : (
-              <span className="flex-1" />
+              next.label
             )}
-            {menu}
-          </div>
+          </button>
+        ) : shortlisting ? (
+          <button
+            type="button"
+            onClick={() => void setPhase(question.id, 'discussion')}
+            disabled={controlsBusy}
+            className={SECONDARY_BUTTON}
+          >
+            Back to discussion
+          </button>
+        ) : null}
+        {canSkip ? (
+          <button type="button" onClick={() => setSkippingId(question.id)} className={QUIET_LINK}>
+            Skip question
+          </button>
         ) : null}
       </div>
     );
+  }
+
+  /**
+   * A question still to come is dragged by the whole row to another place
+   * among the questions still to come, so there is no small target to find.
+   *
+   * Pointer events rather than the browser's drag and drop: that draws its own
+   * cursor over the page and a ghost image of the row, and neither can be
+   * changed. Here the row itself lifts and follows the pointer up and down,
+   * and the cursor stays the pointer the row already shows.
+   *
+   * A press that does not travel is still a click: on the text, it puts that
+   * question's board up. The keyboard moves it from its text (`reorderKeys`).
+   */
+  function dragWiring(question: Question, index: number) {
+    if (!isLeader || question.status !== 'pending') return {};
+    // Any question still to come can take a dragged one's place, the card's
+    // included; only rows that are not the card or being edited pick up.
+    const droppable = { 'data-question-id': question.id } as React.LiHTMLAttributes<HTMLLIElement>;
+    const isCardRow = question.id === controlled?.id;
+    const from = dragId ? questions.findIndex((row) => row.id === dragId) : -1;
+    const isTarget = dragId !== null && overId === question.id && dragId !== question.id;
+    const dropIndicator = isTarget
+      ? from > index
+        ? ('before' as const)
+        : ('after' as const)
+      : null;
+    if (isCardRow || editing?.id === question.id) return { dropIndicator, liProps: droppable };
+
+    const reset = () => {
+      press.current = null;
+      setDragId(null);
+      setOverId(null);
+      setDragOffset(0);
+    };
+    return {
+      dropIndicator,
+      movable: true,
+      dragging: dragId === question.id,
+      dragOffset: dragId === question.id ? dragOffset : 0,
+      liProps: {
+        ...droppable,
+        onPointerDown: (event: React.PointerEvent<HTMLLIElement>) => {
+          if (event.button !== 0) return;
+          // Its own controls are their own presses.
+          if ((event.target as HTMLElement).closest('[data-no-drag]')) return;
+          press.current = { id: question.id, pointerId: event.pointerId, startY: event.clientY };
+        },
+        onPointerMove: (event: React.PointerEvent<HTMLLIElement>) => {
+          const started = press.current;
+          if (!started || started.pointerId !== event.pointerId) return;
+          const travelled = event.clientY - started.startY;
+          if (dragId !== question.id) {
+            // A few pixels of wobble is still a click.
+            if (Math.abs(travelled) < 4) return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setDragId(question.id);
+          }
+          setDragOffset(travelled);
+          const under = document
+            .elementFromPoint(event.clientX, event.clientY)
+            ?.closest<HTMLElement>('[data-question-id]');
+          const targetId = under?.dataset.questionId ?? null;
+          setOverId(targetId && targetId !== question.id ? targetId : null);
+        },
+        onPointerUp: () => {
+          const moving = dragId === question.id;
+          const target = overId;
+          reset();
+          if (!moving) return;
+          swallowClick.current = true;
+          if (target) void place(question.id, target);
+        },
+        onPointerCancel: reset,
+        // The press that ended a drag is not also a click on the text.
+        onClickCapture: (event: React.MouseEvent<HTMLLIElement>) => {
+          if (!swallowClick.current) return;
+          swallowClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        },
+      },
+    };
+  }
+
+  /**
+   * The keyboard's way to move a question still to come, from its text:
+   * Alt+Up and Alt+Down, past other questions that have not started.
+   */
+  function reorderKeys(question: Question, index: number) {
+    const canUp = questions[index - 1]?.status === 'pending';
+    const canDown = questions[index + 1]?.status === 'pending';
+    if (!canUp && !canDown) return undefined;
+    return (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (!event.altKey) return;
+      if (event.key === 'ArrowUp' && canUp) {
+        event.preventDefault();
+        void move(question.id, 'up');
+      } else if (event.key === 'ArrowDown' && canDown) {
+        event.preventDefault();
+        void move(question.id, 'down');
+      }
+    };
   }
 
   return (
@@ -563,43 +730,47 @@ export function AgendaPanel({
             const isCard = question.id === controlled?.id;
             const isFocused = question.id === activeQuestionId;
             const isPending = question.status === 'pending';
+            const isEditing = editing?.id === question.id;
             // The board is showing this one rather than the question the room
             // is on: said out loud, so nobody mistakes the old board for the
             // live one.
             const lookingBack = isFocused && !isCard;
-            const busy =
-              phaseBusyId === question.id ||
-              votingBusyId === question.id ||
-              textBusyId === question.id ||
-              moveBusyId === question.id;
             // Only before it starts: once under way its status already says
             // "Brainstorming", and a second chip would repeat it.
             const brainstorm = !question.votingEnabled && isPending ? <BrainstormChip /> : null;
             const status = statusChip(question, votingPhase);
-            const skipPicker =
-              isLeader && skippingId === question.id ? (
-                <div className="mt-3">
-                  <SkipConfirm
-                    questionNumber={index + 1}
-                    busy={phaseBusyId === question.id}
-                    onSkip={() => void onSkip(question)}
-                    onCancel={() => setSkippingId(null)}
-                  />
-                </div>
+            const busy = moveBusyId === question.id || textBusyId === question.id;
+
+            // Edit opens the question in place: its wording and how it ends.
+            // On the card, beside its status, until voting opens and both are
+            // fixed; on a row still to come, in its corner under the pointer.
+            const cardEdit =
+              isCard && isLeader && canChangeVote(question.status) ? (
+                <EditButton
+                  number={index + 1}
+                  onClick={() => startEditing(question)}
+                  className="ml-auto"
+                />
               ) : null;
+            const rowEdit =
+              !isCard && isLeader && isPending ? (
+                <EditButton
+                  number={index + 1}
+                  onClick={() => startEditing(question)}
+                  className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover/step:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                />
+              ) : undefined;
 
             // The card says where the room is: its status and clock on top,
-            // the question, how it is going, then what the leader can do.
+            // the question, then what the leader can do with it.
             const cardPrefix = isCard ? (
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-1">
-                  {status ? (
-                    <AgendaChip tone={status.tone}>{status.label}</AgendaChip>
-                  ) : (
-                    <AgendaChip tone="neutral">Up next</AgendaChip>
-                  )}
-                  {brainstorm}
-                </span>
+              <div className="mb-1.5 flex items-center gap-2">
+                {status ? (
+                  <AgendaChip tone={status.tone}>{status.label}</AgendaChip>
+                ) : (
+                  <AgendaChip tone="neutral">Up next</AgendaChip>
+                )}
+                {brainstorm}
                 {timer && timer.questionId === question.id && question.status !== 'pending' ? (
                   <PhaseTimer
                     compact
@@ -609,6 +780,7 @@ export function AgendaPanel({
                     label="Discussion"
                   />
                 ) : null}
+                {cardEdit}
               </div>
             ) : upNext?.id === question.id ? (
               <span className={`${EYEBROW} mb-0.5`}>Up next</span>
@@ -626,11 +798,12 @@ export function AgendaPanel({
                 // The line stops at the last question; it runs on only to a
                 // question being written, which has its own numbered node.
                 last={index === questions.length - 1 && !composing}
-                prefix={cardPrefix}
-                // A question still to come has no board worth putting up yet;
-                // its settings are in its ⋯, not behind its text.
+                prefix={isEditing ? undefined : cardPrefix}
+                // The leader can put any question's board up to look at —
+                // finished, or still to come — without changing where the room
+                // is. The row says "Viewing" while it is up.
                 onSelect={
-                  isLeader && !isPending
+                  isLeader && !isEditing
                     ? () => {
                         if (!isFocused) void focus(question.id);
                       }
@@ -650,18 +823,28 @@ export function AgendaPanel({
                 note={
                   question.status === 'skipped' ? (question.skipReason ?? undefined) : undefined
                 }
-                action={
-                  isLeader && isPending && !isCard && skippingId !== question.id ? (
-                    <AgendaRowMenu
-                      label={`Question ${index + 1} options`}
-                      // Only the question the room is on can be skipped.
-                      items={menuItems(question, index, false)}
-                    />
-                  ) : undefined
+                action={busy ? undefined : rowEdit}
+                hoverable={!isCard && isLeader && isPending}
+                onTextKeyDown={
+                  !isCard && isLeader && isPending ? reorderKeys(question, index) : undefined
                 }
-                textSlot={editForm(question, index, busy)}
+                {...dragWiring(question, index)}
+                textSlot={editor(question, index)}
               >
-                {skipPicker ?? (isCard && isLeader ? cardControls(question, index) : null)}
+                {isCard && isLeader && !isEditing ? (
+                  skippingId === question.id ? (
+                    <div className="mt-3">
+                      <SkipConfirm
+                        questionNumber={index + 1}
+                        busy={phaseBusyId === question.id}
+                        onSkip={() => void onSkip(question)}
+                        onCancel={() => setSkippingId(null)}
+                      />
+                    </div>
+                  ) : (
+                    cardControls(question)
+                  )
+                ) : null}
               </AgendaStep>
             );
           })}
@@ -697,7 +880,7 @@ export function AgendaPanel({
                     placeholder="Type a question…"
                     maxLength={SESSION_QUESTION_TEXT_MAX}
                     disabled={adding}
-                    className="min-w-0 flex-1 bg-transparent text-[12.5px] font-medium text-rt-ink outline-none placeholder:font-normal placeholder:text-rt-ink-faint disabled:opacity-60"
+                    className={`flex-1 ${TEXT_BOX}`}
                   />
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 pl-7.5">
@@ -762,7 +945,7 @@ export function AgendaPanel({
       {allDone && (
         <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2.5 text-[11.5px] text-rt-ink-muted">
           {isLeader
-            ? 'Every question is done — end the session when you’re ready.'
+            ? 'Every question is done. End the session when you’re ready.'
             : 'Every question is done.'}
         </p>
       )}

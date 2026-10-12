@@ -32,7 +32,7 @@ describe('JoinSessionPage', () => {
 
   it('explains a missing session and offers a way back to the dashboard', async () => {
     vi.mocked(api.get).mockRejectedValue(
-      new ApiClientError(404, 'Session not found — check the code', 'INVALID_CODE'),
+      new ApiClientError(404, 'Session not found. Check the code', 'INVALID_CODE'),
     );
     renderJoin('ZZZZ-ZZZZ');
 
@@ -42,7 +42,7 @@ describe('JoinSessionPage', () => {
       'href',
       '/dashboard',
     );
-    expect(screen.queryByText(/session not found — check the code/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/session not found. Check the code/i)).not.toBeInTheDocument();
   });
 
   it('shows the preview when the code is live', async () => {

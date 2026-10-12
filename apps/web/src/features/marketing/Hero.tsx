@@ -51,7 +51,6 @@ export function Hero() {
 
   return (
     <section ref={ref} className="relative overflow-hidden">
-
       <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-6 pt-16 pb-16 lg:grid-cols-[1.05fr_1fr] lg:gap-12 lg:pt-24 lg:pb-24">
         <div className="max-w-xl">
           <Reveal when="mount">
@@ -65,8 +64,9 @@ export function Hero() {
           <Reveal when="mount" delay={0.12}>
             <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-rt-ink-muted">
               RoundTable is a facilitated brainstorming tool. A leader writes the agenda, the team
-              joins the session, and each question is discussed live on a shared pinboard — then voted on.
-              The winning proposal is stored as the answer before you move to the next question.
+              joins the session, and each question is discussed live on a shared pinboard, then
+              voted on. The winning proposal is stored as the answer before you move to the next
+              question.
             </p>
           </Reveal>
 
@@ -113,15 +113,15 @@ export function Hero() {
           </Reveal>
         </div>
 
-        <motion.div style={{ y: sceneY, scale: sceneScale }} className="relative mx-auto w-full max-w-lg">
+        <motion.div
+          style={{ y: sceneY, scale: sceneScale }}
+          className="relative mx-auto w-full max-w-lg"
+        >
           <LandingLobby
             seats={seats}
             stagger={!reduce}
             footer={
-              <LobbyFooter
-                status={`${joined} of ${DEMO_SEATS.length} joined`}
-                ready={full}
-              />
+              <LobbyFooter status={`${joined} of ${DEMO_SEATS.length} joined`} ready={full} />
             }
           />
         </motion.div>

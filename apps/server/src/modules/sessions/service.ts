@@ -242,7 +242,7 @@ export async function deleteSession({ sessionId, userId }: DeleteSessionArgs): P
       throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
     }
     if (session.status === 'lobby' || session.status === 'active') {
-      throw new ApiError(409, 'Cannot delete a live session — end it first', 'INVALID_TRANSITION');
+      throw new ApiError(409, 'Cannot delete a live session. End it first', 'INVALID_TRANSITION');
     }
 
     if (session.status === 'draft') {
@@ -482,11 +482,7 @@ export async function openSessionForJoining({
   // Every attempt collided. Surfaced as our own error rather than the raw
   // `P2002`, which would reach the client as an unexplained 500: nothing the
   // caller did is wrong and retrying is the correct response.
-  throw new ApiError(
-    503,
-    'Could not allocate a session code — try again',
-    'CODE_ALLOCATION_FAILED',
-  );
+  throw new ApiError(503, 'Could not allocate a session code. Try again', 'CODE_ALLOCATION_FAILED');
 }
 
 export interface StartSessionArgs {
@@ -663,7 +659,7 @@ export async function setQuestionPhase({
     if (status === 'voting' && !question.votingEnabled) {
       throw new ApiError(
         409,
-        'This question is brainstorm-only — turn its vote on to open voting',
+        'This question is brainstorm-only. Turn its vote on to open voting',
         'VOTING_DISABLED',
       );
     }
@@ -698,7 +694,7 @@ export async function setQuestionPhase({
       if (round && round.status !== 'shortlisting') {
         throw new ApiError(
           409,
-          'The vote has already started — it cannot go back to discussion',
+          'The vote has already started. It cannot go back to discussion',
           'VOTING_ALREADY_STARTED',
         );
       }
@@ -740,7 +736,7 @@ export async function setQuestionPhase({
       if (open) {
         throw new ApiError(
           409,
-          `Question ${open.position + 1} is still open — answer or skip it first`,
+          `Question ${open.position + 1} is still open. Answer or skip it first`,
           'QUESTION_ALREADY_OPEN',
         );
       }
@@ -771,7 +767,7 @@ export async function setQuestionPhase({
       if (current?.status === status) return current;
       throw new ApiError(
         409,
-        'This question changed while you were moving it — check the agenda and try again',
+        'This question changed while you were moving it. Check the agenda and try again',
         'QUESTION_CHANGED',
       );
     }
@@ -1124,13 +1120,14 @@ export interface SetQuestionTextArgs {
 }
 
 /**
- * The leader rewords a question that has not started: a typo fixed, rather
- * than the question removed and the record left with a gap.
+ * The leader rewords a question: a typo fixed, or the question sharpened while
+ * the room is discussing it.
  *
- * Only while it is `pending`. Once it has been discussed, its text is what the
- * room answered, and changing it would rewrite the question after the fact.
- * The write is conditional on the status for the same reason as
- * `setQuestionVoting`: "Start discussion" may land between check and write.
+ * Until voting opens, the same window as its vote choice (`setQuestionVoting`).
+ * Once the room is voting, or the question is finished, its text is what the
+ * room voted on and answered, and changing it would rewrite the question after
+ * the fact. The write is conditional on the status for the same reason as
+ * `setQuestionVoting`: "Open voting" may land between check and write.
  */
 export async function setQuestionText({
   sessionId,
@@ -1169,13 +1166,13 @@ export async function setQuestionText({
     }
 
     const written = await tx.question.updateMany({
-      where: { id: questionId, status: 'pending' },
+      where: { id: questionId, status: { in: VOTE_CHANGEABLE } },
       data: { text },
     });
     if (written.count === 0) {
       throw new ApiError(
         409,
-        'This question has started, so its wording can no longer change',
+        'Voting has opened on this question, so its wording can no longer change',
         'QUESTION_TEXT_LOCKED',
       );
     }
@@ -1187,25 +1184,30 @@ export interface MoveQuestionArgs {
   sessionId: string;
   questionId: string;
   leaderId: string;
-  direction: 'up' | 'down';
+  /** One place up or down — the keyboard's move. */
+  direction?: 'up' | 'down';
+  /** Into this question's place, shifting those between — a drag's move. */
+  toQuestionId?: string;
 }
 
 /**
- * The leader moves a question that has not started one place up or down the
- * agenda, by swapping places with the question that has not started next to
- * it. Only past another pending question: what has been discussed, answered
- * or skipped is the record of the meeting so far, and nothing moves above it.
+ * The leader moves a question that has not started: one place up or down, or
+ * into another question's place with those in between shifting along. Only
+ * past other questions that have not started: what has been discussed,
+ * answered or skipped is the record of the meeting so far, and nothing moves
+ * above it.
  *
- * Returns both questions with their new positions, so the room hears about
- * each. The writes are conditional on both still being pending, so "Start
- * discussion" landing in between makes this a conflict rather than a reshuffle
- * of a question already under way.
+ * Returns every question whose place changed, so the room hears about each.
+ * The writes are conditional on each still being pending where it was, so
+ * "Start discussion" landing in between makes this a conflict rather than a
+ * reshuffle of a question already under way.
  */
 export async function moveQuestion({
   sessionId,
   questionId,
   leaderId,
   direction,
+  toQuestionId,
 }: MoveQuestionArgs): Promise<Question[]> {
   return prisma.$transaction(async (tx) => {
     const session = await tx.session.findUnique({
@@ -1226,14 +1228,17 @@ export async function moveQuestion({
       );
     }
 
-    const question = await tx.question.findUnique({
-      where: { id: questionId },
+    const agenda = await tx.question.findMany({
+      where: { sessionId },
+      orderBy: { position: 'asc' },
       select: { ...QUESTION_REF_SELECT, createdAt: true },
     });
-    if (!question || question.sessionId !== sessionId) {
+    const from = agenda.findIndex((question) => question.id === questionId);
+    const moving = agenda[from];
+    if (!moving) {
       throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
     }
-    if (question.status !== 'pending') {
+    if (moving.status !== 'pending') {
       throw new ApiError(
         409,
         'Only a question that has not started can move',
@@ -1241,42 +1246,50 @@ export async function moveQuestion({
       );
     }
 
-    const up = direction === 'up';
-    const neighbour = await tx.question.findFirst({
-      where: {
-        sessionId,
-        position: up ? { lt: question.position } : { gt: question.position },
-      },
-      orderBy: { position: up ? 'desc' : 'asc' },
-      select: { ...QUESTION_REF_SELECT, createdAt: true },
-    });
-    if (!neighbour || neighbour.status !== 'pending') {
+    const to = toQuestionId
+      ? agenda.findIndex((question) => question.id === toQuestionId)
+      : from + (direction === 'up' ? -1 : 1);
+    if (to === -1 && toQuestionId) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+    if (to === from) return [];
+    // Every question it passes, and the one whose place it takes, must not
+    // have started either.
+    const passed = agenda.slice(Math.min(from, to), Math.max(from, to) + 1);
+    if (to < 0 || to >= agenda.length || passed.some((question) => question.status !== 'pending')) {
       throw new ApiError(
         409,
-        up ? 'This question is already as early as it can go' : 'This question is already last',
+        to < from
+          ? 'This question is already as early as it can go'
+          : 'This question is already last',
         'QUESTION_CANNOT_MOVE',
       );
     }
 
-    const moved = await tx.question.updateMany({
-      where: { id: question.id, status: 'pending', position: question.position },
-      data: { position: neighbour.position },
-    });
-    const displaced = await tx.question.updateMany({
-      where: { id: neighbour.id, status: 'pending', position: neighbour.position },
-      data: { position: question.position },
-    });
-    if (moved.count === 0 || displaced.count === 0) {
-      throw new ApiError(
-        409,
-        'The agenda changed while you were moving it — check it and try again',
-        'QUESTION_CHANGED',
-      );
+    // The same places, handed out in the new order.
+    const places = agenda.map((question) => question.position);
+    const reordered = [...agenda];
+    reordered.splice(from, 1);
+    reordered.splice(to, 0, moving);
+
+    const changed: Question[] = [];
+    for (const [index, question] of reordered.entries()) {
+      const position = places[index]!;
+      if (question.position === position) continue;
+      const written = await tx.question.updateMany({
+        where: { id: question.id, status: 'pending', position: question.position },
+        data: { position },
+      });
+      if (written.count === 0) {
+        throw new ApiError(
+          409,
+          'The agenda changed while you were moving it. Check it and try again',
+          'QUESTION_CHANGED',
+        );
+      }
+      changed.push({ ...question, position });
     }
-    return [
-      { ...question, position: neighbour.position },
-      { ...neighbour, position: question.position },
-    ];
+    return changed;
   });
 }
 
@@ -1439,7 +1452,7 @@ export async function leaveSession({ sessionId, userId }: LeaveSessionArgs): Pro
   if (session.leaderId === userId) {
     throw new ApiError(
       409,
-      'The leader cannot leave — end the session instead',
+      'The leader cannot leave. End the session instead',
       'LEADER_CANNOT_LEAVE',
     );
   }
@@ -1521,7 +1534,7 @@ export async function joinSessionByCode({
 }: JoinSessionArgs): Promise<{ sessionId: string }> {
   const session = await resolveSessionByCode(rawCode);
   if (!session) {
-    throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
+    throw new ApiError(404, 'Session not found. Check the code', 'INVALID_CODE');
   }
 
   if (session.status !== 'lobby' && session.status !== 'active') {

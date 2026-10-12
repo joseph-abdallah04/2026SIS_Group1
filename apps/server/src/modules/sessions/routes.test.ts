@@ -37,11 +37,7 @@ const updateSessionDraft = vi.fn();
 // Identity is injected here so the handlers can be exercised without JWT
 // signing — `requireAuth` itself is covered in middleware/auth.test.ts.
 vi.mock('../../middleware/auth.js', () => ({
-  requireAuth: (
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction,
-  ) => {
+  requireAuth: (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const userId = req.headers['x-test-user-id'];
     if (typeof userId !== 'string' || !userId) {
       res.status(401).json({ error: 'Missing authentication token', code: 'MISSING_TOKEN' });
@@ -146,12 +142,14 @@ function createApp(io: ReturnType<typeof createFakeIo>['io']) {
 
 async function withServer(
   io: ReturnType<typeof createFakeIo>['io'],
-  run: (request: (opts: {
-    method?: string;
-    path: string;
-    userId?: string;
-    body?: unknown;
-  }) => Promise<HttpResult>) => Promise<void>,
+  run: (
+    request: (opts: {
+      method?: string;
+      path: string;
+      userId?: string;
+      body?: unknown;
+    }) => Promise<HttpResult>,
+  ) => Promise<void>,
 ): Promise<void> {
   const server = http.createServer(createApp(io));
   await new Promise<void>((resolve) => {
@@ -349,7 +347,7 @@ describe('POST /api/sessions/:id/leave kicking sockets', () => {
   it('does not kick sockets when leaveSession itself refuses (e.g. the leader)', async () => {
     getSessionMemberIdentity.mockResolvedValue(identity);
     leaveSession.mockRejectedValue(
-      new ApiError(409, 'The leader cannot leave — end the session instead', 'LEADER_CANNOT_LEAVE'),
+      new ApiError(409, 'The leader cannot leave. End the session instead', 'LEADER_CANNOT_LEAVE'),
     );
     const fake = createFakeIo();
     const socket = fake.addSocket('leader-1', 's1');
@@ -612,7 +610,7 @@ describe('draft edit, delete, open, create, join', () => {
 
   it('DELETE /:id surfaces a live-session refusal', async () => {
     deleteSession.mockRejectedValue(
-      new ApiError(409, 'Cannot delete a live session — end it first', 'INVALID_TRANSITION'),
+      new ApiError(409, 'Cannot delete a live session. End it first', 'INVALID_TRANSITION'),
     );
     const { io } = createFakeIo();
     await withServer(io, async (request) => {

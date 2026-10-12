@@ -33,7 +33,7 @@ function encryptionSecret(): string {
   if (!env.LLM_KEY_ENCRYPTION_SECRET) {
     throw new ApiError(
       500,
-      'LLM_KEY_ENCRYPTION_SECRET is not set — the server cannot store API keys safely. Generate one with `openssl rand -base64 32`.',
+      'LLM_KEY_ENCRYPTION_SECRET is not set. The server cannot store API keys safely. Generate one with `openssl rand -base64 32`.',
       'LLM_ENCRYPTION_UNCONFIGURED',
     );
   }

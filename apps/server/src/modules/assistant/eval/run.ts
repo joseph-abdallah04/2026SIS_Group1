@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  console.log(`\n${credentials.model} @ ${credentials.baseUrl} — ${cases.length} cases\n`);
+  console.log(`\n${credentials.model} @ ${credentials.baseUrl}: ${cases.length} cases\n`);
 
   const results: CaseResult[] = [];
   // Sequential on purpose: providers rate-limit, and a 429 storm would read as a behaviour
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     const result = await runCase(testCase, credentials);
     results.push(result);
     const mark = result.ok ? '✓' : '✗';
-    const tools = result.toolsUsed.length > 0 ? result.toolsUsed.join(',') : '—';
+    const tools = result.toolsUsed.length > 0 ? result.toolsUsed.join(',') : 'none';
     console.log(
       `${mark} ${result.id.padEnd(38)} ${tools.padEnd(18)} ${String(result.replyChars).padStart(5)} chars  ${String(result.ms).padStart(6)}ms`,
     );

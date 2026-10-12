@@ -119,7 +119,7 @@ export function requireMutableProposal<T extends MutableProposal>(
   if (question.status !== 'discussion') {
     throw new ApiError(
       409,
-      `This question is ${question.status} — the board is closed`,
+      `This question is ${question.status}: the board is closed`,
       'QUESTION_CLOSED',
     );
   }

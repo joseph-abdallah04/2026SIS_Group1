@@ -18,7 +18,7 @@ export function VotingBeat() {
           </p>
           <p className="mt-4 text-[15.5px] leading-relaxed text-rt-ink-muted">
             The leader can see who still needs to vote, never what they picked. You can change your
-            mind until they end the round — or until the timer does. The running tally is on the
+            mind until they end the round, or until the timer does. The running tally is on the
             cards while voting is open. When they close, the winning proposal is written down as
             that question’s answer, and they continue.
           </p>

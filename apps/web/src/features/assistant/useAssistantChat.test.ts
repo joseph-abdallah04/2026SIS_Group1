@@ -323,7 +323,7 @@ describe('errors', () => {
         type: 'error',
         message: 'The provider refused the request. Try again.',
         code: 'LLM_REQUEST_REJECTED',
-        detail: 'HTTP 400 — property reasoning_content is unsupported',
+        detail: 'HTTP 400: property reasoning_content is unsupported',
       },
     ]);
 
@@ -333,7 +333,7 @@ describe('errors', () => {
         id: 'e1',
         message: 'The provider refused the request. Try again.',
         code: 'LLM_REQUEST_REJECTED',
-        detail: 'HTTP 400 — property reasoning_content is unsupported',
+        detail: 'HTTP 400: property reasoning_content is unsupported',
       },
     ]);
   });

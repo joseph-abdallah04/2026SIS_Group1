@@ -40,7 +40,7 @@ describe('useDeleteSession', () => {
 
   it('keeps a live-session refusal on the hook so the card can show it', async () => {
     del.mockRejectedValue(
-      new ApiClientError(409, 'Cannot delete a live session — end it first', 'INVALID_TRANSITION'),
+      new ApiClientError(409, 'Cannot delete a live session. End it first', 'INVALID_TRANSITION'),
     );
     const { result } = renderHook(() => useDeleteSession());
 
@@ -50,6 +50,6 @@ describe('useDeleteSession', () => {
     });
 
     expect(ok).toBe(false);
-    expect(result.current.error).toBe('Cannot delete a live session — end it first');
+    expect(result.current.error).toBe('Cannot delete a live session. End it first');
   });
 });

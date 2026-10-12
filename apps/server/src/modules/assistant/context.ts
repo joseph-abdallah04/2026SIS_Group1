@@ -94,14 +94,14 @@ export async function buildSessionContext(
     // nothing, the model treats "there are three stickies" from earlier chat as still true.
     lines.push(
       board.items.length === 0
-        ? 'The pinboard for this question is empty — 0 proposals on it. If earlier messages in this conversation mention proposals, they have been removed and must not be treated as still there.'
+        ? 'The pinboard for this question is empty: 0 proposals on it. If earlier messages in this conversation mention proposals, they have been removed and must not be treated as still there.'
         : `The pinboard for this question holds ${board.items.length} proposal${board.items.length === 1 ? '' : 's'}. Use look_up_session to read them; do not rely on what an earlier message in this conversation said was there.`,
     );
 
     const selected = board.items.find((item) => item.id === clientHints.selectedProposalId);
     if (selected) {
       lines.push(
-        `The user has this one selected: [${selected.artifactJson.type}] ${quoteUntrusted(summarizeArtifact(selected.artifactJson))} — ${quoteUntrusted(selected.authorName)}`,
+        `The user has this one selected: [${selected.artifactJson.type}] ${quoteUntrusted(summarizeArtifact(selected.artifactJson))} by ${quoteUntrusted(selected.authorName)}`,
       );
     }
   }
@@ -117,7 +117,7 @@ export async function buildSessionContext(
   }
 
   if (lines.length === 0) {
-    lines.push('No session details are available yet — ask the user what they are working on.');
+    lines.push('No session details are available yet. Ask the user what they are working on.');
   }
 
   return {

@@ -185,7 +185,7 @@ export function runCreateDiagram(input: z.infer<typeof createDiagramInput>): Too
   return {
     ok: true,
     summary: `Diagram: ${candidate.nodes.length} nodes`,
-    modelText: `Diagram created and shown to the user (${summarizeArtifact(parsed.artifact)}). They can propose it to the pinboard with one click — do not repeat the diagram as text.`,
+    modelText: `Diagram created and shown to the user (${summarizeArtifact(parsed.artifact)}). They can propose it to the pinboard with one click. Do not repeat the diagram as text.`,
     artifacts: [parsed.artifact],
   };
 }
@@ -202,7 +202,7 @@ const stickyIdeationInput = z.object({
           .string()
           .min(1)
           .max(280)
-          .describe('The note text — one idea, ideally under 20 words.'),
+          .describe('The note text: one idea, ideally under 20 words.'),
         color: z.enum(STICKY_COLORS).optional(),
       }),
     )
@@ -248,7 +248,7 @@ export function runStickyIdeation(input: z.infer<typeof stickyIdeationInput>): T
       .map((sticky) => `"${sticky.text}"`)
       .join(
         ', ',
-      )}. They can propose any of them with one click — introduce them in a sentence rather than listing them again.`,
+      )}. They can propose any of them with one click. Introduce them in a sentence rather than listing them again.`,
     artifacts,
   };
 }
@@ -338,11 +338,11 @@ function describeProposals(data: SessionLookupData): ToolOutcome {
     return {
       ok: true,
       summary: 'Nothing on it',
-      modelText: `Nothing has been proposed on ${where} — the board for it is empty.`,
+      modelText: `Nothing has been proposed on ${where}: the board for it is empty.`,
     };
   }
 
-  const lines = items.map((item) => `  - [${item.type}] ${item.summary} — ${item.author}`);
+  const lines = items.map((item) => `  - [${item.type}] ${item.summary} by ${item.author}`);
   return {
     ok: true,
     summary: `${items.length} proposal${items.length === 1 ? '' : 's'}`,
@@ -357,21 +357,21 @@ function describeAnswers(data: SessionLookupData): ToolOutcome {
       ok: true,
       summary: 'Nothing settled yet',
       modelText:
-        'No question has been settled yet — nothing has been answered or skipped so far in this session.',
+        'No question has been settled yet: nothing has been answered or skipped so far in this session.',
     };
   }
 
   const lines = answers.map(({ question, winner }) => {
     if (question.status === 'skipped') {
-      return `${question.number}. "${question.text}" — skipped, never answered.`;
+      return `${question.number}. "${question.text}": skipped, never answered.`;
     }
     if (!question.votingEnabled) {
-      return `${question.number}. "${question.text}" — discussed as a brainstorm; no vote was taken, so no single proposal was chosen.`;
+      return `${question.number}. "${question.text}": discussed as a brainstorm; no vote was taken, so no single proposal was chosen.`;
     }
     if (!winner) {
-      return `${question.number}. "${question.text}" — answered, but no single proposal won (a tie, or the winner has since been removed).`;
+      return `${question.number}. "${question.text}": answered, but no single proposal won (a tie, or the winner has since been removed).`;
     }
-    return `${question.number}. "${question.text}" — answered with [${winner.type}] ${winner.summary}, by ${winner.author}.`;
+    return `${question.number}. "${question.text}": answered with [${winner.type}] ${winner.summary}, by ${winner.author}.`;
   });
 
   return {
@@ -401,7 +401,7 @@ export function createAssistantTools(sink: ToolOutcomeSink, lookup?: SessionLook
       ? {
           look_up_session: tool({
             description:
-              "Read this session's own state: the agenda and every question's status, what has been proposed on any question, or what the settled questions were decided on. Use it whenever an answer depends on where the team has got to — and never ask the user for something you could read here.",
+              "Read this session's own state: the agenda and every question's status, what has been proposed on any question, or what the settled questions were decided on. Use it whenever an answer depends on where the team has got to, and never ask the user for something you could read here.",
             inputSchema: lookUpSessionInput,
             execute: async (input, { toolCallId }) =>
               record(
@@ -433,7 +433,7 @@ export function createAssistantTools(sink: ToolOutcomeSink, lookup?: SessionLook
 
     create_diagram: tool({
       description:
-        'Draw a node-and-arrow diagram (architecture, flow, sequence of steps, decision tree) that the user can propose onto the pinboard. Give structure only — positions are computed for you. Use this ONLY when a picture answers the question better than a sentence would.',
+        'Draw a node-and-arrow diagram (architecture, flow, sequence of steps, decision tree) that the user can propose onto the pinboard. Give structure only; positions are computed for you. Use this ONLY when a picture answers the question better than a sentence would.',
       inputSchema: createDiagramInput,
       execute: async (input, { toolCallId }) =>
         record(toolCallId, await guard('create_diagram', () => runCreateDiagram(input))),
@@ -441,7 +441,7 @@ export function createAssistantTools(sink: ToolOutcomeSink, lookup?: SessionLook
 
     sticky_ideation: tool({
       description:
-        'Turn ideas into 3–5 candidate sticky notes the user can propose onto the pinboard. Each note should stand alone as one idea, phrased tightly enough to read at a glance. Use this ONLY when the user is asking for notes, options or a brainstorm to put on the board — an ordinary question wants a prose answer, even if an earlier message in the conversation asked for sticky notes.',
+        'Turn ideas into 3–5 candidate sticky notes the user can propose onto the pinboard. Each note should stand alone as one idea, phrased tightly enough to read at a glance. Use this ONLY when the user is asking for notes, options or a brainstorm to put on the board. An ordinary question wants a prose answer, even if an earlier message in the conversation asked for sticky notes.',
       inputSchema: stickyIdeationInput,
       execute: async (input, { toolCallId }) =>
         record(toolCallId, await guard('sticky_ideation', () => runStickyIdeation(input))),

@@ -273,7 +273,7 @@ export function DashboardPage() {
 
         {sessions && sessions.length === 0 && (
           <p className="text-[13px] text-rt-ink-muted">
-            No sessions yet — create one to get started.
+            No sessions yet. Create one to get started.
           </p>
         )}
 

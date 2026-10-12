@@ -45,10 +45,11 @@ function question(position: number, status: QuestionStatus, votingEnabled = true
  */
 const inList = (text: string) => within(screen.getByRole('list')).getByText(text);
 
-/** Picks an item from a question's ⋯ menu. */
-async function fromMenu(number: number, item: string) {
-  await userEvent.click(screen.getByRole('button', { name: `Question ${number} options` }));
-  await userEvent.click(screen.getByRole('menuitem', { name: item }));
+/** Opens a question to edit, picks how it ends, and saves. */
+async function endsWith(choice: 'A vote' | 'Brainstorm', number = 1) {
+  await userEvent.click(screen.getByRole('button', { name: `Edit question ${number}` }));
+  await userEvent.click(screen.getByRole('radio', { name: choice }));
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 }
 
 function renderPanel({
@@ -277,13 +278,12 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     });
   });
 
-  it('does not offer Mark answered during voting — ending the vote does that', async () => {
+  it('does not offer Mark answered during voting — ending the vote does that', () => {
     renderPanel({ questions: [question(0, 'voting')], activeQuestionId: 'q1' });
 
     expect(screen.queryByRole('button', { name: 'Mark answered' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Back to discussion' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Question 1 options' }));
-    expect(screen.getByRole('menuitem', { name: 'Skip question…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skip question' })).toBeInTheDocument();
   });
 
   it('lets the leader leave shortlisting and return to discussion', async () => {
@@ -391,10 +391,11 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
   it('asks before skipping, because a skipped question cannot be reopened', async () => {
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 
-    await fromMenu(1, 'Skip question…');
+    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     expect(post).not.toHaveBeenCalled();
+    expect(screen.getByText('Skip Q1?')).toBeInTheDocument();
 
-    // The picker's own button confirms, with no reason given.
+    // The confirmation's own button skips it.
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
       questionId: 'q1',
@@ -405,7 +406,7 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
   it('cancelling the skip confirmation sends nothing', async () => {
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 
-    await fromMenu(1, 'Skip question…');
+    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(post).not.toHaveBeenCalled();
@@ -415,14 +416,14 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
   it('surfaces the server’s reason for refusing a transition', async () => {
     post.mockRejectedValueOnce(
-      new ApiClientError(409, 'Question 1 is still open — answer or skip it first'),
+      new ApiClientError(409, 'Question 1 is still open. Answer or skip it first'),
     );
     renderPanel({ questions: [question(0, 'pending')], activeQuestionId: 'q1' });
 
     await userEvent.click(screen.getByRole('button', { name: 'Start discussion' }));
 
     expect(
-      await screen.findByText('Question 1 is still open — answer or skip it first'),
+      await screen.findByText('Question 1 is still open. Answer or skip it first'),
     ).toBeInTheDocument();
   });
 
@@ -432,7 +433,7 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
       activeQuestionId: null,
     });
 
-    expect(screen.getByText(/end the session when you/)).toBeInTheDocument();
+    expect(screen.getByText(/end the session when you/i)).toBeInTheDocument();
   });
 
   it('lets the leader type a question into the agenda and posts it', async () => {
@@ -562,60 +563,70 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     expect(screen.getByText('Answered')).toBeInTheDocument();
   });
 
-  it('lets the leader turn a question still to come into a brainstorm from its menu', async () => {
+  it('lets the leader turn a question still to come into a brainstorm from its Edit', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
       activeQuestionId: 'q1',
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Make brainstorm only' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Brainstorm' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q2', {
       votingEnabled: false,
     });
+    expect(put).not.toHaveBeenCalled();
   });
 
-  it('marks a brainstorm in the list, and offers to put it back to a vote', async () => {
+  it('marks a brainstorm in the list, and shows it as one when edited', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending', false)],
       activeQuestionId: 'q1',
     });
 
     expect(screen.getByText('Brainstorm').closest('li')).toBe(inList('Question 2').closest('li'));
-    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Put to a vote' }));
-
-    expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q2', { votingEnabled: true });
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
+    expect(screen.getByRole('radio', { name: 'Brainstorm' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
   });
 
   // A question still to come has no board worth putting up yet.
-  it('does not move the board when the leader clicks a question still to come', () => {
+  it('puts a question still to come up to look at when the leader clicks it', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
       activeQuestionId: 'q1',
     });
 
-    expect(screen.queryByRole('button', { name: 'Question 2' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Question 2' }));
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/focus', { questionId: 'q2' });
+  });
+
+  it('says a question still to come is being viewed while the room is elsewhere', () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending')],
+      activeQuestionId: 'q2',
+    });
+
+    expect(screen.getByText('Viewing').closest('li')).toBe(inList('Question 2').closest('li'));
   });
 
   it('lets the leader turn the vote back on mid-discussion, from the card', async () => {
     renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
 
-    await fromMenu(1, 'Put to a vote');
+    await endsWith('A vote');
 
     expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q1', { votingEnabled: true });
   });
 
   it.each(['voting', 'answered', 'skipped'] as const)(
     'offers no vote change once a question is %s',
-    async (status) => {
+    (status) => {
       renderPanel({ questions: [question(0, status)], activeQuestionId: 'q1' });
-      const menu = screen.queryByRole('button', { name: 'Question 1 options' });
-      if (menu) await userEvent.click(menu);
-      expect(
-        screen.queryByRole('menuitem', { name: /brainstorm only|put to a vote/i }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Edit question 1' })).not.toBeInTheDocument();
     },
   );
 
@@ -626,7 +637,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     expect(screen.queryByText('Brainstorm')).not.toBeInTheDocument();
   });
 
-  it('shows a participant which questions will not be voted on, with no menu', () => {
+  it('shows a participant which questions will not be voted on, with no controls', () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending', false)],
       activeQuestionId: 'q1',
@@ -634,7 +645,8 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     });
 
     expect(screen.getAllByText('Brainstorm')).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: /options$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Edit question/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Edit question/ })).not.toBeInTheDocument();
   });
 
   it('shows the server refusing a late switch', async () => {
@@ -647,7 +659,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     );
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 
-    await fromMenu(1, 'Make brainstorm only');
+    await endsWith('Brainstorm');
 
     expect(
       await screen.findByText('Voting has already opened on this question'),
@@ -656,13 +668,13 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
 
   // Both decide on the same question, so the leader cannot start one while
   // the other is still on its way (the server also refuses whichever loses).
-  it('holds Open voting while the vote change is still being saved', async () => {
+  it('holds the editor while the vote change is still being saved', async () => {
     patch.mockReturnValueOnce(new Promise(() => {}));
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 
-    await fromMenu(1, 'Make brainstorm only');
+    await endsWith('Brainstorm');
 
-    expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
   });
 
   it('holds the vote change while a phase change is still being saved', async () => {
@@ -670,12 +682,9 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
 
     await userEvent.click(screen.getByRole('button', { name: 'Finish discussion' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Question 1 options' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 1' }));
 
-    expect(screen.getByRole('menuitem', { name: 'Put to a vote' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    );
+    expect(screen.getByRole('radio', { name: 'A vote' })).toBeDisabled();
   });
 
   it('adds a brainstorm-only question when the leader turns its vote off first', async () => {
@@ -709,7 +718,8 @@ describe('AgendaPanel card', () => {
     const card = inList('Question 2').closest('li')!;
     expect(card).toHaveAttribute('aria-current', 'step');
     expect(card).toContainElement(screen.getByRole('button', { name: 'Open voting' }));
-    expect(card).toContainElement(screen.getByRole('button', { name: 'Question 2 options' }));
+    expect(card).toContainElement(screen.getByRole('button', { name: 'Skip question' }));
+    expect(card).toContainElement(screen.getByRole('button', { name: 'Edit question 2' }));
   });
 
   it('marks the question that comes next', () => {
@@ -802,7 +812,7 @@ describe('AgendaPanel skipping', () => {
       activeQuestionId: 'q1',
     });
 
-    await fromMenu(1, 'Skip question…');
+    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     expect(screen.getByText('Skip Q1?')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
 
@@ -818,9 +828,11 @@ describe('AgendaPanel skipping', () => {
       activeQuestionId: 'q1',
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
-
-    expect(screen.queryByRole('menuitem', { name: 'Skip question…' })).not.toBeInTheDocument();
+    // One Skip only, on the card.
+    expect(screen.getAllByRole('button', { name: 'Skip question' })).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
+    const editor = screen.getByLabelText('Question 2').closest('li')!;
+    expect(within(editor).queryByText(/^Skip/)).not.toBeInTheDocument();
   });
 
   it('skips the next question when nothing is open, since that is the one the room is on', async () => {
@@ -829,7 +841,7 @@ describe('AgendaPanel skipping', () => {
       activeQuestionId: 'q1',
     });
 
-    await fromMenu(2, 'Skip question…');
+    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
 
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
@@ -850,7 +862,7 @@ describe('AgendaPanel skipping', () => {
   it('puts the confirmation away on Escape without skipping', async () => {
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 
-    await fromMenu(1, 'Skip question…');
+    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     await userEvent.keyboard('{Escape}');
 
     expect(screen.queryByText('Skip Q1?')).not.toBeInTheDocument();
@@ -860,14 +872,13 @@ describe('AgendaPanel skipping', () => {
 
 // A typo is fixed, not the question removed: the record keeps its place.
 describe('AgendaPanel editing a question', () => {
-  it('rewords a question still to come from its menu', async () => {
+  it('rewords a question still to come from its Edit', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
       activeQuestionId: 'q1',
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit question' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
     const field = screen.getByLabelText('Question 2');
     await userEvent.clear(field);
     await userEvent.type(field, 'Who signs off?{Enter}');
@@ -880,14 +891,53 @@ describe('AgendaPanel editing a question', () => {
     );
   });
 
+  // The question the room is on can be reworded too, until voting opens.
+  it('rewords the question in play from the card', async () => {
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 1' }));
+    const field = screen.getByLabelText('Question 1');
+    await userEvent.clear(field);
+    await userEvent.type(field, 'Which segment first?{Enter}');
+
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith('/api/sessions/s1/questions/q1/text', {
+        text: 'Which segment first?',
+      }),
+    );
+  });
+
+  // Opening the editor leaves the cursor where it was.
+  it('opens the editor without moving the cursor into the text box', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
+
+    expect(screen.getByLabelText('Question 2')).not.toHaveFocus();
+  });
+
+  // Questions are skipped, never removed: the agenda keeps its record.
+  it('offers no way to delete a question', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
+
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
   it('puts the edit away on Escape without saving', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
       activeQuestionId: 'q1',
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit question' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
     await userEvent.type(screen.getByLabelText('Question 2'), ' more{Escape}');
 
     expect(screen.queryByLabelText('Question 2')).not.toBeInTheDocument();
@@ -898,32 +948,64 @@ describe('AgendaPanel editing a question', () => {
 // Reordering keeps to questions that have not started: nothing moves above
 // what has already happened.
 describe('AgendaPanel reordering', () => {
-  it('moves a question still to come down, past another', async () => {
+  it('moves a question still to come down with Alt+arrow, past another', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending')],
       activeQuestionId: 'q1',
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
+    screen.getByRole('button', { name: 'Question 2' }).focus();
+    await userEvent.keyboard('{Alt>}{ArrowUp}{/Alt}');
     // Not above the question in play.
-    expect(screen.queryByRole('menuitem', { name: 'Move up' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
+    expect(post).not.toHaveBeenCalled();
+    await userEvent.keyboard('{Alt>}{ArrowDown}{/Alt}');
 
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q2/move', {
       direction: 'down',
     });
   });
 
-  it('moves the last question up', async () => {
+  it('drags a question into another one’s place', () => {
+    renderPanel({
+      questions: [
+        question(0, 'discussion'),
+        question(1, 'pending'),
+        question(2, 'pending'),
+        question(3, 'pending'),
+      ],
+      activeQuestionId: 'q1',
+    });
+    const dragged = inList('Question 4').closest('li')!;
+    const target = inList('Question 2').closest('li')!;
+    // jsdom lays nothing out: the pointer is over question 2's row.
+    document.elementFromPoint = () => target;
+
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 300 });
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 200 });
+    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 200 });
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q4/move', {
+      toQuestionId: 'q2',
+    });
+    // The press that ended the drag does not also put the board up.
+    fireEvent.click(inList('Question 4'));
+    expect(post).not.toHaveBeenCalledWith('/api/sessions/s1/focus', expect.anything());
+  });
+
+  // A press that barely moves is still a click on the question.
+  it('treats a press that does not travel as a click, not a drag', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending')],
       activeQuestionId: 'q1',
     });
+    const row = inList('Question 2').closest('li')!;
 
-    await userEvent.click(screen.getByRole('button', { name: 'Question 3 options' }));
-    expect(screen.queryByRole('menuitem', { name: 'Move down' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Move up' }));
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientY: 300 });
+    fireEvent.pointerMove(row, { pointerId: 1, clientY: 302 });
+    fireEvent.pointerUp(row, { pointerId: 1, clientY: 302 });
+    await userEvent.click(inList('Question 2'));
 
-    expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q3/move', { direction: 'up' });
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/focus', { questionId: 'q2' });
+    expect(post).not.toHaveBeenCalledWith('/api/sessions/s1/questions/q2/move', expect.anything());
   });
 });

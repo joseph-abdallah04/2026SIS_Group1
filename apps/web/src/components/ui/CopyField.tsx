@@ -60,7 +60,7 @@ export function CopyField({ label, value }: CopyFieldProps) {
       </div>
       {failed && (
         <p className="text-[12px] text-rt-ink-muted">
-          Could not copy automatically — select the field and copy it yourself (Cmd+C).
+          Could not copy automatically. Select the field and copy it yourself (Cmd+C).
         </p>
       )}
     </div>

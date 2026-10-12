@@ -587,7 +587,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: 'timeline',
     label: 'Timeline',
-    hint: 'Now, next, later — connected in order',
+    hint: 'Now, next, later, connected in order',
     build: timeline,
   },
   {

@@ -1732,7 +1732,7 @@ describe('getQuestionInSession', () => {
 
 describe('setQuestionText', () => {
   const activeSession = { leaderId: 'leader-1', status: 'active' as const };
-  const row = (status: 'pending' | 'discussion') => ({
+  const row = (status: 'pending' | 'discussion' | 'voting') => ({
     id: 'q1',
     sessionId: 's1',
     text: 'What ships frist?',
@@ -1750,19 +1750,19 @@ describe('setQuestionText', () => {
     questionUpdateMany.mockResolvedValue({ count: 1 });
   });
 
-  it('rewords a question that has not started', async () => {
-    questionFindUnique.mockResolvedValue(row('pending'));
+  it.each(['pending', 'discussion'] as const)('rewords a question that is %s', async (status) => {
+    questionFindUnique.mockResolvedValue(row(status));
 
     await expect(reword()).resolves.toMatchObject({ text: 'What ships first?' });
-    // Only while it is still pending, so a discussion starting in between wins.
+    // Only until voting opens, so "Open voting" landing in between wins.
     expect(questionUpdateMany).toHaveBeenCalledWith({
-      where: { id: 'q1', status: 'pending' },
+      where: { id: 'q1', status: { in: ['pending', 'discussion'] } },
       data: { text: 'What ships first?' },
     });
   });
 
-  it('refuses once the question has started — its wording is what the room answered', async () => {
-    questionFindUnique.mockResolvedValue(row('discussion'));
+  it('refuses once voting has opened — its wording is what the room votes on', async () => {
+    questionFindUnique.mockResolvedValue(row('voting'));
     questionUpdateMany.mockResolvedValue({ count: 0 });
 
     await expect(reword()).rejects.toMatchObject({ code: 'QUESTION_TEXT_LOCKED' });
@@ -1788,19 +1788,24 @@ describe('moveQuestion', () => {
     votingEnabled: true,
     createdAt: new Date('2026-09-03T00:00:00.000Z'),
   });
-  const move = (direction: 'up' | 'down') =>
-    moveQuestion({ sessionId: 's1', questionId: 'q4', leaderId: 'leader-1', direction });
+  const agenda = [
+    row('q1', 0, 'answered'),
+    row('q2', 1, 'discussion'),
+    row('q3', 2),
+    row('q4', 3),
+    row('q5', 4),
+  ];
+  const move = (args: { direction?: 'up' | 'down'; toQuestionId?: string }, id = 'q4') =>
+    moveQuestion({ sessionId: 's1', questionId: id, leaderId: 'leader-1', ...args });
 
   beforeEach(() => {
     sessionFindUnique.mockResolvedValue(activeSession);
-    questionFindUnique.mockResolvedValue(row('q4', 3));
+    questionFindMany.mockResolvedValue(agenda);
     questionUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   it('swaps places with the question that has not started above it', async () => {
-    questionFindFirst.mockResolvedValue(row('q3', 2));
-
-    await expect(move('up')).resolves.toMatchObject([
+    await expect(move({ direction: 'up' })).resolves.toMatchObject([
       { id: 'q4', position: 2 },
       { id: 'q3', position: 3 },
     ]);
@@ -1810,31 +1815,42 @@ describe('moveQuestion', () => {
     });
   });
 
+  // A drag drops it into another question's place, shifting those between.
+  it('moves into another question’s place, shifting the ones between', async () => {
+    await expect(move({ toQuestionId: 'q3' }, 'q5')).resolves.toMatchObject([
+      { id: 'q5', position: 2 },
+      { id: 'q3', position: 3 },
+      { id: 'q4', position: 4 },
+    ]);
+  });
+
   // What has been discussed is the record so far; nothing moves above it.
   it('will not move above a question that has started', async () => {
-    questionFindFirst.mockResolvedValue(row('q3', 2, 'discussion'));
-
-    await expect(move('up')).rejects.toMatchObject({ code: 'QUESTION_CANNOT_MOVE' });
+    await expect(move({ direction: 'up' }, 'q3')).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
+    await expect(move({ toQuestionId: 'q2' })).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
     expect(questionUpdateMany).not.toHaveBeenCalled();
   });
 
   it('will not move a question that has started', async () => {
-    questionFindUnique.mockResolvedValue(row('q4', 3, 'discussion'));
-
-    await expect(move('down')).rejects.toMatchObject({ code: 'QUESTION_CANNOT_MOVE' });
+    await expect(move({ direction: 'down' }, 'q2')).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
   });
 
   it('says so when there is nowhere further to go', async () => {
-    questionFindFirst.mockResolvedValue(null);
-
-    await expect(move('down')).rejects.toMatchObject({ code: 'QUESTION_CANNOT_MOVE' });
+    await expect(move({ direction: 'down' }, 'q5')).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
   });
 
   it('is a conflict when the agenda changed underneath it', async () => {
-    questionFindFirst.mockResolvedValue(row('q5', 4));
     questionUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
 
-    await expect(move('down')).rejects.toMatchObject({ code: 'QUESTION_CHANGED' });
+    await expect(move({ direction: 'down' })).rejects.toMatchObject({ code: 'QUESTION_CHANGED' });
   });
 });
 

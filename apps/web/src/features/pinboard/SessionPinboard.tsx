@@ -179,6 +179,11 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
   // than the board snapshot — the leader can flip it while the board is open.
   const questionVotingEnabled =
     questions.find((question) => question.id === board.questionId)?.votingEnabled ?? true;
+  // The wording too: the leader can reword the question the room is on until
+  // voting opens, and the board's header and ballot should say what it says now.
+  const questionText =
+    questions.find((question) => question.id === board.questionId)?.text ?? board.questionText;
+  const shownBoard = questionText === board.questionText ? board : { ...board, questionText };
 
   const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
   const balloting = voting.phase === 'open' || voting.phase === 'closed';
@@ -205,7 +210,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
           scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
         <main className="h-dvh overflow-hidden">
           <PinboardCanvas
-            board={board}
+            board={shownBoard}
             questionVotingEnabled={questionVotingEnabled}
             isLive={isLive}
             newItemIds={newItemIds}
@@ -240,7 +245,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
             ballot={
               balloting ? (
                 <VotingBallot
-                  questionText={board.questionText}
+                  questionText={questionText}
                   items={ballotItems}
                   tallies={voting.tallies}
                   myVote={voting.myVote}
@@ -300,6 +305,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
             }
             voiceNotice={
               <VoiceNotice
+                stacked
                 status={voice.status}
                 micStatus={voice.micStatus}
                 micPermissionDenied={voice.micPermissionDenied}

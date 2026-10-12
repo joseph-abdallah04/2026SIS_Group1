@@ -68,9 +68,7 @@ async function emitVotingUpdated(io: RealtimeServer, sessionId: string): Promise
     socket.emit('votingUpdated', {
       ...broadcast.publicState,
       myVote: userId ? (broadcast.votesByVoter.get(userId) ?? null) : null,
-      ...(isLeader && broadcast.voterStatuses
-        ? { voterStatuses: broadcast.voterStatuses }
-        : {}),
+      ...(isLeader && broadcast.voterStatuses ? { voterStatuses: broadcast.voterStatuses } : {}),
     });
   }
 }
@@ -86,7 +84,7 @@ function ackFailure(
   intent: string,
 ): void {
   if (err instanceof ApiError) {
-    console.warn(`[voting] ${intent} refused: ${err.code ?? err.status} — ${err.message}`);
+    console.warn(`[voting] ${intent} refused: ${err.code ?? err.status}: ${err.message}`);
     ack?.({ ok: false, error: err.message, code: err.code });
     return;
   }

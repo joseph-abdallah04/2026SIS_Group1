@@ -10,12 +10,12 @@ export function RecapBeat() {
           <h2 className={sectionHeading}>The recap is the list of answers.</h2>
           <p className={sectionBody}>
             When the leader ends the session, the call disconnects and the board is frozen. What
-            remains is each agenda question paired with the proposal that won it — or marked
-            skipped, if the leader moved on without a vote.
+            remains is each agenda question paired with the proposal that won it, or marked skipped,
+            if the leader moved on without a vote.
           </p>
           <p className="mt-4 text-[15.5px] leading-relaxed text-rt-ink-muted">
-            Everyone who was in the room can open it from the dashboard afterwards. There is
-            nothing extra to write up.
+            Everyone who was in the room can open it from the dashboard afterwards. There is nothing
+            extra to write up.
           </p>
         </div>
 

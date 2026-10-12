@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { BoardLock, BoardLockControl } from './BoardLock';
+import { BoardLock, BoardLockControl, BoardLockToast } from './BoardLock';
 
 describe('BoardLock', () => {
   it('is a toggle for the leader, pressed while the board is locked', async () => {
@@ -71,5 +71,39 @@ describe('BoardLockControl', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Only the session leader can lock the board',
     );
+  });
+});
+
+// Members hear when the leader locks or unlocks the board.
+describe('BoardLockToast', () => {
+  it('tells the room the leader unlocked the board', () => {
+    const { rerender } = render(<BoardLockToast questionId="q1" locked enabled />);
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+
+    rerender(<BoardLockToast questionId="q1" locked={false} enabled />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('The leader unlocked the board');
+  });
+
+  it('tells the room the leader locked it again', () => {
+    const { rerender } = render(<BoardLockToast questionId="q1" locked={false} enabled />);
+    rerender(<BoardLockToast questionId="q1" locked enabled />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('The leader locked the board');
+  });
+
+  // Every question starts locked: moving on is not the leader locking it.
+  it('says nothing when the board moves to another question', () => {
+    const { rerender } = render(<BoardLockToast questionId="q1" locked={false} enabled />);
+    rerender(<BoardLockToast questionId="q2" locked enabled />);
+
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  });
+
+  it('says nothing to the leader, who pressed it', () => {
+    const { rerender } = render(<BoardLockToast questionId="q1" locked enabled={false} />);
+    rerender(<BoardLockToast questionId="q1" locked={false} enabled={false} />);
+
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 });

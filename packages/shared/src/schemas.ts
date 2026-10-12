@@ -285,19 +285,25 @@ export const setQuestionVotingSchema = z.object({
 
 export type SetQuestionVotingInput = z.infer<typeof setQuestionVotingSchema>;
 
-// The leader rewording a question that has not started yet: a typo fixed
-// rather than the question removed. Once it has started its text is locked.
+// The leader rewording a question: a typo fixed rather than the question
+// removed. Until voting opens; after that its text is locked.
 export const setQuestionTextSchema = z.object({
   text: questionTextSchema,
 });
 
 export type SetQuestionTextInput = z.infer<typeof setQuestionTextSchema>;
 
-// The leader moving a question that has not started one place up or down the
-// agenda, past another that has not started either.
-export const moveQuestionSchema = z.object({
-  direction: z.enum(['up', 'down']),
-});
+// The leader moving a question that has not started: one place up or down
+// (the keyboard), or into another question's place (dragging), past questions
+// that have not started either.
+export const moveQuestionSchema = z
+  .object({
+    direction: z.enum(['up', 'down']).optional(),
+    toQuestionId: z.string().min(1).optional(),
+  })
+  .refine((body) => (body.direction === undefined) !== (body.toQuestionId === undefined), {
+    message: 'Say which way to move it, or where',
+  });
 
 export type MoveQuestionInput = z.infer<typeof moveQuestionSchema>;
 

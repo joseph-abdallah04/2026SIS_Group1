@@ -51,7 +51,7 @@ async function requireActiveSession(sessionId: string) {
     throw new ApiError(
       409,
       session.status === 'ended'
-        ? 'This session has ended — the board is read-only'
+        ? 'This session has ended. The board is read-only'
         : 'This session is not live',
       'SESSION_NOT_ACTIVE',
     );
@@ -82,7 +82,7 @@ async function requireLiveMember(sessionId: string, userId: string) {
     throw new ApiError(
       409,
       session.status === 'ended'
-        ? 'This session has ended — the board is read-only'
+        ? 'This session has ended. The board is read-only'
         : 'This session is not live',
       'SESSION_NOT_ACTIVE',
     );
@@ -327,7 +327,7 @@ export async function toggleShortlist({
     });
 
     if (round && round.status !== 'shortlisting') {
-      throw new ApiError(409, 'The shortlist is locked — voting has started', 'SHORTLIST_LOCKED');
+      throw new ApiError(409, 'The shortlist is locked. Voting has started', 'SHORTLIST_LOCKED');
     }
 
     if (!round) {
@@ -385,7 +385,7 @@ export async function clearShortlist({
     return toShortlist(question.id, [], false);
   }
   if (round.status !== 'shortlisting') {
-    throw new ApiError(409, 'The shortlist is locked — voting has started', 'SHORTLIST_LOCKED');
+    throw new ApiError(409, 'The shortlist is locked. Voting has started', 'SHORTLIST_LOCKED');
   }
 
   await prisma.votingShortlistItem.deleteMany({ where: { roundId: round.id } });

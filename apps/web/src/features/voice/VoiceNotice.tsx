@@ -22,6 +22,12 @@ interface VoiceNoticeProps {
   retry: () => void;
   requestMicrophone: () => void | Promise<void>;
   unlockAudio: () => void | Promise<void>;
+  /**
+   * Placed by its parent, in a stack with the board's own notices, rather than
+   * hanging under the header on its own. Two notices that each placed
+   * themselves at the top would lie on top of one another.
+   */
+  stacked?: boolean;
 }
 
 interface Notice {
@@ -114,7 +120,7 @@ function currentNotice(props: VoiceNoticeProps): Notice | null {
           tone: 'attention',
           label: 'Mic blocked',
           message:
-            'You can hear everyone, but nobody can hear you. Your browser has blocked the microphone for this site — open the site settings from your address bar (usually the padlock icon) and allow it there.',
+            'You can hear everyone, but nobody can hear you. Your browser has blocked the microphone for this site. Open the site settings from your address bar (usually the padlock icon) and allow it there.',
           action: { label: 'Recheck', run: requestMicrophone },
           autoHide: true,
         }
@@ -175,7 +181,7 @@ export function VoiceNotice(props: VoiceNoticeProps) {
 
   // Keyed on the condition: a new occurrence remounts the banner, which is
   // the whole of resetting its timer.
-  return <NoticeBanner key={notice.id} notice={notice} />;
+  return <NoticeBanner key={notice.id} notice={notice} stacked={props.stacked ?? false} />;
 }
 
 /**
@@ -187,7 +193,7 @@ export function VoiceNotice(props: VoiceNoticeProps) {
  * are no longer in: the same stale value the `unavailable` check guards
  * against.
  */
-function NoticeBanner({ notice }: { notice: Notice }) {
+function NoticeBanner({ notice, stacked }: { notice: Notice; stacked: boolean }) {
   const [expired, setExpired] = useState(false);
   // Held while the pointer is on it or focus is in it: someone is reading it,
   // or reaching for its button, and pulling it out from under them would lose
@@ -211,7 +217,11 @@ function NoticeBanner({ notice }: { notice: Notice }) {
     // `z-30`, and last in the board's markup: a vote's scrim is `z-30` too, and
     // voice trouble is not the board's to cover — "Sound blocked" behind it
     // would be a silent room and a button nobody can press.
-    <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-4">
+    <div
+      className={`pointer-events-none flex justify-center ${
+        stacked ? '' : 'absolute inset-x-0 top-3 z-30 px-4'
+      }`}
+    >
       <div
         role="status"
         onPointerEnter={() => setHovered(true)}

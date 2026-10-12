@@ -326,7 +326,7 @@ describe('usePinboard write intents', () => {
       ) => {
         ack?.({
           ok: false,
-          error: 'This session has ended — the board is read-only',
+          error: 'This session has ended. The board is read-only',
           code: 'SESSION_NOT_ACTIVE',
         });
       },
@@ -335,7 +335,7 @@ describe('usePinboard write intents', () => {
 
     await act(async () => {
       await expect(result.current.propose(createInput)).rejects.toMatchObject({
-        message: 'This session has ended — the board is read-only',
+        message: 'This session has ended. The board is read-only',
         code: 'SESSION_NOT_ACTIVE',
       });
     });

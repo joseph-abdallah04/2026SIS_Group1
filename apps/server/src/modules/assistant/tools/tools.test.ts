@@ -267,7 +267,7 @@ describe('look_up_session', () => {
     );
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.modelText).toContain('[sticky] Ship the importer — Bob');
+    expect(outcome.modelText).toContain('[sticky] Ship the importer by Bob');
   });
 
   // "Nothing on it" and "there is no such question" are different answers, and a model

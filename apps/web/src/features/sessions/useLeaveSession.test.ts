@@ -41,7 +41,11 @@ describe('useLeaveSession', () => {
 
   it('keeps the server’s message when leave is refused (e.g. the leader)', async () => {
     post.mockRejectedValue(
-      new ApiClientError(409, 'The leader cannot leave — end the session instead', 'LEADER_CANNOT_LEAVE'),
+      new ApiClientError(
+        409,
+        'The leader cannot leave. End the session instead',
+        'LEADER_CANNOT_LEAVE',
+      ),
     );
     const { result } = renderHook(() => useLeaveSession());
 
@@ -51,7 +55,7 @@ describe('useLeaveSession', () => {
     });
 
     expect(ok).toBe(false);
-    expect(result.current.error).toBe('The leader cannot leave — end the session instead');
+    expect(result.current.error).toBe('The leader cannot leave. End the session instead');
   });
 
   it('falls back to a generic message for a non-API failure', async () => {

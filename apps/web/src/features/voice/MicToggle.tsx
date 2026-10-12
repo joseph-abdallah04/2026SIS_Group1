@@ -71,9 +71,9 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
     : busy
       ? 'Working…'
       : micStatus === 'blocked'
-        ? 'Your browser is blocking the microphone — allow it in site settings, then press M'
+        ? 'Your browser is blocking the microphone. Allow it in site settings, then press M'
         : micStatus === 'no-device'
-          ? 'No microphone was found — press M to look again'
+          ? 'No microphone was found. Press M to look again'
           : `${action} (M)`;
 
   return (
@@ -84,7 +84,7 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
       // Pressed means muted: the button's job is muting, and a screen reader
       // reading "Mute, pressed" alongside the label below is unambiguous.
       aria-pressed={!micEnabled}
-      aria-label={`${label} — microphone ${problem ?? (micEnabled ? 'on' : 'muted')}. ${action}.`}
+      aria-label={`${label}: microphone ${problem ?? (micEnabled ? 'on' : 'muted')}. ${action}.`}
       aria-busy={busy}
       title={title}
       // Square and sized to the header's content band, so it sits level with

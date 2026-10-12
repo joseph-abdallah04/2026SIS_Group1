@@ -71,7 +71,7 @@ export async function assertPublicUrl(rawUrl: string, policy: HostPolicy): Promi
   if (url.username || url.password) {
     throw new ApiError(
       400,
-      'Base URL must not embed a username or password — the API key field is the place for credentials',
+      'Base URL must not embed a username or password. The API key field is the place for credentials',
       'LLM_URL_INVALID',
     );
   }
@@ -170,7 +170,7 @@ async function resolveHost(hostname: string): Promise<string[]> {
         reject(
           new ApiError(
             400,
-            `Could not resolve ${hostname} — check the base URL`,
+            `Could not resolve ${hostname}. Check the base URL`,
             'LLM_URL_UNRESOLVABLE',
           ),
         );

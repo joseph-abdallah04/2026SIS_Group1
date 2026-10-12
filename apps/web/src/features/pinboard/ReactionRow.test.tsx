@@ -95,7 +95,7 @@ describe('reaction row', () => {
       viewerId: 'bo',
     });
 
-    expect(chip(THUMB, 3)).toHaveAccessibleName('Agree (3) — You, ADA and CY');
+    expect(chip(THUMB, 3)).toHaveAccessibleName('Agree (3): You, ADA and CY');
   });
 
   // One popular chip must not cover the board with a list of names.
@@ -103,7 +103,7 @@ describe('reaction row', () => {
     const crowd = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(person);
     renderRow({ reactions: [{ emoji: THUMB, people: crowd }], viewerId: null });
 
-    expect(chip(THUMB, 7)).toHaveAccessibleName('Agree (7) — A, B, C, D, E and 2 more');
+    expect(chip(THUMB, 7)).toHaveAccessibleName('Agree (7): A, B, C, D, E and 2 more');
   });
 
   // The three quick chips are named by what pressing them means; everything
@@ -343,8 +343,8 @@ describe('reaction row', () => {
       expect(labels).toEqual([
         // Used, in the server's order, which is the order they first appeared,
         // each naming whoever is in it.
-        `${reactionButtonLabel(PARTY)} (1) — A`,
-        `${reactionButtonLabel(HEART)} (1) — B`,
+        `${reactionButtonLabel(PARTY)} (1): A`,
+        `${reactionButtonLabel(HEART)} (1): B`,
         // Then the quick chips still untouched, in contract order.
         ...QUICK_REACTIONS.filter((emoji) => emoji !== HEART).map((emoji) =>
           reactionButtonLabel(emoji),
@@ -363,7 +363,7 @@ describe('reaction row', () => {
         .map((button) => button.getAttribute('aria-label'));
 
       expect(labels.filter((label) => label?.startsWith(reactionButtonLabel(THUMB)))).toEqual([
-        `${reactionButtonLabel(THUMB)} (1) — A`,
+        `${reactionButtonLabel(THUMB)} (1): A`,
       ]);
     });
   });
