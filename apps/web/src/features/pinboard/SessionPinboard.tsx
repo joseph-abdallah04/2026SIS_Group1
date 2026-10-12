@@ -277,8 +277,6 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                 proposalCount={
                   board.questionStatus === 'discussion' ? board.items.length : undefined
                 }
-                votes={{ voted: voting.votedCount, voters: voting.voterCount }}
-                peopleCount={voice.participants.length || undefined}
                 timer={
                   board.discussionTimer && board.questionId
                     ? { questionId: board.questionId, ...board.discussionTimer }

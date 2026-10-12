@@ -1494,22 +1494,20 @@ describe('setQuestionPhase (F25/F26)', () => {
       );
     });
 
-    // Skipping ahead ("we won't get to this") must not pull the room off the
-    // question it is still working on.
-    it('leaves the board on the question still open when one further down is skipped', async () => {
-      questionFindUnique.mockResolvedValue(question({ id: 'q3', status: 'pending' }));
-      questionFindFirst.mockResolvedValueOnce({ id: 'q2' });
+    // Only the question the room is on can be skipped, never one further down.
+    it('refuses to skip a question ahead of the one the room is on', async () => {
+      questionFindUnique.mockResolvedValue(question({ id: 'q3', position: 2, status: 'pending' }));
+      questionFindFirst.mockResolvedValueOnce({ position: 1 });
 
-      await setQuestionPhase({
-        sessionId: 's1',
-        questionId: 'q3',
-        leaderId: 'leader-1',
-        status: 'skipped',
-      });
-      expect(sessionUpdateInTx).toHaveBeenCalledWith({
-        where: { id: 's1' },
-        data: { currentQuestionId: 'q2' },
-      });
+      await expect(
+        setQuestionPhase({
+          sessionId: 's1',
+          questionId: 'q3',
+          leaderId: 'leader-1',
+          status: 'skipped',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_CURRENT_QUESTION' });
+      expect(questionUpdateMany).not.toHaveBeenCalled();
     });
   });
 

@@ -704,6 +704,30 @@ export async function setQuestionPhase({
       }
     }
 
+    // Only the question the room is on can be skipped: the open one, or with
+    // nothing open, the next to start. One further down is not skipped ahead
+    // of time — the agenda can be reordered or reworded instead.
+    if (status === 'skipped' && question.status === 'pending') {
+      const ahead = await tx.question.findFirst({
+        where: {
+          sessionId,
+          id: { not: questionId },
+          OR: [
+            { status: { in: ['discussion', 'voting'] } },
+            { status: 'pending', position: { lt: question.position } },
+          ],
+        },
+        select: { position: true },
+      });
+      if (ahead) {
+        throw new ApiError(
+          409,
+          'Only the question the room is on can be skipped',
+          'NOT_CURRENT_QUESTION',
+        );
+      }
+    }
+
     if (status === 'discussion' || status === 'voting') {
       const open = await tx.question.findFirst({
         where: {

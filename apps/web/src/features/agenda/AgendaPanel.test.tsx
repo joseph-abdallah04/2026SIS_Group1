@@ -509,20 +509,6 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('says how the question in play is going', () => {
-    render(
-      <AgendaPanel
-        sessionId="s1"
-        questions={[question(0, 'answered'), question(1, 'discussion')]}
-        activeQuestionId="q2"
-        isLeader={false}
-        proposalCount={5}
-      />,
-    );
-
-    expect(screen.getByText('5 proposals')).toBeInTheDocument();
-  });
-
   it('counts down on the button how many more proposals voting needs', () => {
     render(
       <AgendaPanel
@@ -538,8 +524,6 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     expect(screen.getByRole('button', { name: 'Open voting' })).toHaveAccessibleDescription(
       '1 more proposal needed',
     );
-    // The card just counts.
-    expect(screen.getByText('1 proposal')).toBeInTheDocument();
   });
 });
 
@@ -749,7 +733,7 @@ describe('AgendaPanel card', () => {
     expect(card).toContainElement(screen.getByRole('button', { name: 'Start discussion' }));
   });
 
-  it('shows the discussion clock and who is here', () => {
+  it('shows the discussion clock, and no count line under the question', () => {
     render(
       <AgendaPanel
         sessionId="s1"
@@ -757,7 +741,6 @@ describe('AgendaPanel card', () => {
         activeQuestionId="q1"
         isLeader={false}
         proposalCount={5}
-        peopleCount={6}
         timer={{
           questionId: 'q1',
           startedAt: new Date().toISOString(),
@@ -767,7 +750,7 @@ describe('AgendaPanel card', () => {
     );
 
     expect(screen.getByRole('timer')).toBeInTheDocument();
-    expect(screen.getByText('5 proposals · 6 people')).toBeInTheDocument();
+    expect(screen.queryByText(/proposals?\b/)).not.toBeInTheDocument();
   });
 
   // The shortlist is picked on the board, which has its own "Start vote".
@@ -813,14 +796,40 @@ describe('AgendaPanel card', () => {
 
 // Skipping asks once, since a skipped question cannot be reopened.
 describe('AgendaPanel skipping', () => {
-  it('skips a question further down from its menu, once confirmed', async () => {
+  it('skips the question the room is on, once confirmed', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
       activeQuestionId: 'q1',
     });
 
+    await fromMenu(1, 'Skip question…');
+    expect(screen.getByText('Skip Q1?')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
+
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
+      questionId: 'q1',
+      status: 'skipped',
+    });
+  });
+
+  it('does not offer to skip a question still to come', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Question 2 options' }));
+
+    expect(screen.queryByRole('menuitem', { name: 'Skip question…' })).not.toBeInTheDocument();
+  });
+
+  it('skips the next question when nothing is open, since that is the one the room is on', async () => {
+    renderPanel({
+      questions: [question(0, 'answered'), question(1, 'pending'), question(2, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
     await fromMenu(2, 'Skip question…');
-    expect(screen.getByText('Skip Q2?')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
 
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {

@@ -47,14 +47,11 @@ interface AgendaPanelProps {
    */
   hasProposals?: boolean;
   /**
-   * How many proposals the question in discussion has, for the line under it.
-   * Omitted when the board is showing a different question.
+   * How many proposals the question in discussion has, so "Open voting" can
+   * say how many more it needs. Omitted when the board is showing a different
+   * question.
    */
   proposalCount?: number;
-  /** How far through the open ballot the room is, for the line under it. */
-  votes?: { voted: number; voters: number };
-  /** How many people are in the room, for the line under the question in play. */
-  peopleCount?: number;
   /** The discussion clock of the question the board is showing, if it has one. */
   timer?: { questionId: string; startedAt: string; durationSeconds: number } | null;
 }
@@ -120,27 +117,6 @@ function statusChip(
     case 'skipped':
       return { label: 'Skipped', tone: 'neutral' };
   }
-}
-
-/** The one quiet line under the question in play: how it is going, and who is here. */
-function metaLine(
-  question: Question,
-  votingPhase: VotingPhase | undefined,
-  proposalCount: number | undefined,
-  votes: { voted: number; voters: number } | undefined,
-  peopleCount: number | undefined,
-): string | undefined {
-  const parts: string[] = [];
-  if (question.status === 'discussion' && proposalCount !== undefined) {
-    parts.push(`${proposalCount} ${proposalCount === 1 ? 'proposal' : 'proposals'}`);
-  }
-  if (question.status === 'voting' && votingPhase === 'open' && votes) {
-    parts.push(`${votes.voted} of ${votes.voters} voted`);
-  }
-  if (question.status !== 'pending' && peopleCount) {
-    parts.push(`${peopleCount} ${peopleCount === 1 ? 'person' : 'people'}`);
-  }
-  return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
 /** Why "Open voting" is not ready: how many more proposals the shortlist needs. */
@@ -240,8 +216,6 @@ export function AgendaPanel({
   votingPhase,
   hasProposals,
   proposalCount,
-  votes,
-  peopleCount,
   timer,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -387,7 +361,8 @@ export function AgendaPanel({
   /**
    * What the leader can do to a question beyond its primary step: the vote
    * while it can still change, its wording and place while it has not
-   * started, and skipping it.
+   * started, and — on the question the room is on, and only there — skipping
+   * it.
    */
   function menuItems(question: Question, index: number, skippable: boolean): ProposalMenuItem[] {
     const items: ProposalMenuItem[] = [];
@@ -672,11 +647,6 @@ export function AgendaPanel({
                     </>
                   ) : null
                 }
-                meta={
-                  isCard
-                    ? metaLine(question, votingPhase, proposalCount, votes, peopleCount)
-                    : undefined
-                }
                 note={
                   question.status === 'skipped' ? (question.skipReason ?? undefined) : undefined
                 }
@@ -684,7 +654,8 @@ export function AgendaPanel({
                   isLeader && isPending && !isCard && skippingId !== question.id ? (
                     <AgendaRowMenu
                       label={`Question ${index + 1} options`}
-                      items={menuItems(question, index, true)}
+                      // Only the question the room is on can be skipped.
+                      items={menuItems(question, index, false)}
                     />
                   ) : undefined
                 }
