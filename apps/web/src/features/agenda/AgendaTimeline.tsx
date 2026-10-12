@@ -3,16 +3,22 @@ import { useEffect, useRef, type ReactNode } from 'react';
 
 import type { AgendaStepState } from './agendaSummary';
 
-export type AgendaChipTone = 'cool' | 'warm' | 'neutral' | 'outline';
+/**
+ * `live` is the question in play, in the app's live colour. `done` is a
+ * finished one, in the accent its node is filled with. `neutral` is passed
+ * over or never reached, and `outline` is a note beside the status rather
+ * than a status.
+ */
+export type AgendaChipTone = 'live' | 'done' | 'neutral' | 'outline';
 
 const CHIP_TONE: Record<AgendaChipTone, string> = {
-  cool: 'border-rt-cool/40 bg-rt-cool-tint text-rt-cool-deep',
-  warm: 'border-rt-secondary/40 bg-rt-secondary-wash text-rt-secondary-deep',
-  neutral: 'border-rt-tertiary/80 bg-rt-surface-sunken text-rt-ink-faint',
-  outline: 'border-rt-tertiary bg-white text-rt-ink-muted',
+  live: 'bg-rt-cool-tint text-rt-cool-deep',
+  done: 'bg-rt-secondary-wash text-rt-secondary-deep',
+  neutral: 'bg-rt-surface-sunken text-rt-ink-faint',
+  outline: 'border border-rt-tertiary bg-white text-rt-ink-muted',
 };
 
-/** A question's status, as a small coloured pill under its text. */
+/** A question's status, as a small pill under its text. */
 export function AgendaChip({
   tone,
   icon,
@@ -24,7 +30,7 @@ export function AgendaChip({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-px text-[10px] font-semibold tracking-[0.06em] uppercase ${CHIP_TONE[tone]}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] leading-tight font-semibold ${CHIP_TONE[tone]}`}
     >
       {icon}
       {children}
@@ -45,9 +51,14 @@ const NODE_CLASS: Record<AgendaStepState, string> = {
   answered: 'border-rt-secondary bg-rt-secondary text-white',
   skipped: 'border-rt-tertiary bg-rt-surface-sunken text-rt-ink-faint',
   live: 'border-2 border-rt-cool bg-white',
-  pending: 'border-rt-tertiary bg-rt-surface text-rt-ink-faint',
+  pending: 'border-rt-tertiary bg-white text-rt-ink-muted',
 };
 
+/**
+ * The circle beside a question, which says what happened to it: a tick once
+ * answered, a skip mark once skipped, a pulsing dot while it is in play, and
+ * its number while it is still to come.
+ */
 function StepNode({ state, number }: { state: AgendaStepState; number: number }) {
   return (
     <span
@@ -94,26 +105,35 @@ interface AgendaStepProps {
   number: number;
   text: string;
   state: AgendaStepState;
-  /** The question the board is showing: the white card. */
+  /** The question the board is showing: lifted into the white card. */
   focused: boolean;
   /**
    * In play but not on screen, while the board looks back at another question:
    * tinted so the controls riding on it are still easy to find.
    */
   highlighted?: boolean;
+  /**
+   * Opened by the leader's click, to show what can be set on it before it
+   * starts. Present: the text button says whether it is open.
+   */
+  expanded?: boolean;
+  /** Just added to the agenda: tinted for a moment so the room notices it. */
+  fresh?: boolean;
   /** Nothing below it, so no line runs on from its node. */
   last: boolean;
   /** Present: the question text is a button that puts this question up. */
   onSelect?: () => void;
   /**
-   * What happened to it, as a chip under the text. Shown on the cards and on
+   * What happened to it, as a chip under the text. Shown on the card and on
    * anything still to come; a finished question in the list leaves it to its
    * node and keeps it for screen readers only.
    */
   status?: { label: string; tone: AgendaChipTone } | null;
   /** More chips beside the status, shown whenever given. */
   extraChips?: ReactNode;
-  /** Anything else on the card: the board lock, the leader's controls. */
+  /** One quiet line under the chips: "5 proposals", "4 of 6 voted". */
+  meta?: string;
+  /** Anything else on the card: the board lock. */
   children?: ReactNode;
 }
 
@@ -122,9 +142,13 @@ interface AgendaStepProps {
  * happened to it, joined to the next by a line that fills in as the session
  * gets through them.
  *
+ * Past and upcoming questions are compact rows. The question the board is
+ * showing is the white card with the accent edge, with its whole text, its
+ * status and whatever rides on it.
+ *
  * Shared by the live agenda and an ended session's question list, so the two
  * read alike: same node, same card, same chips. What differs is what each one
- * puts in `status`, `extraChips` and `children`.
+ * puts in `status`, `extraChips`, `meta` and `children`.
  */
 export function AgendaStep({
   number,
@@ -132,10 +156,13 @@ export function AgendaStep({
   state,
   focused,
   highlighted = false,
+  expanded,
+  fresh = false,
   last,
   onSelect,
   status,
   extraChips,
+  meta,
   children,
 }: AgendaStepProps) {
   const stepRef = useRef<HTMLLIElement>(null);
@@ -165,12 +192,16 @@ export function AgendaStep({
     <li
       ref={stepRef}
       aria-current={focused ? 'step' : undefined}
-      className={`relative flex gap-2.5 rounded-2xl border px-2.5 py-2 transition-colors ${
+      className={`relative flex gap-2.5 rounded-2xl border px-2.5 py-2 transition-colors duration-500 ${
         focused
           ? 'border-rt-secondary bg-white shadow-sm'
           : highlighted
             ? 'border-rt-cool/40 bg-rt-cool-tint/60'
-            : 'border-transparent'
+            : expanded
+              ? 'border-rt-tertiary bg-white'
+              : fresh
+                ? 'border-transparent bg-rt-secondary-wash'
+                : 'border-transparent'
       }`}
     >
       {/* From under this node to just above the next one, across the gap and
@@ -190,6 +221,7 @@ export function AgendaStep({
           <button
             type="button"
             onClick={onSelect}
+            aria-expanded={expanded}
             title={compact ? text : undefined}
             className={`rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${textClass}`}
           >
@@ -209,6 +241,9 @@ export function AgendaStep({
           </div>
         ) : status ? (
           <span className="sr-only">{status.label}</span>
+        ) : null}
+        {meta && !compact ? (
+          <p className="mt-1.5 text-[11px] text-rt-ink-muted tabular-nums">{meta}</p>
         ) : null}
         {children}
       </div>

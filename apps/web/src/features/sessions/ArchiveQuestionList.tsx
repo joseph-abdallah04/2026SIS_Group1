@@ -15,7 +15,7 @@ const STATUS_CHIP: Record<QuestionStatus, { label: string; tone: AgendaChipTone 
   pending: { label: 'Not reached', tone: 'neutral' },
   discussion: { label: 'Not voted on', tone: 'neutral' },
   voting: { label: 'Voting', tone: 'neutral' },
-  answered: { label: 'Answered', tone: 'warm' },
+  answered: { label: 'Answered', tone: 'done' },
   skipped: { label: 'Skipped', tone: 'neutral' },
 };
 
@@ -30,7 +30,7 @@ function statusChip(question: Question): { label: string; tone: AgendaChipTone }
     !question.votingEnabled &&
     (question.status === 'answered' || question.status === 'discussion')
   ) {
-    return { label: 'Discussed', tone: 'warm' };
+    return { label: 'Discussed', tone: 'done' };
   }
   return STATUS_CHIP[question.status];
 }
@@ -67,32 +67,30 @@ export function ArchiveQuestionList({
       collapseLabel="Collapse questions"
       collapsedExtra={<AgendaProgress summary={summary} vertical />}
       resize={QUESTIONS_RESIZE}
+      subheader={questions.length > 0 ? <AgendaProgress summary={summary} /> : null}
     >
       {questions.length === 0 ? (
         <p className="py-3 text-[12px] text-rt-ink-muted">No questions in this session.</p>
       ) : (
-        <>
-          <AgendaProgress summary={summary} />
-          <AgendaTimeline>
-            {questions.map((question, index) => {
-              const isFocused = question.id === activeQuestionId;
-              return (
-                <AgendaStep
-                  key={question.id}
-                  number={index + 1}
-                  text={question.text}
-                  state={stepState(question.status, true, question.votingEnabled)}
-                  focused={isFocused}
-                  last={index === questions.length - 1}
-                  onSelect={() => {
-                    if (!isFocused) onSelect(question.id);
-                  }}
-                  status={statusChip(question)}
-                />
-              );
-            })}
-          </AgendaTimeline>
-        </>
+        <AgendaTimeline>
+          {questions.map((question, index) => {
+            const isFocused = question.id === activeQuestionId;
+            return (
+              <AgendaStep
+                key={question.id}
+                number={index + 1}
+                text={question.text}
+                state={stepState(question.status, true, question.votingEnabled)}
+                focused={isFocused}
+                last={index === questions.length - 1}
+                onSelect={() => {
+                  if (!isFocused) onSelect(question.id);
+                }}
+                status={statusChip(question)}
+              />
+            );
+          })}
+        </AgendaTimeline>
       )}
     </BoardRail>
   );

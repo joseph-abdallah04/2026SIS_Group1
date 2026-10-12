@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   SHORTLIST_MIN,
   type Question,
@@ -20,6 +20,7 @@ import {
   AgendaChip,
   AgendaStep,
   AgendaTimeline,
+  revealInList,
   ViewingChip,
   type AgendaChipTone,
 } from './AgendaTimeline';
@@ -40,6 +41,13 @@ interface AgendaPanelProps {
    * gate.
    */
   hasProposals?: boolean;
+  /**
+   * How many proposals the question in discussion has, for the line under it.
+   * Omitted when the board is showing a different question.
+   */
+  proposalCount?: number;
+  /** How far through the open ballot the room is, for the line under it. */
+  votes?: { voted: number; voters: number };
   /**
    * The board lock for the question on screen: whether only the leader may
    * move proposals. Shown under it while it is being discussed, the only time
@@ -85,18 +93,25 @@ function canChangeVote(status: QuestionStatus): boolean {
  */
 const AGENDA_RESIZE = { storageKey: 'agenda', label: 'Resize agenda' };
 
+/** How long a question just added stays tinted, so the room notices it. */
+const FRESH_MS = 1500;
+
 function statusChip(
   question: Question,
   votingPhase?: VotingPhase,
 ): { label: string; tone: AgendaChipTone } | null {
   switch (question.status) {
     case 'discussion':
-      return { label: question.votingEnabled ? 'Discussing' : 'Brainstorming', tone: 'cool' };
+      return { label: question.votingEnabled ? 'Discussing' : 'Brainstorming', tone: 'live' };
     case 'voting':
-      return { label: votingPhase === 'closed' ? 'Results' : 'Voting', tone: 'warm' };
+      return {
+        label:
+          votingPhase === 'closed' ? 'Results' : votingPhase === 'open' ? 'Voting' : 'Shortlisting',
+        tone: 'live',
+      };
     case 'answered':
       // Nobody chose an answer for a brainstorm — the team discussed it.
-      return { label: question.votingEnabled ? 'Answered' : 'Discussed', tone: 'warm' };
+      return { label: question.votingEnabled ? 'Answered' : 'Discussed', tone: 'done' };
     case 'skipped':
       return { label: 'Skipped', tone: 'neutral' };
     default:
@@ -104,15 +119,79 @@ function statusChip(
   }
 }
 
+/** The one quiet line under the question in play. */
+function metaLine(
+  question: Question,
+  votingPhase: VotingPhase | undefined,
+  proposalCount: number | undefined,
+  votes: { voted: number; voters: number } | undefined,
+): string | undefined {
+  if (question.status === 'discussion' && proposalCount !== undefined) {
+    return `${proposalCount} ${proposalCount === 1 ? 'proposal' : 'proposals'}`;
+  }
+  if (question.status === 'voting') {
+    if (votingPhase === 'open' && votes) return `${votes.voted} of ${votes.voters} voted`;
+    if (votingPhase !== 'open' && votingPhase !== 'closed') return 'Picking the shortlist';
+  }
+  return undefined;
+}
+
+/** Why "Open voting" is not ready: how many more proposals the shortlist needs. */
+function proposalsShort(proposalCount: number | undefined): string {
+  if (proposalCount === undefined) return `Needs ${SHORTLIST_MIN} proposals`;
+  const more = Math.max(SHORTLIST_MIN - proposalCount, 1);
+  return `${more} more ${more === 1 ? 'proposal' : 'proposals'} needed`;
+}
+
+const PRIMARY_BUTTON =
+  'w-full rounded-full bg-rt-secondary px-3 py-2.5 text-[13px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+const SECONDARY_BUTTON =
+  'w-full rounded-full border border-rt-tertiary bg-white px-3 py-2 text-[12.5px] font-semibold text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+const EYEBROW = 'text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase';
+
+/** A choice in the add-question composer: pressed or not. */
+function ComposerChip({
+  pressed,
+  onClick,
+  disabled,
+  children,
+}: {
+  pressed: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${
+        pressed
+          ? 'border-rt-secondary/50 bg-rt-secondary-wash text-rt-secondary-deep'
+          : 'border-rt-tertiary bg-white text-rt-ink-faint hover:text-rt-ink-muted'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
  * F24: the ordered question list beside the board, with F25/F26's leader
  * controls. The chrome is `BoardRail`, shared with the assistant on the other
- * edge; the timeline and progress track are shared with the ended session's
- * question list. The leader can click a finished question to put that
- * question's pinboard back on screen without reopening it.
+ * edge; the steps and progress header are shared with the ended session's
+ * question list.
  *
- * Collapse state and width are local to each participant — the leader
- * collapsing their rail is not an instruction to everyone else.
+ * Three zones: the progress header, the list, which scrolls, and — for the
+ * leader only — the controls, pinned to the bottom however long the agenda
+ * gets. Participants get the same panel without them, so it stays calm.
+ *
+ * The leader can click a finished question to put that question's pinboard
+ * back on screen without reopening it. Collapse state and width are local to
+ * each participant — the leader collapsing their rail is not an instruction to
+ * everyone else.
  */
 export function AgendaPanel({
   sessionId,
@@ -121,6 +200,8 @@ export function AgendaPanel({
   isLeader,
   votingPhase,
   hasProposals,
+  proposalCount,
+  votes,
   boardLock,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -129,6 +210,9 @@ export function AgendaPanel({
   const [lockBusy, setLockBusy] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
   const [confirmingSkip, setConfirmingSkip] = useState<string | null>(null);
+  // An upcoming question the leader has clicked open, to set its vote before
+  // it starts. Local: it is the leader looking ahead, not the room's board.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const {
     setPhase,
     busyQuestionId: phaseBusyId,
@@ -141,14 +225,38 @@ export function AgendaPanel({
   } = useSetQuestionVoting(sessionId);
   const { focus, error: focusError } = useFocusQuestion(sessionId);
   const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
+  const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftVoting, setDraftVoting] = useState(true);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  // The composer opens at the end of the list, which is often below the fold.
+  const composerRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (composing && composerRef.current) revealInList(composerRef.current);
+  }, [composing]);
+
+  // Questions that have just arrived — added by the leader, heard by everyone —
+  // are tinted for a moment. Nothing is fresh on first sight of the agenda.
+  const knownIds = useRef<Set<string> | null>(null);
+  const [freshIds, setFreshIds] = useState<readonly string[]>([]);
+  useEffect(() => {
+    const ids = questions.map((question) => question.id);
+    const known = knownIds.current;
+    knownIds.current = new Set(ids);
+    if (!known) return;
+    const added = ids.filter((id) => !known.has(id));
+    if (added.length === 0) return;
+    setFreshIds(added);
+    const fade = window.setTimeout(() => setFreshIds([]), FRESH_MS);
+    return () => window.clearTimeout(fade);
+  }, [questions]);
 
   const summary = summarizeAgenda(questions);
   const allDone = summary.total > 0 && summary.done === summary.total;
-  const openQuestion = questions.find(
+  const openIndex = questions.findIndex(
     (question) => question.status === 'discussion' || question.status === 'voting',
   );
+  const openQuestion = openIndex === -1 ? undefined : questions[openIndex];
   const firstPending = questions.find((question) => question.status === 'pending');
   const error = phaseError ?? votingError ?? focusError ?? addError ?? lockError;
 
@@ -166,14 +274,161 @@ export function AgendaPanel({
     : undefined;
   const canAdd = isLeader && questions.length < SESSION_QUESTION_LIMIT;
 
+  // The controls act on the question that is actually open, even while the
+  // board is looking back at an earlier one. With nothing open, on the next
+  // question to start.
+  const controlled = openQuestion ?? firstPending;
+  const next = controlled ? nextPhase(controlled) : undefined;
+  const canSkip =
+    controlled !== undefined && (controlled.status !== 'voting' || votingPhase !== 'closed');
+  const stillShortlisting =
+    controlled?.status === 'voting' && votingPhase !== 'open' && votingPhase !== 'closed';
+  // One request per question at a time: a phase change and the vote switch
+  // (F41) both decide on the same question, so each waits for the other. The
+  // server refuses whichever loses a race anyway; this keeps the leader from
+  // starting one.
+  const phaseBusy = controlled !== undefined && phaseBusyId === controlled.id;
+  const controlsBusy = phaseBusy || (controlled !== undefined && votingBusyId === controlled.id);
+  const openVotingBlocked = next?.status === 'voting' && hasProposals === false;
+
+  function closeComposer() {
+    setComposing(false);
+    setDraft('');
+    setDraftVoting(true);
+    addButtonRef.current?.focus();
+  }
+
   async function onAdd(event: FormEvent) {
     event.preventDefault();
     const ok = await addQuestion(draft, draftVoting);
-    if (ok) {
-      setDraft('');
-      setDraftVoting(true);
-    }
+    if (ok) closeComposer();
   }
+
+  const skipControl =
+    controlled && canSkip ? (
+      confirmingSkip === controlled.id ? (
+        <div className="flex min-h-9 items-center justify-center gap-3 text-[12px]">
+          <span className="text-rt-ink-muted">Skip it?</span>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmingSkip(null);
+              void setPhase(controlled.id, 'skipped');
+            }}
+            disabled={controlsBusy}
+            className="font-semibold text-rt-primary-deep hover:underline"
+          >
+            Yes
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmingSkip(null)}
+            className="text-rt-ink-muted hover:underline"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmingSkip(controlled.id)}
+          className={SECONDARY_BUTTON}
+        >
+          Skip question
+        </button>
+      )
+    ) : null;
+
+  const footer = isLeader ? (
+    <div className="-mx-3 flex shrink-0 flex-col gap-2.5 border-t border-rt-tertiary px-3 pt-3 pb-3.5">
+      <div className="flex min-h-5 items-center justify-between gap-2">
+        <span className={EYEBROW}>Leader controls</span>
+        {canAdd ? (
+          composing ? (
+            <span className="text-[11.5px] font-medium text-rt-ink-faint">Adding…</span>
+          ) : (
+            <button
+              ref={addButtonRef}
+              type="button"
+              onClick={() => setComposing(true)}
+              className="rounded-sm text-[11.5px] font-semibold text-rt-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary"
+            >
+              + Add question
+            </button>
+          )
+        ) : null}
+      </div>
+
+      {composing ? (
+        <>
+          <button
+            type="submit"
+            form="agenda-add-question"
+            disabled={adding || draft.trim().length === 0}
+            className={PRIMARY_BUTTON}
+          >
+            {adding ? 'Adding…' : 'Add to agenda'}
+          </button>
+          <button
+            type="button"
+            onClick={closeComposer}
+            disabled={adding}
+            className={SECONDARY_BUTTON}
+          >
+            Cancel
+          </button>
+        </>
+      ) : allDone ? (
+        <p className="text-[12px] leading-snug text-rt-ink-muted">
+          Every question is done — end the session when you’re ready.
+        </p>
+      ) : (
+        <>
+          {next ? (
+            <button
+              type="button"
+              onClick={() => controlled && void setPhase(controlled.id, next.status)}
+              disabled={controlsBusy || openVotingBlocked}
+              // Named for what it does; why it cannot yet is its description,
+              // read out after the name.
+              aria-label={openVotingBlocked ? next.label : undefined}
+              aria-describedby={openVotingBlocked ? 'agenda-open-voting-why' : undefined}
+              className={PRIMARY_BUTTON}
+            >
+              {phaseBusy ? (
+                'Working…'
+              ) : openVotingBlocked ? (
+                // The reason on the button that cannot be pressed, counting
+                // down as proposals arrive, rather than in a line elsewhere.
+                <span className="flex flex-col items-center leading-tight">
+                  {next.label}
+                  <span
+                    id="agenda-open-voting-why"
+                    className="mt-0.5 text-[11px] font-medium text-rt-ink/70"
+                  >
+                    {proposalsShort(proposalCount)}
+                  </span>
+                </span>
+              ) : (
+                next.label
+              )}
+            </button>
+          ) : null}
+          {stillShortlisting ? (
+            <button
+              type="button"
+              onClick={() => controlled && void setPhase(controlled.id, 'discussion')}
+              disabled={controlsBusy}
+              className={SECONDARY_BUTTON}
+            >
+              Back to discussion
+            </button>
+          ) : null}
+          {skipControl}
+        </>
+      )}
+    </div>
+  ) : null;
 
   return (
     <BoardRail
@@ -185,212 +440,153 @@ export function AgendaPanel({
       collapseLabel="Collapse agenda"
       collapsedExtra={<AgendaProgress summary={summary} vertical />}
       resize={AGENDA_RESIZE}
+      subheader={
+        questions.length > 0 ? (
+          <AgendaProgress
+            summary={summary}
+            current={openIndex === -1 ? undefined : openIndex + 1}
+          />
+        ) : null
+      }
     >
-      {questions.length === 0 ? (
-        <p className="py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
+      {questions.length === 0 && !composing ? (
+        <p className="flex-1 py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
       ) : (
-        <>
-          <AgendaProgress summary={summary} />
-          <AgendaTimeline>
-            {questions.map((question, index) => {
-              const isFocused = question.id === activeQuestionId;
-              const isOpen = question.id === openQuestion?.id;
-              const canSkipVote = question.status !== 'voting' || votingPhase !== 'closed';
-              const next = nextPhase(question);
-              // Phase controls stay on the question that is actually open, even
-              // while the board is looking back at an earlier one. Pending gets
-              // "Start discussion" only when nothing is open, on the next one.
-              // Voting still offers Skip (an escape hatch); closing the vote is
-              // the ballot's "End voting", not an agenda "Mark answered".
-              const onThisQuestion = openQuestion
-                ? isOpen
-                : firstPending !== undefined && question.id === firstPending.id;
-              const stillShortlisting =
-                question.status === 'voting' && votingPhase !== 'open' && votingPhase !== 'closed';
-              const showControls =
-                isLeader &&
-                onThisQuestion &&
-                (next !== undefined ||
-                  stillShortlisting ||
-                  (question.status === 'voting' && canSkipVote));
-              // One request per question at a time: a phase change and the vote
-              // switch (F41) both decide on the same row, so each waits for the
-              // other. The server refuses whichever loses a race anyway; this
-              // keeps the leader from starting one.
-              const phaseBusy = phaseBusyId === question.id;
-              const busy = phaseBusy || votingBusyId === question.id;
-              const openVotingBlocked = next?.status === 'voting' && hasProposals === false;
-              // The board is showing this one while another is still in play:
-              // said out loud, so nobody mistakes the old board for the live one.
-              const lookingBack = isFocused && openQuestion !== undefined && !isOpen;
-              // F41: the leader can flip any not-yet-voting question; everyone
-              // else just sees which upcoming ones will not go to a vote.
-              const voteControl = !canChangeVote(question.status) ? null : isLeader ? (
-                <VoteToggle
-                  size="sm"
-                  votingEnabled={question.votingEnabled}
-                  onChange={(votingEnabled) => void setVoting(question.id, votingEnabled)}
-                  label={`Vote on question ${index + 1}`}
-                  disabled={busy}
-                />
-              ) : question.votingEnabled ? null : (
-                <AgendaChip tone="outline">No vote</AgendaChip>
-              );
+        <AgendaTimeline>
+          {questions.map((question, index) => {
+            const isFocused = question.id === activeQuestionId;
+            const isOpen = question.id === openQuestion?.id;
+            // The board is showing this one while another is still in play:
+            // said out loud, so nobody mistakes the old board for the live one.
+            const lookingBack = isFocused && openQuestion !== undefined && !isOpen;
+            const busy = phaseBusyId === question.id || votingBusyId === question.id;
+            // A question still to come, other than the one the controls act
+            // on: the leader's click opens it here rather than putting its
+            // empty board up for everyone.
+            const opensInPlace =
+              isLeader &&
+              question.status === 'pending' &&
+              !isFocused &&
+              question.id !== controlled?.id;
+            const isExpanded = opensInPlace && expandedId === question.id;
+            // F41: the leader flips the vote on the question the controls act
+            // on — the open one, or the next to start — and on any question
+            // still to come once clicked open, so the rows stay compact. A
+            // question set to no vote says so in the list for everyone.
+            const canFlipVote = isLeader && (question.id === controlled?.id || isExpanded);
+            const voteControl = !canChangeVote(question.status) ? null : canFlipVote ? (
+              <VoteToggle
+                size="sm"
+                votingEnabled={question.votingEnabled}
+                onChange={(votingEnabled) => void setVoting(question.id, votingEnabled)}
+                label={`Vote on question ${index + 1}`}
+                disabled={busy}
+              />
+            ) : question.votingEnabled ? null : (
+              <AgendaChip tone="outline">No vote</AgendaChip>
+            );
 
-              return (
-                <AgendaStep
-                  key={question.id}
-                  number={index + 1}
-                  text={question.text}
-                  state={stepState(question.status)}
-                  focused={isFocused}
-                  highlighted={isOpen && !isFocused}
-                  last={index === questions.length - 1}
-                  onSelect={
-                    isLeader
-                      ? () => {
+            return (
+              <AgendaStep
+                key={question.id}
+                number={index + 1}
+                text={question.text}
+                state={stepState(question.status)}
+                focused={isFocused}
+                highlighted={isOpen && !isFocused}
+                fresh={freshIds.includes(question.id)}
+                // The composer is the next step once it is open, so the line
+                // runs on to it.
+                last={index === questions.length - 1 && !composing}
+                expanded={opensInPlace ? isExpanded : undefined}
+                onSelect={
+                  !isLeader
+                    ? undefined
+                    : opensInPlace
+                      ? () => setExpandedId((open) => (open === question.id ? null : question.id))
+                      : () => {
                           if (!isFocused) void focus(question.id);
                         }
-                      : undefined
-                  }
-                  status={statusChip(question, votingPhase)}
-                  extraChips={
-                    lookingBack || voteControl ? (
-                      <>
-                        {lookingBack ? <ViewingChip /> : null}
-                        {voteControl}
-                      </>
-                    ) : null
-                  }
-                >
-                  {boardLock && isFocused && question.status === 'discussion' ? (
-                    <div className="mt-2 flex flex-col">
-                      <BoardLock
-                        locked={boardLock.locked}
-                        onToggle={onToggleLock}
-                        busy={lockBusy}
-                      />
-                    </div>
-                  ) : null}
+                }
+                status={statusChip(question, votingPhase)}
+                extraChips={
+                  lookingBack || voteControl ? (
+                    <>
+                      {lookingBack ? <ViewingChip /> : null}
+                      {voteControl}
+                    </>
+                  ) : null
+                }
+                meta={isOpen ? metaLine(question, votingPhase, proposalCount, votes) : undefined}
+              >
+                {boardLock && isFocused && question.status === 'discussion' ? (
+                  <div className="mt-2.5 flex flex-col">
+                    <BoardLock locked={boardLock.locked} onToggle={onToggleLock} busy={lockBusy} />
+                  </div>
+                ) : null}
+              </AgendaStep>
+            );
+          })}
 
-                  {showControls && (
-                    <div className="mt-2.5 flex flex-col gap-1.5">
-                      {next ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void setPhase(question.id, next.status)}
-                            disabled={busy || openVotingBlocked}
-                            title={
-                              openVotingBlocked
-                                ? `Add at least ${SHORTLIST_MIN} proposals before opening voting`
-                                : undefined
-                            }
-                            className="w-full rounded-full bg-rt-secondary px-3 py-1.5 text-[11.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60"
-                          >
-                            {phaseBusy ? 'Working…' : next.label}
-                          </button>
-                          {openVotingBlocked ? (
-                            <p className="text-[10.5px] leading-snug text-rt-ink-faint">
-                              Needs {SHORTLIST_MIN} proposals on the board first
-                            </p>
-                          ) : null}
-                        </>
-                      ) : null}
-
-                      {stillShortlisting || canSkipVote ? (
-                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px]">
-                          {stillShortlisting ? (
-                            <button
-                              type="button"
-                              onClick={() => void setPhase(question.id, 'discussion')}
-                              disabled={busy}
-                              className="font-medium text-rt-ink-muted hover:text-rt-ink hover:underline"
-                            >
-                              Back to discussion
-                            </button>
-                          ) : null}
-
-                          {canSkipVote ? (
-                            confirmingSkip === question.id ? (
-                              <span className="ml-auto flex items-center gap-2">
-                                <span className="text-rt-ink-muted">Skip it?</span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setConfirmingSkip(null);
-                                    void setPhase(question.id, 'skipped');
-                                  }}
-                                  disabled={busy}
-                                  className="font-semibold text-rt-primary-deep hover:underline"
-                                >
-                                  Yes
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmingSkip(null)}
-                                  className="text-rt-ink-muted hover:underline"
-                                >
-                                  Cancel
-                                </button>
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmingSkip(question.id)}
-                                className="ml-auto font-medium text-rt-ink-faint hover:text-rt-ink-muted hover:underline"
-                              >
-                                Skip question
-                              </button>
-                            )
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </AgendaStep>
-              );
-            })}
-          </AgendaTimeline>
-        </>
-      )}
-
-      {canAdd ? (
-        <form
-          onSubmit={(event) => void onAdd(event)}
-          className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2.5"
-        >
-          <label className="sr-only" htmlFor="agenda-new-question">
-            New question
-          </label>
-          <div className="flex items-center gap-1.5">
-            <input
-              autoComplete="off"
-              id="agenda-new-question"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Add a question…"
-              maxLength={SESSION_QUESTION_TEXT_MAX}
-              disabled={adding}
-              className="min-h-8 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-white px-3 text-[12px] text-rt-ink outline-none placeholder:text-rt-ink-faint focus-visible:border-rt-secondary focus-visible:ring-2 focus-visible:ring-rt-secondary/40 disabled:opacity-60"
-            />
-            <VoteToggle
-              size="sm"
-              votingEnabled={draftVoting}
-              onChange={setDraftVoting}
-              label="Vote on the new question"
-              disabled={adding}
-            />
-            <button
-              type="submit"
-              disabled={adding || draft.trim().length === 0}
-              className="min-h-8 shrink-0 rounded-full bg-rt-secondary px-3 text-[11px] font-semibold text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white disabled:opacity-50"
+          {composing ? (
+            <li
+              ref={composerRef}
+              className="rounded-2xl border border-rt-secondary bg-white px-2.5 py-2 shadow-[0_0_0_3px_var(--color-rt-secondary-wash)]"
             >
-              {adding ? 'Adding…' : 'Add'}
-            </button>
-          </div>
-        </form>
-      ) : null}
+              <form
+                id="agenda-add-question"
+                onSubmit={(event) => void onAdd(event)}
+                className="flex flex-col gap-2"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span
+                    aria-hidden
+                    className="flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed border-rt-secondary text-[10px] font-semibold text-rt-secondary-deep tabular-nums"
+                  >
+                    {questions.length + 1}
+                  </span>
+                  <label className="sr-only" htmlFor="agenda-new-question">
+                    New question
+                  </label>
+                  <input
+                    autoFocus
+                    autoComplete="off"
+                    id="agenda-new-question"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        closeComposer();
+                      }
+                    }}
+                    placeholder="Type a question…"
+                    maxLength={SESSION_QUESTION_TEXT_MAX}
+                    disabled={adding}
+                    className="min-w-0 flex-1 bg-transparent text-[12.5px] font-medium text-rt-ink outline-none placeholder:font-normal placeholder:text-rt-ink-faint disabled:opacity-60"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5 pl-[30px]">
+                  <ComposerChip
+                    pressed={draftVoting}
+                    onClick={() => setDraftVoting(true)}
+                    disabled={adding}
+                  >
+                    Vote
+                  </ComposerChip>
+                  <ComposerChip
+                    pressed={!draftVoting}
+                    onClick={() => setDraftVoting(false)}
+                    disabled={adding}
+                  >
+                    Brainstorm
+                  </ComposerChip>
+                </div>
+              </form>
+            </li>
+          ) : null}
+        </AgendaTimeline>
+      )}
 
       {error && (
         <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-red-600">
@@ -398,13 +594,13 @@ export function AgendaPanel({
         </p>
       )}
 
-      {allDone && (
-        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-muted">
-          {isLeader
-            ? 'Every question is done — end the session when you’re ready.'
-            : 'Every question is done.'}
+      {allDone && !isLeader && (
+        <p className="-mx-3 shrink-0 border-t border-rt-tertiary px-3 py-2.5 text-[11.5px] text-rt-ink-muted">
+          Every question is done.
         </p>
       )}
+
+      {footer}
     </BoardRail>
   );
 }

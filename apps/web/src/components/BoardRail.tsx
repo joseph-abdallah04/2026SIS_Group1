@@ -43,6 +43,11 @@ interface BoardRailProps {
    * that share one open at the same size. Overrides `width` while set.
    */
   resize?: { storageKey: string; label: string };
+  /**
+   * Under the title, in the same header zone and above its one divider: the
+   * agenda's progress, which belongs to the heading rather than to the list.
+   */
+  subheader?: ReactNode;
   children: ReactNode;
 }
 
@@ -79,6 +84,7 @@ export function BoardRail({
   toggleRef,
   inert = false,
   resize,
+  subheader,
   children,
 }: BoardRailProps) {
   const resizer = useRailResize({ side, storageKey: resize?.storageKey, collapsed, onToggle });
@@ -142,18 +148,21 @@ export function BoardRail({
           : { width: sizedWidth, minWidth: sizedWidth, maxWidth: sizedWidth, flexBasis: sizedWidth }
       }
     >
-      <div className="-mx-3 flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">
-        {onLeft ? (
-          <>
-            <RailTitle>{title}</RailTitle>
-            {collapseButton}
-          </>
-        ) : (
-          <>
-            {collapseButton}
-            <RailTitle>{title}</RailTitle>
-          </>
-        )}
+      <div className="-mx-3 shrink-0 border-b border-rt-tertiary px-3 py-2">
+        <div className="flex items-center justify-between">
+          {onLeft ? (
+            <>
+              <RailTitle>{title}</RailTitle>
+              {collapseButton}
+            </>
+          ) : (
+            <>
+              {collapseButton}
+              <RailTitle>{title}</RailTitle>
+            </>
+          )}
+        </div>
+        {subheader ? <div className="pt-1 pb-1.5">{subheader}</div> : null}
       </div>
       <div
         className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${

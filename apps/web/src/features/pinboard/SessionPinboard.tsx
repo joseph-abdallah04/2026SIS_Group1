@@ -274,6 +274,10 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                     ? board.items.length >= SHORTLIST_MIN
                     : undefined
                 }
+                proposalCount={
+                  board.questionStatus === 'discussion' ? board.items.length : undefined
+                }
+                votes={{ voted: voting.votedCount, voters: voting.voterCount }}
                 boardLock={{
                   locked: board.boardLocked,
                   onToggle:

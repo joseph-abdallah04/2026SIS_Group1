@@ -9,10 +9,12 @@ import {
 } from './agendaSummary';
 
 const SEGMENT_CLASS: Record<AgendaStepState, string> = {
+  // The same colours as their nodes in the list below.
   answered: 'bg-rt-secondary',
   skipped: 'bg-rt-tertiary/40',
-  // The app's "live" colour, as on the header's live dot.
-  live: 'bg-rt-cool motion-safe:animate-pulse',
+  // The app's "live" colour, as on the header's live dot. Steady: the node in
+  // the list already pulses, and a bar fading in and out pulls the eye.
+  live: 'bg-rt-cool',
   pending: 'bg-rt-tertiary/50',
 };
 
@@ -29,7 +31,7 @@ function Segments({ steps, vertical }: { steps: AgendaStepState[]; vertical: boo
   return (
     <div
       className={`flex ${vertical ? 'w-1.5 flex-col' : 'h-1.5 w-full'} ${
-        dense ? 'overflow-hidden rounded-full' : vertical ? 'gap-0.5' : 'gap-[3px]'
+        dense ? 'overflow-hidden rounded-full' : vertical ? 'gap-0.5' : 'gap-1'
       }`}
       style={vertical ? { height: Math.min(steps.length * 12, 144) } : undefined}
     >
@@ -47,7 +49,12 @@ function Segments({ steps, vertical }: { steps: AgendaStepState[]; vertical: boo
 /**
  * How far through its agenda the session is: one segment per question,
  * coloured by what happened to it — answered, skipped, being worked on, or
- * still to come — and "2 of 4 done" above it.
+ * still to come.
+ *
+ * Above it, which question the room is on ("Question 3 of 5") while one is in
+ * play, and how many are finished otherwise. That is the question in play, not
+ * the one the board happens to be showing: the leader can put an earlier
+ * question back up without the session going backwards.
  *
  * The same piece heads the live agenda and an ended session's question list,
  * so a past board reads the way the session did. `vertical` is the slim
@@ -55,12 +62,15 @@ function Segments({ steps, vertical }: { steps: AgendaStepState[]; vertical: boo
  */
 export function AgendaProgress({
   summary,
+  current,
   vertical = false,
 }: {
   summary: AgendaSummary;
+  /** One-based position of the question in play, if one is. */
+  current?: number;
   vertical?: boolean;
 }) {
-  const { done, skipped, total, steps } = summary;
+  const { answered, done, skipped, total, steps } = summary;
   if (total === 0) return null;
   const allDone = done === total;
 
@@ -85,22 +95,31 @@ export function AgendaProgress({
   }
 
   return (
-    <div className="-mx-3 shrink-0 border-b border-rt-tertiary/70 px-3 pt-2.5 pb-3">
-      <div aria-hidden className="mb-2 flex items-baseline justify-between gap-2">
+    <div className="flex flex-col gap-2.5">
+      <div aria-hidden className="flex items-baseline justify-between gap-2">
         {allDone ? (
-          <span className="flex items-center gap-1 text-[11px] font-semibold text-rt-secondary-deep">
+          <span className="flex items-center gap-1 text-[12px] font-semibold text-rt-secondary-deep">
             <Check size={12} strokeWidth={3} className="shrink-0 self-center" />
             All done
           </span>
+        ) : current !== undefined ? (
+          <span className="text-[14px] font-semibold text-rt-ink">
+            Question <span className="tabular-nums">{current}</span>{' '}
+            <span className="font-normal text-rt-ink-muted">
+              of <span className="tabular-nums">{total}</span>
+            </span>
+          </span>
         ) : (
-          <span className="text-[11px] text-rt-ink-muted">
-            <span className="font-semibold text-rt-ink tabular-nums">{done}</span> of{' '}
-            <span className="tabular-nums">{total}</span> done
+          <span className="text-[14px] font-semibold text-rt-ink">
+            <span className="tabular-nums">{done}</span>{' '}
+            <span className="font-normal text-rt-ink-muted">
+              of <span className="tabular-nums">{total}</span> done
+            </span>
           </span>
         )}
-        {skipped > 0 ? (
-          <span className="text-[10.5px] text-rt-ink-faint tabular-nums">
-            incl. {skipped} skipped
+        {done > 0 && !allDone ? (
+          <span className="shrink-0 text-[11px] text-rt-ink-muted tabular-nums">
+            {answered} answered{skipped > 0 ? ` · ${skipped} skipped` : ''}
           </span>
         ) : null}
       </div>

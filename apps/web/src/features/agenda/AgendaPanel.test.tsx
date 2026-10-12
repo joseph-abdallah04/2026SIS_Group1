@@ -136,7 +136,9 @@ describe('AgendaPanel (F24)', () => {
       'aria-valuetext',
       '2 of 4 questions done, including 1 skipped',
     );
-    expect(screen.getByText('incl. 1 skipped')).toBeInTheDocument();
+    expect(screen.getByText('1 answered · 1 skipped')).toBeInTheDocument();
+    // Named by the question in play, not the one the board is looking back at.
+    expect(screen.getByText('Question', { selector: 'span' })).toHaveTextContent('Question 3 of 4');
   });
 
   it('says so when every question is finished', () => {
@@ -309,8 +311,10 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Open voting' })).toBeDisabled();
-    // Said in the card, not only in a tooltip a pointer has to find.
-    expect(screen.getByText('Needs 2 proposals on the board first')).toBeInTheDocument();
+    // Said on the button, not only in a tooltip a pointer has to find.
+    expect(screen.getByRole('button', { name: 'Open voting' })).toHaveAccessibleDescription(
+      'Needs 2 proposals',
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Open voting' }));
     expect(post).not.toHaveBeenCalled();
   });
@@ -426,8 +430,9 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
       activeQuestionId: 'q1',
     });
 
+    await userEvent.click(screen.getByRole('button', { name: '+ Add question' }));
     await userEvent.type(screen.getByLabelText('New question'), 'What did we miss?');
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add to agenda' }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
@@ -435,8 +440,27 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
         votingEnabled: true,
       }),
     );
-    expect(screen.queryByDisplayValue('What did we miss?')).not.toBeInTheDocument();
+    // The composer closes; the question itself arrives on the broadcast.
+    await waitFor(() => expect(screen.queryByLabelText('New question')).not.toBeInTheDocument());
     expect(screen.queryByText('What did we miss?')).not.toBeInTheDocument();
+  });
+
+  it('adds the question on Enter and puts the composer away on Escape', async () => {
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+
+    await userEvent.click(screen.getByRole('button', { name: '+ Add question' }));
+    await userEvent.type(screen.getByLabelText('New question'), 'Who decides?{Enter}');
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
+        text: 'Who decides?',
+        votingEnabled: true,
+      }),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '+ Add question' }));
+    await userEvent.type(screen.getByLabelText('New question'), 'Never mind{Escape}');
+    expect(screen.queryByLabelText('New question')).not.toBeInTheDocument();
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it('does not offer the add field to a participant', () => {
@@ -446,8 +470,9 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
       isLeader: false,
     });
 
+    expect(screen.queryByRole('button', { name: '+ Add question' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('New question')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Leader controls')).not.toBeInTheDocument();
   });
 
   it('does not post a blank question', async () => {
@@ -456,8 +481,43 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
       activeQuestionId: 'q1',
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await userEvent.click(screen.getByRole('button', { name: '+ Add question' }));
+    expect(screen.getByRole('button', { name: 'Add to agenda' })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText('New question'), '   {Enter}');
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('says how the question in play is going', () => {
+    render(
+      <AgendaPanel
+        sessionId="s1"
+        questions={[question(0, 'answered'), question(1, 'discussion')]}
+        activeQuestionId="q2"
+        isLeader={false}
+        proposalCount={5}
+      />,
+    );
+
+    expect(screen.getByText('5 proposals')).toBeInTheDocument();
+  });
+
+  it('counts down on the button how many more proposals voting needs', () => {
+    render(
+      <AgendaPanel
+        sessionId="s1"
+        questions={[question(0, 'discussion')]}
+        activeQuestionId="q1"
+        isLeader
+        proposalCount={1}
+        hasProposals={false}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Open voting' })).toHaveAccessibleDescription(
+      '1 more proposal needed',
+    );
+    // The card just counts.
+    expect(screen.getByText('1 proposal')).toBeInTheDocument();
   });
 });
 
@@ -558,9 +618,9 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     expect(screen.getByText('Answered')).toBeInTheDocument();
   });
 
-  it('lets the leader turn a pending question into a brainstorm', async () => {
+  it('lets the leader turn the next question into a brainstorm before it starts', async () => {
     renderPanel({
-      questions: [question(0, 'discussion'), question(1, 'pending')],
+      questions: [question(0, 'answered'), question(1, 'pending')],
       activeQuestionId: 'q1',
     });
 
@@ -571,6 +631,43 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q2', {
       votingEnabled: false,
     });
+  });
+
+  it('keeps the rows still to come compact while another question is open', () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending', false)],
+      activeQuestionId: 'q1',
+    });
+
+    // The switch rides on the open question only.
+    expect(screen.getByRole('button', { name: 'Vote on question 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Vote on question 2' })).not.toBeInTheDocument();
+    // A brainstorm further down still says so.
+    expect(screen.getByText('No vote').closest('li')).toBe(
+      screen.getByText('Question 3').closest('li'),
+    );
+  });
+
+  it('opens a question still to come in place when the leader clicks it, with its vote switch', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
+    const row = screen.getByRole('button', { name: 'Question 3' });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(row);
+
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Vote on question 3' }));
+    expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q3', {
+      votingEnabled: false,
+    });
+    // Opened here only: the room's board stays where it is.
+    expect(post).not.toHaveBeenCalledWith('/api/sessions/s1/focus', expect.anything());
+
+    await userEvent.click(row);
+    expect(screen.queryByRole('button', { name: 'Vote on question 3' })).not.toBeInTheDocument();
   });
 
   it('lets the leader turn the vote back on mid-discussion', async () => {
@@ -642,9 +739,10 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
   it('adds a brainstorm-only question when the leader turns its vote off first', async () => {
     renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
 
+    await userEvent.click(screen.getByRole('button', { name: '+ Add question' }));
     await userEvent.type(screen.getByLabelText('New question'), 'Any wild ideas?');
-    await userEvent.click(screen.getByRole('button', { name: 'Vote on the new question' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Brainstorm' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add to agenda' }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
@@ -653,9 +751,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
       }),
     );
     // Back to the default for the next one.
-    expect(screen.getByRole('button', { name: 'Vote on the new question' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    await userEvent.click(await screen.findByRole('button', { name: '+ Add question' }));
+    expect(screen.getByRole('button', { name: 'Vote' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
