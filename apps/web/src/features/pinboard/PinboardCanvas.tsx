@@ -20,6 +20,7 @@ import {
   FLOATING_BAR,
   TOOL_LABEL,
 } from '../toolbar/CreativeToolbar';
+import { BoardLockControl } from './BoardLock';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -68,6 +69,13 @@ interface PinboardCanvasProps {
    * the header/board split the rail has to sit inside.
    */
   agenda?: ReactNode;
+  /**
+   * The board lock for the question on screen: whether only the leader may
+   * move proposals. In the board's navigation bar while it is being
+   * discussed, the only time anything on it can move. `onToggle` is the
+   * leader's alone.
+   */
+  boardLock?: { locked: boolean; onToggle?: () => Promise<void> };
   /**
    * The assistant rail, opposite the agenda. A node for the same reason:
    * the board owns the row, and the chat owns what goes in the rail.
@@ -177,6 +185,7 @@ function ZoomControl({
   onZoomIn,
   onZoomOut,
   onFit,
+  extra,
 }: {
   zoom: ZoomLevel;
   canZoomIn: boolean;
@@ -185,6 +194,8 @@ function ZoomControl({
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  /** More of the board's own controls after Fit: the board lock. */
+  extra?: ReactNode;
 }) {
   // Round buttons inside the pill rather than cells split by rules: it is the
   // same shape as the creative toolbar, so the two read as one set of controls
@@ -235,6 +246,12 @@ function ZoomControl({
           className="hidden @max-[42rem]/board:block"
         />
       </button>
+      {extra ? (
+        <>
+          <span aria-hidden="true" className="mx-1 h-5 w-px bg-rt-tertiary" />
+          {extra}
+        </>
+      ) : null}
     </nav>
   );
 }
@@ -245,6 +262,7 @@ export function PinboardCanvas({
   newItemIds,
   isLeader,
   agenda,
+  boardLock,
   assistant,
   myProposals,
   micControl,
@@ -1382,6 +1400,11 @@ export function PinboardCanvas({
                 onZoomIn={onZoomIn}
                 onZoomOut={onZoomOut}
                 onFit={onFit}
+                extra={
+                  boardLock && boardOpen ? (
+                    <BoardLockControl locked={boardLock.locked} onToggle={boardLock.onToggle} />
+                  ) : undefined
+                }
               />
             </div>
 

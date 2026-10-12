@@ -25,18 +25,28 @@ export function useSessionDetail(sessionId: string) {
    * leader advanced the agenda. The `sessionPhase` broadcast carries the new
    * status, so the refetch has nothing to add.
    */
-  const applyQuestionPhase = useCallback((questionId: string, status: QuestionStatus) => {
-    setSession((prev) =>
-      prev
-        ? {
-            ...prev,
-            questions: prev.questions.map((question) =>
-              question.id === questionId ? { ...question, status } : question,
-            ),
-          }
-        : prev,
-    );
-  }, []);
+  const applyQuestionPhase = useCallback(
+    (questionId: string, status: QuestionStatus, skipReason?: string | null) => {
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              questions: prev.questions.map((question) =>
+                question.id === questionId
+                  ? {
+                      ...question,
+                      status,
+                      // Why it was skipped travels with the skip.
+                      ...(status === 'skipped' ? { skipReason: skipReason ?? null } : {}),
+                    }
+                  : question,
+              ),
+            }
+          : prev,
+      );
+    },
+    [],
+  );
 
   const applyAddedQuestion = useCallback((question: Question) => {
     setSession((prev) => {
@@ -50,18 +60,28 @@ export function useSessionDetail(sessionId: string) {
   }, []);
 
   /**
-   * F41: take a question's vote choice from `questionUpdated`. Only that
-   * field — status belongs to `sessionPhase`, and an older copy of the row
-   * arriving after a phase change must not put the question back a step.
+   * Take a question's vote choice (F41), wording and place in the agenda from
+   * `questionUpdated`. Only those fields — status belongs to `sessionPhase`,
+   * and an older copy of the row arriving after a phase change must not put
+   * the question back a step.
    */
   const applyUpdatedQuestion = useCallback((question: Question) => {
     setSession((prev) =>
       prev
         ? {
             ...prev,
-            questions: prev.questions.map((row) =>
-              row.id === question.id ? { ...row, votingEnabled: question.votingEnabled } : row,
-            ),
+            questions: prev.questions
+              .map((row) =>
+                row.id === question.id
+                  ? {
+                      ...row,
+                      votingEnabled: question.votingEnabled,
+                      text: question.text,
+                      position: question.position,
+                    }
+                  : row,
+              )
+              .sort((a, b) => a.position - b.position),
           }
         : prev,
     );

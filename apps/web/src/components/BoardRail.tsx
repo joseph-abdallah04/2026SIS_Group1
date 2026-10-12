@@ -48,6 +48,8 @@ interface BoardRailProps {
    * agenda's progress, which belongs to the heading rather than to the list.
    */
   subheader?: ReactNode;
+  /** A control beside the collapse arrow, such as the agenda's +. */
+  headerAction?: ReactNode;
   children: ReactNode;
 }
 
@@ -85,6 +87,7 @@ export function BoardRail({
   inert = false,
   resize,
   subheader,
+  headerAction,
   children,
 }: BoardRailProps) {
   const resizer = useRailResize({ side, storageKey: resize?.storageKey, collapsed, onToggle });
@@ -153,11 +156,17 @@ export function BoardRail({
           {onLeft ? (
             <>
               <RailTitle>{title}</RailTitle>
-              {collapseButton}
+              <span className="flex items-center">
+                {headerAction}
+                {collapseButton}
+              </span>
             </>
           ) : (
             <>
-              {collapseButton}
+              <span className="flex items-center">
+                {collapseButton}
+                {headerAction}
+              </span>
               <RailTitle>{title}</RailTitle>
             </>
           )}

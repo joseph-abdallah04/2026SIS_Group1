@@ -87,6 +87,9 @@ export function ArchiveQuestionList({
                   if (!isFocused) onSelect(question.id);
                 }}
                 status={statusChip(question)}
+                note={
+                  question.status === 'skipped' ? (question.skipReason ?? undefined) : undefined
+                }
               />
             );
           })}

@@ -278,15 +278,21 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
                   board.questionStatus === 'discussion' ? board.items.length : undefined
                 }
                 votes={{ voted: voting.votedCount, voters: voting.voterCount }}
-                boardLock={{
-                  locked: board.boardLocked,
-                  onToggle:
-                    isLeader && board.questionId
-                      ? () => setBoardLocked(board.questionId!, !board.boardLocked)
-                      : undefined,
-                }}
+                peopleCount={voice.participants.length || undefined}
+                timer={
+                  board.discussionTimer && board.questionId
+                    ? { questionId: board.questionId, ...board.discussionTimer }
+                    : null
+                }
               />
             }
+            boardLock={{
+              locked: board.boardLocked,
+              onToggle:
+                isLeader && board.questionId
+                  ? () => setBoardLocked(board.questionId!, !board.boardLocked)
+                  : undefined,
+            }}
             myProposals={
               <MyProposalsLauncher
                 sessionId={sessionId}

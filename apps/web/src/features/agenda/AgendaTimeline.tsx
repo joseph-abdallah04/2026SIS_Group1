@@ -105,22 +105,26 @@ interface AgendaStepProps {
   number: number;
   text: string;
   state: AgendaStepState;
-  /** The question the board is showing: lifted into the white card. */
+  /**
+   * The question the room is on: lifted into the white card, with its whole
+   * text larger and whatever rides on it. In the live agenda that is the
+   * question in play; in an ended session, the one being looked at.
+   */
   focused: boolean;
   /**
    * In play but not on screen, while the board looks back at another question:
    * tinted so the controls riding on it are still easy to find.
    */
   highlighted?: boolean;
-  /**
-   * Opened by the leader's click, to show what can be set on it before it
-   * starts. Present: the text button says whether it is open.
-   */
-  expanded?: boolean;
   /** Just added to the agenda: tinted for a moment so the room notices it. */
   fresh?: boolean;
   /** Nothing below it, so no line runs on from its node. */
   last: boolean;
+  /**
+   * Above the text: the card's status and timer, or "Up next" over the
+   * question that follows the one in play.
+   */
+  prefix?: ReactNode;
   /** Present: the question text is a button that puts this question up. */
   onSelect?: () => void;
   /**
@@ -133,7 +137,23 @@ interface AgendaStepProps {
   extraChips?: ReactNode;
   /** One quiet line under the chips: "5 proposals", "4 of 6 voted". */
   meta?: string;
-  /** Anything else on the card: the board lock. */
+  /**
+   * A line under the text that stays even on a compact row: why a question
+   * was skipped, which is part of the record.
+   */
+  note?: string;
+  /**
+   * In place of the text, while it is being reworded: the edit box. The row
+   * keeps its node and its place in the line.
+   */
+  textSlot?: ReactNode;
+  /**
+   * The row's own control in its top-right corner — the leader's ⋯ — shown
+   * on hover and focus, beside the text rather than under it, so nothing
+   * moves when it appears.
+   */
+  action?: ReactNode;
+  /** Anything else on the card. */
   children?: ReactNode;
 }
 
@@ -156,21 +176,24 @@ export function AgendaStep({
   state,
   focused,
   highlighted = false,
-  expanded,
   fresh = false,
   last,
+  prefix,
   onSelect,
   status,
   extraChips,
   meta,
+  note,
+  textSlot,
+  action,
   children,
 }: AgendaStepProps) {
   const stepRef = useRef<HTMLLIElement>(null);
   // A long agenda scrolls, and the board moving to a question below the fold
   // should not leave everyone hunting for it.
   useEffect(() => {
-    if (focused && stepRef.current) revealInList(stepRef.current);
-  }, [focused]);
+    if ((focused || highlighted) && stepRef.current) revealInList(stepRef.current);
+  }, [focused, highlighted]);
 
   const finished = state === 'answered' || state === 'skipped';
   // A finished question gives way to the ones still to come: two lines at
@@ -178,11 +201,13 @@ export function AgendaStep({
   // play always show their whole text and their status.
   const compact = finished && !focused && !highlighted;
   const showStatus = status && !compact;
-  const textClass = `text-left text-[12.5px] leading-snug wrap-break-word ${compact ? 'line-clamp-2' : ''} ${
+  const textClass = `text-left leading-snug wrap-break-word ${compact ? 'line-clamp-2' : ''} ${
+    focused ? 'text-[14.5px] font-semibold' : 'text-[12.5px]'
+  } ${
     state === 'skipped'
       ? 'text-rt-ink-faint line-through'
       : focused
-        ? 'font-medium text-rt-ink'
+        ? 'text-rt-ink'
         : finished
           ? 'text-rt-ink-muted'
           : 'text-rt-ink'
@@ -192,16 +217,18 @@ export function AgendaStep({
     <li
       ref={stepRef}
       aria-current={focused ? 'step' : undefined}
-      className={`relative flex gap-2.5 rounded-2xl border px-2.5 py-2 transition-colors duration-500 ${
+      className={`group/step relative flex gap-2.5 rounded-2xl border px-2.5 transition-colors duration-500 ${
         focused
-          ? 'border-rt-secondary bg-white shadow-sm'
-          : highlighted
-            ? 'border-rt-cool/40 bg-rt-cool-tint/60'
-            : expanded
-              ? 'border-rt-tertiary bg-white'
-              : fresh
-                ? 'border-transparent bg-rt-secondary-wash'
-                : 'border-transparent'
+          ? 'border-rt-secondary bg-white py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]'
+          : `py-2 ${
+              highlighted
+                ? 'border-rt-cool/40 bg-rt-cool-tint/60'
+                : textSlot
+                  ? 'border-rt-tertiary bg-white'
+                  : fresh
+                    ? 'border-transparent bg-rt-secondary-wash'
+                    : 'border-transparent'
+            }`
       }`}
     >
       {/* From under this node to just above the next one, across the gap and
@@ -216,12 +243,14 @@ export function AgendaStep({
         />
       )}
       <StepNode state={state} number={number} />
-      <div className="flex min-w-0 flex-1 flex-col pt-px">
-        {onSelect ? (
+      <div className={`flex min-w-0 flex-1 flex-col pt-px ${action && !textSlot ? 'pr-6' : ''}`}>
+        {prefix}
+        {textSlot ? (
+          textSlot
+        ) : onSelect ? (
           <button
             type="button"
             onClick={onSelect}
-            aria-expanded={expanded}
             title={compact ? text : undefined}
             className={`rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${textClass}`}
           >
@@ -242,11 +271,18 @@ export function AgendaStep({
         ) : status ? (
           <span className="sr-only">{status.label}</span>
         ) : null}
+        {note ? (
+          <p className="mt-0.5 text-[11px] leading-snug text-rt-ink-muted">
+            <span aria-hidden>↳ </span>
+            {note}
+          </p>
+        ) : null}
         {meta && !compact ? (
           <p className="mt-1.5 text-[11px] text-rt-ink-muted tabular-nums">{meta}</p>
         ) : null}
         {children}
       </div>
+      {textSlot ? null : action}
     </li>
   );
 }

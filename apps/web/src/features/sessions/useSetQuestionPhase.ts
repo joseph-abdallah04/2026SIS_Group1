@@ -19,11 +19,14 @@ export function useSetQuestionPhase(sessionId: string) {
   const [error, setError] = useState<string | null>(null);
 
   const setPhase = useCallback(
-    async (questionId: string, status: QuestionPhaseTarget): Promise<boolean> => {
+    async (questionId: string, status: QuestionPhaseTarget, reason?: string): Promise<boolean> => {
       setBusyQuestionId(questionId);
       setError(null);
       try {
-        await api.post(`/api/sessions/${sessionId}/phase`, { questionId, status });
+        // A skip may say why; nothing else carries a reason.
+        const body =
+          status === 'skipped' && reason ? { questionId, status, reason } : { questionId, status };
+        await api.post(`/api/sessions/${sessionId}/phase`, body);
         return true;
       } catch (err) {
         // The server's message is the useful one here — "Question 2 is still

@@ -39,7 +39,16 @@ interface PhaseTimerProps {
  * Shared session clock. The deadline is a server timestamp; this only paints
  * remaining time so every screen agrees on the same number.
  */
-export function PhaseTimer({ startedAt, durationSeconds, allowOvertime, label }: PhaseTimerProps) {
+export function PhaseTimer({
+  startedAt,
+  durationSeconds,
+  allowOvertime,
+  label,
+  compact = false,
+}: PhaseTimerProps & {
+  /** Just the time, for a card that already says what it is timing. */
+  compact?: boolean;
+}) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -49,6 +58,20 @@ export function PhaseTimer({ startedAt, durationSeconds, allowOvertime, label }:
 
   const remainingMs = Date.parse(startedAt) + durationSeconds * 1000 - now;
   const view = phaseTimerView(remainingMs, allowOvertime);
+
+  if (compact) {
+    return (
+      <span
+        role="timer"
+        aria-label={`${label} ${view.label}`}
+        className={`text-[12.5px] font-semibold tabular-nums ${
+          view.tone === 'over' ? 'text-red-600' : 'text-rt-ink-muted'
+        }`}
+      >
+        <span className={view.tone === 'warn' ? 'rt-timer-flash' : undefined}>{view.label}</span>
+      </span>
+    );
+  }
 
   return (
     <p

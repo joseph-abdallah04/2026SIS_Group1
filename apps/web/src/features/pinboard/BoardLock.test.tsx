@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { BoardLock } from './BoardLock';
+import { BoardLock, BoardLockControl } from './BoardLock';
 
 describe('BoardLock', () => {
   it('is a toggle for the leader, pressed while the board is locked', async () => {
@@ -44,5 +44,32 @@ describe('BoardLock', () => {
     render(<BoardLock locked={false} busy={false} />);
 
     expect(screen.getByRole('status')).toHaveTextContent('You can move your own proposals');
+  });
+});
+
+describe('BoardLockControl', () => {
+  it('holds the toggle while the change is on its way', async () => {
+    const user = userEvent.setup();
+    render(<BoardLockControl locked onToggle={() => new Promise(() => {})} />);
+
+    await user.click(screen.getByRole('button', { name: 'Board locked' }));
+    expect(screen.getByRole('button', { name: 'Board locked' })).toBeDisabled();
+  });
+
+  it('says why, when the lock could not be changed', async () => {
+    const user = userEvent.setup();
+    render(
+      <BoardLockControl
+        locked
+        onToggle={vi.fn(async () => {
+          throw new Error('Only the session leader can lock the board');
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Board locked' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Only the session leader can lock the board',
+    );
   });
 });
