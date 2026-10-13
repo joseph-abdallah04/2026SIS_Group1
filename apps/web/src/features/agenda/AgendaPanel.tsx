@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { Lightbulb, Pencil, Plus } from 'lucide-react';
+import { Lightbulb, Pencil, Plus, SkipForward } from 'lucide-react';
 import {
   SHORTLIST_MIN,
   type Question,
@@ -23,7 +23,11 @@ import {
   AgendaChip,
   AgendaStep,
   AgendaTimeline,
+  CARD_FOCUS_RING,
+  CARD_EDGE,
+  CARD_SHAPE,
   revealInList,
+  StepNode,
   ViewingChip,
   type AgendaChipTone,
   REORDER_MS,
@@ -142,20 +146,28 @@ function shortcutLabel(): string {
 }
 
 const PRIMARY_BUTTON =
-  'min-h-9 w-full rounded-full bg-rt-secondary px-3 py-1.5 text-[12.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+  'min-h-10 w-full rounded-full bg-rt-secondary px-3 py-1.5 text-[12.5px] font-semibold text-rt-ink shadow-sm transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
 const SECONDARY_BUTTON =
   'min-h-9 w-full rounded-full border border-rt-tertiary bg-white px-3 py-1.5 text-[12px] font-semibold text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
 const QUIET_LINK =
-  'self-center rounded-sm px-1 text-[12px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary';
+  'self-center rounded-sm px-1 text-[12.5px] font-medium text-[#667085] hover:text-rt-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary';
 const EYEBROW = 'text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase';
-/** The buttons of the forms that add a question or edit one. */
+/**
+ * The footer buttons of the forms that add a question or edit one: small and
+ * right-aligned, well below the live card's full-width action.
+ */
 const EDIT_PRIMARY =
-  'rounded-full bg-rt-secondary px-3.5 py-1 text-[12px] font-semibold text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-50';
+  'inline-flex h-7 items-center rounded-full bg-[#DFA243] px-3.5 text-[12.5px] font-semibold text-[#1F2328] transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFA243] disabled:opacity-45';
 const EDIT_TEXT_BUTTON =
-  'rounded-full px-2.5 py-1 text-[12px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline';
-/** A question being written or reworded: a box, so it is plain where to type. */
+  'inline-flex h-7 items-center rounded-full px-2.5 text-[12.5px] font-semibold text-[#475467] transition-colors hover:bg-[#EFEDE8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFA243]';
+/**
+ * A question being written or reworded: a box, so it is plain where to type.
+ * In the card's title type, so the words break where they do on the card, and
+ * the box's padding and edge (18px) are what the forms trade for the card's
+ * own spacing round its title: the shapes stay one height.
+ */
 const EDIT_BOX =
-  'min-w-0 rounded-xl border border-rt-tertiary bg-white px-2.5 py-1 text-[12.5px] leading-snug font-medium text-rt-ink outline-none transition-[border-color,box-shadow] placeholder:font-normal placeholder:text-rt-ink-faint focus:border-rt-secondary focus:ring-2 focus:ring-rt-secondary/30 disabled:opacity-60';
+  'min-w-0 rounded-xl border-[1.5px] border-[#D9D4CB] bg-white px-2.5 py-[7.5px] text-[14.5px] leading-snug font-semibold text-rt-ink outline-none transition-[border-color,box-shadow] placeholder:font-normal placeholder:text-rt-ink-faint focus:border-rt-secondary focus:ring-2 focus:ring-rt-secondary/30 disabled:opacity-60';
 
 /**
  * F41: how a question finishes, as two choices side by side — a vote, or a
@@ -187,7 +199,7 @@ function EndsWith({
         onClick={() => {
           if (!on) onChange(value);
         }}
-        className={`rounded-full px-3 font-semibold whitespace-nowrap transition-colors ${stretch ? 'flex-1 py-0.5' : 'py-1'} text-[11.5px] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rt-secondary disabled:opacity-60 ${
+        className={`rounded-full font-semibold whitespace-nowrap transition-colors ${stretch ? 'flex-1 px-2.5 py-0.5' : 'px-3 py-1'} text-[11.5px] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rt-secondary disabled:opacity-60 ${
           on ? 'bg-white text-rt-ink shadow-sm' : 'text-rt-ink-muted hover:text-rt-ink'
         }`}
       >
@@ -196,14 +208,16 @@ function EndsWith({
     );
   };
   return (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+    <div className={`flex flex-wrap items-center gap-y-1.5 ${stretch ? 'gap-x-2' : 'gap-x-2.5'}`}>
       <span id={labelId} className="text-[11.5px] whitespace-nowrap text-rt-ink-muted">
         Ends with
       </span>
       <div
         role="radiogroup"
         aria-labelledby={labelId}
-        className={`inline-flex rounded-full bg-rt-ink/[0.06] p-0.5 ${stretch ? 'min-w-0 flex-1' : ''}`}
+        // Filling the row, but never narrower than its two words: on a narrow
+        // panel it drops under "Ends with" and fills that line instead.
+        className={`inline-flex rounded-full bg-rt-ink/[0.06] p-0.5 ${stretch ? 'flex-1' : ''}`}
       >
         {option(true, 'A vote')}
         {option(false, 'Brainstorm')}
@@ -296,6 +310,15 @@ function landingIndex({ boxes, self }: RowLayout, offset: number) {
     }
   }
   return target;
+}
+
+/**
+ * How tall the card for the question in play is right now, if there is one.
+ * The add form opens at that height: its box starts empty, a line tall, and
+ * the card's question may run to more.
+ */
+function liveCardHeight() {
+  return document.querySelector<HTMLElement>('[data-agenda-card]')?.getBoundingClientRect().height;
 }
 
 /** How far the dragged row travels to sit in the gap opened at `target`. */
@@ -484,6 +507,8 @@ export function AgendaPanel({
   const { focus, error: focusError } = useFocusQuestion(sessionId);
   const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
   const [composing, setComposing] = useState(false);
+  // The card in play's height as the form opened, so it is the same shape.
+  const [composerMinHeight, setComposerMinHeight] = useState<number | undefined>(undefined);
   const [draft, setDraft] = useState('');
   const [draftVoting, setDraftVoting] = useState(true);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -504,11 +529,17 @@ export function AgendaPanel({
     knownIds.current = new Set(ids);
     if (!known) return;
     const added = ids.filter((id) => !known.has(id));
-    if (added.length === 0) return;
-    setFreshIds(added);
+    if (added.length > 0) setFreshIds(added);
+  }, [questions]);
+  // The tint fades on a clock of its own. Kept with the arrival above, it was
+  // cancelled by the next change to the agenda (a new question is usually
+  // followed straight away by another update) and never set again, so the
+  // tint stayed.
+  useEffect(() => {
+    if (freshIds.length === 0) return;
     const fade = window.setTimeout(() => setFreshIds([]), FRESH_MS);
     return () => window.clearTimeout(fade);
-  }, [questions]);
+  }, [freshIds]);
 
   const summary = summarizeAgenda(questions);
   const allDone = summary.total > 0 && summary.done === summary.total;
@@ -525,6 +556,16 @@ export function AgendaPanel({
   const controlled = openQuestion ?? firstPending;
   // The question that follows it, marked so the room can see what is coming.
   const upNext = openQuestion ? firstPending : undefined;
+  // The label opens out only when it moves to another question, once. Not
+  // whenever it is drawn: the list is drawn afresh each time the agenda is
+  // collapsed and opened again, and the label would grow in every time.
+  const [upNextArrivingId, setUpNextArrivingId] = useState<string | null>(null);
+  const lastUpNextId = useRef(upNext?.id);
+  useLayoutEffect(() => {
+    if (lastUpNextId.current === upNext?.id) return;
+    lastUpNextId.current = upNext?.id;
+    setUpNextArrivingId(upNext?.id ?? null);
+  }, [upNext?.id]);
   const next = controlled ? nextPhase(controlled) : undefined;
   const canSkip =
     controlled !== undefined && (controlled.status !== 'voting' || votingPhase !== 'closed');
@@ -614,7 +655,16 @@ export function AgendaPanel({
   }
 
   function startEditing(question: Question) {
-    setEditing({ id: question.id, draft: question.text, votingEnabled: question.votingEnabled });
+    setEditing({
+      id: question.id,
+      draft: question.text,
+      votingEnabled: question.votingEnabled,
+    });
+  }
+
+  function openComposer() {
+    setComposerMinHeight(liveCardHeight());
+    setComposing(true);
   }
 
   function editor(question: Question, index: number) {
@@ -632,7 +682,7 @@ export function AgendaPanel({
             setEditing(null);
           }
         }}
-        className="flex flex-col gap-2"
+        className="flex flex-1 flex-col gap-2"
       >
         <label className="sr-only" htmlFor={`agenda-edit-${question.id}`}>
           Question {index + 1}
@@ -661,7 +711,7 @@ export function AgendaPanel({
           disabled={busy}
           stretch
         />
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="mt-auto flex items-center justify-end gap-1.5">
           <button type="button" onClick={() => setEditing(null)} className={EDIT_TEXT_BUTTON}>
             Cancel
           </button>
@@ -688,7 +738,7 @@ export function AgendaPanel({
         : null;
 
     return (
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-3.5 flex flex-col gap-2">
         {notice ? <p className="text-[11.5px] leading-snug text-rt-ink-muted">{notice}</p> : null}
         {next ? (
           <button
@@ -920,7 +970,7 @@ export function AgendaPanel({
         canAdd ? (
           <button
             type="button"
-            onClick={() => setComposing(true)}
+            onClick={openComposer}
             disabled={composing}
             aria-label="Add a question"
             title="Add a question"
@@ -966,7 +1016,10 @@ export function AgendaPanel({
                 <EditButton
                   number={index + 1}
                   onClick={() => startEditing(question)}
-                  className="ml-auto"
+                  // Under the pointer, as on the rows below: the card's job is
+                  // its next step, and the pencil stays out of the way until
+                  // the leader reaches for it.
+                  className="ml-auto opacity-0 transition-opacity group-hover/step:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
                 />
               ) : null;
             const rowEdit =
@@ -978,15 +1031,43 @@ export function AgendaPanel({
                 />
               ) : undefined;
 
+            // Asking whether to skip it: the card itself turns into the
+            // question, rather than a second box opening under it.
+            const confirmingSkip = isCard && skippingId === question.id;
+
             // The card says where the room is: its status and clock on top,
             // the question, then what the leader can do with it.
-            const cardPrefix = isCard ? (
-              <div className="mb-1.5 flex min-h-6 items-center gap-2">
-                {status ? (
-                  <AgendaChip tone={status.tone}>{status.label}</AgendaChip>
-                ) : (
-                  <AgendaChip tone="neutral">Up next</AgendaChip>
-                )}
+            const cardPrefix = confirmingSkip ? (
+              <div className="mb-3 flex min-h-6 items-center gap-2">
+                <span className="-ml-[8.5px] flex">
+                  <AgendaChip
+                    tone="confirm"
+                    size="md"
+                    icon={
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-rt-tertiary bg-white text-rt-ink">
+                        <SkipForward aria-hidden size={10} strokeWidth={2.5} />
+                      </span>
+                    }
+                  >
+                    Skip this question?
+                  </AgendaChip>
+                </span>
+              </div>
+            ) : isCard ? (
+              <div className="mb-3 flex min-h-6 items-center gap-2">
+                {/* The card's mark sits in its status pill, pulled out into
+                    the column the rows' marks run down: the card's 16px
+                    padding and 1.5px edge less a row's 10px and 1px, plus the
+                    pill's own 2px before its mark. */}
+                <span className="-ml-[8.5px] flex">
+                  <AgendaChip
+                    tone={status ? status.tone : 'neutral'}
+                    size="md"
+                    icon={<StepNode state={stepState(question.status)} number={index + 1} />}
+                  >
+                    {status ? status.label : 'Up next'}
+                  </AgendaChip>
+                </span>
                 {brainstorm}
                 {timer && timer.questionId === question.id && question.status !== 'pending' ? (
                   <PhaseTimer
@@ -1000,7 +1081,12 @@ export function AgendaPanel({
                 {cardEdit}
               </div>
             ) : upNext?.id === question.id ? (
-              <span className={`${EYEBROW} rt-eyebrow-in mb-0.5`}>Up next</span>
+              <span
+                className={`${EYEBROW} mb-0.5 ${upNextArrivingId === question.id ? 'rt-eyebrow-in' : ''}`}
+                onAnimationEnd={() => setUpNextArrivingId(null)}
+              >
+                Up next
+              </span>
             ) : null;
 
             return (
@@ -1013,6 +1099,7 @@ export function AgendaPanel({
                 highlighted={lookingBack}
                 fresh={freshIds.includes(question.id)}
                 prefix={isEditing ? undefined : cardPrefix}
+                confirming={confirmingSkip}
                 // The leader can put any question's board up to look at —
                 // finished, or still to come — without changing where the room
                 // is. The row says "Viewing" while it is up.
@@ -1046,8 +1133,8 @@ export function AgendaPanel({
                 textSlot={editor(question, index)}
               >
                 {isCard && isLeader && !isEditing ? (
-                  skippingId === question.id ? (
-                    <div className="mt-3">
+                  confirmingSkip ? (
+                    <div className="mt-2">
                       <SkipConfirm
                         questionNumber={index + 1}
                         busy={phaseBusyId === question.id}
@@ -1068,9 +1155,10 @@ export function AgendaPanel({
             // is going on, then the box and its choices across the whole width.
             <li
               ref={composerRef}
-              className="rounded-2xl border border-rt-secondary bg-white px-2.5 py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]"
+              className={`flex flex-col rounded-2xl ${CARD_SHAPE} ${CARD_EDGE} ${CARD_FOCUS_RING}`}
+              style={{ minHeight: composerMinHeight }}
             >
-              <form onSubmit={(event) => void onAdd(event)} className="flex flex-col gap-2">
+              <form onSubmit={(event) => void onAdd(event)} className="flex flex-1 flex-col gap-2">
                 <div className="flex min-h-6 items-center gap-2.5">
                   <span
                     aria-hidden
@@ -1108,7 +1196,7 @@ export function AgendaPanel({
                   disabled={adding}
                   stretch
                 />
-                <div className="flex items-center justify-end gap-1.5">
+                <div className="mt-auto flex items-center justify-end gap-1.5">
                   <button type="button" onClick={closeComposer} className={EDIT_TEXT_BUTTON}>
                     Cancel
                   </button>
@@ -1129,7 +1217,7 @@ export function AgendaPanel({
               <button
                 ref={addButtonRef}
                 type="button"
-                onClick={() => setComposing(true)}
+                onClick={openComposer}
                 className="group/add flex w-full items-center gap-2.5 rounded-2xl border border-transparent px-2.5 py-2 text-left text-[12.5px] font-medium text-rt-ink-muted transition-colors hover:bg-white hover:text-rt-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-secondary"
               >
                 <span

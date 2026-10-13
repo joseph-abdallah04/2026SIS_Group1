@@ -16,28 +16,57 @@ import type { AgendaStepState } from './agendaSummary';
  */
 export const REORDER_MS = 240;
 
-export type AgendaChipTone = 'live' | 'done' | 'neutral' | 'outline';
+/**
+ * The one shape shared by the question in play, a question being edited, one
+ * being skipped and one being added. They are one height by construction, not
+ * by measuring: row for row, each takes the same room — a 24px header, the
+ * question in the same type at the same measure (the box around the text in
+ * the forms is matched by space round the card's title), and a foot of one
+ * height. So they match at any width, and a long question grows them all
+ * alike rather than being cut off.
+ */
+export const CARD_SHAPE = 'border-[1.5px] bg-white p-4';
+/**
+ * The card's title keeps clear at its end what the forms' text box gives to its
+ * padding and edge (10px and 1.5px a side), so the title and the text being
+ * edited break onto a new line at the same place.
+ */
+const CARD_TITLE_MEASURE = 'pr-[23px]';
+/** The shape's edge: amber, as the question in play is the room's. */
+export const CARD_EDGE = 'border-[#DFA243]';
+/** The forms' extra ring, round the shape above, saying they are being typed in. */
+export const CARD_FOCUS_RING = 'shadow-[0_0_0_4px_#FBEAD0]';
+
+export type AgendaChipTone = 'live' | 'done' | 'neutral' | 'outline' | 'confirm';
 
 const CHIP_TONE: Record<AgendaChipTone, string> = {
   live: 'bg-rt-cool-tint text-rt-cool-deep',
   done: 'bg-rt-secondary-wash text-rt-secondary-deep',
   neutral: 'bg-rt-surface-sunken text-rt-ink-faint',
   outline: 'border border-rt-tertiary bg-white text-rt-ink-muted',
+  confirm: 'bg-[#F2F0EB] text-[#475467]',
 };
 
 /** A question's status, as a small pill under its text. */
 export function AgendaChip({
   tone,
   icon,
+  size = 'sm',
   children,
 }: {
   tone: AgendaChipTone;
   icon?: ReactNode;
+  /** `md` for the card's status, which carries the card's mark. */
+  size?: 'sm' | 'md';
   children: ReactNode;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] leading-tight font-semibold ${CHIP_TONE[tone]}`}
+      className={`inline-flex items-center rounded-full leading-tight font-semibold ${
+        size === 'md'
+          ? 'gap-1.5 py-0.5 pr-2.5 pl-0.5 text-[12px]'
+          : 'gap-1 px-2 py-0.5 text-[10.5px]'
+      } ${CHIP_TONE[tone]}`}
     >
       {icon}
       {children}
@@ -66,7 +95,7 @@ const NODE_CLASS: Record<AgendaStepState, string> = {
  * answered, a skip mark once skipped, a dot while it is in play, and
  * its number while it is still to come.
  */
-function StepNode({
+export function StepNode({
   state,
   number,
   editing = false,
@@ -195,6 +224,8 @@ interface AgendaStepProps {
   shift?: number;
   /** Whether that movement eases rather than following the pointer exactly. */
   glide?: boolean;
+  /** The card asking to confirm something that cannot be undone: a dark edge. */
+  confirming?: boolean;
   /** Drag and drop wiring, onto the row itself. */
   liProps?: LiHTMLAttributes<HTMLLIElement>;
   /** Anything else on the card. */
@@ -234,6 +265,7 @@ export function AgendaStep({
   dragging = false,
   shift,
   glide = false,
+  confirming = false,
   liProps,
   children,
 }: AgendaStepProps) {
@@ -251,7 +283,7 @@ export function AgendaStep({
   const compact = finished && !focused && !highlighted;
   const showStatus = status && !compact;
   const textClass = `text-left leading-snug wrap-break-word ${compact ? 'line-clamp-2' : ''} ${
-    focused ? 'text-[14.5px] font-semibold' : 'text-[12.5px]'
+    focused ? `text-[14.5px] font-semibold ${CARD_TITLE_MEASURE}` : 'text-[12.5px]'
   } ${
     state === 'skipped'
       ? 'text-rt-ink-faint line-through'
@@ -267,24 +299,26 @@ export function AgendaStep({
       {...liProps}
       ref={stepRef}
       aria-current={focused ? 'step' : undefined}
-      style={
-        shift === undefined
-          ? undefined
+      // The add form opens at the card's height, so it reads as the same shape.
+      data-agenda-card={focused && !textSlot ? '' : undefined}
+      style={{
+        ...(shift === undefined
+          ? {}
           : {
               transform: `translateY(${shift}px)`,
               transition: glide
                 ? `transform ${REORDER_MS}ms cubic-bezier(0.25, 1, 0.5, 1)`
                 : 'none',
-            }
-      }
-      className={`group/step relative flex gap-2.5 rounded-2xl border px-2.5 transition-[background-color,border-color,opacity,box-shadow] duration-500 ${
+            }),
+      }}
+      className={`group/step relative flex gap-2.5 rounded-2xl transition-[background-color,border-color,opacity,box-shadow] duration-500 ${
         movable ? 'cursor-pointer select-none' : ''
       } ${dragging ? 'z-10 bg-white! shadow-[0_8px_20px_rgb(31_35_40/0.16)]' : ''} ${
-        focused
-          ? 'border-rt-secondary bg-white py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]'
+        focused && !textSlot
+          ? `${CARD_SHAPE} ${confirming ? 'border-rt-ink' : CARD_EDGE} shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]`
           : textSlot
-            ? 'border-rt-secondary bg-white py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]'
-            : `py-2 ${
+            ? `${CARD_SHAPE} ${CARD_EDGE} ${CARD_FOCUS_RING}`
+            : `border px-2.5 py-2 ${
                 highlighted
                   ? 'border-rt-cool/40 bg-rt-cool-tint/60'
                   : fresh
@@ -293,11 +327,15 @@ export function AgendaStep({
               }`
       }`}
     >
-      {textSlot ? (
+      {focused && !textSlot ? (
+        // The card: its mark rides in its status pill, so the question and
+        // what can be done with it have the card's whole width.
+        content()
+      ) : textSlot ? (
         // Being edited: a header naming what is going on, with the number and
         // anything about the question beside it, then the editor across the
         // whole width, so the text box has room.
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-[7.5px]">
           <div className="flex min-h-6 items-center gap-2.5">
             <StepNode state={state} number={number} editing />
             <span className="text-[12.5px] font-medium text-rt-ink-muted">Editing question</span>
@@ -309,10 +347,8 @@ export function AgendaStep({
         </div>
       ) : (
         <>
-          {/* On the card the node sits level with its status row, which is
-              the height of the edit button beside it; elsewhere, with the
-              first line of the text. */}
-          <span className={`flex shrink-0 ${focused && prefix ? 'h-6 items-center' : ''}`}>
+          {/* Level with the first line of the text. */}
+          <span className="flex shrink-0">
             <StepNode state={state} number={number} />
           </span>
           {content()}
@@ -360,7 +396,8 @@ export function AgendaStep({
         {meta && !compact ? (
           <p className="mt-1.5 text-[11px] text-rt-ink-muted tabular-nums">{meta}</p>
         ) : null}
-        {children}
+        {/* On the card, its buttons sit at the foot of the shape. */}
+        {focused && children ? <div className="mt-auto">{children}</div> : children}
       </div>
     );
   }

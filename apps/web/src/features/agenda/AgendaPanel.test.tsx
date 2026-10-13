@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Question, QuestionStatus, VotingPhase } from '@roundtable/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -220,6 +220,32 @@ describe('AgendaPanel (F24)', () => {
     }
   });
 
+  // A new question is usually followed at once by another update (its place,
+  // the next one's). The tint used to be cancelled by that update and stay.
+  it('fades the tint on a new question even when the agenda changes again straight away', () => {
+    vi.useFakeTimers();
+    try {
+      const first = [question(0, 'discussion'), question(1, 'pending')];
+      const { rerender } = renderPanel({ questions: first, activeQuestionId: 'q1' });
+      const panel = (questions: Question[]) => (
+        <AgendaPanel sessionId="s1" questions={questions} activeQuestionId="q1" isLeader />
+      );
+      const added = [...first, question(2, 'pending')];
+      rerender(panel(added));
+      const row = () => inList('Question 3').closest('li')!;
+      expect(row()).toHaveClass('bg-rt-secondary-wash');
+
+      // Another update a moment later, with nothing new in it.
+      act(() => vi.advanceTimersByTime(200));
+      rerender(panel(added.map((item) => ({ ...item }))));
+      act(() => vi.advanceTimersByTime(2000));
+
+      expect(row()).not.toHaveClass('bg-rt-secondary-wash');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not say "Viewing" when the board is on the question in play', () => {
     renderPanel({
       questions: [question(0, 'answered'), question(1, 'discussion')],
@@ -393,10 +419,15 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     expect(post).not.toHaveBeenCalled();
-    expect(screen.getByText('Skip Q1?')).toBeInTheDocument();
+    // The card turns into the question: a dark edge, its own pill, no pencil.
+    expect(screen.getByText('Skip this question?')).toBeInTheDocument();
+    expect(
+      screen.getByText('It can’t be reopened. Proposals stay on the board.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit question 1' })).not.toBeInTheDocument();
 
     // The confirmation's own button skips it.
-    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }));
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
       questionId: 'q1',
       status: 'skipped',
@@ -410,7 +441,7 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(post).not.toHaveBeenCalled();
-    expect(screen.queryByText('Skip Q1?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip this question?')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open voting' })).toBeInTheDocument();
   });
 
@@ -818,8 +849,8 @@ describe('AgendaPanel skipping', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
-    expect(screen.getByText('Skip Q1?')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
+    expect(screen.getByText('Skip this question?')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
       questionId: 'q1',
@@ -847,7 +878,7 @@ describe('AgendaPanel skipping', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/phase', {
       questionId: 'q2',
@@ -870,7 +901,7 @@ describe('AgendaPanel skipping', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Skip question' }));
     await userEvent.keyboard('{Escape}');
 
-    expect(screen.queryByText('Skip Q1?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip this question?')).not.toBeInTheDocument();
     expect(post).not.toHaveBeenCalled();
   });
 });
