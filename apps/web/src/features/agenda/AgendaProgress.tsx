@@ -12,8 +12,7 @@ const SEGMENT_CLASS: Record<AgendaStepState, string> = {
   // The same colours as their nodes in the list below.
   answered: 'bg-rt-secondary',
   skipped: 'bg-rt-tertiary/40',
-  // The app's "live" colour, as on the header's live dot. Steady: the node in
-  // the list already pulses, and a bar fading in and out pulls the eye.
+  // The app's "live" colour, as on the live question's node in the list.
   live: 'bg-rt-cool',
   pending: 'bg-rt-tertiary/50',
 };
@@ -70,7 +69,7 @@ export function AgendaProgress({
   current?: number;
   vertical?: boolean;
 }) {
-  const { answered, done, skipped, total, steps } = summary;
+  const { done, total, steps } = summary;
   if (total === 0) return null;
   const allDone = done === total;
 
@@ -96,7 +95,7 @@ export function AgendaProgress({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div aria-hidden className="flex items-baseline justify-between gap-2">
+      <div aria-hidden className="flex items-baseline gap-2">
         {allDone ? (
           <span className="flex items-center gap-1 text-[12px] font-semibold text-rt-secondary-deep">
             <Check size={12} strokeWidth={3} className="shrink-0 self-center" />
@@ -117,11 +116,6 @@ export function AgendaProgress({
             </span>
           </span>
         )}
-        {done > 0 && !allDone ? (
-          <span className="shrink-0 text-[11px] text-rt-ink-muted tabular-nums">
-            {answered} answered{skipped > 0 ? ` · ${skipped} skipped` : ''}
-          </span>
-        ) : null}
       </div>
       <div {...meter}>
         <Segments steps={steps} vertical={false} />

@@ -9,6 +9,13 @@ import type { AgendaStepState } from './agendaSummary';
  * over or never reached, and `outline` is a note beside the status rather
  * than a status.
  */
+/**
+ * How long a row takes to slide out of a dragged question's way, or for the
+ * dragged one to ease into its place. Long enough to follow by eye, short
+ * enough to keep up with the pointer.
+ */
+export const REORDER_MS = 240;
+
 export type AgendaChipTone = 'live' | 'done' | 'neutral' | 'outline';
 
 const CHIP_TONE: Record<AgendaChipTone, string> = {
@@ -179,12 +186,15 @@ interface AgendaStepProps {
   hoverable?: boolean;
   /** Can be picked up and moved: the pointer cursor, and no text selection. */
   movable?: boolean;
-  /** Being dragged: lifted and following the pointer up and down. */
+  /** Being dragged: lifted off the list, following the pointer up and down. */
   dragging?: boolean;
-  /** How far the dragged row has travelled from where it was, in pixels. */
-  dragOffset?: number;
-  /** Where a dragged question would land, if dropped here. */
-  dropIndicator?: 'before' | 'after' | null;
+  /**
+   * While a question is dragged, how far this row has moved, in pixels: the
+   * dragged one with the pointer, the rest sliding out of its way.
+   */
+  shift?: number;
+  /** Whether that movement eases rather than following the pointer exactly. */
+  glide?: boolean;
   /** Drag and drop wiring, onto the row itself. */
   liProps?: LiHTMLAttributes<HTMLLIElement>;
   /** Anything else on the card. */
@@ -222,8 +232,8 @@ export function AgendaStep({
   hoverable = false,
   movable = false,
   dragging = false,
-  dragOffset = 0,
-  dropIndicator = null,
+  shift,
+  glide = false,
   liProps,
   children,
 }: AgendaStepProps) {
@@ -258,43 +268,65 @@ export function AgendaStep({
       ref={stepRef}
       aria-current={focused ? 'step' : undefined}
       style={
-        dragging ? { ...liProps?.style, transform: `translateY(${dragOffset}px)` } : liProps?.style
+        shift === undefined
+          ? undefined
+          : {
+              transform: `translateY(${shift}px)`,
+              transition: glide
+                ? `transform ${REORDER_MS}ms cubic-bezier(0.25, 1, 0.5, 1)`
+                : 'none',
+            }
       }
       className={`group/step relative flex gap-2.5 rounded-2xl border px-2.5 transition-[background-color,border-color,opacity,box-shadow] duration-500 ${
         movable ? 'cursor-pointer select-none' : ''
-      } ${dragging ? 'z-10 bg-white shadow-[0_6px_16px_rgb(31_35_40/0.14)] duration-0' : ''} ${
+      } ${dragging ? 'z-10 bg-white! shadow-[0_8px_20px_rgb(31_35_40/0.16)]' : ''} ${
         focused
           ? 'border-rt-secondary bg-white py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]'
           : textSlot
-            ? 'border-rt-secondary bg-white py-2.5 shadow-[0_0_0_3px_var(--color-rt-secondary-wash)]'
+            ? 'border-rt-secondary bg-white py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]'
             : `py-2 ${
                 highlighted
                   ? 'border-rt-cool/40 bg-rt-cool-tint/60'
                   : fresh
                     ? 'border-transparent bg-rt-secondary-wash'
-                    : `border-transparent ${hoverable ? 'hover:bg-rt-ink/[0.035] focus-within:bg-rt-ink/[0.035]' : ''}`
+                    : `border-transparent ${hoverable && !dragging ? 'hover:bg-rt-ink/[0.035] focus-within:bg-rt-ink/[0.035]' : ''}`
               }`
       }`}
     >
-      {dropIndicator ? (
-        <span
-          aria-hidden
-          className={`pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-rt-secondary ${
-            dropIndicator === 'before' ? '-top-[3px]' : '-bottom-[3px]'
-          }`}
-        />
-      ) : null}
-      {/* On the card the node sits level with its status row, which is the
-          height of the edit button beside it; elsewhere, with the first line of
-          the text. */}
-      <span className={`flex shrink-0 ${focused && prefix ? 'h-6 items-center' : ''}`}>
-        <StepNode state={state} number={number} editing={Boolean(textSlot)} />
-      </span>
-      <div className={`flex min-w-0 flex-1 flex-col pt-px ${action && !textSlot ? 'pr-6' : ''}`}>
+      {textSlot ? (
+        // Being edited: a header naming what is going on, with the number and
+        // anything about the question beside it, then the editor across the
+        // whole width, so the text box has room.
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex min-h-6 items-center gap-2.5">
+            <StepNode state={state} number={number} editing />
+            <span className="text-[12.5px] font-medium text-rt-ink-muted">Editing question</span>
+            {extraChips ? (
+              <span className="ml-auto flex items-center gap-1">{extraChips}</span>
+            ) : null}
+          </div>
+          {textSlot}
+        </div>
+      ) : (
+        <>
+          {/* On the card the node sits level with its status row, which is
+              the height of the edit button beside it; elsewhere, with the
+              first line of the text. */}
+          <span className={`flex shrink-0 ${focused && prefix ? 'h-6 items-center' : ''}`}>
+            <StepNode state={state} number={number} />
+          </span>
+          {content()}
+        </>
+      )}
+      {textSlot ? null : action}
+    </li>
+  );
+
+  function content() {
+    return (
+      <div className={`flex min-w-0 flex-1 flex-col pt-px ${action ? 'pr-6' : ''}`}>
         {prefix}
-        {textSlot ? (
-          textSlot
-        ) : onSelect ? (
+        {onSelect ? (
           <button
             type="button"
             onClick={onSelect}
@@ -330,9 +362,8 @@ export function AgendaStep({
         ) : null}
         {children}
       </div>
-      {textSlot ? null : action}
-    </li>
-  );
+    );
+  }
 }
 
 /** The list the steps sit in. Scrolls on its own under the progress header. */

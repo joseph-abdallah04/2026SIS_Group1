@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Lightbulb, Pencil, Plus } from 'lucide-react';
 import {
   SHORTLIST_MIN,
@@ -26,6 +26,7 @@ import {
   revealInList,
   ViewingChip,
   type AgendaChipTone,
+  REORDER_MS,
 } from './AgendaTimeline';
 import { SkipConfirm } from './SkipConfirm';
 
@@ -146,57 +147,35 @@ const SECONDARY_BUTTON =
   'min-h-9 w-full rounded-full border border-rt-tertiary bg-white px-3 py-1.5 text-[12px] font-semibold text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
 const QUIET_LINK =
   'self-center rounded-sm px-1 text-[12px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary';
-const SMALL_PRIMARY =
-  'rounded-full bg-rt-secondary px-3 py-1 text-[11.5px] font-semibold text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-50';
-const SMALL_TEXT_BUTTON =
-  'rounded-full px-2 py-1 text-[11.5px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline';
 const EYEBROW = 'text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase';
+/** The buttons of the forms that add a question or edit one. */
+const EDIT_PRIMARY =
+  'rounded-full bg-rt-secondary px-3.5 py-1 text-[12px] font-semibold text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-50';
+const EDIT_TEXT_BUTTON =
+  'rounded-full px-2.5 py-1 text-[12px] font-medium text-rt-ink-muted hover:text-rt-ink hover:underline';
 /** A question being written or reworded: a box, so it is plain where to type. */
-const TEXT_BOX =
-  'min-w-0 rounded-lg border border-rt-tertiary bg-white px-2.5 py-1.5 text-[12.5px] leading-snug font-medium text-rt-ink outline-none transition-[border-color,box-shadow] placeholder:font-normal placeholder:text-rt-ink-faint focus:border-rt-secondary focus:ring-2 focus:ring-rt-secondary/30 disabled:opacity-60';
-
-/** A choice in the add-question composer: pressed or not. */
-function ComposerChip({
-  pressed,
-  onClick,
-  disabled,
-  children,
-}: {
-  pressed: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      disabled={disabled}
-      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary ${
-        pressed
-          ? 'border-rt-secondary/50 bg-rt-secondary-wash text-rt-secondary-deep'
-          : 'border-rt-tertiary bg-white text-rt-ink-faint hover:text-rt-ink-muted'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
+const EDIT_BOX =
+  'min-w-0 rounded-xl border border-rt-tertiary bg-white px-2.5 py-1 text-[12.5px] leading-snug font-medium text-rt-ink outline-none transition-[border-color,box-shadow] placeholder:font-normal placeholder:text-rt-ink-faint focus:border-rt-secondary focus:ring-2 focus:ring-rt-secondary/30 disabled:opacity-60';
 
 /**
  * F41: how a question finishes, as two choices side by side — a vote, or a
- * brainstorm that ends with the board as it is.
+ * brainstorm that ends with the board as it is. The same control when adding a
+ * question and when editing one, so the choice looks the same both times.
  */
 function EndsWith({
   votingEnabled,
   onChange,
   disabled = false,
+  stretch = false,
 }: {
   votingEnabled: boolean;
   onChange: (votingEnabled: boolean) => void;
   disabled?: boolean;
+  /** Fill the row: the editor's choice runs to the edge of the text box above it. */
+  stretch?: boolean;
 }) {
+  // Both forms can be open at once, so the label's id cannot be a fixed one.
+  const labelId = useId();
   const option = (value: boolean, label: string) => {
     const on = votingEnabled === value;
     return (
@@ -208,7 +187,7 @@ function EndsWith({
         onClick={() => {
           if (!on) onChange(value);
         }}
-        className={`rounded-full px-3 py-1 text-[11.5px] font-semibold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rt-secondary disabled:opacity-60 ${
+        className={`rounded-full px-3 font-semibold whitespace-nowrap transition-colors ${stretch ? 'flex-1 py-0.5' : 'py-1'} text-[11.5px] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rt-secondary disabled:opacity-60 ${
           on ? 'bg-white text-rt-ink shadow-sm' : 'text-rt-ink-muted hover:text-rt-ink'
         }`}
       >
@@ -218,19 +197,112 @@ function EndsWith({
   };
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-      <span id="agenda-ends-with" className="text-[11.5px] whitespace-nowrap text-rt-ink-muted">
+      <span id={labelId} className="text-[11.5px] whitespace-nowrap text-rt-ink-muted">
         Ends with
       </span>
       <div
         role="radiogroup"
-        aria-labelledby="agenda-ends-with"
-        className="inline-flex rounded-full bg-rt-ink/[0.06] p-0.5"
+        aria-labelledby={labelId}
+        className={`inline-flex rounded-full bg-rt-ink/[0.06] p-0.5 ${stretch ? 'min-w-0 flex-1' : ''}`}
       >
         {option(true, 'A vote')}
         {option(false, 'Brainstorm')}
       </div>
     </div>
   );
+}
+
+/** Where the rows a dragged question can trade places with sat when it lifted. */
+interface RowLayout {
+  ids: string[];
+  boxes: { top: number; bottom: number }[];
+  /** The dragged row's index. */
+  self: number;
+  /** How far a row slides to make room: the dragged row's height and the gap after it. */
+  step: number;
+  /** How far up and down the dragged row may travel: level with the first and the last. */
+  min: number;
+  max: number;
+}
+
+/**
+ * Measured once, as the drag begins: the rows are about to slide, and their
+ * boxes from then on would say where they have gone, not where they belong.
+ */
+function measureRows(row: HTMLElement, id: string): RowLayout {
+  const list = row.parentElement;
+  const rows = list ? [...list.querySelectorAll<HTMLElement>('[data-question-id]')] : [row];
+  const ids = rows.map((element) => element.dataset.questionId ?? '');
+  const boxes = rows.map((element) => {
+    const box = element.getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom };
+  });
+  const self = Math.max(0, ids.indexOf(id));
+  const gap = list ? Number.parseFloat(getComputedStyle(list).rowGap) || 0 : 0;
+  const own = boxAt(boxes, self);
+  return {
+    ids,
+    boxes,
+    self,
+    step: own.bottom - own.top + gap,
+    min: Math.min(0, boxAt(boxes, 0).top - own.top),
+    max: Math.max(0, boxAt(boxes, boxes.length - 1).bottom - own.bottom),
+  };
+}
+
+function boxAt(boxes: RowLayout['boxes'], index: number) {
+  return boxes[index] ?? { top: 0, bottom: 0 };
+}
+
+/** The most a dragged row moves past the first or last question it can trade with. */
+const RUBBER_MAX = 14;
+
+/**
+ * How far a row dragged `overshoot` pixels past its limit actually goes: about
+ * a third as far at first, closing on `RUBBER_MAX` however far it is pulled.
+ */
+function rubberBand(overshoot: number) {
+  return Math.sign(overshoot) * RUBBER_MAX * (1 - Math.exp(-Math.abs(overshoot) / 40));
+}
+
+/** `questions`, with the ones in `held` back in that order, in the places they fill. */
+function holdOrder(questions: Question[], held: string[]) {
+  const byId = new Map(questions.map((question) => [question.id, question]));
+  const queue = held.flatMap((id) => byId.get(id) ?? []);
+  if (queue.length !== held.length) return questions;
+  return questions.map((question) =>
+    held.includes(question.id) ? (queue.shift() ?? question) : question,
+  );
+}
+
+/**
+ * Whose place a dragged row takes: the furthest row its leading edge has
+ * passed the middle of, going the way it is moving. Edges rather than the
+ * dragged row's own middle, which on a row taller than the rest (the one being
+ * viewed, with its chip) could still sit inside its own place with the row
+ * already as far as it can go.
+ */
+function landingIndex({ boxes, self }: RowLayout, offset: number) {
+  const own = boxAt(boxes, self);
+  const middle = (index: number) => (boxAt(boxes, index).top + boxAt(boxes, index).bottom) / 2;
+  let target = self;
+  if (offset > 0) {
+    for (let i = self + 1; i < boxes.length; i++) {
+      if (middle(i) <= own.bottom + offset) target = i;
+    }
+  } else if (offset < 0) {
+    for (let i = self - 1; i >= 0; i--) {
+      if (middle(i) >= own.top + offset) target = i;
+    }
+  }
+  return target;
+}
+
+/** How far the dragged row travels to sit in the gap opened at `target`. */
+function landingOffset({ boxes, self }: RowLayout, target: number) {
+  const own = boxAt(boxes, self);
+  const there = boxAt(boxes, target);
+  return target > self ? there.bottom - own.bottom : there.top - own.top;
 }
 
 /**
@@ -315,15 +387,88 @@ export function AgendaPanel({
     draft: string;
     votingEnabled: boolean;
   } | null>(null);
-  // Dragging a question to a new place: which one, how far it has travelled,
-  // and which question's place it would take.
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState(0);
+  // A question being dragged to a new place: how far it has travelled, and how
+  // far each row it has passed has slid to make room for it. `settling` once
+  // it is let go, while it eases into its new place and the new order is on
+  // its way from the server; `expected` is that order.
+  const [drag, setDrag] = useState<{
+    id: string;
+    offset: number;
+    shifts: Record<string, number>;
+    settling: boolean;
+    expected?: string;
+    /** The order the rows were in when it lifted, held until `expected` arrives. */
+    held?: string[];
+  } | null>(null);
   // A press on a row that might become a drag, and whether the click that
   // follows a drag should be swallowed rather than open that question's board.
-  const press = useRef<{ id: string; pointerId: number; startY: number } | null>(null);
+  const press = useRef<{
+    id: string;
+    pointerId: number;
+    startY: number;
+    /** Where the rows sat when it became a drag. */
+    layout?: RowLayout;
+    /** The row whose place it would take, as an index into the layout. */
+    target?: number;
+  } | null>(null);
   const swallowClick = useRef(false);
+  // The move is sent once the dropped row has eased into its gap.
+  const placeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(placeTimer.current), []);
+  // The new order arrives with every row already where it puts them, so the
+  // slides come off in the very render that brings it: a frame later, and the
+  // new order would flash with the old offsets still on it. Until it comes
+  // the rows hold their places; a drop that moves nothing, or a move that
+  // fails, eases back first.
+  const pendingOrder = questions
+    .filter((question) => question.status === 'pending')
+    .map((question) => question.id)
+    .join();
+  const shownDrag = drag?.settling && drag.expected === pendingOrder ? null : drag;
+  // A move past several questions arrives as several updates, one question at
+  // a time. The list keeps the order it was dragged in until the last of them
+  // lands, rather than passing through the steps in between under rows that
+  // are still slid aside for the old one.
+  const listed = shownDrag?.held ? holdOrder(questions, shownDrag.held) : questions;
+  // Where each row sat, settled, when a dropped question's move was sent, from
+  // the top of the list. The new order can still change a row's height: the
+  // "Up next" label moves to whichever question is now first. So when it
+  // lands, every row glides from where it was shown to where it now is,
+  // rather than jumping the difference.
+  const landed = useRef<{ list: HTMLElement; tops: Record<string, number> } | null>(null);
+  const wasDragging = useRef(false);
+  useLayoutEffect(() => {
+    const ended = wasDragging.current && !shownDrag;
+    wasDragging.current = Boolean(shownDrag);
+    const from = landed.current;
+    if (!ended || !from) return;
+    landed.current = null;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const listTop = from.list.getBoundingClientRect().top;
+    for (const row of from.list.querySelectorAll<HTMLElement>('[data-question-id]')) {
+      const was = from.tops[row.dataset.questionId ?? ''];
+      if (was === undefined || typeof row.animate !== 'function') continue;
+      const delta = was - (row.getBoundingClientRect().top - listTop);
+      if (Math.abs(delta) < 0.5) continue;
+      row.animate([{ transform: `translateY(${delta}px)` }, { transform: 'none' }], {
+        duration: REORDER_MS,
+        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+      });
+    }
+  }, [shownDrag]);
+  useEffect(() => {
+    if (!drag?.settling) return;
+    if (drag.expected !== undefined && drag.expected === pendingOrder) {
+      setDrag(null);
+      return;
+    }
+    // A broadcast that never comes should not leave the rows slid aside.
+    const timer = window.setTimeout(
+      () => setDrag(null),
+      drag.expected === undefined ? REORDER_MS : 4000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [drag, pendingOrder]);
   const {
     setPhase,
     busyQuestionId: phaseBusyId,
@@ -487,7 +632,7 @@ export function AgendaPanel({
             setEditing(null);
           }
         }}
-        className="flex flex-col gap-2.5"
+        className="flex flex-col gap-2"
       >
         <label className="sr-only" htmlFor={`agenda-edit-${question.id}`}>
           Question {index + 1}
@@ -508,26 +653,25 @@ export function AgendaPanel({
           }}
           maxLength={SESSION_QUESTION_TEXT_MAX}
           disabled={busy}
-          className={`field-sizing-content w-full resize-none ${TEXT_BOX}`}
+          className={`field-sizing-content w-full resize-none ${EDIT_BOX}`}
         />
         <EndsWith
           votingEnabled={editing.votingEnabled}
           onChange={(votingEnabled) => setEditing({ ...editing, votingEnabled })}
           disabled={busy}
+          stretch
         />
-        <div className="flex items-center justify-end gap-2">
-          <span className="flex items-center gap-1">
-            <button type="button" onClick={() => setEditing(null)} className={SMALL_TEXT_BUTTON}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy || editing.draft.trim().length === 0}
-              className={SMALL_PRIMARY}
-            >
-              {busy ? 'Saving…' : 'Save'}
-            </button>
-          </span>
+        <div className="flex items-center justify-end gap-1.5">
+          <button type="button" onClick={() => setEditing(null)} className={EDIT_TEXT_BUTTON}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || editing.draft.trim().length === 0}
+            className={EDIT_PRIMARY}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
         </div>
       </form>
     );
@@ -600,80 +744,137 @@ export function AgendaPanel({
    * A question still to come is dragged by the whole row to another place
    * among the questions still to come, so there is no small target to find.
    *
+   * The row lifts and follows the pointer up and down, no further than the
+   * first and last of those questions, and the rows it passes slide out of its
+   * way: the gap is always where it would land, so the new order shows before
+   * it is let go. Let go, it eases into the gap.
+   *
    * Pointer events rather than the browser's drag and drop: that draws its own
    * cursor over the page and a ghost image of the row, and neither can be
-   * changed. Here the row itself lifts and follows the pointer up and down,
-   * and the cursor stays the pointer the row already shows.
+   * changed. Here the cursor stays the pointer the row already shows.
    *
    * A press that does not travel is still a click: on the text, it puts that
    * question's board up. The keyboard moves it from its text (`reorderKeys`).
    */
-  function dragWiring(question: Question, index: number) {
+  function dragWiring(question: Question) {
     if (!isLeader || question.status !== 'pending') return {};
-    // Any question still to come can take a dragged one's place, the card's
+    // Any question still to come can make way for a dragged one, the card's
     // included; only rows that are not the card or being edited pick up.
     const droppable = { 'data-question-id': question.id } as React.LiHTMLAttributes<HTMLLIElement>;
-    const isCardRow = question.id === controlled?.id;
-    const from = dragId ? questions.findIndex((row) => row.id === dragId) : -1;
-    const isTarget = dragId !== null && overId === question.id && dragId !== question.id;
-    const dropIndicator = isTarget
-      ? from > index
-        ? ('before' as const)
-        : ('after' as const)
-      : null;
-    if (isCardRow || editing?.id === question.id) return { dropIndicator, liProps: droppable };
+    const lifted = shownDrag?.id === question.id;
+    const motion = shownDrag
+      ? {
+          shift: lifted ? shownDrag.offset : (shownDrag.shifts[question.id] ?? 0),
+          // The lifted row is the pointer's until it is let go.
+          glide: !lifted || shownDrag.settling,
+        }
+      : {};
+    if (question.id === controlled?.id || editing?.id === question.id) {
+      return { ...motion, liProps: droppable };
+    }
 
-    const reset = () => {
-      press.current = null;
-      setDragId(null);
-      setOverId(null);
-      setDragOffset(0);
-    };
     return {
-      dropIndicator,
+      ...motion,
       movable: true,
-      dragging: dragId === question.id,
-      dragOffset: dragId === question.id ? dragOffset : 0,
+      dragging: lifted,
       liProps: {
         ...droppable,
         onPointerDown: (event: React.PointerEvent<HTMLLIElement>) => {
-          if (event.button !== 0) return;
+          if (event.button !== 0 || drag) return;
           // Its own controls are their own presses.
           if ((event.target as HTMLElement).closest('[data-no-drag]')) return;
+          // Text left selected anywhere on the page, the card's say, would
+          // otherwise be what moves: the browser drags the selection instead
+          // and cancels this press, so the row never lifts.
+          window.getSelection()?.removeAllRanges();
           press.current = { id: question.id, pointerId: event.pointerId, startY: event.clientY };
         },
+        onDragStart: (event: React.DragEvent<HTMLLIElement>) => event.preventDefault(),
         onPointerMove: (event: React.PointerEvent<HTMLLIElement>) => {
           const started = press.current;
           if (!started || started.pointerId !== event.pointerId) return;
           const travelled = event.clientY - started.startY;
-          if (dragId !== question.id) {
+          if (!started.layout) {
             // A few pixels of wobble is still a click.
             if (Math.abs(travelled) < 4) return;
             event.currentTarget.setPointerCapture(event.pointerId);
-            setDragId(question.id);
+            started.layout = measureRows(event.currentTarget, question.id);
           }
-          setDragOffset(travelled);
-          // Which other question's row the pointer is over, from where those
-          // rows sit. Not `elementFromPoint`: the dragged row travels under the
-          // pointer, so that would only ever find the row being dragged.
-          const list = event.currentTarget.parentElement;
-          const rows = list ? [...list.querySelectorAll<HTMLElement>('[data-question-id]')] : [];
-          const target = rows.find((row) => {
-            if (row.dataset.questionId === question.id) return false;
-            const box = row.getBoundingClientRect();
-            return event.clientY >= box.top && event.clientY <= box.bottom;
-          });
-          setOverId(target?.dataset.questionId ?? null);
+          const { ids, self, step, min, max } = started.layout;
+          const offset = Math.min(max, Math.max(min, travelled));
+          const target = landingIndex(started.layout, offset);
+          started.target = target;
+          // Every row between its place and the one it would take slides one
+          // place towards where it came from.
+          const shifts: Record<string, number> = {};
+          for (let i = Math.min(self, target); i <= Math.max(self, target); i++) {
+            const id = ids[i];
+            if (i !== self && id) shifts[id] = target > self ? -step : step;
+          }
+          // Past the first or last, the row gives a little and no more, so
+          // the end is felt rather than hit; let go, it springs back.
+          const give = rubberBand(travelled - offset);
+          setDrag({ id: question.id, offset: offset + give, shifts, settling: false });
         },
-        onPointerUp: () => {
-          const moving = dragId === question.id;
-          const target = overId;
-          reset();
-          if (!moving) return;
+        onPointerUp: (event: React.PointerEvent<HTMLLIElement>) => {
+          const started = press.current;
+          press.current = null;
+          const layout = started?.layout;
+          if (!layout || started.target === undefined) return;
           swallowClick.current = true;
-          if (target) void place(question.id, target);
+          const { ids, self } = layout;
+          const target = started.target;
+          const onto = ids[target];
+          if (target === self || !onto) {
+            // Back where it started: ease home.
+            setDrag({ id: question.id, offset: 0, shifts: {}, settling: true });
+            return;
+          }
+          const expected = ids.filter((id) => id !== question.id);
+          expected.splice(target, 0, question.id);
+          const list = event.currentTarget.parentElement;
+          if (list) {
+            const listTop = list.getBoundingClientRect().top;
+            const shifts = drag?.shifts ?? {};
+            landed.current = {
+              list,
+              tops: Object.fromEntries(
+                ids.map((id, i) => [
+                  id,
+                  boxAt(layout.boxes, i).top -
+                    listTop +
+                    (i === self ? landingOffset(layout, target) : (shifts[id] ?? 0)),
+                ]),
+              ),
+            };
+          }
+          setDrag((current) => ({
+            id: question.id,
+            shifts: current?.shifts ?? {},
+            // Into the gap the other rows have opened.
+            offset: landingOffset(layout, target),
+            settling: true,
+            expected: expected.join(),
+            held: ids,
+          }));
+          // Sent once the row is at rest in the gap, so the new order lands
+          // on rows that have stopped moving rather than on one mid-slide.
+          placeTimer.current = window.setTimeout(() => {
+            void place(question.id, onto).then((ok) => {
+              if (!ok) {
+                landed.current = null;
+                setDrag(
+                  (current) =>
+                    current && { ...current, offset: 0, shifts: {}, expected: undefined },
+                );
+              }
+            });
+          }, REORDER_MS);
         },
-        onPointerCancel: reset,
+        onPointerCancel: () => {
+          press.current = null;
+          setDrag(null);
+        },
         // The press that ended a drag is not also a click on the text.
         onClickCapture: (event: React.MouseEvent<HTMLLIElement>) => {
           if (!swallowClick.current) return;
@@ -742,7 +943,7 @@ export function AgendaPanel({
         <p className="flex-1 py-3 text-[12px] text-rt-ink-muted">No questions on the agenda.</p>
       ) : (
         <AgendaTimeline>
-          {questions.map((question, index) => {
+          {listed.map((question, index) => {
             const isCard = question.id === controlled?.id;
             const isFocused = question.id === activeQuestionId;
             const isPending = question.status === 'pending';
@@ -799,7 +1000,7 @@ export function AgendaPanel({
                 {cardEdit}
               </div>
             ) : upNext?.id === question.id ? (
-              <span className={`${EYEBROW} mb-0.5`}>Up next</span>
+              <span className={`${EYEBROW} rt-eyebrow-in mb-0.5`}>Up next</span>
             ) : null;
 
             return (
@@ -841,7 +1042,7 @@ export function AgendaPanel({
                 onTextKeyDown={
                   !isCard && isLeader && isPending ? reorderKeys(question, index) : undefined
                 }
-                {...dragWiring(question, index)}
+                {...dragWiring(question)}
                 textSlot={editor(question, index)}
               >
                 {isCard && isLeader && !isEditing ? (
@@ -863,65 +1064,60 @@ export function AgendaPanel({
           })}
 
           {composing ? (
+            // The same shape as a question being edited: a header saying what
+            // is going on, then the box and its choices across the whole width.
             <li
               ref={composerRef}
-              className="rounded-2xl border border-rt-secondary bg-white px-2.5 py-2 shadow-[0_0_0_3px_var(--color-rt-secondary-wash)]"
+              className="rounded-2xl border border-rt-secondary bg-white px-2.5 py-3 shadow-[0_1px_2px_rgb(31_35_40/0.05),0_6px_16px_rgb(31_35_40/0.08)]"
             >
               <form onSubmit={(event) => void onAdd(event)} className="flex flex-col gap-2">
-                <div className="flex items-center gap-2.5">
+                <div className="flex min-h-6 items-center gap-2.5">
                   <span
                     aria-hidden
                     className="flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed border-rt-secondary text-[10px] font-semibold text-rt-secondary-deep tabular-nums"
                   >
                     {questions.length + 1}
                   </span>
-                  <label className="sr-only" htmlFor="agenda-new-question">
+                  <label
+                    htmlFor="agenda-new-question"
+                    className="text-[12.5px] font-medium text-rt-ink-muted"
+                  >
                     New question
                   </label>
-                  <input
-                    autoFocus
-                    autoComplete="off"
-                    id="agenda-new-question"
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        closeComposer();
-                      }
-                    }}
-                    placeholder="Type a question…"
-                    maxLength={SESSION_QUESTION_TEXT_MAX}
-                    disabled={adding}
-                    className={`flex-1 ${TEXT_BOX}`}
-                  />
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 pl-7.5">
-                  <ComposerChip
-                    pressed={draftVoting}
-                    onClick={() => setDraftVoting(true)}
-                    disabled={adding}
-                  >
-                    Vote
-                  </ComposerChip>
-                  <ComposerChip
-                    pressed={!draftVoting}
-                    onClick={() => setDraftVoting(false)}
-                    disabled={adding}
-                  >
-                    Brainstorm
-                  </ComposerChip>
-                </div>
-                <div className="flex items-center gap-1 pl-7.5">
+                <input
+                  autoFocus
+                  autoComplete="off"
+                  id="agenda-new-question"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closeComposer();
+                    }
+                  }}
+                  placeholder="Type a question…"
+                  maxLength={SESSION_QUESTION_TEXT_MAX}
+                  disabled={adding}
+                  className={`w-full ${EDIT_BOX}`}
+                />
+                <EndsWith
+                  votingEnabled={draftVoting}
+                  onChange={setDraftVoting}
+                  disabled={adding}
+                  stretch
+                />
+                <div className="flex items-center justify-end gap-1.5">
+                  <button type="button" onClick={closeComposer} className={EDIT_TEXT_BUTTON}>
+                    Cancel
+                  </button>
                   <button
                     type="submit"
                     disabled={adding || draft.trim().length === 0}
-                    className={SMALL_PRIMARY}
+                    className={EDIT_PRIMARY}
                   >
-                    {adding ? 'Adding…' : 'Add to agenda'}
-                  </button>
-                  <button type="button" onClick={closeComposer} className={SMALL_TEXT_BUTTON}>
-                    Cancel
+                    {adding ? 'Adding…' : 'Add'}
                   </button>
                 </div>
               </form>

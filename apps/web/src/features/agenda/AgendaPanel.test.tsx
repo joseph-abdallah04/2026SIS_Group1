@@ -149,7 +149,7 @@ describe('AgendaPanel (F24)', () => {
       'aria-valuetext',
       '2 of 4 questions done, including 1 skipped',
     );
-    expect(screen.getByText('1 answered · 1 skipped')).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ answered/)).not.toBeInTheDocument();
     // Named by the question in play, not the one the board is looking back at.
     expect(screen.getByText('Question', { selector: 'span' })).toHaveTextContent('Question 3 of 4');
   });
@@ -444,7 +444,7 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Add question' }));
     await userEvent.type(screen.getByLabelText('New question'), 'What did we miss?');
-    await userEvent.click(screen.getByRole('button', { name: 'Add to agenda' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
@@ -505,7 +505,7 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Add question' }));
-    expect(screen.getByRole('button', { name: 'Add to agenda' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
     await userEvent.type(screen.getByLabelText('New question'), '   {Enter}');
     expect(post).not.toHaveBeenCalled();
   });
@@ -692,8 +692,8 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Add question' }));
     await userEvent.type(screen.getByLabelText('New question'), 'Any wild ideas?');
-    await userEvent.click(screen.getByRole('button', { name: 'Brainstorm' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add to agenda' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Brainstorm' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions', {
@@ -703,11 +703,16 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     );
     // Back to the default for the next one.
     await userEvent.click(await screen.findByRole('button', { name: 'Add question' }));
-    expect(screen.getByRole('button', { name: 'Vote' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('radio', { name: 'A vote' })).toHaveAttribute('aria-checked', 'true');
   });
 });
 
 // The question the room is on is a card, with the leader's controls on it.
+/** How far a row has been moved, from its `translateY`. */
+function shiftOf(row: HTMLElement) {
+  return Number.parseFloat(row.style.transform.replace('translateY(', ''));
+}
+
 describe('AgendaPanel card', () => {
   it('puts the question in play in the card, with its primary step', () => {
     renderPanel({
@@ -965,7 +970,7 @@ describe('AgendaPanel reordering', () => {
     });
   });
 
-  it('drags a question into another one’s place', () => {
+  it('drags a question into another one’s place', async () => {
     renderPanel({
       questions: [
         question(0, 'discussion'),
@@ -977,24 +982,120 @@ describe('AgendaPanel reordering', () => {
     });
     const dragged = inList('Question 4').closest('li')!;
     const target = inList('Question 2').closest('li')!;
-    // jsdom lays nothing out: give each row a place in the list, so the
-    // pointer at y=150 is over question 2's row. The dragged row follows the
-    // pointer, so the target has to come from where the other rows sit.
+    // jsdom lays nothing out: give each row a place in the list, so 160px up
+    // puts the dragged row's middle (345 to 185) over question 2's row. The
+    // dragged row follows the pointer, so the target has to come from where
+    // the other rows sit.
     inList('Question 1').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 0, 200, 90);
     target.getBoundingClientRect = () => new DOMRect(0, 100, 200, 90);
     inList('Question 3').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 200, 200, 90);
     dragged.getBoundingClientRect = () => new DOMRect(0, 300, 200, 90);
 
     fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 300 });
-    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 150 });
-    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 150 });
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 140 });
+    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 140 });
 
-    expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q4/move', {
-      toQuestionId: 'q2',
-    });
+    // Sent once the row has eased into its new place.
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q4/move', {
+        toQuestionId: 'q2',
+      }),
+    );
     // The press that ended the drag does not also put the board up.
     fireEvent.click(inList('Question 4'));
     expect(post).not.toHaveBeenCalledWith('/api/sessions/s1/focus', expect.anything());
+  });
+
+  it('slides the other rows out of the way, and stops at the first and last questions', async () => {
+    renderPanel({
+      questions: [
+        question(0, 'discussion'),
+        question(1, 'pending'),
+        question(2, 'pending'),
+        question(3, 'pending'),
+      ],
+      activeQuestionId: 'q1',
+    });
+    const first = inList('Question 2').closest('li')!;
+    const dragged = inList('Question 3').closest('li')!;
+    const last = inList('Question 4').closest('li')!;
+    inList('Question 1').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 0, 200, 90);
+    first.getBoundingClientRect = () => new DOMRect(0, 100, 200, 90);
+    dragged.getBoundingClientRect = () => new DOMRect(0, 200, 200, 90);
+    last.getBoundingClientRect = () => new DOMRect(0, 300, 200, 90);
+
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 200 });
+    // Far past the top: level with question 2, never up over the one in play,
+    // and question 2 slides down into the place it left.
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: -400 });
+    // Level with question 2, give or take the little it yields past it.
+    expect(shiftOf(dragged)).toBeLessThan(-100);
+    expect(shiftOf(dragged)).toBeGreaterThan(-115);
+    expect(first.style.transform).toBe('translateY(90px)');
+    expect(last.style.transform).toBe('translateY(0px)');
+    // Far past the bottom: level with question 4, which slides up instead.
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 900 });
+    expect(shiftOf(dragged)).toBeGreaterThan(100);
+    expect(shiftOf(dragged)).toBeLessThan(115);
+    expect(first.style.transform).toBe('translateY(0px)');
+    expect(last.style.transform).toBe('translateY(-90px)');
+    // The lifted row is the pointer's; the others ease.
+    expect(dragged.style.transition).toBe('none');
+    expect(last.style.transition).toContain('transform');
+    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 900 });
+
+    // Let go, it springs back into the gap and holds there for the new order.
+    expect(dragged.style.transform).toBe('translateY(100px)');
+    expect(dragged.style.transition).toContain('transform');
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q3/move', {
+        toQuestionId: 'q4',
+      }),
+    );
+  });
+
+  it('eases a row let go back where it started home, and moves nothing', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending')],
+      activeQuestionId: 'q1',
+    });
+    const dragged = inList('Question 2').closest('li')!;
+    inList('Question 1').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 0, 200, 90);
+    dragged.getBoundingClientRect = () => new DOMRect(0, 100, 200, 90);
+    inList('Question 3').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 200, 200, 90);
+
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 100 });
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 120 });
+    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 120 });
+
+    expect(dragged.style.transform).toBe('translateY(0px)');
+    expect(post).not.toHaveBeenCalledWith('/api/sessions/s1/questions/q2/move', expect.anything());
+    // Home, the row lets go of its drag styles.
+    await waitFor(() => expect(dragged.style.transform).toBe(''));
+  });
+
+  // The row being viewed carries a chip, so it can be much taller than the
+  // short one it has to get below.
+  it('drags a tall row below a short last one', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending')],
+      activeQuestionId: 'q1',
+    });
+    const dragged = inList('Question 2').closest('li')!;
+    const last = inList('Question 3').closest('li')!;
+    inList('Question 1').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 0, 200, 190);
+    dragged.getBoundingClientRect = () => new DOMRect(0, 200, 200, 200);
+    last.getBoundingClientRect = () => new DOMRect(0, 410, 200, 40);
+
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 300 });
+    fireEvent.pointerMove(dragged, { pointerId: 1, clientY: 900 });
+    fireEvent.pointerUp(dragged, { pointerId: 1, clientY: 900 });
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q2/move', {
+        toQuestionId: 'q3',
+      }),
+    );
   });
 
   // A press that barely moves is still a click on the question.
