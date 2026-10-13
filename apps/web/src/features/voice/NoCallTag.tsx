@@ -1,7 +1,8 @@
 /**
- * The leader created this session with no call, so there is no microphone,
- * banner or roster to show. This sits where the mic would be so that missing
- * them reads as a choice rather than something broken.
+ * The leader created this session with no call, so there is no microphone or
+ * banner to show. In the waiting room this sits where the mic would be so that
+ * missing it reads as a choice rather than something broken. (The board header
+ * says the same in its status line instead.)
  *
  * Dressed like `VoiceReconnect`'s chip, minus the red dot: nothing is wrong.
  */

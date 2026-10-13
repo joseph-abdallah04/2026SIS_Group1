@@ -5,6 +5,7 @@ import express from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const issueVoiceToken = vi.fn();
+const muteParticipants = vi.fn();
 
 // Identity is injected rather than signed: `requireAuth` itself is covered in
 // middleware/auth.test.ts, and this file is about what the route does *after*
@@ -21,18 +22,24 @@ vi.mock('../../middleware/auth.js', () => ({
   },
 }));
 
-vi.mock('./service.js', () => ({ issueVoiceToken }));
+vi.mock('./service.js', () => ({ issueVoiceToken, muteParticipants }));
 
 const { voiceRoutes } = await import('./routes.js');
 
 interface HttpResult {
   status: number;
-  body: { error?: string; code?: string; token?: string; url?: string } | null;
+  body: { error?: string; code?: string; token?: string; url?: string; muted?: number } | null;
 }
 
-/** Mount the real router on a real server and talk to it over a real socket. */
+/**
+ * Mount the real router on a real server and talk to it over a real socket.
+ * `request` asks for a token; `post` reaches any path with any body.
+ */
 async function withServer(
-  run: (request: (userId?: string) => Promise<HttpResult>) => Promise<void>,
+  run: (
+    request: (userId?: string) => Promise<HttpResult>,
+    post: (path: string, body: string, userId?: string) => Promise<HttpResult>,
+  ) => Promise<void>,
 ): Promise<void> {
   // Callers pass '' for "no credentials" rather than `undefined`, which would
   // fall through to the default below and quietly authenticate them.
@@ -46,21 +53,22 @@ async function withServer(
   });
   const { port } = server.address() as AddressInfo;
 
-  const request = async (userId = 'u1'): Promise<HttpResult> => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/livekit-token`, {
+  const post = async (path: string, body: string, userId = 'u1'): Promise<HttpResult> => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/s1/${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(userId ? { 'x-test-user-id': userId } : {}),
       },
-      body: '{}',
+      body,
     });
     const text = await res.text();
     return { status: res.status, body: text ? JSON.parse(text) : null };
   };
+  const request = (userId = 'u1') => post('livekit-token', '{}', userId);
 
   try {
-    await run(request);
+    await run(request, post);
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
@@ -138,6 +146,79 @@ describe('POST /api/sessions/:sessionId/livekit-token', () => {
 
       expect(res.status).toBe(401);
       expect(issueVoiceToken).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('POST /api/sessions/:sessionId/voice/mute', () => {
+  beforeEach(() => {
+    muteParticipants.mockReset();
+  });
+
+  it('mutes everyone but the leader when nobody is named', async () => {
+    muteParticipants.mockResolvedValue({ ok: true, value: { muted: 3 } });
+
+    await withServer(async (_request, post) => {
+      const res = await post('voice/mute', '{}');
+
+      expect(res.status).toBe(200);
+      expect(res.body?.muted).toBe(3);
+      expect(muteParticipants).toHaveBeenCalledWith('s1', 'u1', undefined);
+    });
+  });
+
+  it('mutes the one person named', async () => {
+    muteParticipants.mockResolvedValue({ ok: true, value: { muted: 1 } });
+
+    await withServer(async (_request, post) => {
+      const res = await post('voice/mute', JSON.stringify({ identity: 'u2' }));
+
+      expect(res.status).toBe(200);
+      expect(muteParticipants).toHaveBeenCalledWith('s1', 'u1', 'u2');
+    });
+  });
+
+  it('turns away a body that names nobody properly', async () => {
+    await withServer(async (_request, post) => {
+      const res = await post('voice/mute', JSON.stringify({ identity: '' }));
+
+      expect(res.status).toBe(400);
+      expect(res.body?.code).toBe('VALIDATION_ERROR');
+      expect(muteParticipants).not.toHaveBeenCalled();
+    });
+  });
+
+  it('answers 403 NOT_SESSION_LEADER to anyone but the leader', async () => {
+    muteParticipants.mockResolvedValue({ ok: false, reason: 'not-the-leader' });
+
+    await withServer(async (_request, post) => {
+      const res = await post('voice/mute', '{}');
+
+      expect(res.status).toBe(403);
+      expect(res.body?.code).toBe('NOT_SESSION_LEADER');
+    });
+  });
+
+  it('answers 409 VOICE_OFF and 503 VOICE_NOT_CONFIGURED as the token route does', async () => {
+    await withServer(async (_request, post) => {
+      muteParticipants.mockResolvedValue({ ok: false, reason: 'voice-off' });
+      const off = await post('voice/mute', '{}');
+      expect(off.status).toBe(409);
+      expect(off.body?.code).toBe('VOICE_OFF');
+
+      muteParticipants.mockResolvedValue({ ok: false, reason: 'not-configured' });
+      const missing = await post('voice/mute', '{}');
+      expect(missing.status).toBe(503);
+      expect(missing.body?.code).toBe('VOICE_NOT_CONFIGURED');
+    });
+  });
+
+  it('refuses an unauthenticated caller before reaching the service', async () => {
+    await withServer(async (_request, post) => {
+      const res = await post('voice/mute', '{}', '');
+
+      expect(res.status).toBe(401);
+      expect(muteParticipants).not.toHaveBeenCalled();
     });
   });
 });

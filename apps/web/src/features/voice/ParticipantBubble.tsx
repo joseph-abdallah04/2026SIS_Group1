@@ -1,8 +1,8 @@
-import { MicOff } from 'lucide-react';
+import { Crown, MicOff } from 'lucide-react';
 
 import type { SeatSwatch } from '../sessions/waitingRoomSeats';
 
-/** The slash-mic scales with the bubble it is pinned to. */
+/** The slash-mic and the crown scale with the bubble they are pinned to. */
 const MUTE_ICON: Record<'row' | 'strip' | 'header', number> = {
   row: 8,
   strip: 9,
@@ -21,12 +21,14 @@ interface ParticipantBubbleProps {
    * because a taller bubble makes the whole header taller.
    */
   size: 'row' | 'strip' | 'header';
+  /** Runs the session: a small amber crown, so everyone can tell who it is. */
+  isLeader?: boolean;
 }
 
 /**
  * One person's head, as the waiting room draws it — initials on a hashed
  * colour — carrying the two states F13 adds: a green ring while they talk and
- * F12's red-slash mic while they are muted.
+ * F12's red-slash mic while they are muted. The leader also wears a crown.
  *
  * `aria-hidden`, deliberately. The bubble is decoration for words its context
  * already carries — the visible name in a row, an `sr-only` label in the
@@ -39,6 +41,7 @@ export function ParticipantBubble({
   isSpeaking,
   isMuted,
   size,
+  isLeader = false,
 }: ParticipantBubbleProps) {
   return (
     <span
@@ -56,6 +59,11 @@ export function ParticipantBubble({
       {isMuted ? (
         <span className="rt-voice-bubble-muted">
           <MicOff size={MUTE_ICON[size]} strokeWidth={2.5} />
+        </span>
+      ) : null}
+      {isLeader ? (
+        <span className="rt-voice-bubble-leader" data-leader-mark>
+          <Crown size={MUTE_ICON[size]} strokeWidth={2.5} />
         </span>
       ) : null}
     </span>

@@ -490,6 +490,7 @@ Frontend: apps/web/src/features/voice/
 
 ```
 POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, expiresInSeconds }
+POST   /api/sessions/:id/voice/mute      → { muted }   (leader only; body { identity? }, none = everyone but the leader)
 ```
 
 ### Frontend interactions
@@ -723,7 +724,7 @@ data: {"type":"done"}
 
 - Auth: `POST /api/auth/signup`, `POST /api/auth/login`, etc.
 - Sessions: `POST /api/sessions`, `GET /api/sessions/:id`, etc.
-- Voice: `POST /api/sessions/:id/livekit-token`
+- Voice: `POST /api/sessions/:id/livekit-token`, `POST /api/sessions/:id/voice/mute`
 - Assistant: `POST /api/sessions/:id/assistant/chat`
 
 **Rule:** No two modules own the same REST prefix or the same socket event namespace (`proposal:*` = pinboard, `vote:*`/`voting:*` = voting, `session:*` = sessions)  

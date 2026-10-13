@@ -334,8 +334,7 @@ describe('BoardRail resize', () => {
     render(
       <BoardRail
         side="right"
-        width="wide"
-        title="Assistant"
+        title="Dock"
         collapsed={false}
         onToggle={() => undefined}
         expandLabel="Expand dock"
@@ -344,9 +343,45 @@ describe('BoardRail resize', () => {
         <p>Chat</p>
       </BoardRail>,
     );
-    const assistant = screen.getByRole('complementary', { name: 'Assistant' });
-    expect(assistant).toHaveClass('w-96');
-    expect(assistant.style.width).toBe('');
+    const dock = screen.getByRole('complementary', { name: 'Dock' });
+    expect(dock).toHaveClass('w-64');
+    expect(dock.style.width).toBe('');
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+
+  describe('with a default width of its own', () => {
+    const OWN_DEFAULT = 384;
+    const ownKey = 'rt_rail_width:wide-dock';
+
+    function Wide() {
+      const [collapsed, setCollapsed] = useState(false);
+      return (
+        <BoardRail
+          side="right"
+          title="Agenda"
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((open) => !open)}
+          expandLabel="Expand agenda"
+          collapseLabel="Collapse agenda"
+          resize={{ storageKey: 'wide-dock', label: 'Resize agenda', defaultWidth: OWN_DEFAULT }}
+        >
+          <p>Questions</p>
+        </BoardRail>
+      );
+    }
+
+    it('opens at it before anyone has dragged', () => {
+      render(<Wide />);
+      expect(rail().style.width).toBe(`${OWN_DEFAULT}px`);
+    });
+
+    it('goes back to it on double-click, not to the shared default', () => {
+      localStorage.setItem(ownKey, '300');
+      render(<Wide />);
+      expect(rail().style.width).toBe('300px');
+      fireEvent.doubleClick(handle());
+      expect(rail().style.width).toBe(`${OWN_DEFAULT}px`);
+      expect(localStorage.getItem(ownKey)).toBe(String(OWN_DEFAULT));
+    });
   });
 });

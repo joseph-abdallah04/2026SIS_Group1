@@ -1044,7 +1044,7 @@ a.rt-sticky-link:focus-visible {
   font-size: 9px;
 }
 
-/* F13.2: the header's overflow control, ringed while a speaker is behind it
+/* F13.2: the header snapshot's total, ringed while a speaker is behind it
    that promotion could not fit into the visible bubbles. Same green, same
    pulse, so "someone in here is talking" reads as the same signal as a ring on
    a face. */
@@ -1110,6 +1110,30 @@ a.rt-sticky-link:focus-visible {
   width: 0.9rem;
 }
 
+/* The leader's crown: top right, clear of the mute badge below it, ringed the
+   same way so the two read as one family. Amber, the colour the waiting room
+   already gives the leader. */
+.rt-voice-bubble-leader {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: flex;
+  height: 0.8rem;
+  width: 0.8rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1.5px solid var(--rt-seat-surface, var(--color-rt-surface-alt));
+  background: var(--color-rt-secondary);
+  color: #ffffff;
+}
+
+.rt-voice-seat[data-size='header'] .rt-voice-bubble-leader {
+  height: 0.72rem;
+  width: 0.72rem;
+  --rt-seat-surface: var(--color-rt-secondary-wash);
+}
+
 /* The waiting room's head is 3.5rem — roughly twice the rail's — so the ring
    needs the extra stand-off and weight to read as the same signal at that
    size, and the badge has to grow with it or it turns into a speck. The
@@ -1129,17 +1153,23 @@ a.rt-sticky-link:focus-visible {
   --rt-seat-surface: #f7f4ee;
 }
 
+/* The header's faces sit straight on its amber wash now, not in a white chip,
+   so their badges are ringed in the wash. */
 .rt-voice-seat[data-size='header'] .rt-voice-bubble-muted {
   height: 0.72rem;
   width: 0.72rem;
-  --rt-seat-surface: var(--color-rt-surface);
+  --rt-seat-surface: var(--color-rt-secondary-wash);
 }
 
-/* The overflow roster is a white panel, not the rail's tinted surface the row
-   size was drawn for, so its mute badges need the same correction the header
-   bubbles get. Set on the list so it cascades to every badge inside. */
-.rt-voice-roster {
-  --rt-seat-surface: var(--color-rt-surface);
+/* The header's people snapshot past four faces: each tucks under the one
+   before it, ringed in the header's fill so the edge between two reads as a
+   cut rather than a smudge. */
+.rt-people-snapshot[data-overlap='true'] > * + * {
+  margin-left: -4px;
+}
+
+.rt-people-snapshot[data-overlap='true'] .rt-voice-bubble {
+  box-shadow: 0 0 0 2px var(--color-rt-secondary-wash);
 }
 
 @media (prefers-reduced-motion: reduce) {

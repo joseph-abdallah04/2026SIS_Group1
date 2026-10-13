@@ -1,4 +1,4 @@
-import type { VoiceTokenResponse } from '@roundtable/shared';
+import type { VoiceMuteResponse, VoiceTokenResponse } from '@roundtable/shared';
 
 import { api } from '../../lib/api';
 
@@ -16,4 +16,19 @@ import { api } from '../../lib/api';
  */
 export async function fetchVoiceToken(sessionId: string): Promise<VoiceTokenResponse> {
   return api.post<VoiceTokenResponse>(`/api/sessions/${sessionId}/livekit-token`, {});
+}
+
+/**
+ * The leader turning off one person's microphone, by their identity (user id),
+ * or everyone's but their own when `identity` is left out (F12).
+ *
+ * The server checks it is the leader asking, and LiveKit does the muting, so
+ * nothing here changes local state: the muted microphones come back through
+ * the room's own events, to every screen at once.
+ */
+export async function muteInCall(sessionId: string, identity?: string): Promise<VoiceMuteResponse> {
+  return api.post<VoiceMuteResponse>(
+    `/api/sessions/${sessionId}/voice/mute`,
+    identity === undefined ? {} : { identity },
+  );
 }

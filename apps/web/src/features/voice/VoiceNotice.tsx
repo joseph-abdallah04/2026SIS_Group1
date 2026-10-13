@@ -19,6 +19,8 @@ interface VoiceNoticeProps {
   micPermissionDenied: boolean;
   error: string | null;
   audioBlocked: boolean;
+  /** The leader turned your microphone off and you have not turned it back on. */
+  mutedByLeader?: boolean;
   retry: () => void;
   requestMicrophone: () => void | Promise<void>;
   unlockAudio: () => void | Promise<void>;
@@ -38,7 +40,8 @@ interface Notice {
    * mic-blocked wordings share one: the Permissions API refines the first into
    * the second a moment after it appears, and that is not a new problem.
    */
-  id: 'sound-blocked' | 'offline' | 'mic-blocked' | 'no-device' | 'reconnecting';
+  id:
+    'sound-blocked' | 'offline' | 'mic-blocked' | 'no-device' | 'reconnecting' | 'muted-by-leader';
   label: string;
   message: string;
   action?: { label: string; run: () => void | Promise<void> };
@@ -66,6 +69,7 @@ function currentNotice(props: VoiceNoticeProps): Notice | null {
     micPermissionDenied,
     error,
     audioBlocked,
+    mutedByLeader = false,
     retry,
     requestMicrophone,
     unlockAudio,
@@ -158,6 +162,21 @@ function currentNotice(props: VoiceNoticeProps): Notice | null {
       message: 'Reconnecting to the room…',
       // Ends by itself: you are back in, or it becomes `offline`.
       autoHide: false,
+    };
+  }
+
+  // Last: it is news, not trouble. Anything above it is something you may
+  // need to act on, and it waits its turn behind them.
+  if (mutedByLeader) {
+    return {
+      id: 'muted-by-leader',
+      tone: 'quiet',
+      label: 'Muted',
+      message: 'The leader muted you. Press M or Unmute when you want to speak.',
+      // The same thing the mic toggle does: your microphone, your decision.
+      action: { label: 'Unmute', run: requestMicrophone },
+      // The mic toggle stays red, which carries it on from here.
+      autoHide: true,
     };
   }
 

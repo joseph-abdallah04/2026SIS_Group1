@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { phaseTimerView } from './PhaseTimer';
+import { phaseTimerPhrase, phaseTimerView } from './PhaseTimer';
+
+describe('phaseTimerPhrase', () => {
+  it('says how long is left, and how far over once past zero', () => {
+    expect(phaseTimerPhrase(phaseTimerView(252_000, true))).toBe('4:12 left');
+    expect(phaseTimerPhrase(phaseTimerView(0, true))).toBe('0:00 left');
+    expect(phaseTimerPhrase(phaseTimerView(-42_000, true))).toBe('0:42 over');
+    expect(phaseTimerPhrase(phaseTimerView(-42_000, false))).toBe('0:00 left');
+  });
+});
 
 describe('phaseTimerView', () => {
   it('counts down in minutes and seconds', () => {

@@ -28,6 +28,16 @@ beforeEach(() => {
 });
 
 describe('LeaveSessionControl', () => {
+  it('reads "Leave" in the board header, and still says what it leaves', async () => {
+    const user = userEvent.setup();
+    render(<LeaveSessionControl sessionId="s1" variant="header" />);
+
+    const trigger = screen.getByRole('button', { name: 'Leave session' });
+    expect(trigger).toHaveTextContent(/^Leave$/);
+    await user.click(trigger);
+    expect(screen.getByRole('dialog', { name: 'Leave this session?' })).toBeInTheDocument();
+  });
+
   it('confirms before leaving, then drops the socket and returns to the dashboard', async () => {
     const user = userEvent.setup();
     render(<LeaveSessionControl sessionId="s1" />);
