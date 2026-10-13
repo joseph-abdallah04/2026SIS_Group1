@@ -286,9 +286,13 @@ function ViewingBar({
       <span className="flex min-w-0 items-center gap-2 text-[12px] text-rt-ink-muted">
         <Icon aria-hidden size={14} strokeWidth={2} className="shrink-0" />
         <span className="shrink-0 font-semibold whitespace-nowrap text-rt-ink">{title}</span>
-        {/* The same rule that parts the toolbar's own groups. */}
-        <span aria-hidden className="h-5 w-px shrink-0 bg-rt-tertiary" />
-        <span className="truncate font-medium">{detail}</span>
+        {detail ? (
+          <>
+            {/* The same rule that parts the toolbar's own groups. */}
+            <span aria-hidden className="h-5 w-px shrink-0 bg-rt-tertiary" />
+            <span className="truncate font-medium">{detail}</span>
+          </>
+        ) : null}
       </span>
       {actions ? <span className="flex shrink-0 items-center gap-1.5">{actions}</span> : null}
     </div>

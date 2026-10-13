@@ -302,10 +302,11 @@ export function SessionPinboard({
       ? questions.find((question) => question.id === board.questionId)
       : undefined;
   const roomShowing = viewingQuestion ? undefined : presenting;
-  // "Viewing Q1 | Only you can see this": which board, and the one thing worth
-  // knowing about it — that everyone is on a board the leader put up, that the
-  // room has moved on, that it has not started, or else that nobody else's
-  // board moved. While a board is up for everyone, the way back is to it.
+  // "Viewing Q1", and after it only what the screen does not already say: that
+  // everyone is on a board the leader put up, that the room has moved on, or
+  // that the question has not started. How a finished one ended is on its
+  // agenda row and in the header already. While a board is up for everyone,
+  // the way back is to it.
   const viewingTitle = viewingQuestion ? `Viewing Q${questions.indexOf(viewingQuestion) + 1}` : '';
   const viewingDetail = !viewingQuestion
     ? ''
@@ -317,7 +318,7 @@ export function SessionPinboard({
           ? `The room is on Q${roomPosition + 1} now`
           : viewingQuestion.status === 'pending'
             ? 'Not started'
-            : 'Only you can see this';
+            : '';
   const backLabel = presenting ? `Back to Q${roomPosition + 1}` : 'Back to live';
 
   const view = (questionId: string | null) => {
