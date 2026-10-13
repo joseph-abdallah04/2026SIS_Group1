@@ -1460,26 +1460,25 @@ export function PinboardCanvas({
               Widen the board to see its controls
             </p>
           </div>
+
+          {/* One stack under the header, so its notices never lie on top of one
+              another: voice trouble first, then the board's own news — the
+              leader locking or unlocking it. In the board's box, so it centres
+              on the board the toolbar centres on, not on the whole row with the
+              panels in it. `z-40`, over the ballot's `z-30`: a vote covers the
+              board, not voice. */}
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-40 flex flex-col items-center gap-2 px-4">
+            {voiceNotice}
+            <BoardLockToast
+              questionId={board.questionId}
+              locked={board.boardLocked}
+              enabled={!isLeader && board.questionStatus === 'discussion' && !frozen}
+            />
+          </div>
         </div>
 
         {assistant}
         {ballot}
-
-        {/* Positioned against this row, so it hangs just under the header the
-            way the lobby's does. After the ballot on purpose: they share
-            `z-30`, and the later one paints on top — a vote covers the board,
-            not voice. */}
-        {/* One stack under the header, so its notices never lie on top of one
-            another: voice trouble first, then the board's own news — the
-            leader locking or unlocking it. */}
-        <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-2 px-4">
-          {voiceNotice}
-          <BoardLockToast
-            questionId={board.questionId}
-            locked={board.boardLocked}
-            enabled={!isLeader && board.questionStatus === 'discussion' && !frozen}
-          />
-        </div>
       </div>
     </div>
   );

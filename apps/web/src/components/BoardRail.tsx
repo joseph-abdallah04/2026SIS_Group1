@@ -134,7 +134,10 @@ export function BoardRail({
       aria-expanded={true}
       aria-label={collapseLabel}
       title={collapseTitle ?? collapseLabel}
-      className={`-my-1 ${TOGGLE_CLASSES}`}
+      // Pulled towards the panel's edge by the icon's own inset (its frame is
+      // drawn 7px inside the 28px button), so the drawn icon ends where the
+      // header's content does, flush with the progress bar under it.
+      className={`-my-1 ${onLeft ? '-mr-[7px]' : '-ml-[7px]'} ${TOGGLE_CLASSES}`}
     >
       <CollapseIcon aria-hidden="true" data-rail-icon="collapse" size={16} strokeWidth={2} />
     </button>

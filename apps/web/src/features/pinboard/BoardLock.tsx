@@ -175,8 +175,8 @@ export function BoardLockToast({
             />
           )}
           {shown.locked
-            ? 'The leader locked the board. Only they can move cards'
-            : 'The leader unlocked the board. You can move your own cards'}
+            ? 'The leader locked the board. Only they can move proposals'
+            : 'The leader unlocked the board. You can move your own proposals'}
         </p>
       ) : null}
     </div>
