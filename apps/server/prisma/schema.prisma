@@ -84,6 +84,12 @@ model Session {
   // Stored in seconds so the client can count without rounding minutes.
   discussionTimerSeconds Int? @map("discussion_timer_seconds")
   votingTimerSeconds     Int? @map("voting_timer_seconds")
+  // Live call or no call, chosen at create/draft edit and fixed once the
+  // session opens. False means nobody is ever given a LiveKit token for it,
+  // which is the point: a session with no call costs no LiveKit minutes.
+  // Defaults off for new sessions; the migration backfills every older one
+  // to true, since they were all created with a call.
+  voiceEnabled Boolean @default(false) @map("voice_enabled")
   // The question the board is showing. Distinct from each question's own
   // status: the leader can look back at an answered question's pinboard
   // without reopening it (proposals stay closed). Set when the session

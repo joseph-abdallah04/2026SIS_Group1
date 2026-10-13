@@ -104,6 +104,19 @@ describe('POST /api/sessions/:sessionId/livekit-token', () => {
     });
   });
 
+  it('answers 409 VOICE_OFF for a session created with no call', async () => {
+    issueVoiceToken.mockResolvedValue({ ok: false, reason: 'voice-off' });
+
+    await withServer(async (request) => {
+      const res = await request();
+
+      expect(res.status).toBe(409);
+      // Same contract as VOICE_NOT_CONFIGURED above: useVoiceRoom.ts keys its
+      // quiet `unavailable` state on this exact code.
+      expect(res.body?.code).toBe('VOICE_OFF');
+    });
+  });
+
   it('answers 403 NOT_A_PARTICIPANT for a non-member, saying nothing about the session', async () => {
     issueVoiceToken.mockResolvedValue({ ok: false, reason: 'not-a-participant' });
 

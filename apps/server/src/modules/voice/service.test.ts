@@ -5,10 +5,11 @@ import { TokenVerifier } from 'livekit-server-sdk';
 // is never loaded: these tests are about who gets a token and what is in it,
 // not about Prisma. Membership itself is a `findUnique` on a unique index and
 // is covered by the integration smoke test (docs/05 §10).
-const { findSessionParticipant } = vi.hoisted(() => ({
+const { findSessionParticipant, isSessionVoiceEnabled } = vi.hoisted(() => ({
   findSessionParticipant: vi.fn(),
+  isSessionVoiceEnabled: vi.fn(),
 }));
-vi.mock('./sessionsAdapter.js', () => ({ findSessionParticipant }));
+vi.mock('./sessionsAdapter.js', () => ({ findSessionParticipant, isSessionVoiceEnabled }));
 
 const { mockEnv } = vi.hoisted(() => ({
   mockEnv: {
@@ -40,6 +41,8 @@ function decodePayload(token: string): { exp: number; nbf: number } {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // A live-call session unless a test says otherwise.
+  isSessionVoiceEnabled.mockResolvedValue(true);
   mockEnv.LIVEKIT_URL = 'wss://roundtable.livekit.cloud';
   mockEnv.LIVEKIT_API_KEY = 'APItestkey';
   mockEnv.LIVEKIT_API_SECRET = 'test-secret-at-least-32-characters-long';
@@ -60,6 +63,28 @@ describe('issueVoiceToken', () => {
     await issueVoiceToken('sess_1', 'user_alice');
 
     expect(findSessionParticipant).toHaveBeenCalledWith('sess_1', 'user_alice');
+  });
+
+  it('refuses a member of a session created with no call, so it never costs LiveKit minutes', async () => {
+    findSessionParticipant.mockResolvedValue(ALICE);
+    isSessionVoiceEnabled.mockResolvedValue(false);
+
+    const result = await issueVoiceToken('sess_1', 'user_alice');
+
+    expect(result).toEqual({ ok: false, reason: 'voice-off' });
+    expect(isSessionVoiceEnabled).toHaveBeenCalledWith('sess_1');
+  });
+
+  it('tells a non-member of a no-call session only that they are not a member', async () => {
+    // Checked in this order so an outsider cannot learn whether a session
+    // has a call.
+    findSessionParticipant.mockResolvedValue(null);
+    isSessionVoiceEnabled.mockResolvedValue(false);
+
+    const result = await issueVoiceToken('sess_1', 'user_stranger');
+
+    expect(result).toEqual({ ok: false, reason: 'not-a-member' });
+    expect(isSessionVoiceEnabled).not.toHaveBeenCalled();
   });
 
   it('issues a token scoped to that session room for a member', async () => {

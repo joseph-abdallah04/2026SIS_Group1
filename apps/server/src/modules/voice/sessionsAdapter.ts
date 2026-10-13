@@ -10,5 +10,11 @@
 // deliberately lets someone who has *left* through, because it guards
 // read-only access to a session's history — the wrong rule for handing out a
 // live voice-room token.
-export { getSessionMemberIdentity as findSessionParticipant } from '../sessions/index.js';
+//
+// `isSessionVoiceEnabled` answers the other half: whether the session has a
+// call at all. A session with no call has no room, so nobody gets a token.
+export {
+  getSessionMemberIdentity as findSessionParticipant,
+  isSessionVoiceEnabled,
+} from '../sessions/index.js';
 export type { SessionMemberIdentity as SessionParticipant } from '../sessions/index.js';

@@ -409,3 +409,51 @@ describe('usePinboard write intents', () => {
     });
   });
 });
+
+describe('usePinboard presence (who is connected, for sessions with no call)', () => {
+  const ALICE = { id: 'u1', displayName: 'Alice' };
+  const BOB = { id: 'u2', displayName: 'Bob' };
+
+  it('takes who is here from the join snapshot', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    expect(result.current.participants).toEqual([]);
+
+    act(() => emitServer('sessionState', snapshot({ participants: [ALICE, BOB] })));
+
+    expect(result.current.participants).toEqual([ALICE, BOB]);
+  });
+
+  it('adds someone who joins, once, and removes them when they leave', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    act(() => emitServer('sessionState', snapshot({ participants: [ALICE] })));
+
+    act(() => {
+      emitServer('memberJoined', { user: BOB });
+      // A second tab, or a Strict Mode rejoin, must not seat Bob twice.
+      emitServer('memberJoined', { user: BOB });
+    });
+    expect(result.current.participants).toEqual([ALICE, BOB]);
+
+    act(() => emitServer('memberLeft', { user: BOB }));
+    expect(result.current.participants).toEqual([ALICE]);
+  });
+
+  it('replaces the list on a fresh snapshot, so a reconnect forgets who left meanwhile', async () => {
+    const { result } = renderHook(() => usePinboard('s1'));
+    act(() => emitServer('sessionState', snapshot({ participants: [ALICE, BOB] })));
+
+    // Bob left while this client was disconnected; the rejoin snapshot is
+    // the only thing that says so.
+    act(() => emitServer('sessionState', snapshot({ participants: [ALICE] })));
+
+    expect(result.current.participants).toEqual([ALICE]);
+  });
+
+  it('stops listening for joins and leaves once the board is gone', () => {
+    const { unmount } = renderHook(() => usePinboard('s1'));
+    unmount();
+
+    expect(listeners.get('memberJoined')?.size ?? 0).toBe(0);
+    expect(listeners.get('memberLeft')?.size ?? 0).toBe(0);
+  });
+});

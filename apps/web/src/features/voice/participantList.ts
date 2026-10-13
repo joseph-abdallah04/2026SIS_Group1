@@ -1,3 +1,5 @@
+import type { SessionUserPayload } from '@roundtable/shared/events';
+
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import type { SeatSwatch } from '../sessions/waitingRoomSeats';
 import type { VoiceParticipant } from './useVoiceRoom';
@@ -165,4 +167,26 @@ export function voiceStateByIdentity(
  */
 export function localName(participants: readonly VoiceParticipant[]): string | null {
   return participants.find((p) => p.isLocal)?.name ?? null;
+}
+
+/**
+ * The board's roster for a session with no call: who is connected to the
+ * session, in the shape `ParticipantCluster` draws.
+ *
+ * There is no audio, so nobody is ever speaking or muted — which is also what
+ * makes the chip draw plain initials and names, with no rings or badges.
+ * `viewerId` is who the server says this socket is, so "(you)" lands on the
+ * same person the rest of the board treats as you.
+ */
+export function presenceParticipants(
+  users: readonly SessionUserPayload[],
+  viewerId: string | null,
+): VoiceParticipant[] {
+  return users.map((user) => ({
+    identity: user.id,
+    name: user.displayName,
+    isLocal: user.id === viewerId,
+    isSpeaking: false,
+    isMuted: false,
+  }));
 }

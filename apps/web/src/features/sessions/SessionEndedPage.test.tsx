@@ -54,6 +54,7 @@ const SESSION: SessionDetail = {
   endedAt: new Date('2026-09-01T02:00:00.000Z'),
   discussionTimerSeconds: null,
   votingTimerSeconds: null,
+  voiceEnabled: false,
   questions: [
     {
       id: 'q1',

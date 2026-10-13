@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { SHORTLIST_MIN, type BoardResponse, type Question } from '@roundtable/shared';
 
@@ -18,7 +18,15 @@ import { ShortlistBar } from '../voting/ShortlistBar';
 import { ShortlistPrompt } from '../voting/ShortlistPrompt';
 import { useVoting } from '../voting/useVoting';
 import { VotingBallot } from '../voting/VotingBallot';
-import { MicToggle, ParticipantCluster, VoiceNotice, VoiceReconnect, useVoiceRoom } from '../voice';
+import {
+  MicToggle,
+  NoCallTag,
+  ParticipantCluster,
+  VoiceNotice,
+  VoiceReconnect,
+  presenceParticipants,
+  useVoiceRoom,
+} from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
 import { useArchivedBoard } from './useArchivedBoard';
 import { usePinboard } from './usePinboard';
@@ -64,9 +72,16 @@ interface SessionPinboardProps {
   questions: Question[];
   /** Still joinable while the session is live — shown on the participant rail. */
   joinCode: string | null;
+  /** Live call or no call. With no call the board never joins a LiveKit room. */
+  voiceEnabled: boolean;
 }
 
-export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboardProps) {
+export function SessionPinboard({
+  isLeader,
+  questions,
+  joinCode,
+  voiceEnabled,
+}: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
   const selectedProposalId = useRef<string | undefined>(undefined);
@@ -91,6 +106,7 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
     isLive,
     newItemIds,
     viewerId,
+    participants,
   } = usePinboard(sessionId);
   const voting = useVoting(sessionId, board?.questionId ?? null);
 
@@ -137,12 +153,21 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
   // session) unmounts this and disconnects — F11's connect/disconnect points.
   // Called before any early return so the room is not torn down and rebuilt
   // every time the board flips between loading, error and loaded.
-  const voice = useVoiceRoom(sessionId);
+  const voice = useVoiceRoom(sessionId, voiceEnabled);
 
   // The room's own name for us, minted into the token server-side — the only
   // name F12's toggle can show that is guaranteed to match what the rest of the
   // room sees beside our audio.
   const selfName = voice.participants.find((p) => p.isLocal)?.name ?? null;
+
+  // The roster for a session with no call, from who is connected to the board
+  // rather than who is in a LiveKit room. Memoised, and up here before the
+  // early returns: the chip's speaking tracker re-runs whenever this array
+  // changes, so it must not be a new one on every render.
+  const presenceRoster = useMemo(
+    () => presenceParticipants(participants, viewerId),
+    [participants, viewerId],
+  );
 
   if (!sessionId) {
     return (
@@ -467,21 +492,36 @@ export function SessionPinboard({ isLeader, questions, joinCode }: SessionPinboa
             }
             micControl={
               // Only one of these two is ever drawn: the mic, or — once voice
-              // has given up — its Reconnect in the mic's place.
-              <>
-                <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
-                <MicToggle
-                  name={selfName}
-                  micEnabled={voice.micEnabled}
-                  micStatus={voice.micStatus}
-                  status={voice.status}
-                  busy={voice.micBusy}
-                  toggle={voice.toggleMic}
-                />
-              </>
+              // has given up — its Reconnect in the mic's place. A session
+              // with no call has neither, so it says so instead.
+              voiceEnabled ? (
+                <>
+                  <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
+                  <MicToggle
+                    name={selfName}
+                    micEnabled={voice.micEnabled}
+                    micStatus={voice.micStatus}
+                    status={voice.status}
+                    busy={voice.micBusy}
+                    toggle={voice.toggleMic}
+                  />
+                </>
+              ) : (
+                <NoCallTag />
+              )
             }
             participants={
-              <ParticipantCluster participants={voice.participants} status={voice.status} />
+              voiceEnabled ? (
+                <ParticipantCluster participants={voice.participants} status={voice.status} />
+              ) : (
+                // No call: same chip, fed from the board's own connection. Its
+                // `reconnecting` wording already says what a dropped socket
+                // means for the list.
+                <ParticipantCluster
+                  participants={presenceRoster}
+                  status={isLive ? 'connected' : 'reconnecting'}
+                />
+              )
             }
             joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
             reactToProposal={reactToProposal}

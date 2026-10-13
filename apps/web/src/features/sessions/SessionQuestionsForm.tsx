@@ -22,6 +22,8 @@ interface SessionQuestionsFormProps {
   initialQuestions?: SessionQuestionInput[];
   initialDiscussionTimerSeconds?: number | null;
   initialVotingTimerSeconds?: number | null;
+  /** Live call (true) or no call (false). New sessions start with no call. */
+  initialVoiceEnabled?: boolean;
   submitLabel: string;
   submittingLabel: string;
   submitting: boolean;
@@ -32,6 +34,12 @@ interface SessionQuestionsFormProps {
 }
 
 const ZERO_DURATION: TimerDurationParts = { hours: 0, minutes: 0, seconds: 0 };
+
+/** The two answers to "does this session have a call?", in the order shown. */
+const CALL_OPTIONS = [
+  { voiceEnabled: true, label: 'Live call', hint: 'Talk live while you work the board.' },
+  { voiceEnabled: false, label: 'No call', hint: 'Everyone works on the board, with no audio.' },
+] as const;
 
 /** A fresh row is a voting question — what every question was before F41. */
 function blankQuestion(): SessionQuestionInput {
@@ -53,6 +61,7 @@ export function SessionQuestionsForm({
   initialQuestions = [blankQuestion()],
   initialDiscussionTimerSeconds = null,
   initialVotingTimerSeconds = null,
+  initialVoiceEnabled = false,
   submitLabel,
   submittingLabel,
   submitting,
@@ -70,6 +79,7 @@ export function SessionQuestionsForm({
   const [votingTimer, setVotingTimer] = useState(
     () => timerPartsFromSeconds(initialVotingTimerSeconds) ?? ZERO_DURATION,
   );
+  const [voiceEnabled, setVoiceEnabled] = useState(initialVoiceEnabled);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const ready =
@@ -120,6 +130,7 @@ export function SessionQuestionsForm({
         .filter((q) => q.text.length > 0),
       discussionTimerSeconds: secondsFromTimerParts(discussionTimer),
       votingTimerSeconds: secondsFromTimerParts(votingTimer),
+      voiceEnabled,
     });
     if (!parsed.success) {
       setValidationError(parsed.error.issues[0]?.message ?? 'Invalid session');
@@ -146,6 +157,32 @@ export function SessionQuestionsForm({
           className="min-h-10 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
         />
       </div>
+
+      {/* Radios rather than a toggle: neither answer is "off", and the leader
+          should see both before choosing. Styled like `VoteToggle`'s pill. */}
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-[13px] font-semibold text-rt-ink">Call</legend>
+        <p className="text-[12px] leading-relaxed text-rt-ink-muted">
+          You can’t change this once the session is open.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {CALL_OPTIONS.map((option) => (
+            <label key={option.label} className="cursor-pointer">
+              <input
+                type="radio"
+                name="session-call"
+                checked={voiceEnabled === option.voiceEnabled}
+                onChange={() => setVoiceEnabled(option.voiceEnabled)}
+                className="peer sr-only"
+              />
+              <span className="flex h-full flex-col gap-0.5 rounded-2xl border border-dashed border-rt-tertiary px-3 py-2 hover:bg-rt-primary-tint peer-checked:border-solid peer-checked:border-rt-secondary peer-checked:bg-rt-secondary-wash peer-focus-visible:ring-2 peer-focus-visible:ring-rt-secondary">
+                <span className="text-[13px] font-semibold text-rt-ink">{option.label}</span>
+                <span className="text-[12px] text-rt-ink-muted">{option.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       <div className="flex flex-col gap-2">
         <span className="text-[13px] font-semibold text-rt-ink">Questions (in order)</span>

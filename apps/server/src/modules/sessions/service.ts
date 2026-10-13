@@ -101,6 +101,7 @@ export async function createSession({ leaderId, input }: CreateSessionArgs): Pro
         status: 'draft',
         discussionTimerSeconds: input.discussionTimerSeconds ?? null,
         votingTimerSeconds: input.votingTimerSeconds ?? null,
+        voiceEnabled: input.voiceEnabled,
       },
     });
 
@@ -195,6 +196,7 @@ export async function updateSessionDraft({
         title: input.title,
         discussionTimerSeconds: input.discussionTimerSeconds ?? null,
         votingTimerSeconds: input.votingTimerSeconds ?? null,
+        voiceEnabled: input.voiceEnabled,
       },
     });
 
@@ -1783,6 +1785,19 @@ export async function getSession(sessionId: string): Promise<SessionRef | null> 
       votingTimerSeconds: true,
     },
   });
+}
+
+/**
+ * Live call or no call. The voice module asks this before minting a LiveKit
+ * token — kept out of `SessionRef`, which every Pinboard read shares and none
+ * of them needs. A session that does not exist has no call.
+ */
+export async function isSessionVoiceEnabled(sessionId: string): Promise<boolean> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { voiceEnabled: true },
+  });
+  return session?.voiceEnabled ?? false;
 }
 
 /**

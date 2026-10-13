@@ -5,6 +5,7 @@ import {
   localName,
   orderParticipants,
   presenceLabel,
+  presenceParticipants,
   seatParticipants,
   splitForHeader,
   voiceStateByIdentity,
@@ -283,5 +284,23 @@ describe('localName', () => {
   it('is null before you are in the room', () => {
     expect(localName([])).toBeNull();
     expect(localName([person({ identity: 'u1', name: 'Ada' })])).toBeNull();
+  });
+});
+
+describe('presenceParticipants', () => {
+  const users = [
+    { id: 'u1', displayName: 'Joey' },
+    { id: 'u2', displayName: 'Alice Smith' },
+  ];
+
+  it('lists everyone connected by name, marking only the viewer as you', () => {
+    expect(presenceParticipants(users, 'u2')).toEqual([
+      { identity: 'u1', name: 'Joey', isLocal: false, isSpeaking: false, isMuted: false },
+      { identity: 'u2', name: 'Alice Smith', isLocal: true, isSpeaking: false, isMuted: false },
+    ]);
+  });
+
+  it('marks nobody as you before the server has said who you are', () => {
+    expect(presenceParticipants(users, null).some((p) => p.isLocal)).toBe(false);
   });
 });

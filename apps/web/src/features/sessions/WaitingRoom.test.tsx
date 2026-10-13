@@ -36,12 +36,15 @@ function freshVoice(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Kept as a spy so a test can check whether the lobby asked to join at all. */
+const useVoiceRoom = vi.fn<(sessionId: string, enabled?: boolean) => typeof voice>(() => voice);
+
 // Only the hook is replaced: `MicToggle`, `VoiceNotice` and the seat helpers
 // are the real ones, because how they render off this state is the thing worth
 // asserting. Left unmocked, the hook would reach for a real token here.
 vi.mock('../voice', async () => {
   const actual = await vi.importActual<typeof import('../voice')>('../voice');
-  return { ...actual, useVoiceRoom: () => voice };
+  return { ...actual, useVoiceRoom };
 });
 
 vi.mock('./useWaitingRoom', () => ({
@@ -81,6 +84,7 @@ const session: SessionDetail = {
   endedAt: null,
   discussionTimerSeconds: null,
   votingTimerSeconds: null,
+  voiceEnabled: true,
   questions: [
     {
       id: 'q1',
@@ -97,6 +101,7 @@ const session: SessionDetail = {
 describe('WaitingRoom', () => {
   beforeEach(() => {
     start.mockReset();
+    useVoiceRoom.mockClear();
     voice = freshVoice();
   });
 
@@ -202,5 +207,25 @@ describe('WaitingRoom', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Joey, Leader' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Alice Smith' })).toBeInTheDocument();
+  });
+
+  it('never joins a call for a session created with no call, and says so in the header', () => {
+    // What the real hook reports when it is told not to join.
+    voice = freshVoice({ status: 'unavailable', micStatus: 'idle', micEnabled: false });
+    render(
+      <WaitingRoom session={{ ...session, voiceEnabled: false }} onStarted={() => undefined} />,
+    );
+
+    expect(useVoiceRoom).toHaveBeenLastCalledWith('s1', false);
+    expect(screen.getByText('No call')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /microphone/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reconnect voice' })).not.toBeInTheDocument();
+  });
+
+  it('joins the call for a live-call session, with no "No call" chip', () => {
+    render(<WaitingRoom session={session} onStarted={() => undefined} />);
+
+    expect(useVoiceRoom).toHaveBeenLastCalledWith('s1', true);
+    expect(screen.queryByText('No call')).not.toBeInTheDocument();
   });
 });

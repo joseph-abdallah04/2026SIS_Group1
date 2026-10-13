@@ -30,6 +30,8 @@ export interface Session {
   discussionTimerSeconds: number | null;
   /** Seconds, or null when the session has no voting clock. */
   votingTimerSeconds: number | null;
+  /** Live call (true) or no call (false). Fixed once the session leaves `draft`. */
+  voiceEnabled: boolean;
 }
 
 /** Row shape for the dashboard's session list (F04/F07). */

@@ -5,7 +5,7 @@ import {
   type BoardResponse,
   type ReactionGroup,
 } from '@roundtable/shared';
-import type { SessionStatePayload, WriteAck } from '@roundtable/shared/events';
+import type { SessionStatePayload, SessionUserPayload, WriteAck } from '@roundtable/shared/events';
 import type {
   ProposalArrangeInput,
   ProposalCreateInput,
@@ -75,6 +75,10 @@ export function usePinboard(sessionId: string) {
   // Who the server says this socket is. Null until the join snapshot lands,
   // which is also exactly when writing becomes possible (F16).
   const [viewerId, setViewerId] = useState<string | null>(null);
+  // Who is connected to the session right now, one entry per person. A
+  // session with no call has no LiveKit room to list people from, so its
+  // board shows this instead. Same bookkeeping as `useWaitingRoom`.
+  const [participants, setParticipants] = useState<readonly SessionUserPayload[]>([]);
 
   // Derived, not stored: whichever source produces a board first ends the load.
   // As state it had to be flipped back to `true` by every refetch, which made a
@@ -126,6 +130,9 @@ export function usePinboard(sessionId: string) {
       if (snapshot.sessionId !== sessionId) return;
       setError(null);
       setViewerId(snapshot.viewer.id);
+      // Replaces, not merges: a snapshot is the whole truth, and on a
+      // reconnect it is the only way to learn who left while we were away.
+      setParticipants(snapshot.participants);
       setBoard({
         sessionId: snapshot.sessionId,
         sessionTitle: snapshot.sessionTitle,
@@ -307,10 +314,21 @@ export function usePinboard(sessionId: string) {
       );
     };
 
+    // Only ever about other people: the server sends these to everyone in
+    // the room but the socket that caused them, so you arrive by snapshot.
+    const onMemberJoined = ({ user }: { user: SessionUserPayload }) => {
+      setParticipants((prev) => (prev.some((p) => p.id === user.id) ? prev : [...prev, user]));
+    };
+    const onMemberLeft = ({ user }: { user: SessionUserPayload }) => {
+      setParticipants((prev) => prev.filter((p) => p.id !== user.id));
+    };
+
     if (socket.connected) onConnect();
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('sessionState', onSessionState);
+    socket.on('memberJoined', onMemberJoined);
+    socket.on('memberLeft', onMemberLeft);
     socket.on('proposalCreated', onCreated);
     socket.on('proposalUpdated', onUpdated);
     socket.on('proposalDeleted', onDeleted);
@@ -325,6 +343,8 @@ export function usePinboard(sessionId: string) {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('sessionState', onSessionState);
+      socket.off('memberJoined', onMemberJoined);
+      socket.off('memberLeft', onMemberLeft);
       socket.off('proposalCreated', onCreated);
       socket.off('proposalUpdated', onUpdated);
       socket.off('proposalDeleted', onDeleted);
@@ -438,5 +458,6 @@ export function usePinboard(sessionId: string) {
     isLive,
     newItemIds,
     viewerId,
+    participants,
   };
 }

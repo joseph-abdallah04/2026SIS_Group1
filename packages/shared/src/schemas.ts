@@ -205,11 +205,14 @@ export type SessionQuestionInput = z.infer<typeof sessionQuestionInputSchema>;
 // client-side and resubmitting is how a question list gets reordered. Each
 // question carries its own vote/brainstorm choice, so it moves with its row.
 // Timer seconds are optional: omit or `null` means that clock is off.
+// `voiceEnabled` is live call vs no call; omitted means no call, the default
+// that keeps LiveKit usage down.
 export const createSessionSchema = z.object({
   title: z.string().trim().min(1).max(120),
   questions: z.array(sessionQuestionInputSchema).min(1).max(SESSION_QUESTION_LIMIT),
   discussionTimerSeconds: optionalTimerSeconds(DISCUSSION_TIMER_MAX_SECONDS),
   votingTimerSeconds: optionalTimerSeconds(VOTING_TIMER_MAX_SECONDS),
+  voiceEnabled: z.boolean().default(false),
 });
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;

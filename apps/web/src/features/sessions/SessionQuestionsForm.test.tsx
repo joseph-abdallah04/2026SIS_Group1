@@ -37,6 +37,7 @@ describe('SessionQuestionsForm', () => {
       questions: [{ text: 'What ships first?', votingEnabled: true }],
       discussionTimerSeconds: null,
       votingTimerSeconds: null,
+      voiceEnabled: false,
     });
   });
 
@@ -63,6 +64,7 @@ describe('SessionQuestionsForm', () => {
       questions: [{ text: 'What ships first?', votingEnabled: true }],
       discussionTimerSeconds: 615,
       votingTimerSeconds: 120,
+      voiceEnabled: false,
     });
   });
 
