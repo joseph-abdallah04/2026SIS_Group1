@@ -315,11 +315,10 @@ export async function createProposal({
  * for any other kind, which is always the same size, and for a sticky whose
  * browser did not say.
  */
-function stickySizeFrom(input: {
-  type: string;
-  cardWidth?: number;
-  cardHeight?: number;
-}): { cardWidth: number | null; cardHeight: number | null } {
+function stickySizeFrom(input: { type: string; cardWidth?: number; cardHeight?: number }): {
+  cardWidth: number | null;
+  cardHeight: number | null;
+} {
   if (input.type !== 'sticky' || input.cardWidth === undefined) {
     return { cardWidth: null, cardHeight: null };
   }
@@ -741,14 +740,9 @@ async function resolveBoardQuestion(
 ): Promise<QuestionRef | null> {
   if (questionId === undefined) return getActiveQuestion(session.id);
 
-  if (session.status !== 'ended') {
-    throw new ApiError(
-      409,
-      "A specific question's board is available once the session has ended",
-      'SESSION_NOT_ENDED',
-    );
-  }
-
+  // Any question of the session, live or ended: in a live one each member
+  // can look back at a finished board, or ahead at one still to come, on their
+  // own screen without moving the room's. Membership is checked by the route.
   const question = await getQuestionInSession(session.id, questionId);
   if (!question) {
     throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');

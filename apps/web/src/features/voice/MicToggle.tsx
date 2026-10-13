@@ -71,9 +71,9 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
     : busy
       ? 'Working…'
       : micStatus === 'blocked'
-        ? 'Your browser is blocking the microphone — allow it in site settings, then press M'
+        ? 'Your browser is blocking the microphone. Allow it in site settings, then press M'
         : micStatus === 'no-device'
-          ? 'No microphone was found — press M to look again'
+          ? 'No microphone was found. Press M to look again'
           : `${action} (M)`;
 
   return (
@@ -84,30 +84,26 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
       // Pressed means muted: the button's job is muting, and a screen reader
       // reading "Mute, pressed" alongside the label below is unambiguous.
       aria-pressed={!micEnabled}
-      aria-label={`${label} — microphone ${problem ?? (micEnabled ? 'on' : 'muted')}. ${action}.`}
+      aria-label={`${label}: microphone ${problem ?? (micEnabled ? 'on' : 'muted')}. ${action}.`}
       aria-busy={busy}
       title={title}
-      // Square and sized to the header's content band, so it sits level with
-      // the chips beside it and the roster's 24px bubbles without making the
-      // header any taller.
-      className={`relative flex size-6 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+      // A 36px round button with a 16px icon. The border is always there,
+      // transparent when muted, so switching never shifts it by a pixel.
+      className={`relative flex size-9 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFA243] disabled:cursor-not-allowed disabled:opacity-50 ${
         micEnabled
-          ? // Grey, and quiet: a live microphone is the state you do not need
-            // to be told about. `rt-ink-muted` rather than `rt-ink-faint`,
-            // which is too light to read at 13px.
-            'border-rt-secondary/25 bg-white text-rt-ink-muted hover:bg-rt-secondary-wash'
-          : // Red fill, not merely a red icon: muted is the state that costs
-            // you the meeting if you miss it, and a lone red glyph among five
-            // white chips is easy to miss. Same red the app already spends on
-            // destructive actions (End session, Remove proposal).
-            'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
+          ? // Quiet: a live microphone is the state you do not need to be told
+            // about.
+            'border-[#D9D4CB] bg-white text-[#1F2328] enabled:hover:bg-[#F2F0EB] enabled:active:bg-[#E6E2DA]'
+          : // A soft red fill, not merely a red icon: muted is the state that
+            // costs you the meeting if you miss it.
+            'border-transparent bg-[#FDECEA] text-[#B42318] enabled:hover:bg-[#FBDCD8] enabled:active:bg-[#F8CFC9]'
       }`}
     >
       {micEnabled ? (
-        <Mic aria-hidden="true" size={13} strokeWidth={2} />
+        <Mic aria-hidden="true" size={16} strokeWidth={1.5} />
       ) : (
-        // A mic with a slash through it — the muted icon the ticket asks for.
-        <MicOff aria-hidden="true" size={13} strokeWidth={2} />
+        // A mic with a slash through it.
+        <MicOff aria-hidden="true" size={16} strokeWidth={1.5} />
       )}
       {problem ? (
         // Amber, the banner's "you should do something", ringed in the
@@ -115,7 +111,7 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
         <span
           aria-hidden="true"
           data-mic-warning
-          className="absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full bg-rt-secondary text-[8px] leading-none font-bold text-white ring-2 ring-rt-secondary-wash"
+          className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-rt-secondary text-[8px] leading-none font-bold text-white ring-2 ring-rt-secondary-wash"
         >
           !
         </span>

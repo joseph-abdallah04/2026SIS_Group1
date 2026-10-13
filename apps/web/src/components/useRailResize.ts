@@ -9,8 +9,12 @@ import {
 
 import type { BoardRailSide } from './BoardRail';
 
-/** Narrower and the question cards stop fitting a line of text and a chip. */
-export const RAIL_MIN_WIDTH = 224;
+/**
+ * Narrower and the agenda's cards stop fitting their rows on one line: "Ends
+ * with" beside its two choices needs about 210px inside a card, and a card
+ * gives up about 59px to its padding, edge and the list's gutter.
+ */
+export const RAIL_MIN_WIDTH = 268;
 /** Where a rail opens before anyone has dragged it, and what double-click restores. */
 export const RAIL_DEFAULT_WIDTH = 288;
 /** Wider and the rail stops being beside the board and starts competing with it. */

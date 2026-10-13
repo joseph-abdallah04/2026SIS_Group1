@@ -47,7 +47,7 @@ describe('chat persistence', () => {
         id: 'x1',
         message: 'The provider refused the request. Try again.',
         code: 'LLM_REQUEST_REJECTED',
-        detail: 'HTTP 400 — nope',
+        detail: 'HTTP 400: nope',
         cardsAbove: 1,
       },
       // Saved by a build that knew only the message.

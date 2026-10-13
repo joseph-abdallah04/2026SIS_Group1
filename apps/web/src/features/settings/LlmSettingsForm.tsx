@@ -266,7 +266,7 @@ export function LlmSettingsForm({ variant = 'page', onSaved, onCancel }: LlmSett
         ))}
       </div>
 
-      <Field label="Base URL" hint="Usually ends in /v1 — the assistant appends /chat/completions.">
+      <Field label="Base URL" hint="Usually ends in /v1. The assistant appends /chat/completions.">
         {({ id, invalid }) => (
           <Input
             id={id}
@@ -284,7 +284,7 @@ export function LlmSettingsForm({ variant = 'page', onSaved, onCancel }: LlmSett
         label="API key"
         hint={
           hasStoredKey
-            ? 'A key is saved — leave this blank to keep it. Type a new one to replace it.'
+            ? 'A key is saved. Leave this blank to keep it. Type a new one to replace it.'
             : 'Stored encrypted (AES-256-GCM). Never returned by the API.'
         }
       >

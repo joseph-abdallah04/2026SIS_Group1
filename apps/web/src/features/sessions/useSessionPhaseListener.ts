@@ -14,7 +14,7 @@ import { getSocket } from '../../lib/socket';
  */
 export function useSessionPhaseListener(
   sessionId: string,
-  onPhase: (questionId: string, status: QuestionStatus) => void,
+  onPhase: (questionId: string, status: QuestionStatus, skipReason?: string | null) => void,
 ) {
   useEffect(() => {
     if (!sessionId) return;
@@ -24,11 +24,12 @@ export function useSessionPhaseListener(
       sessionId: string;
       questionId: string;
       status: QuestionStatus;
+      skipReason?: string | null;
     }) => {
       // A socket can be moved between sessions (see the gateway's room swap),
       // so an event for a different session is possible and must be ignored.
       if (payload.sessionId !== sessionId) return;
-      onPhase(payload.questionId, payload.status);
+      onPhase(payload.questionId, payload.status, payload.skipReason);
     };
 
     socket.on('sessionPhase', handle);

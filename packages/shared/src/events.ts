@@ -211,7 +211,13 @@ export interface ServerToClientEvents {
    * board (the active question, and therefore which proposals belong on
    * screen, may have moved with it).
    */
-  sessionPhase(payload: { sessionId: string; questionId: string; status: QuestionStatus }): void;
+  sessionPhase(payload: {
+    sessionId: string;
+    questionId: string;
+    status: QuestionStatus;
+    /** Why, when it was skipped and the leader said. */
+    skipReason?: string | null;
+  }): void;
   /**
    * The leader pointed the board at a different question without changing
    * that question's status (looking back at an answered pinboard). Clients

@@ -243,7 +243,7 @@ describe('error notices', () => {
     id: 'x1',
     message: 'The provider refused the request. Try again.',
     code: 'LLM_REQUEST_REJECTED',
-    detail: "HTTP 400 — 'messages.2' : property 'reasoning_content' is unsupported",
+    detail: "HTTP 400: 'messages.2' : property 'reasoning_content' is unsupported",
   };
 
   it('leads with what went wrong and what to do, not with what the provider said', () => {

@@ -20,7 +20,7 @@ export const FLOATING_BAR =
  * container (the dev workbench, the editor tests) it never matches, so the
  * labels show.
  *
- * 42rem because the right-anchored main bar (~375px) and the zoom control
+ * 42rem because the left-anchored main bar (~375px) and the zoom control
  * (~181px), with their 24px insets and a 16px gap between, need about 620px.
  * Re-derive it if the labels change.
  */
@@ -40,7 +40,7 @@ export const BAR_BESIDE_ZOOM =
 
 /**
  * The board's last stage: too narrow to use, so the floating controls go and a
- * one-line note says why. 24rem because the right-anchored toolbar (~165px as
+ * one-line note says why. 24rem because the left-anchored toolbar (~165px as
  * icons) and the zoom control (~125px), with their insets and gap, meet just
  * under 360px. Below this nothing could be pressed without hitting the other,
  * and the board itself is too small to place anything on.
@@ -73,10 +73,9 @@ interface CreativeToolbarProps {
  * that has gone — drawings already on a board still render, and extending or
  * editing one still opens the editor that made it.
  *
- * The first-proposal hint's arrow points at Sticky from this bar's right edge
- * once it is icons only, a fixed distance that counts the buttons after it
- * (see `FirstProposalHint`). Re-derive that offset if a button is added,
- * removed or reordered here.
+ * The first-proposal hint's arrow points at Sticky, the first button, a fixed
+ * distance in from this bar's left edge (see `FirstProposalHint`). Re-derive
+ * that offset if a button is put before it.
  */
 export function CreativeToolbar({ children }: CreativeToolbarProps) {
   const { activeTool, isLive, openTool, submissionStatus } = useCreativeTools();

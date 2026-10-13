@@ -600,6 +600,8 @@ export interface SetQuestionPhaseArgs {
   questionId: string;
   leaderId: string;
   status: QuestionStatus;
+  /** Why, when skipping. Kept on the question as part of the record. */
+  reason?: string;
 }
 
 /**
@@ -620,7 +622,9 @@ export async function setQuestionPhase({
   questionId,
   leaderId,
   status,
+  reason,
 }: SetQuestionPhaseArgs): Promise<QuestionRef> {
+  const skipReason = status === 'skipped' ? reason?.trim() || null : null;
   return prisma.$transaction(async (tx) => {
     const session = await tx.session.findUnique({
       where: { id: sessionId },
@@ -702,6 +706,30 @@ export async function setQuestionPhase({
       }
     }
 
+    // Only the question the room is on can be skipped: the open one, or with
+    // nothing open, the next to start. One further down is not skipped ahead
+    // of time — the agenda can be reordered or reworded instead.
+    if (status === 'skipped' && question.status === 'pending') {
+      const ahead = await tx.question.findFirst({
+        where: {
+          sessionId,
+          id: { not: questionId },
+          OR: [
+            { status: { in: ['discussion', 'voting'] } },
+            { status: 'pending', position: { lt: question.position } },
+          ],
+        },
+        select: { position: true },
+      });
+      if (ahead) {
+        throw new ApiError(
+          409,
+          'Only the question the room is on can be skipped',
+          'NOT_CURRENT_QUESTION',
+        );
+      }
+    }
+
     if (status === 'discussion' || status === 'voting') {
       const open = await tx.question.findFirst({
         where: {
@@ -732,6 +760,7 @@ export async function setQuestionPhase({
       data: {
         status,
         ...(status === 'discussion' ? { discussionStartedAt: new Date() } : {}),
+        ...(status === 'skipped' ? { skipReason } : {}),
       },
     });
     if (written.count === 0) {
@@ -750,7 +779,11 @@ export async function setQuestionPhase({
     }
     // The write matched the row as read, so that row with its new status is
     // what now stands.
-    const updated: QuestionRef = { ...question, status };
+    const updated: QuestionRef = {
+      ...question,
+      status,
+      ...(status === 'skipped' ? { skipReason } : {}),
+    };
 
     // Drop an unfinished shortlist so a later "Open voting" does not revive
     // ticks from the attempt the leader backed out of.
@@ -764,6 +797,9 @@ export async function setQuestionPhase({
     // one: then it advances to the next pending question so the room is not
     // left staring at a finished card. The leader can still look back via
     // `focusQuestion` without touching statuses.
+    //
+    // No other question can be open here: only one is ever open at a time, and
+    // a question further down cannot be skipped while one is (the guard above).
     if (status === 'discussion' || status === 'voting') {
       await tx.session.update({
         where: { id: sessionId },
@@ -1076,6 +1112,187 @@ export async function setQuestionVoting({
   });
 }
 
+export interface SetQuestionTextArgs {
+  sessionId: string;
+  questionId: string;
+  leaderId: string;
+  text: string;
+}
+
+/**
+ * The leader rewords a question: a typo fixed, or the question sharpened while
+ * the room is discussing it.
+ *
+ * Until voting opens, the same window as its vote choice (`setQuestionVoting`).
+ * Once the room is voting, or the question is finished, its text is what the
+ * room voted on and answered, and changing it would rewrite the question after
+ * the fact. The write is conditional on the status for the same reason as
+ * `setQuestionVoting`: "Open voting" may land between check and write.
+ */
+export async function setQuestionText({
+  sessionId,
+  questionId,
+  leaderId,
+  text,
+}: SetQuestionTextArgs): Promise<Question> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: { leaderId: true, status: true },
+    });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.leaderId !== leaderId) {
+      throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+    }
+    if (session.status !== 'active') {
+      throw new ApiError(
+        409,
+        `Cannot change the agenda of a session that is ${session.status}`,
+        'INVALID_TRANSITION',
+      );
+    }
+
+    const question = await tx.question.findUnique({
+      where: { id: questionId },
+      select: { ...QUESTION_REF_SELECT, createdAt: true },
+    });
+    if (!question || question.sessionId !== sessionId) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+    if (question.text === text) {
+      return question;
+    }
+
+    const written = await tx.question.updateMany({
+      where: { id: questionId, status: { in: VOTE_CHANGEABLE } },
+      data: { text },
+    });
+    if (written.count === 0) {
+      throw new ApiError(
+        409,
+        'Voting has opened on this question, so its wording can no longer change',
+        'QUESTION_TEXT_LOCKED',
+      );
+    }
+    return { ...question, text };
+  });
+}
+
+export interface MoveQuestionArgs {
+  sessionId: string;
+  questionId: string;
+  leaderId: string;
+  /** One place up or down — the keyboard's move. */
+  direction?: 'up' | 'down';
+  /** Into this question's place, shifting those between — a drag's move. */
+  toQuestionId?: string;
+}
+
+/**
+ * The leader moves a question that has not started: one place up or down, or
+ * into another question's place with those in between shifting along. Only
+ * past other questions that have not started: what has been discussed,
+ * answered or skipped is the record of the meeting so far, and nothing moves
+ * above it.
+ *
+ * Returns every question whose place changed, so the room hears about each.
+ * The writes are conditional on each still being pending where it was, so
+ * "Start discussion" landing in between makes this a conflict rather than a
+ * reshuffle of a question already under way.
+ */
+export async function moveQuestion({
+  sessionId,
+  questionId,
+  leaderId,
+  direction,
+  toQuestionId,
+}: MoveQuestionArgs): Promise<Question[]> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: { leaderId: true, status: true },
+    });
+    if (!session) {
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
+    if (session.leaderId !== leaderId) {
+      throw new ApiError(403, 'Only the session leader controls the agenda', 'NOT_SESSION_LEADER');
+    }
+    if (session.status !== 'active') {
+      throw new ApiError(
+        409,
+        `Cannot change the agenda of a session that is ${session.status}`,
+        'INVALID_TRANSITION',
+      );
+    }
+
+    const agenda = await tx.question.findMany({
+      where: { sessionId },
+      orderBy: { position: 'asc' },
+      select: { ...QUESTION_REF_SELECT, createdAt: true },
+    });
+    const from = agenda.findIndex((question) => question.id === questionId);
+    const moving = agenda[from];
+    if (!moving) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+    if (moving.status !== 'pending') {
+      throw new ApiError(
+        409,
+        'Only a question that has not started can move',
+        'QUESTION_CANNOT_MOVE',
+      );
+    }
+
+    const to = toQuestionId
+      ? agenda.findIndex((question) => question.id === toQuestionId)
+      : from + (direction === 'up' ? -1 : 1);
+    if (to === -1 && toQuestionId) {
+      throw new ApiError(404, 'Question not found in this session', 'QUESTION_NOT_FOUND');
+    }
+    if (to === from) return [];
+    // Every question it passes, and the one whose place it takes, must not
+    // have started either.
+    const passed = agenda.slice(Math.min(from, to), Math.max(from, to) + 1);
+    if (to < 0 || to >= agenda.length || passed.some((question) => question.status !== 'pending')) {
+      throw new ApiError(
+        409,
+        to < from
+          ? 'This question is already as early as it can go'
+          : 'This question is already last',
+        'QUESTION_CANNOT_MOVE',
+      );
+    }
+
+    // The same places, handed out in the new order.
+    const places = agenda.map((question) => question.position);
+    const reordered = [...agenda];
+    reordered.splice(from, 1);
+    reordered.splice(to, 0, moving);
+
+    const changed: Question[] = [];
+    for (const [index, question] of reordered.entries()) {
+      const position = places[index]!;
+      if (question.position === position) continue;
+      const written = await tx.question.updateMany({
+        where: { id: question.id, status: 'pending', position: question.position },
+        data: { position },
+      });
+      if (written.count === 0) {
+        throw new ApiError(
+          409,
+          'The agenda changed while you were moving it — check it and try again',
+          'QUESTION_CHANGED',
+        );
+      }
+      changed.push({ ...question, position });
+    }
+    return changed;
+  });
+}
+
 /** F41: the statuses a question's vote can still change in — before voting opens. */
 const VOTE_CHANGEABLE: QuestionStatus[] = ['pending', 'discussion'];
 
@@ -1114,6 +1331,7 @@ export function emitQuestionPhase(
     sessionId,
     questionId: question.id,
     status: question.status,
+    skipReason: question.skipReason,
   });
 }
 
@@ -1530,6 +1748,8 @@ export interface QuestionRef {
   boardLocked: boolean;
   /** F41: false = brainstorm-only; picks the phase table and hides voting. */
   votingEnabled: boolean;
+  /** Why it was skipped, when the leader said. */
+  skipReason?: string | null;
 }
 
 /** Every read that returns a `QuestionRef` selects exactly these columns. */
@@ -1541,6 +1761,7 @@ const QUESTION_REF_SELECT = {
   status: true,
   boardLocked: true,
   votingEnabled: true,
+  skipReason: true,
 } as const;
 
 /**

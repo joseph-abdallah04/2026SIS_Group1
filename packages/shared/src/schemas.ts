@@ -179,8 +179,19 @@ const optionalTimerSeconds = (max: number) =>
     .nullable()
     .optional();
 
-/** Longest a single question may be. */
-export const SESSION_QUESTION_TEXT_MAX = 500;
+/**
+ * Longest a single question may be: about 25 words, three lines on the
+ * agenda's card. A question is a prompt for the room, not a brief. Counted in
+ * characters, not words, so a run of text with no spaces cannot get round it.
+ */
+export const SESSION_QUESTION_TEXT_MAX = 150;
+/**
+ * The limit before it came down to `SESSION_QUESTION_TEXT_MAX`. A draft saved
+ * then may hold questions this long, and saving the draft again (say, a new
+ * title) must not fail on them, so a draft's update still takes them. Every
+ * box stops at the new limit, so nobody can write a longer one.
+ */
+export const SESSION_QUESTION_TEXT_LEGACY_MAX = 500;
 /** Hard cap on an agenda, including questions added mid-session. */
 export const SESSION_QUESTION_LIMIT = 50;
 
@@ -216,8 +227,37 @@ export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 // F05: editing a draft replaces title + the full question list in one call
 // (no partial-field PATCH semantics) — same shape as creating one, since a
 // draft's questions have no other state yet for a partial update to preserve.
-export const updateSessionSchema = createSessionSchema;
+// Its questions may run to the old limit, so drafts saved before it came down
+// still save (`SESSION_QUESTION_TEXT_LEGACY_MAX`).
+export const updateSessionSchema = createSessionSchema.extend({
+  questions: z
+    .array(
+      sessionQuestionInputSchema.extend({
+        text: z.string().trim().min(1).max(SESSION_QUESTION_TEXT_LEGACY_MAX),
+      }),
+    )
+    .min(1)
+    .max(SESSION_QUESTION_LIMIT),
+});
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
+
+/**
+ * What to tell someone whose session did not validate. A question that is
+ * too long or empty is named by its number, so they know which row to fix;
+ * anything else is zod's own message.
+ */
+export function sessionIssueMessage(issues: readonly z.ZodIssue[], fallback: string): string {
+  const issue = issues[0];
+  if (!issue) return fallback;
+  const [field, index, key] = issue.path;
+  if (field === 'questions' && typeof index === 'number' && key === 'text') {
+    if (issue.code === 'too_big') {
+      return `Question ${index + 1} is longer than ${String(issue.maximum)} characters`;
+    }
+    if (issue.code === 'too_small') return `Question ${index + 1} is empty`;
+  }
+  return issue.message || fallback;
+}
 
 // F06: `XXXX-XXXX` from an alphabet with no `0/1/I/L/O` — nothing that could
 // be confused for another character when read aloud or typed. Kept here
@@ -244,9 +284,14 @@ export type JoinSessionInput = z.infer<typeof joinSessionSchema>;
 // may return to it, so "un-start a discussion" is not expressible. The rest of
 // the machine (which status may follow which) is enforced server-side in
 // `setQuestionPhase`; this only bounds the shape.
+/** The longest reason the leader can give for skipping a question. */
+export const SKIP_REASON_MAX = 120;
+
 export const setQuestionPhaseSchema = z.object({
   questionId: z.string().min(1),
   status: z.enum(['discussion', 'voting', 'answered', 'skipped']),
+  /** Why, when skipping. Optional: a reason should never hold up the meeting. */
+  reason: z.string().trim().max(SKIP_REASON_MAX).optional(),
 });
 
 export type SetQuestionPhaseInput = z.infer<typeof setQuestionPhaseSchema>;
@@ -282,6 +327,28 @@ export const setQuestionVotingSchema = z.object({
 });
 
 export type SetQuestionVotingInput = z.infer<typeof setQuestionVotingSchema>;
+
+// The leader rewording a question: a typo fixed rather than the question
+// removed. Until voting opens; after that its text is locked.
+export const setQuestionTextSchema = z.object({
+  text: questionTextSchema,
+});
+
+export type SetQuestionTextInput = z.infer<typeof setQuestionTextSchema>;
+
+// The leader moving a question that has not started: one place up or down
+// (the keyboard), or into another question's place (dragging), past questions
+// that have not started either.
+export const moveQuestionSchema = z
+  .object({
+    direction: z.enum(['up', 'down']).optional(),
+    toQuestionId: z.string().min(1).optional(),
+  })
+  .refine((body) => (body.direction === undefined) !== (body.toQuestionId === undefined), {
+    message: 'Say which way to move it, or where',
+  });
+
+export type MoveQuestionInput = z.infer<typeof moveQuestionSchema>;
 
 // === pinboard module ===
 

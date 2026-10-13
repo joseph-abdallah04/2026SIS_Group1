@@ -29,7 +29,7 @@ export function VoteToggle({
       type="button"
       aria-pressed={votingEnabled}
       aria-label={label}
-      title={votingEnabled ? 'The team votes on this question' : 'Brainstorm only — no vote'}
+      title={votingEnabled ? 'The team votes on this question' : 'Brainstorm only (no vote)'}
       disabled={disabled}
       onClick={() => onChange(!votingEnabled)}
       className={`flex shrink-0 items-center rounded-full border border-dashed border-rt-tertiary font-semibold text-rt-ink-faint hover:bg-rt-primary-tint focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none disabled:opacity-50 aria-pressed:border-solid aria-pressed:border-rt-secondary aria-pressed:bg-rt-secondary-wash aria-pressed:text-rt-secondary-deep ${sizing}`}

@@ -47,7 +47,7 @@ function writeIntent(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      reject(new Error('No response from the server — check your connection'));
+      reject(new Error('No response from the server. Check your connection'));
     }, WRITE_TIMEOUT_MS);
 
     send((res) => {

@@ -20,7 +20,7 @@ describe('MicToggle', () => {
   it('names you with the mic on, and offers muting', () => {
     render(<MicToggle {...liveProps()} />);
 
-    const button = screen.getByRole('button', { name: /Ada — microphone on/ });
+    const button = screen.getByRole('button', { name: /Ada: microphone on/ });
     expect(button).toHaveAccessibleName(/Mute your microphone/);
     // Not pressed: "pressed" is reserved for the muted state.
     expect(button).toHaveAttribute('aria-pressed', 'false');
@@ -29,7 +29,7 @@ describe('MicToggle', () => {
   it('reads as muted, and offers unmuting, once the mic is off', () => {
     render(<MicToggle {...liveProps()} micEnabled={false} />);
 
-    const button = screen.getByRole('button', { name: /Ada — microphone muted/ });
+    const button = screen.getByRole('button', { name: /Ada: microphone muted/ });
     expect(button).toHaveAccessibleName(/Unmute your microphone/);
     expect(button).toHaveAttribute('aria-pressed', 'true');
   });
@@ -38,7 +38,7 @@ describe('MicToggle', () => {
     render(<MicToggle {...liveProps()} name={null} />);
 
     // In the accessible name, which is the only name an icon-only button has.
-    expect(screen.getByRole('button')).toHaveAccessibleName(/^You — microphone/);
+    expect(screen.getByRole('button')).toHaveAccessibleName(/^You: microphone/);
   });
 
   it('is the symbol alone — no name, no state in words', () => {
@@ -55,7 +55,7 @@ describe('MicToggle', () => {
     // Muted is what costs you the meeting if you miss it. A lone red icon
     // among five white chips is easy to overlook, so the fill stays.
     render(<MicToggle {...liveProps()} micEnabled={false} />);
-    expect(screen.getByRole('button')).toHaveClass('bg-red-50');
+    expect(screen.getByRole('button')).toHaveClass('bg-[#FDECEA]');
   });
 
   it('stays quiet and grey while the mic is live', () => {
@@ -63,7 +63,7 @@ describe('MicToggle', () => {
 
     const button = screen.getByRole('button');
     expect(button).toHaveClass('bg-white');
-    expect(button).not.toHaveClass('bg-red-50');
+    expect(button).not.toHaveClass('bg-[#FDECEA]');
   });
 
   it('toggles on click', async () => {
@@ -153,7 +153,7 @@ describe('MicToggle', () => {
     render(<MicToggle {...liveProps()} micEnabled={false} micStatus="blocked" />);
 
     const button = screen.getByRole('button');
-    expect(button).toHaveAccessibleName(/Ada — microphone blocked by your browser/);
+    expect(button).toHaveAccessibleName(/Ada: microphone blocked by your browser/);
     expect(button.querySelector('[data-mic-warning]')).not.toBeNull();
   });
 
@@ -161,7 +161,7 @@ describe('MicToggle', () => {
     render(<MicToggle {...liveProps()} micEnabled={false} micStatus="no-device" />);
 
     const button = screen.getByRole('button');
-    expect(button).toHaveAccessibleName(/Ada — microphone not found/);
+    expect(button).toHaveAccessibleName(/Ada: microphone not found/);
     expect(button.querySelector('[data-mic-warning]')).not.toBeNull();
   });
 

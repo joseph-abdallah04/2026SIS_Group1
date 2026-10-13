@@ -30,7 +30,7 @@ export function ToolActivity({ toolName, status, summary, results }: ToolActivit
           }`}
           aria-hidden="true"
         />
-        <span>{status === 'failed' ? `${labels.done} — failed` : label}</span>
+        <span>{status === 'failed' ? `${labels.done} (failed)` : label}</span>
         {summary && status !== 'running' && (
           <span style={{ color: 'var(--rt-assistant-muted)' }}>· {summary}</span>
         )}

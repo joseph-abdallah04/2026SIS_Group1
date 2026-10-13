@@ -157,7 +157,7 @@ function ReactionChip({
       aria-disabled={readOnly || undefined}
       // The names are part of what the chip says, not only what it shows on
       // hover: a tooltip is nothing to a screen reader.
-      aria-label={count === 0 ? label : `${label} (${count}) — ${who}`}
+      aria-label={count === 0 ? label : `${label} (${count}): ${who}`}
       disabled={busy || disabled}
       onClick={readOnly ? undefined : onClick}
       {...names.anchor}

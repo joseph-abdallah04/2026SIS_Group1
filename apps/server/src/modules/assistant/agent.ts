@@ -493,7 +493,12 @@ function parseStickyIdeas(text: string): string[] {
   }
   return text
     .split('\n')
-    .map((line) => line.replace(/^[\s\d.*-]+/, '').replace(/^"+|"+$/g, '').trim())
+    .map((line) =>
+      line
+        .replace(/^[\s\d.*-]+/, '')
+        .replace(/^"+|"+$/g, '')
+        .trim(),
+    )
     .filter((line) => line.length > 2 && !line.startsWith('{'))
     .slice(0, 5);
 }

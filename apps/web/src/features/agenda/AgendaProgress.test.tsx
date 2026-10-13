@@ -35,7 +35,20 @@ describe('AgendaProgress', () => {
     expect(segments[2]).toHaveClass('bg-rt-cool');
     expect(segments[3]).toHaveClass('bg-rt-tertiary/50');
     expect(track()).not.toHaveClass('overflow-hidden');
-    expect(screen.getByText('incl. 1 skipped')).toBeInTheDocument();
+    expect(screen.queryByText(/answered/)).not.toBeInTheDocument();
+  });
+
+  it('names the question in play, out of how many', () => {
+    render(<AgendaProgress summary={summaryOf('answered', 'discussion', 'pending')} current={2} />);
+
+    expect(screen.getByText('Question')).toHaveTextContent('Question 2 of 3');
+  });
+
+  it('counts what is done when nothing is in play', () => {
+    render(<AgendaProgress summary={summaryOf('answered', 'pending')} />);
+
+    expect(screen.getByText('done', { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText(/answered/)).not.toBeInTheDocument();
   });
 
   it('runs the segments together once there are too many to tell apart', () => {

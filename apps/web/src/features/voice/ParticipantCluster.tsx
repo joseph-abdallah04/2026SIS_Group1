@@ -155,7 +155,7 @@ export function ParticipantCluster({ participants, status }: ParticipantClusterP
         onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Show everyone in the room — ${presenceLabel(seats.length)}`}
+        aria-label={`Show everyone in the room, ${presenceLabel(seats.length)}`}
         title={`In the room · ${presenceLabel(seats.length)}`}
         data-speaking={speakerHidden ? 'true' : undefined}
         className="rt-voice-more flex items-center rounded-full px-1.5 text-[10.5px] font-semibold text-rt-secondary-deep transition-colors hover:bg-rt-secondary-wash focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-1 focus-visible:outline-none"
@@ -190,7 +190,7 @@ export function ParticipantCluster({ participants, status }: ParticipantClusterP
           </ul>
           {status === 'reconnecting' ? (
             <p className="shrink-0 border-t border-rt-tertiary px-3 py-2 text-[11px] text-rt-ink-faint">
-              Reconnecting — this list may be out of date.
+              Reconnecting. This list may be out of date.
             </p>
           ) : null}
         </AnchoredPopover>

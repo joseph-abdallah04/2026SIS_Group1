@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
 import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
-import { ImagePlus, Scan } from 'lucide-react';
+import { Eye, ImagePlus, Scan, ScreenShare } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { copyText } from '../../lib/copyText';
@@ -20,6 +20,7 @@ import {
   FLOATING_BAR,
   TOOL_LABEL,
 } from '../toolbar/CreativeToolbar';
+import { BoardLockControl, BoardLockToast } from './BoardLock';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
 import { clearBoardCentre, setBoardCentre } from './boardView';
@@ -68,6 +69,12 @@ interface PinboardCanvasProps {
    * the header/board split the rail has to sit inside.
    */
   agenda?: ReactNode;
+  /**
+   * The board lock for the question on screen: whether only the leader may
+   * move proposals. A pill in the board's top-right corner for the leader,
+   * while it is being discussed — the only time anything on it can move.
+   */
+  boardLock?: { locked: boolean; onToggle?: () => Promise<void> };
   /**
    * The assistant rail, opposite the agenda. A node for the same reason:
    * the board owns the row, and the chat owns what goes in the rail.
@@ -147,6 +154,20 @@ interface PinboardCanvasProps {
   readOnly?: boolean;
   /** The way back to the recap, in the header slot End/Leave uses live. */
   archiveActions?: ReactNode;
+  /**
+   * The board on screen is not the question in play: this person is looking
+   * at another question's on their own, or the leader has put one up for
+   * everyone. Nothing on it can be changed, while the rest of the session
+   * (header, mic, the room's vote) carries on live. A bar takes the toolbar's
+   * place: which board, what to know about it, and the ways back.
+   */
+  viewing?: {
+    title: string;
+    detail: string;
+    actions: ReactNode;
+    /** Up for everyone (a shared screen) rather than looked at alone (an eye). */
+    shared?: boolean;
+  } | null;
   /**
    * F41: false when the question on screen is brainstorm-only, so the header
    * tells the room up front that no vote is coming. Defaults to a vote.
@@ -239,12 +260,52 @@ function ZoomControl({
   );
 }
 
+/**
+ * Where the toolbar sits while the board is not the question in play: which
+ * board it is, the one thing worth knowing about it, and the ways back.
+ */
+function ViewingBar({
+  title,
+  detail,
+  actions,
+  shared = false,
+}: {
+  title: string;
+  detail: string;
+  actions: ReactNode;
+  shared?: boolean;
+}) {
+  const Icon = shared ? ScreenShare : Eye;
+  return (
+    // With no buttons (a member, while a board is up for everyone) the words
+    // run to the bar's end, so they get the same room there as at the start.
+    <div
+      role="status"
+      className={`${FLOATING_BAR} ${BAR_BESIDE_ZOOM} gap-3 pl-4 ${actions ? '' : 'pr-4'}`}
+    >
+      <span className="flex min-w-0 items-center gap-2 text-[12px] text-rt-ink-muted">
+        <Icon aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+        <span className="shrink-0 font-semibold whitespace-nowrap text-rt-ink">{title}</span>
+        {detail ? (
+          <>
+            {/* The same rule that parts the toolbar's own groups. */}
+            <span aria-hidden className="h-5 w-px shrink-0 bg-rt-tertiary" />
+            <span className="truncate font-medium">{detail}</span>
+          </>
+        ) : null}
+      </span>
+      {actions ? <span className="flex shrink-0 items-center gap-1.5">{actions}</span> : null}
+    </div>
+  );
+}
+
 export function PinboardCanvas({
   board,
   isLive,
   newItemIds,
   isLeader,
   agenda,
+  boardLock,
   assistant,
   myProposals,
   micControl,
@@ -267,6 +328,7 @@ export function PinboardCanvas({
   onSelectProposal,
   readOnly = false,
   archiveActions,
+  viewing = null,
   questionVotingEnabled = true,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
@@ -309,7 +371,10 @@ export function PinboardCanvas({
   // Opening a tool waits while a proposal is on its way, so the menu offers
   // nothing that would open one — the same way the toolbar goes dim.
   const toolsFree = submissionStatus !== 'submitting';
-  const boardOpen = !readOnly && board.questionStatus === 'discussion';
+  // Nothing on the board can be changed: an ended session's, or another
+  // question's that this person is only looking at.
+  const frozen = readOnly || viewing !== null;
+  const boardOpen = !frozen && board.questionStatus === 'discussion';
 
   // Which cards this viewer may move right now: the leader any of them, anyone
   // else their own while the board is unlocked, nobody once it has closed.
@@ -481,7 +546,7 @@ export function PinboardCanvas({
       // Drawn whenever the board is live, cards to pick up or not: a box that
       // only sometimes appears reads as the board ignoring the drag. With
       // nothing this viewer may move, it simply selects nothing.
-      if (readOnly) return;
+      if (frozen) return;
       const target = event.target as HTMLElement;
       if (target.closest('[data-proposal-card], button, a, input, textarea, [role="dialog"]')) {
         return;
@@ -931,7 +996,7 @@ export function PinboardCanvas({
         'Agenda complete';
 
   const closedMessage = readOnly
-    ? 'This session has ended — the board is read-only'
+    ? 'This session has ended. The board is read-only'
     : board.questionStatus === 'voting'
       ? 'Proposals are locked while this question is in voting'
       : 'This question is closed to new proposals';
@@ -1044,7 +1109,7 @@ export function PinboardCanvas({
           {shortlistControl}
           {micControl}
           {/* Two short rows in the height one pill used to take: the count
-              and the live dot above, the join code below. The join code came
+              (and an offline flag while disconnected) above, the join code below. The join code came
               up from the retired footer, and stacking it here rather than
               adding it to the row keeps the header neither taller nor wider.
               `items-end` lines both rows up against the exit button. */}
@@ -1057,21 +1122,15 @@ export function PinboardCanvas({
                 <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2 text-[10px] font-medium text-rt-secondary-deep shadow-sm">
                   Session ended
                 </span>
-              ) : (
+              ) : isLive ? null : (
+                // Only the exception is worth the room: being connected is the
+                // normal state, so it goes unsaid.
                 <div
                   className="flex h-4.5 items-center gap-1.5 rounded-full border border-rt-secondary/25 bg-white px-2 shadow-sm"
-                  title={
-                    isLive
-                      ? 'Connected: new proposals appear here as they are made'
-                      : 'Not receiving live updates; reconnecting'
-                  }
+                  title="Not receiving live updates; reconnecting"
                 >
-                  <div
-                    className={`size-1.5 rounded-full ${isLive ? 'bg-rt-cool' : 'bg-rt-tertiary'}`}
-                  />
-                  <span className="text-[10px] font-medium text-rt-secondary-deep">
-                    {isLive ? 'live' : 'offline'}
-                  </span>
+                  <div className="size-1.5 rounded-full bg-rt-tertiary" />
+                  <span className="text-[10px] font-medium text-rt-secondary-deep">offline</span>
                 </div>
               )}
             </div>
@@ -1186,7 +1245,7 @@ export function PinboardCanvas({
                     stackIndex={stackIndexById.get(item.id) ?? 0}
                     stackSize={board.items.length}
                     isDragging={isDragging(item.id)}
-                    dragHandlers={readOnly ? undefined : cardDragHandlers}
+                    dragHandlers={frozen ? undefined : cardDragHandlers}
                     onDelete={onDelete}
                     onArrange={onArrange}
                     onCopyText={onCopyText}
@@ -1309,7 +1368,7 @@ export function PinboardCanvas({
             </div>
 
             {/* The main toolbar. Centred on the board until it would run
-                  into the zoom control on the left, then anchored right: the
+                  into the zoom control on the right, then anchored left: the
                   centred bar (~375px) meets the zoom control (~181px, 24px in
                   from the edge, 16px gap) on a board narrower than ~816px, so
                   52rem leaves a margin. `bottom-6` clears the horizontal
@@ -1320,7 +1379,7 @@ export function PinboardCanvas({
                   The leader's shortlist bar, which takes this slot while the
                   board is closed, is wider (~490px) and meets the zoom
                   control on a board narrower than ~930px, so it anchors
-                  right from 60rem.
+                  left from 60rem.
 
                   Marked so the sticky popup can centre itself over the board
                   this row spans, rather than over a window the side panels
@@ -1329,8 +1388,8 @@ export function PinboardCanvas({
               data-board-toolbar
               className={`absolute inset-x-0 bottom-6 flex justify-center px-6 ${BOARD_CRAMPED_HIDDEN} ${
                 !boardOpen && boardOverlay
-                  ? '@max-[60rem]/board:justify-end'
-                  : '@max-[52rem]/board:justify-end'
+                  ? '@max-[60rem]/board:justify-start'
+                  : '@max-[52rem]/board:justify-start'
               }`}
             >
               {/* `relative` so the first-proposal hint can rise off whichever
@@ -1345,7 +1404,14 @@ export function PinboardCanvas({
                   // the hint that says how to make one has done its job.
                   toolOpen={activeTool !== null || (imageImport?.importing ?? false)}
                 />
-                {boardOpen ? (
+                {viewing ? (
+                  <ViewingBar
+                    title={viewing.title}
+                    detail={viewing.detail}
+                    actions={viewing.actions}
+                    shared={viewing.shared}
+                  />
+                ) : boardOpen ? (
                   // Reuse sits in the same pill as the tools that start from
                   // blank, because reusing an earlier proposal produces the
                   // same thing they do. It belongs inside this branch for
@@ -1368,12 +1434,12 @@ export function PinboardCanvas({
               </div>
             </div>
 
-            {/* Zoom, on the left of the board: clear of the vertical
-                  scrollbar by `left-6`, and on the same baseline as the
-                  main bar. */}
+            {/* Zoom, in the board's bottom-right corner: clear of the
+                  vertical scrollbar by `right-6`, and on the same baseline
+                  as the main bar. */}
             <div
               data-board-zoom
-              className={`pointer-events-auto absolute bottom-6 left-6 ${BOARD_CRAMPED_HIDDEN}`}
+              className={`pointer-events-auto absolute right-6 bottom-6 ${BOARD_CRAMPED_HIDDEN}`}
             >
               <ZoomControl
                 zoom={zoom}
@@ -1384,6 +1450,19 @@ export function PinboardCanvas({
                 onFit={onFit}
               />
             </div>
+
+            {/* The board lock, the leader's, as its own pill in the top-right
+                corner while the question is being discussed — the only time
+                anything on it can move. `right-6` clears the vertical
+                scrollbar, the way the zoom control's `left-6` does. */}
+            {isLeader && boardLock?.onToggle && boardOpen ? (
+              <div
+                data-board-lock
+                className={`pointer-events-auto absolute top-4 right-6 ${FLOATING_BAR} ${BOARD_CRAMPED_HIDDEN}`}
+              >
+                <BoardLockControl locked={boardLock.locked} onToggle={boardLock.onToggle} />
+              </div>
+            ) : null}
 
             {/* What stands in for the bars on a board too narrow to use. The
                 bars are `display: none` there, so they leave the
@@ -1400,16 +1479,25 @@ export function PinboardCanvas({
               Widen the board to see its controls
             </p>
           </div>
+
+          {/* One stack under the header, so its notices never lie on top of one
+              another: voice trouble first, then the board's own news — the
+              leader locking or unlocking it. In the board's box, so it centres
+              on the board the toolbar centres on, not on the whole row with the
+              panels in it. `z-40`, over the ballot's `z-30`: a vote covers the
+              board, not voice. */}
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-40 flex flex-col items-center gap-2 px-4">
+            {voiceNotice}
+            <BoardLockToast
+              questionId={board.questionId}
+              locked={board.boardLocked}
+              enabled={!isLeader && board.questionStatus === 'discussion' && !frozen}
+            />
+          </div>
         </div>
 
         {assistant}
         {ballot}
-
-        {/* Positioned against this row, so it hangs just under the header the
-            way the lobby's does. After the ballot on purpose: they share
-            `z-30`, and the later one paints on top — a vote covers the board,
-            not voice. */}
-        {voiceNotice}
       </div>
     </div>
   );

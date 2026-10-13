@@ -1,4 +1,5 @@
 import type { ReactNode, Ref } from 'react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
 import { useRailResize } from './useRailResize';
 
@@ -12,8 +13,9 @@ const EXPANDED_WIDTH: Record<BoardRailWidth, string> = {
 };
 
 const TITLE_CLASSES = 'text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase';
+/** The same quiet round button as the agenda's +, so the header's controls match. */
 const TOGGLE_CLASSES =
-  'inline-flex items-center justify-center text-[13px] font-semibold text-rt-primary-deep hover:opacity-70';
+  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-rt-ink-muted transition-colors hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary';
 
 interface BoardRailProps {
   /** Which edge of the board this dock sits on — flips the border and chevrons. */
@@ -43,6 +45,13 @@ interface BoardRailProps {
    * that share one open at the same size. Overrides `width` while set.
    */
   resize?: { storageKey: string; label: string };
+  /**
+   * Under the title, in the same header zone and above its one divider: the
+   * agenda's progress, which belongs to the heading rather than to the list.
+   */
+  subheader?: ReactNode;
+  /** A control beside the collapse arrow, such as the agenda's +. */
+  headerAction?: ReactNode;
   children: ReactNode;
 }
 
@@ -79,13 +88,17 @@ export function BoardRail({
   toggleRef,
   inert = false,
   resize,
+  subheader,
+  headerAction,
   children,
 }: BoardRailProps) {
   const resizer = useRailResize({ side, storageKey: resize?.storageKey, collapsed, onToggle });
   const onLeft = side === 'left';
   const edge = onLeft ? 'border-r' : 'border-l';
-  const expandChevron = onLeft ? '›' : '‹';
-  const collapseChevron = onLeft ? '‹' : '›';
+  // A panel with its edge on the rail's side: closing it points back to that
+  // edge, opening it points away.
+  const ExpandIcon = onLeft ? PanelLeftOpen : PanelRightOpen;
+  const CollapseIcon = onLeft ? PanelLeftClose : PanelRightClose;
 
   if (collapsed) {
     return (
@@ -101,9 +114,9 @@ export function BoardRail({
           aria-expanded={false}
           aria-label={expandLabel}
           title={expandTitle ?? expandLabel}
-          className={`h-11 w-full ${TOGGLE_CLASSES}`}
+          className={TOGGLE_CLASSES}
         >
-          {expandChevron}
+          <ExpandIcon aria-hidden="true" data-rail-icon="expand" size={16} strokeWidth={2} />
         </button>
         <div className="flex w-full justify-center">
           <RailTitle vertical>{title}</RailTitle>
@@ -121,9 +134,12 @@ export function BoardRail({
       aria-expanded={true}
       aria-label={collapseLabel}
       title={collapseTitle ?? collapseLabel}
-      className={`-my-2 h-11 w-11 ${TOGGLE_CLASSES}`}
+      // Pulled towards the panel's edge by the icon's own inset (its frame is
+      // drawn 7px inside the 28px button), so the drawn icon ends where the
+      // header's content does, flush with the progress bar under it.
+      className={`-my-1 ${onLeft ? '-mr-[7px]' : '-ml-[7px]'} ${TOGGLE_CLASSES}`}
     >
-      {collapseChevron}
+      <CollapseIcon aria-hidden="true" data-rail-icon="collapse" size={16} strokeWidth={2} />
     </button>
   );
 
@@ -142,18 +158,27 @@ export function BoardRail({
           : { width: sizedWidth, minWidth: sizedWidth, maxWidth: sizedWidth, flexBasis: sizedWidth }
       }
     >
-      <div className="-mx-3 flex shrink-0 items-center justify-between border-b border-rt-tertiary px-3 py-2">
-        {onLeft ? (
-          <>
-            <RailTitle>{title}</RailTitle>
-            {collapseButton}
-          </>
-        ) : (
-          <>
-            {collapseButton}
-            <RailTitle>{title}</RailTitle>
-          </>
-        )}
+      <div className="-mx-3 shrink-0 border-b border-rt-tertiary px-3 py-2">
+        <div className="flex items-center justify-between">
+          {onLeft ? (
+            <>
+              <RailTitle>{title}</RailTitle>
+              <span className="flex items-center">
+                {headerAction}
+                {collapseButton}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="flex items-center">
+                {collapseButton}
+                {headerAction}
+              </span>
+              <RailTitle>{title}</RailTitle>
+            </>
+          )}
+        </div>
+        {subheader ? <div className="pt-1 pb-1.5">{subheader}</div> : null}
       </div>
       <div
         className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${

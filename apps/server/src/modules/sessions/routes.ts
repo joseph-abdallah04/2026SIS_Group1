@@ -5,8 +5,11 @@ import {
   createSessionSchema,
   focusQuestionSchema,
   joinSessionSchema,
+  moveQuestionSchema,
   setBoardLockSchema,
   setQuestionPhaseSchema,
+  setQuestionTextSchema,
+  sessionIssueMessage,
   setQuestionVotingSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
@@ -34,10 +37,12 @@ import {
   leaveSession,
   listSessionMembers,
   listSessionsForUser,
+  moveQuestion,
   openSessionForJoining,
   resolveSessionByCode,
   setBoardLock,
   setQuestionPhase,
+  setQuestionText,
   setQuestionVoting,
   startSession,
   updateSessionDraft,
@@ -69,6 +74,12 @@ const boardLockLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
 // keying — its own bucket, so flipping votes cannot use up the board lock's.
 const questionVotingLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
 
+// Rewording and moving get buckets of their own too, so a long reorder cannot
+// lock the leader out of the vote switch or the editor's Save. A move is a
+// step (Alt+Arrow sends one per press), so its budget is wider.
+const questionTextLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
+const questionMoveLimiter = rateLimit({ ...LEADER_TOGGLE_LIMIT, limit: 120 });
+
 /**
  * A factory, not a module-level Router, because F09's POST /:id/start
  * needs to broadcast on `io` after it succeeds.
@@ -83,7 +94,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       if (!parsed.success) {
         throw new ApiError(
           400,
-          parsed.error.issues[0]?.message ?? 'Invalid session',
+          sessionIssueMessage(parsed.error.issues, 'Invalid session'),
           'VALIDATION_ERROR',
         );
       }
@@ -129,7 +140,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       if (!parsed.success) {
         throw new ApiError(
           400,
-          parsed.error.issues[0]?.message ?? 'Invalid session',
+          sessionIssueMessage(parsed.error.issues, 'Invalid session'),
           'VALIDATION_ERROR',
         );
       }
@@ -198,6 +209,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
         questionId: parsed.data.questionId,
         leaderId,
         status: parsed.data.status,
+        reason: parsed.data.reason,
       });
       emitQuestionPhase(io, req.params.id, question);
       res.json(question);
@@ -312,6 +324,71 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
         });
         emitQuestionUpdated(io, question);
         res.json(question);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Reword a question until voting opens on it: still to come, or under
+  // discussion. Leader-only; clients pick the change up from
+  // `questionUpdated`, like the vote switch.
+  sessionsRoutes.put<{ id: string; questionId: string }>(
+    '/:id/questions/:questionId/text',
+    questionTextLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = setQuestionTextSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid question',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const question = await setQuestionText({
+          sessionId: req.params.id,
+          questionId: req.params.questionId,
+          leaderId: req.userId!,
+          text: parsed.data.text,
+        });
+        emitQuestionUpdated(io, question);
+        res.json(question);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Move a question that has not started: one place up or down the agenda, or
+  // into another such question's place. Every question that moves goes out on
+  // `questionUpdated`.
+  sessionsRoutes.post<{ id: string; questionId: string }>(
+    '/:id/questions/:questionId/move',
+    questionMoveLimiter,
+    requireAuth,
+    async (req, res, next) => {
+      try {
+        const parsed = moveQuestionSchema.safeParse(req.body);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? 'Invalid move',
+            'VALIDATION_ERROR',
+          );
+        }
+
+        const questions = await moveQuestion({
+          sessionId: req.params.id,
+          questionId: req.params.questionId,
+          leaderId: req.userId!,
+          direction: parsed.data.direction,
+          toQuestionId: parsed.data.toQuestionId,
+        });
+        for (const question of questions) emitQuestionUpdated(io, question);
+        res.json(questions);
       } catch (err) {
         next(err);
       }

@@ -306,7 +306,7 @@ function NotConfigured({ onOpenSetup }: { onOpenSetup: () => void }) {
     <div className="rt-assistant-setup text-sm">
       <p className="font-semibold">No AI provider set up yet</p>
       <p className="mt-1 text-xs leading-relaxed">
-        The assistant runs on your own LLM provider — RoundTable never pays for or sees your
+        The assistant runs on your own LLM provider. RoundTable never pays for or sees your
         inference. Add a base URL, API key and model here to switch it on.
       </p>
       <button type="button" onClick={onOpenSetup} className="rt-assistant-setup-cta">
@@ -320,7 +320,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="space-y-3">
       <p className="rt-assistant-empty">
-        Hi — I&apos;m your private ideation buddy. I can see the board around you, search the web,
+        Hi, I&apos;m your private ideation buddy. I can see the board around you, search the web,
         and draft sticky notes or diagrams you can drop onto the pinboard.
       </p>
       <div className="flex flex-wrap gap-1.5">

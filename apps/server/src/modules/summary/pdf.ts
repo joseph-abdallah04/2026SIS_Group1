@@ -181,8 +181,7 @@ function writeQuestion(
   }
 
   if (question.votedCount > 0) {
-    const votes =
-      question.votedCount === 1 ? '1 vote cast' : `${question.votedCount} votes cast`;
+    const votes = question.votedCount === 1 ? '1 vote cast' : `${question.votedCount} votes cast`;
     doc.text(votes, { width });
   }
 
@@ -222,12 +221,21 @@ function writeQuestion(
 function writeRecap(doc: PDFKit.PDFDocument, summary: SessionRecap) {
   const width = doc.page.width - MARGIN * 2;
 
-  doc.fillColor(MUTED).font('Helvetica').fontSize(9).text('ROUNDTABLE', { width, characterSpacing: 1.6 });
+  doc
+    .fillColor(MUTED)
+    .font('Helvetica')
+    .fontSize(9)
+    .text('ROUNDTABLE', { width, characterSpacing: 1.6 });
   doc.moveDown(0.35);
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(20).text(summary.title, { width });
   doc.moveDown(0.3);
   const ruleY = doc.y;
-  doc.strokeColor(GOLD).lineWidth(1.5).moveTo(MARGIN, ruleY).lineTo(MARGIN + 64, ruleY).stroke();
+  doc
+    .strokeColor(GOLD)
+    .lineWidth(1.5)
+    .moveTo(MARGIN, ruleY)
+    .lineTo(MARGIN + 64, ruleY)
+    .stroke();
   doc.x = MARGIN;
   doc.y = ruleY + 14;
 

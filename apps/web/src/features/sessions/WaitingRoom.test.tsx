@@ -142,7 +142,7 @@ describe('WaitingRoom', () => {
     });
     render(<WaitingRoom session={session} onStarted={() => undefined} />);
 
-    expect(screen.getByRole('button', { name: /Joey — microphone on/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Joey: microphone on/ })).toBeInTheDocument();
   });
 
   it('marks a muted person on the seat they already occupy', () => {

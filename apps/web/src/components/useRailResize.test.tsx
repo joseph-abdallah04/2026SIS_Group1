@@ -195,8 +195,11 @@ describe('BoardRail resize', () => {
     render(<Harness />);
     fireEvent.keyDown(handle(), { key: 'ArrowRight' });
     expect(handle()).toHaveAttribute('aria-valuenow', String(RAIL_DEFAULT_WIDTH + 16));
+    // Far enough out that a large step back stays clear of the minimum.
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' });
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' });
     fireEvent.keyDown(handle(), { key: 'ArrowLeft', shiftKey: true });
-    expect(handle()).toHaveAttribute('aria-valuenow', String(RAIL_DEFAULT_WIDTH + 16 - 48));
+    expect(handle()).toHaveAttribute('aria-valuenow', String(RAIL_DEFAULT_WIDTH + 48 - 48));
     fireEvent.keyDown(handle(), { key: 'Home' });
     expect(handle()).toHaveAttribute('aria-valuenow', String(RAIL_MIN_WIDTH));
     // The keyboard stops at the minimum: closing is the collapse button's job.
@@ -252,12 +255,12 @@ describe('BoardRail resize', () => {
     beforeEach(() => {
       original = window.innerWidth;
       localStorage.setItem(KEY, '480');
-      window.innerWidth = 700;
+      window.innerWidth = 800;
     });
     afterEach(() => {
       window.innerWidth = original;
     });
-    const cap = () => railMaxWidth(700);
+    const cap = () => railMaxWidth(800);
 
     it('keeps the preference through a press that never moved', () => {
       render(<Harness />);

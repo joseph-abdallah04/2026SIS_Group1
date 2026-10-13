@@ -71,7 +71,9 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
         if (cancelled) return;
         setIsLive(res.ok);
         if (!res.ok) {
-          console.error(`[waiting-room] could not join the session room: ${res.error ?? 'unknown'}`);
+          console.error(
+            `[waiting-room] could not join the session room: ${res.error ?? 'unknown'}`,
+          );
         }
       });
     };

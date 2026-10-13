@@ -25,7 +25,7 @@ const POINTS = [
   },
   {
     title: 'It drafts. You still propose.',
-    body: 'It can search the web, sketch a diagram, or rough out stickies. Nothing reaches the shared pinboard until you press Propose — and when you do, the proposal is authored by you.',
+    body: 'It can search the web, sketch a diagram, or rough out stickies. Nothing reaches the shared pinboard until you press Propose, and when you do, the proposal is authored by you.',
   },
 ];
 

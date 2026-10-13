@@ -35,7 +35,7 @@ function AgendaScene() {
   }, [last.length, reduce]);
 
   return (
-    <ProductFrame title="New session" meta="Draft — only you can see this yet" badge="Agenda">
+    <ProductFrame title="New session" meta="Draft: only you can see this yet" badge="Agenda">
       <div className="flex flex-col gap-5 p-5">
         <div className="flex flex-col gap-2">
           <p className="text-[13px] font-semibold text-rt-ink">Focus / title</p>
@@ -159,12 +159,12 @@ export const FILM_SCENES = [
   },
   {
     title: 'Shortlist, then vote once',
-    body: 'The leader picks the proposals worth deciding between. Everyone casts one private vote and can change it until the leader ends the round — or the timer does. Then the winner is stored as that question’s answer.',
+    body: 'The leader picks the proposals worth deciding between. Everyone casts one private vote and can change it until the leader ends the round, or the timer does. Then the winner is stored as that question’s answer.',
     Visual: VoteScene,
   },
   {
     title: 'Leave with the recap',
-    body: 'End the session and the call disconnects. Every question is listed with the proposal that won it — or marked skipped — and it stays on the dashboard for the people who were there.',
+    body: 'End the session and the call disconnects. Every question is listed with the proposal that won it (or marked skipped), and it stays on the dashboard for the people who were there.',
     Visual: RecapScene,
   },
 ] as const;

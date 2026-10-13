@@ -78,7 +78,7 @@ export function LiveSessionExitGuard({
       onCancel={() => setPending(false)}
     >
       <p>
-        Going back does not pause the session — as leader, leaving this page ends it for everyone in
+        Going back does not pause the session. As leader, leaving this page ends it for everyone in
         the room. This cannot be undone.
       </p>
       {error ? <p className="mt-2 text-red-600">{error}</p> : null}

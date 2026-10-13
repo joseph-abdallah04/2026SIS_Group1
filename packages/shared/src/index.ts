@@ -75,6 +75,9 @@ export interface Question {
   // F41: false = brainstorm-only. It runs discussion -> answered and never
   // enters `voting`, so nobody is asked to vote on it.
   votingEnabled: boolean;
+  // Why the leader skipped it, when they gave a reason. Part of the record:
+  // a question passed over is a decision too.
+  skipReason?: string | null;
   createdAt: Date;
 }
 
@@ -488,6 +491,8 @@ export interface SessionRecapQuestion {
   text: string;
   status: QuestionStatus;
   votingEnabled: boolean;
+  /** Why it was skipped, when the leader said. */
+  skipReason?: string | null;
   proposals: BoardItem[];
   winnerProposalId: string | null;
   tiedProposalIds: string[];
@@ -523,11 +528,16 @@ export interface SessionRecap {
  * it as done for the same reason.
  */
 export function recapQuestionStatusLabel(question: SessionRecapQuestion): string {
+  // Skipped, with the reason when the leader gave one: why a question was
+  // passed over is as much part of the record as what another decided.
+  if (question.status === 'skipped') {
+    return question.skipReason ? `Skipped: ${question.skipReason}` : 'Skipped';
+  }
   if (!question.votingEnabled) {
     if (question.status === 'answered' || question.status === 'discussion') {
       return 'Discussed';
     }
-    return question.status === 'skipped' ? 'Skipped' : 'Not reached';
+    return 'Not reached';
   }
   if (
     question.status === 'voting' &&
@@ -544,8 +554,6 @@ export function recapQuestionStatusLabel(question: SessionRecapQuestion): string
       return 'Not reached';
     case 'answered':
       return 'Answered';
-    case 'skipped':
-      return 'Skipped';
   }
 }
 

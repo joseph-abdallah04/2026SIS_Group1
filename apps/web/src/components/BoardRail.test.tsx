@@ -28,7 +28,9 @@ describe('BoardRail', () => {
     const rail = screen.getByRole('complementary', { name: 'Dock title' });
     expect(rail.querySelector(':scope > div')?.textContent).toMatch(/^Dock title/);
     const collapse = screen.getByRole('button', { name: 'Collapse dock' });
-    expect(collapse).toHaveTextContent('‹');
+    expect(collapse.querySelector('[data-rail-icon="collapse"]')).toHaveClass(
+      'lucide-panel-left-close',
+    );
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -37,7 +39,9 @@ describe('BoardRail', () => {
     const rail = screen.getByRole('complementary', { name: 'Dock title' });
     expect(rail.querySelector(':scope > div')?.textContent).toMatch(/Dock title$/);
     const collapse = screen.getByRole('button', { name: 'Collapse dock' });
-    expect(collapse).toHaveTextContent('›');
+    expect(collapse.querySelector('[data-rail-icon="collapse"]')).toHaveClass(
+      'lucide-panel-right-close',
+    );
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -74,7 +78,9 @@ describe('BoardRail', () => {
       </BoardRail>,
     );
     expect(screen.getByRole('complementary', { name: 'Assistant' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveTextContent('›');
+    expect(
+      screen.getByRole('button', { name: 'Collapse dock' }).querySelector('[data-rail-icon]'),
+    ).toHaveClass('lucide-panel-right-close');
     expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveAttribute(
       'aria-expanded',
       'true',
@@ -88,6 +94,8 @@ describe('BoardRail', () => {
     expect(screen.getByText('Dock title')).toBeInTheDocument();
     expect(screen.getByText('Strip extra')).toBeInTheDocument();
     expect(screen.queryByText('Open body')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Expand dock' })).toHaveTextContent('‹');
+    expect(
+      screen.getByRole('button', { name: 'Expand dock' }).querySelector('[data-rail-icon]'),
+    ).toHaveClass('lucide-panel-right-open');
   });
 });

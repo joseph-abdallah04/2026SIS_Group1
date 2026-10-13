@@ -37,9 +37,7 @@ vi.mock('../../lib/socket', () => ({
 const { useWaitingRoom } = await import('./useWaitingRoom');
 const { usePinboard } = await import('../pinboard/usePinboard');
 
-const MEMBERS = [
-  { userId: 'u1', displayName: 'Alice', joinedAt: '2026-09-05T00:00:00.000Z' },
-];
+const MEMBERS = [{ userId: 'u1', displayName: 'Alice', joinedAt: '2026-09-05T00:00:00.000Z' }];
 
 const EMPTY_BOARD = {
   sessionId: 's1',
@@ -187,9 +185,11 @@ describe('useWaitingRoom', () => {
 
   it('marks the room offline on disconnect and surfaces a failed join', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    joinSessionRoom.mockImplementation((_id: string, ack?: (res: { ok: boolean; error?: string }) => void) => {
-      ack?.({ ok: false, error: 'not a member' });
-    });
+    joinSessionRoom.mockImplementation(
+      (_id: string, ack?: (res: { ok: boolean; error?: string }) => void) => {
+        ack?.({ ok: false, error: 'not a member' });
+      },
+    );
 
     const { result } = renderHook(() => useWaitingRoom('s1'));
     await waitFor(() => expect(result.current.isLive).toBe(false));

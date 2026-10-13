@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { addSessionQuestionSchema, createSessionSchema, sessionCodeSchema } from '@roundtable/shared/schemas';
+import {
+  addSessionQuestionSchema,
+  createSessionSchema,
+  sessionCodeSchema,
+  sessionIssueMessage,
+  updateSessionSchema,
+} from '@roundtable/shared/schemas';
 
 // The transaction shape is the interesting part here, not Prisma itself —
 // stubbed so writes can be inspected directly. The actual queries are
@@ -122,7 +128,9 @@ const {
   getActiveQuestion,
   getQuestionInSession,
   setQuestionPhase,
+  setQuestionText,
   setQuestionVoting,
+  moveQuestion,
   joinSessionByCode,
   leaveSession,
   listSessionsForUser,
@@ -179,7 +187,7 @@ describe('createSession', () => {
     ]);
   });
 
-  it('stores each question\'s vote choice with its row (F41)', async () => {
+  it("stores each question's vote choice with its row (F41)", async () => {
     await createSession({
       leaderId: 'u1',
       input: {
@@ -261,7 +269,10 @@ describe('createSessionSchema', () => {
   });
 
   it('defaults to no call when the call choice is omitted, and keeps an explicit live call', () => {
-    const omitted = createSessionSchema.parse({ title: 'Sprint kickoff', questions: [q('Scope?')] });
+    const omitted = createSessionSchema.parse({
+      title: 'Sprint kickoff',
+      questions: [q('Scope?')],
+    });
     expect(omitted.voiceEnabled).toBe(false);
 
     const live = createSessionSchema.parse({
@@ -273,7 +284,9 @@ describe('createSessionSchema', () => {
   });
 
   it('rejects an empty title', () => {
-    expect(createSessionSchema.safeParse({ title: '', questions: [q('Scope?')] }).success).toBe(false);
+    expect(createSessionSchema.safeParse({ title: '', questions: [q('Scope?')] }).success).toBe(
+      false,
+    );
   });
 
   it('rejects a title that is only whitespace', () => {
@@ -300,11 +313,49 @@ describe('createSessionSchema', () => {
     ).toBe(false);
   });
 
-  it('rejects a question over 500 characters', () => {
+  it('rejects a question over 150 characters', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(501))] })
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(151))] })
         .success,
     ).toBe(false);
+    expect(
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(150))] })
+        .success,
+    ).toBe(true);
+  });
+
+  // A draft written before the limit came down must still save, say for a
+  // new title, so a draft's update takes questions up to the old limit.
+  it('still saves a draft holding a question written under the old, longer limit', () => {
+    const draft = { title: 'Sprint kickoff', questions: [q('x'.repeat(400))] };
+    expect(updateSessionSchema.safeParse(draft).success).toBe(true);
+    expect(createSessionSchema.safeParse(draft).success).toBe(false);
+    expect(
+      updateSessionSchema.safeParse({ ...draft, questions: [q('x'.repeat(501))] }).success,
+    ).toBe(false);
+  });
+
+  it('names the question that is too long or empty', () => {
+    const tooLong = createSessionSchema.safeParse({
+      title: 'Sprint kickoff',
+      questions: [q('Fine'), q('Fine'), q('x'.repeat(151))],
+    });
+    expect(tooLong.success).toBe(false);
+    if (!tooLong.success) {
+      expect(sessionIssueMessage(tooLong.error.issues, 'Invalid session')).toBe(
+        'Question 3 is longer than 150 characters',
+      );
+    }
+    const empty = createSessionSchema.safeParse({
+      title: 'Sprint kickoff',
+      questions: [q('Fine'), q('   ')],
+    });
+    expect(empty.success).toBe(false);
+    if (!empty.success) {
+      expect(sessionIssueMessage(empty.error.issues, 'Invalid session')).toBe(
+        'Question 2 is empty',
+      );
+    }
   });
 
   it('rejects more than 50 questions', () => {
@@ -441,9 +492,7 @@ describe('openSessionForJoining', () => {
   it('retries on a P2002 collision and succeeds on the next attempt', async () => {
     const opened = { ...draftSession, code: 'M4T7-2QRX', status: 'lobby' };
     sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(opened);
-    sessionUpdateMany
-      .mockRejectedValueOnce({ code: 'P2002' })
-      .mockResolvedValueOnce({ count: 1 });
+    sessionUpdateMany.mockRejectedValueOnce({ code: 'P2002' }).mockResolvedValueOnce({ count: 1 });
 
     const session = await openSessionForJoining({ sessionId: 's1', leaderId: 'leader-1' });
 
@@ -472,7 +521,7 @@ describe('openSessionForJoining', () => {
     expect(sessionUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('returns the winner\'s code when a concurrent open already left draft — does not mint a second one', async () => {
+  it("returns the winner's code when a concurrent open already left draft — does not mint a second one", async () => {
     const lobbySession = { ...draftSession, code: 'K7NP-3WQZ', status: 'lobby' };
     sessionFindUnique.mockResolvedValueOnce(draftSession).mockResolvedValueOnce(lobbySession);
     sessionUpdateMany.mockResolvedValueOnce({ count: 0 });
@@ -719,18 +768,21 @@ describe('addSessionQuestion', () => {
     expect(questionCreate).not.toHaveBeenCalled();
   });
 
-  it.each(['draft', 'ended'] as const)('refuses to add a question while the session is %s', async (status) => {
-    sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
-    await expect(
-      addSessionQuestion({
-        sessionId: 's1',
-        leaderId: 'leader-1',
-        text: 'What did we miss?',
-        votingEnabled: true,
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
-    expect(questionCreate).not.toHaveBeenCalled();
-  });
+  it.each(['draft', 'ended'] as const)(
+    'refuses to add a question while the session is %s',
+    async (status) => {
+      sessionFindUnique.mockResolvedValueOnce({ ...liveSession, status });
+      await expect(
+        addSessionQuestion({
+          sessionId: 's1',
+          leaderId: 'leader-1',
+          text: 'What did we miss?',
+          votingEnabled: true,
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+      expect(questionCreate).not.toHaveBeenCalled();
+    },
+  );
 
   it('appends after the current last position as pending', async () => {
     sessionFindUnique.mockResolvedValueOnce(liveSession);
@@ -1485,6 +1537,65 @@ describe('setQuestionPhase (F25/F26)', () => {
     expect(questionUpdateMany).not.toHaveBeenCalled();
   });
 
+  // Why a question was passed over is part of the meeting's record.
+  describe('skipping with a reason', () => {
+    it('keeps the reason on the question and hands it back', async () => {
+      questionFindUnique.mockResolvedValue(question({ status: 'discussion' }));
+
+      await expect(
+        setQuestionPhase({
+          sessionId: 's1',
+          questionId: 'q1',
+          leaderId: 'leader-1',
+          status: 'skipped',
+          reason: '  Out of time  ',
+        }),
+      ).resolves.toMatchObject({ status: 'skipped', skipReason: 'Out of time' });
+      expect(questionUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'skipped', skipReason: 'Out of time' }),
+        }),
+      );
+    });
+
+    it('records no reason when none is given', async () => {
+      questionFindUnique.mockResolvedValue(question({ status: 'pending' }));
+
+      await expect(advance('skipped')).resolves.toMatchObject({ skipReason: null });
+    });
+
+    it('ignores a reason sent with any other move', async () => {
+      questionFindUnique.mockResolvedValue(question({ status: 'pending' }));
+
+      await setQuestionPhase({
+        sessionId: 's1',
+        questionId: 'q1',
+        leaderId: 'leader-1',
+        status: 'discussion',
+        reason: 'Stray',
+      });
+      expect(questionUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.not.objectContaining({ skipReason: 'Stray' }) }),
+      );
+    });
+
+    // Only the question the room is on can be skipped, never one further down.
+    it('refuses to skip a question ahead of the one the room is on', async () => {
+      questionFindUnique.mockResolvedValue(question({ id: 'q3', position: 2, status: 'pending' }));
+      questionFindFirst.mockResolvedValueOnce({ position: 1 });
+
+      await expect(
+        setQuestionPhase({
+          sessionId: 's1',
+          questionId: 'q3',
+          leaderId: 'leader-1',
+          status: 'skipped',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_CURRENT_QUESTION' });
+      expect(questionUpdateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('a brainstorm-only question (F41)', () => {
     const brainstorm = (status: QuestionRow['status']) =>
       question({ status, votingEnabled: false });
@@ -1698,8 +1809,133 @@ describe('getQuestionInSession', () => {
         status: true,
         boardLocked: true,
         votingEnabled: true,
+        skipReason: true,
       },
     });
+  });
+});
+
+describe('setQuestionText', () => {
+  const activeSession = { leaderId: 'leader-1', status: 'active' as const };
+  const row = (status: 'pending' | 'discussion' | 'voting') => ({
+    id: 'q1',
+    sessionId: 's1',
+    text: 'What ships frist?',
+    position: 0,
+    status,
+    boardLocked: true,
+    votingEnabled: true,
+    createdAt: new Date('2026-09-03T00:00:00.000Z'),
+  });
+  const reword = (leaderId = 'leader-1') =>
+    setQuestionText({ sessionId: 's1', questionId: 'q1', leaderId, text: 'What ships first?' });
+
+  beforeEach(() => {
+    sessionFindUnique.mockResolvedValue(activeSession);
+    questionUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it.each(['pending', 'discussion'] as const)('rewords a question that is %s', async (status) => {
+    questionFindUnique.mockResolvedValue(row(status));
+
+    await expect(reword()).resolves.toMatchObject({ text: 'What ships first?' });
+    // Only until voting opens, so "Open voting" landing in between wins.
+    expect(questionUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'q1', status: { in: ['pending', 'discussion'] } },
+      data: { text: 'What ships first?' },
+    });
+  });
+
+  it('refuses once voting has opened — its wording is what the room votes on', async () => {
+    questionFindUnique.mockResolvedValue(row('voting'));
+    questionUpdateMany.mockResolvedValue({ count: 0 });
+
+    await expect(reword()).rejects.toMatchObject({ code: 'QUESTION_TEXT_LOCKED' });
+  });
+
+  it('is the leader’s alone', async () => {
+    questionFindUnique.mockResolvedValue(row('pending'));
+
+    await expect(reword('someone-else')).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
+    expect(questionUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('moveQuestion', () => {
+  const activeSession = { leaderId: 'leader-1', status: 'active' as const };
+  const row = (id: string, position: number, status = 'pending') => ({
+    id,
+    sessionId: 's1',
+    text: `Question ${position + 1}`,
+    position,
+    status,
+    boardLocked: true,
+    votingEnabled: true,
+    createdAt: new Date('2026-09-03T00:00:00.000Z'),
+  });
+  const agenda = [
+    row('q1', 0, 'answered'),
+    row('q2', 1, 'discussion'),
+    row('q3', 2),
+    row('q4', 3),
+    row('q5', 4),
+  ];
+  const move = (args: { direction?: 'up' | 'down'; toQuestionId?: string }, id = 'q4') =>
+    moveQuestion({ sessionId: 's1', questionId: id, leaderId: 'leader-1', ...args });
+
+  beforeEach(() => {
+    sessionFindUnique.mockResolvedValue(activeSession);
+    questionFindMany.mockResolvedValue(agenda);
+    questionUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('swaps places with the question that has not started above it', async () => {
+    await expect(move({ direction: 'up' })).resolves.toMatchObject([
+      { id: 'q4', position: 2 },
+      { id: 'q3', position: 3 },
+    ]);
+    expect(questionUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'q4', status: 'pending', position: 3 },
+      data: { position: 2 },
+    });
+  });
+
+  // A drag drops it into another question's place, shifting those between.
+  it('moves into another question’s place, shifting the ones between', async () => {
+    await expect(move({ toQuestionId: 'q3' }, 'q5')).resolves.toMatchObject([
+      { id: 'q5', position: 2 },
+      { id: 'q3', position: 3 },
+      { id: 'q4', position: 4 },
+    ]);
+  });
+
+  // What has been discussed is the record so far; nothing moves above it.
+  it('will not move above a question that has started', async () => {
+    await expect(move({ direction: 'up' }, 'q3')).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
+    await expect(move({ toQuestionId: 'q2' })).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
+    expect(questionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('will not move a question that has started', async () => {
+    await expect(move({ direction: 'down' }, 'q2')).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
+  });
+
+  it('says so when there is nowhere further to go', async () => {
+    await expect(move({ direction: 'down' }, 'q5')).rejects.toMatchObject({
+      code: 'QUESTION_CANNOT_MOVE',
+    });
+  });
+
+  it('is a conflict when the agenda changed underneath it', async () => {
+    questionUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    await expect(move({ direction: 'down' })).rejects.toMatchObject({ code: 'QUESTION_CHANGED' });
   });
 });
 

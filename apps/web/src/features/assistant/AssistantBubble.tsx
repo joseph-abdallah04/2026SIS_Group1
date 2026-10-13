@@ -119,7 +119,7 @@ export function AssistantBubble({
   }, [collapsed]);
 
   const shownCollapsed = collapsed || suppressed;
-  const expandLabel = unread ? 'Expand assistant — new answer' : 'Expand assistant';
+  const expandLabel = unread ? 'Expand assistant (new answer)' : 'Expand assistant';
   const busy = chat.streaming && shownCollapsed;
 
   return (

@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { SHORTLIST_MIN, type Question } from '@roundtable/shared';
+import { ScreenShare } from 'lucide-react';
+import { SHORTLIST_MIN, type BoardResponse, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { PhaseTimer } from '../../components/PhaseTimer';
@@ -9,6 +10,7 @@ import { AssistantBubble } from '../assistant';
 import { JoinCodeCard } from '../sessions/JoinCodeCard';
 import { MyProposalsLauncher } from './MyProposalsLauncher';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
+import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
@@ -27,7 +29,18 @@ import {
   useVoiceRoom,
 } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
+import { useArchivedBoard } from './useArchivedBoard';
 import { usePinboard } from './usePinboard';
+
+/** The viewing bar's buttons: the way back, and the leader's "Show everyone". */
+const BAR_PRIMARY =
+  'h-9 rounded-full bg-rt-secondary px-4 text-[12.5px] font-semibold whitespace-nowrap text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+const BAR_SECONDARY =
+  'inline-flex h-9 items-center gap-1.5 rounded-full border border-rt-tertiary bg-white px-4 text-[12.5px] font-semibold whitespace-nowrap text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+
+/** Nothing on another question's board is new to this person. */
+const NO_NEW_ITEMS: ReadonlySet<string> = new Set();
+const NO_SHORTLIST: string[] = [];
 
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
@@ -97,6 +110,52 @@ export function SessionPinboard({
     participants,
   } = usePinboard(sessionId);
   const voting = useVoting(sessionId, board?.questionId ?? null);
+
+  // Another question's board this person is looking at, on their screen only:
+  // finished or still to come, it moves nobody else's. `null` follows the room.
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const viewed = useArchivedBoard(sessionId, viewingId);
+  // The room's question when they went to look, so they can be told it moved.
+  const roomWhenViewing = useRef<string | null>(null);
+  const roomQuestionId = board?.questionId ?? null;
+  const ballotUp = voting.phase === 'open' || voting.phase === 'closed';
+
+  // The leader putting a question's board up for the whole room, on purpose,
+  // and taking the room back to the question in play.
+  const { focus: focusRoom, busyQuestionId: focusBusyId } = useFocusQuestion(sessionId);
+  useEffect(() => {
+    // The room arriving at the question they were looking at: they are live.
+    if (viewingId !== null && viewingId === roomQuestionId) setViewingId(null);
+  }, [viewingId, roomQuestionId]);
+  useEffect(() => {
+    // A vote is everyone's moment, and its ballot covers the board anyway.
+    if (ballotUp) setViewingId(null);
+  }, [ballotUp]);
+  // The board the leader has put up for everyone, when it is not the question
+  // in play. Each time it changes, whoever was looking at another question is
+  // brought to it, once, like everyone else; they can step away again after.
+  const liveQuestionId =
+    questions.find((question) => question.status === 'discussion' || question.status === 'voting')
+      ?.id ?? null;
+  const shownToEveryoneId =
+    roomQuestionId && liveQuestionId && roomQuestionId !== liveQuestionId ? roomQuestionId : null;
+  useEffect(() => {
+    if (shownToEveryoneId) setViewingId(null);
+  }, [shownToEveryoneId]);
+  useEffect(() => {
+    if (viewingId === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // Escape in a field or a dialog is theirs, not a way back.
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) {
+        return;
+      }
+      setViewingId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewingId]);
   const {
     setPhase,
     busyQuestionId: phaseBusyId,
@@ -204,6 +263,72 @@ export function SessionPinboard({
   // than the board snapshot — the leader can flip it while the board is open.
   const questionVotingEnabled =
     questions.find((question) => question.id === board.questionId)?.votingEnabled ?? true;
+  // The wording too: the leader can reword the question the room is on until
+  // voting opens, and the board's header and ballot should say what it says now.
+  const questionText =
+    questions.find((question) => question.id === board.questionId)?.text ?? board.questionText;
+  const shownBoard = questionText === board.questionText ? board : { ...board, questionText };
+
+  // The question being looked at instead of the room's, and its board: the
+  // one fetched once it has arrived, the question's own words over an empty
+  // board until then (and for a question still to come, which has none yet).
+  const viewingQuestion =
+    viewingId !== null && viewingId !== board.questionId
+      ? questions.find((question) => question.id === viewingId)
+      : undefined;
+  const viewedBoard: BoardResponse | null = viewingQuestion
+    ? viewed.board && viewed.board.questionId === viewingQuestion.id
+      ? { ...viewed.board, questionText: viewingQuestion.text }
+      : {
+          ...board,
+          questionId: viewingQuestion.id,
+          questionText: viewingQuestion.text,
+          questionPosition: viewingQuestion.position,
+          questionStatus: viewingQuestion.status,
+          boardLocked: false,
+          items: [],
+          discussionTimer: null,
+        }
+    : null;
+  const roomPosition = questions.findIndex((question) => question.id === board.questionId);
+  // The room's board is not the question in play: the leader has put another
+  // up for everyone (or a session was left that way). Everyone is told, its
+  // row is marked, and the leader can take the room back.
+  const openQuestion = questions.find(
+    (question) => question.status === 'discussion' || question.status === 'voting',
+  );
+  const presenting =
+    openQuestion && board.questionId && board.questionId !== openQuestion.id
+      ? questions.find((question) => question.id === board.questionId)
+      : undefined;
+  const roomShowing = viewingQuestion ? undefined : presenting;
+  // "Viewing Q1", and after it only what the screen does not already say: that
+  // everyone is on a board the leader put up, that the room has moved on, or
+  // that the question has not started. How a finished one ended is on its
+  // agenda row and in the header already. While a board is up for everyone,
+  // the way back is to it.
+  const viewingTitle = viewingQuestion ? `Viewing Q${questions.indexOf(viewingQuestion) + 1}` : '';
+  const viewingDetail = !viewingQuestion
+    ? ''
+    : viewed.error
+      ? 'Could not load this board'
+      : presenting
+        ? `Everyone is on Q${roomPosition + 1}`
+        : roomWhenViewing.current !== board.questionId && roomPosition !== -1
+          ? `The room is on Q${roomPosition + 1} now`
+          : viewingQuestion.status === 'pending'
+            ? 'Not started'
+            : '';
+  const backLabel = presenting ? `Back to Q${roomPosition + 1}` : 'Back to live';
+
+  const view = (questionId: string | null) => {
+    if (questionId === null || questionId === board.questionId) {
+      setViewingId(null);
+      return;
+    }
+    roomWhenViewing.current = board.questionId;
+    setViewingId(questionId);
+  };
 
   const selecting = board.questionStatus === 'voting' && voting.phase === 'shortlisting';
   const balloting = voting.phase === 'open' || voting.phase === 'closed';
@@ -216,7 +341,7 @@ export function SessionPinboard({
     <CreativeToolsProvider
       sessionId={sessionId}
       questionId={board.questionId ?? ''}
-      isLive={acceptsProposals}
+      isLive={acceptsProposals && !viewingQuestion}
       viewerId={viewerId}
       proposals={board.items}
       propose={propose}
@@ -230,25 +355,73 @@ export function SessionPinboard({
           scrollbar; `h-dvh` so mobile browser chrome does not cut it off. */}
         <main className="h-dvh overflow-hidden">
           <PinboardCanvas
-            board={board}
-            questionVotingEnabled={questionVotingEnabled}
+            board={viewedBoard ?? shownBoard}
+            questionVotingEnabled={viewingQuestion?.votingEnabled ?? questionVotingEnabled}
             isLive={isLive}
-            newItemIds={newItemIds}
+            newItemIds={viewingQuestion ? NO_NEW_ITEMS : newItemIds}
+            viewing={
+              viewingQuestion
+                ? {
+                    title: viewingTitle,
+                    detail: viewingDetail,
+                    actions: (
+                      <>
+                        {isLeader ? (
+                          <button
+                            type="button"
+                            onClick={() => void focusRoom(viewingQuestion.id)}
+                            disabled={focusBusyId !== null}
+                            className={BAR_SECONDARY}
+                          >
+                            <ScreenShare aria-hidden size={14} strokeWidth={2} />
+                            Show everyone
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => setViewingId(null)}
+                          className={BAR_PRIMARY}
+                        >
+                          {backLabel}
+                        </button>
+                      </>
+                    ),
+                  }
+                : roomShowing && openQuestion
+                  ? {
+                      shared: true,
+                      title: `Showing Q${questions.indexOf(roomShowing) + 1}`,
+                      detail: isLeader
+                        ? 'Everyone can see this'
+                        : 'The leader is showing this to everyone',
+                      actions: isLeader ? (
+                        <button
+                          type="button"
+                          onClick={() => void focusRoom(openQuestion.id)}
+                          disabled={focusBusyId !== null}
+                          className={BAR_PRIMARY}
+                        >
+                          Back to live
+                        </button>
+                      ) : null,
+                    }
+                  : null
+            }
             isLeader={isLeader}
             viewerId={viewerId}
             editProposal={editProposal}
             arrangeProposal={arrangeProposal}
             deleteProposal={deleteProposal}
-            shortlist={voting.proposalIds}
-            canToggleShortlist={isLeader && selecting && !voting.locked}
+            shortlist={viewingQuestion ? NO_SHORTLIST : voting.proposalIds}
+            canToggleShortlist={isLeader && selecting && !voting.locked && !viewingQuestion}
             onToggleShortlist={voting.toggle}
             shortlistControl={
-              selecting ? (
+              selecting && !viewingQuestion ? (
                 <ShortlistBar isLeader={isLeader} count={voting.proposalIds.length} />
               ) : null
             }
             boardOverlay={
-              selecting && isLeader ? (
+              selecting && isLeader && !viewingQuestion ? (
                 <ShortlistPrompt
                   count={voting.proposalIds.length}
                   busy={voting.busy || phaseBusyId === board.questionId}
@@ -265,7 +438,7 @@ export function SessionPinboard({
             ballot={
               balloting ? (
                 <VotingBallot
-                  questionText={board.questionText}
+                  questionText={questionText}
                   items={ballotItems}
                   tallies={voting.tallies}
                   myVote={voting.myVote}
@@ -291,7 +464,9 @@ export function SessionPinboard({
               <AgendaPanel
                 sessionId={sessionId}
                 questions={questions}
-                activeQuestionId={board.questionId}
+                viewingQuestionId={viewingQuestion?.id ?? null}
+                showingQuestionId={presenting?.id ?? null}
+                onView={view}
                 isLeader={isLeader}
                 votingPhase={voting.phase}
                 hasProposals={
@@ -299,24 +474,33 @@ export function SessionPinboard({
                     ? board.items.length >= SHORTLIST_MIN
                     : undefined
                 }
-                boardLock={{
-                  locked: board.boardLocked,
-                  onToggle:
-                    isLeader && board.questionId
-                      ? () => setBoardLocked(board.questionId!, !board.boardLocked)
-                      : undefined,
-                }}
+                proposalCount={
+                  board.questionStatus === 'discussion' ? board.items.length : undefined
+                }
+                timer={
+                  board.discussionTimer && board.questionId
+                    ? { questionId: board.questionId, ...board.discussionTimer }
+                    : null
+                }
               />
             }
+            boardLock={{
+              locked: viewedBoard ? viewedBoard.boardLocked : board.boardLocked,
+              onToggle:
+                isLeader && board.questionId
+                  ? () => setBoardLocked(board.questionId!, !board.boardLocked)
+                  : undefined,
+            }}
             myProposals={
               <MyProposalsLauncher
                 sessionId={sessionId}
                 revision={myProposalsRevision}
-                canPropose={acceptsProposals}
+                canPropose={acceptsProposals && !viewingQuestion}
               />
             }
             voiceNotice={
               <VoiceNotice
+                stacked
                 status={voice.status}
                 micStatus={voice.micStatus}
                 micPermissionDenied={voice.micPermissionDenied}
@@ -364,6 +548,7 @@ export function SessionPinboard({
             reactToProposal={reactToProposal}
             onSelectProposal={onSelectProposal}
             headerTimer={
+              !viewingQuestion &&
               board.discussionTimer &&
               (board.questionStatus === 'discussion' ||
                 (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (

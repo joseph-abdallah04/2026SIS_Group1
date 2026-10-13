@@ -63,7 +63,7 @@ describe('ShortlistPrompt', () => {
         count={3}
         busy={false}
         limitHits={0}
-        error="No response from the server — check your connection"
+        error="No response from the server. Check your connection"
         onProceed={() => undefined}
         onClear={() => undefined}
         onBack={() => undefined}

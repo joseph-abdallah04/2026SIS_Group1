@@ -2,6 +2,9 @@ import { useState, type FormEvent } from 'react';
 import {
   createSessionSchema,
   DISCUSSION_TIMER_MAX_SECONDS,
+  SESSION_QUESTION_TEXT_MAX,
+  sessionIssueMessage,
+  updateSessionSchema,
   VOTING_TIMER_MAX_SECONDS,
   type CreateSessionInput,
   type SessionQuestionInput,
@@ -30,6 +33,12 @@ interface SessionQuestionsFormProps {
   onSubmit: (input: CreateSessionInput) => void | Promise<void>;
   /** Rendered after the submit button — F05's Delete, or create-page Cancel. */
   extraActions?: React.ReactNode;
+  /**
+   * Saving a draft rather than creating a session: its questions may run to
+   * the old, longer limit, so a draft written before the limit came down
+   * still saves (`updateSessionSchema`).
+   */
+  editingDraft?: boolean;
 }
 
 const ZERO_DURATION: TimerDurationParts = { hours: 0, minutes: 0, seconds: 0 };
@@ -61,6 +70,7 @@ export function SessionQuestionsForm({
   initialDiscussionTimerSeconds = null,
   initialVotingTimerSeconds = null,
   initialVoiceEnabled = false,
+  editingDraft = false,
   submitLabel,
   submittingLabel,
   submitting,
@@ -122,7 +132,7 @@ export function SessionQuestionsForm({
     if (!ready || submitting) return;
     setValidationError(null);
 
-    const parsed = createSessionSchema.safeParse({
+    const parsed = (editingDraft ? updateSessionSchema : createSessionSchema).safeParse({
       title,
       questions: questions
         .map((q) => ({ ...q, text: q.text.trim() }))
@@ -132,7 +142,7 @@ export function SessionQuestionsForm({
       voiceEnabled,
     });
     if (!parsed.success) {
-      setValidationError(parsed.error.issues[0]?.message ?? 'Invalid session');
+      setValidationError(sessionIssueMessage(parsed.error.issues, 'Invalid session'));
       return;
     }
 
@@ -201,7 +211,7 @@ export function SessionQuestionsForm({
                 value={question.text}
                 onChange={(e) => updateQuestion(index, e.target.value)}
                 placeholder={`Question ${index + 1}`}
-                maxLength={500}
+                maxLength={SESSION_QUESTION_TEXT_MAX}
                 className="min-h-10 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
               />
               <VoteToggle
@@ -257,7 +267,7 @@ export function SessionQuestionsForm({
             maxSeconds={DISCUSSION_TIMER_MAX_SECONDS}
             value={discussionTimer}
             onChange={setDiscussionTimer}
-            hint="Starts when discussion begins. Visible to everyone. Does not end the phase — it turns red if you run over."
+            hint="Starts when discussion begins. Visible to everyone. Does not end the phase; it turns red if you run over."
           />
           <TimerDurationFields
             id="voting-timer"

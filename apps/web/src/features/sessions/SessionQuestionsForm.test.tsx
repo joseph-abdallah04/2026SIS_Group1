@@ -17,6 +17,61 @@ function renderForm(onSubmit = vi.fn()) {
 }
 
 describe('SessionQuestionsForm', () => {
+  // A draft saved before the limit came down: its long question is kept, and
+  // the draft saves without the leader having to trim it first.
+  it('saves a draft whose question was written under the old, longer limit', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const long = 'x'.repeat(300);
+    render(
+      <SessionQuestionsForm
+        editingDraft
+        initialTitle="Roadmap"
+        initialQuestions={[{ text: long, votingEnabled: true }]}
+        submitLabel="Save"
+        submittingLabel="Saving…"
+        submitting={false}
+        error={null}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.clear(screen.getByLabelText(/focus \/ title/i));
+    await user.type(screen.getByLabelText(/focus \/ title/i), 'Roadmap v2');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Roadmap v2',
+        questions: [{ text: long, votingEnabled: true }],
+      }),
+    );
+  });
+
+  it('names the question that is too long when creating a session', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SessionQuestionsForm
+        initialTitle="Roadmap"
+        initialQuestions={[
+          { text: 'Fine', votingEnabled: true },
+          { text: 'x'.repeat(200), votingEnabled: true },
+        ]}
+        submitLabel="Create session"
+        submittingLabel="Creating…"
+        submitting={false}
+        error={null}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('Question 2 is longer than 150 characters')).toBeInTheDocument();
+  });
+
   it('keeps Create session disabled until a title and at least one question are filled', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

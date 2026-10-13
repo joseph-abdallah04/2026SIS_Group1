@@ -68,9 +68,7 @@ async function emitVotingUpdated(io: RealtimeServer, sessionId: string): Promise
     socket.emit('votingUpdated', {
       ...broadcast.publicState,
       myVote: userId ? (broadcast.votesByVoter.get(userId) ?? null) : null,
-      ...(isLeader && broadcast.voterStatuses
-        ? { voterStatuses: broadcast.voterStatuses }
-        : {}),
+      ...(isLeader && broadcast.voterStatuses ? { voterStatuses: broadcast.voterStatuses } : {}),
     });
   }
 }
