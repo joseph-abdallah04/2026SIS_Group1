@@ -278,11 +278,15 @@ describe('createSessionSchema', () => {
     ).toBe(false);
   });
 
-  it('rejects a question over 500 characters', () => {
+  it('rejects a question over 150 characters', () => {
     expect(
-      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(501))] })
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(151))] })
         .success,
     ).toBe(false);
+    expect(
+      createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(150))] })
+        .success,
+    ).toBe(true);
   });
 
   it('rejects more than 50 questions', () => {

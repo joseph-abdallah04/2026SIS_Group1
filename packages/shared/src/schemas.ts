@@ -179,8 +179,12 @@ const optionalTimerSeconds = (max: number) =>
     .nullable()
     .optional();
 
-/** Longest a single question may be. */
-export const SESSION_QUESTION_TEXT_MAX = 500;
+/**
+ * Longest a single question may be: about 25 words, three lines on the
+ * agenda's card. A question is a prompt for the room, not a brief. Counted in
+ * characters, not words, so a run of text with no spaces cannot get round it.
+ */
+export const SESSION_QUESTION_TEXT_MAX = 150;
 /** Hard cap on an agenda, including questions added mid-session. */
 export const SESSION_QUESTION_LIMIT = 50;
 

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import {
   createSessionSchema,
   DISCUSSION_TIMER_MAX_SECONDS,
+  SESSION_QUESTION_TEXT_MAX,
   VOTING_TIMER_MAX_SECONDS,
   type CreateSessionInput,
   type SessionQuestionInput,
@@ -164,7 +165,7 @@ export function SessionQuestionsForm({
                 value={question.text}
                 onChange={(e) => updateQuestion(index, e.target.value)}
                 placeholder={`Question ${index + 1}`}
-                maxLength={500}
+                maxLength={SESSION_QUESTION_TEXT_MAX}
                 className="min-h-10 min-w-0 flex-1 rounded-full border border-rt-tertiary bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-secondary"
               />
               <VoteToggle

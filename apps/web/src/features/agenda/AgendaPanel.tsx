@@ -170,6 +170,28 @@ const EDIT_BOX =
   'min-w-0 rounded-xl border-[1.5px] border-[#D9D4CB] bg-white px-2.5 py-[7.5px] text-[14.5px] leading-snug font-semibold text-rt-ink outline-none transition-[border-color,box-shadow] placeholder:font-normal placeholder:text-rt-ink-faint focus:border-rt-secondary focus:ring-2 focus:ring-rt-secondary/30 disabled:opacity-60';
 
 /**
+ * How close a question is to the longest it may be, once it is close: quiet
+ * until the last fifth, then counting, and red past the end (a question
+ * written before the limit was tightened can be longer than it now allows).
+ * In the forms' button row, so it adds nothing to their height.
+ */
+function LengthCount({ length }: { length: number }) {
+  if (length < SESSION_QUESTION_TEXT_MAX * 0.8) return null;
+  const over = length > SESSION_QUESTION_TEXT_MAX;
+  return (
+    <span
+      aria-live="polite"
+      className={`mr-auto text-[11px] font-medium tabular-nums ${
+        over ? 'text-[#B42318]' : 'text-rt-ink-faint'
+      }`}
+    >
+      {length}/{SESSION_QUESTION_TEXT_MAX}
+      <span className="sr-only">{over ? ' characters, too long' : ' characters'}</span>
+    </span>
+  );
+}
+
+/**
  * F41: how a question finishes, as two choices side by side — a vote, or a
  * brainstorm that ends with the board as it is. The same control when adding a
  * question and when editing one, so the choice looks the same both times.
@@ -712,12 +734,17 @@ export function AgendaPanel({
           stretch
         />
         <div className="mt-auto flex items-center justify-end gap-1.5">
+          <LengthCount length={editing.draft.trim().length} />
           <button type="button" onClick={() => setEditing(null)} className={EDIT_TEXT_BUTTON}>
             Cancel
           </button>
           <button
             type="submit"
-            disabled={busy || editing.draft.trim().length === 0}
+            disabled={
+              busy ||
+              editing.draft.trim().length === 0 ||
+              editing.draft.trim().length > SESSION_QUESTION_TEXT_MAX
+            }
             className={EDIT_PRIMARY}
           >
             {busy ? 'Saving…' : 'Save'}
@@ -1197,12 +1224,17 @@ export function AgendaPanel({
                   stretch
                 />
                 <div className="mt-auto flex items-center justify-end gap-1.5">
+                  <LengthCount length={draft.trim().length} />
                   <button type="button" onClick={closeComposer} className={EDIT_TEXT_BUTTON}>
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={adding || draft.trim().length === 0}
+                    disabled={
+                      adding ||
+                      draft.trim().length === 0 ||
+                      draft.trim().length > SESSION_QUESTION_TEXT_MAX
+                    }
                     className={EDIT_PRIMARY}
                   >
                     {adding ? 'Adding…' : 'Add'}

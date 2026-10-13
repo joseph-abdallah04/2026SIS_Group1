@@ -858,6 +858,31 @@ describe('AgendaPanel skipping', () => {
     });
   });
 
+  it('counts the characters once a new question nears the limit, and stops at it', async () => {
+    renderPanel({ questions: [question(0, 'discussion')], activeQuestionId: 'q1' });
+    await userEvent.click(screen.getByRole('button', { name: 'Add question' }));
+    const box = screen.getByLabelText('New question');
+
+    await userEvent.type(box, 'x'.repeat(100));
+    expect(screen.queryByText(/\/150/)).not.toBeInTheDocument();
+    await userEvent.type(box, 'x'.repeat(30));
+    expect(screen.getByText(/^130\/150/)).toBeInTheDocument();
+    // The box takes no more than the limit.
+    await userEvent.type(box, 'x'.repeat(40));
+    expect(box).toHaveValue('x'.repeat(150));
+  });
+
+  it('will not save a question written before the limit that is now over it', async () => {
+    renderPanel({
+      questions: [question(0, 'discussion'), { ...question(1, 'pending'), text: 'y'.repeat(200) }],
+      activeQuestionId: 'q1',
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Edit question 2' }));
+
+    expect(screen.getByText(/^200\/150/)).toHaveClass('text-[#B42318]');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
   it('does not offer to skip a question still to come', async () => {
     renderPanel({
       questions: [question(0, 'discussion'), question(1, 'pending')],
