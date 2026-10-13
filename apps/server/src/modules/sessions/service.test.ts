@@ -3,6 +3,8 @@ import {
   addSessionQuestionSchema,
   createSessionSchema,
   sessionCodeSchema,
+  sessionIssueMessage,
+  updateSessionSchema,
 } from '@roundtable/shared/schemas';
 
 // The transaction shape is the interesting part here, not Prisma itself —
@@ -267,7 +269,10 @@ describe('createSessionSchema', () => {
   });
 
   it('defaults to no call when the call choice is omitted, and keeps an explicit live call', () => {
-    const omitted = createSessionSchema.parse({ title: 'Sprint kickoff', questions: [q('Scope?')] });
+    const omitted = createSessionSchema.parse({
+      title: 'Sprint kickoff',
+      questions: [q('Scope?')],
+    });
     expect(omitted.voiceEnabled).toBe(false);
 
     const live = createSessionSchema.parse({
@@ -317,6 +322,40 @@ describe('createSessionSchema', () => {
       createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('x'.repeat(150))] })
         .success,
     ).toBe(true);
+  });
+
+  // A draft written before the limit came down must still save, say for a
+  // new title, so a draft's update takes questions up to the old limit.
+  it('still saves a draft holding a question written under the old, longer limit', () => {
+    const draft = { title: 'Sprint kickoff', questions: [q('x'.repeat(400))] };
+    expect(updateSessionSchema.safeParse(draft).success).toBe(true);
+    expect(createSessionSchema.safeParse(draft).success).toBe(false);
+    expect(
+      updateSessionSchema.safeParse({ ...draft, questions: [q('x'.repeat(501))] }).success,
+    ).toBe(false);
+  });
+
+  it('names the question that is too long or empty', () => {
+    const tooLong = createSessionSchema.safeParse({
+      title: 'Sprint kickoff',
+      questions: [q('Fine'), q('Fine'), q('x'.repeat(151))],
+    });
+    expect(tooLong.success).toBe(false);
+    if (!tooLong.success) {
+      expect(sessionIssueMessage(tooLong.error.issues, 'Invalid session')).toBe(
+        'Question 3 is longer than 150 characters',
+      );
+    }
+    const empty = createSessionSchema.safeParse({
+      title: 'Sprint kickoff',
+      questions: [q('Fine'), q('   ')],
+    });
+    expect(empty.success).toBe(false);
+    if (!empty.success) {
+      expect(sessionIssueMessage(empty.error.issues, 'Invalid session')).toBe(
+        'Question 2 is empty',
+      );
+    }
   });
 
   it('rejects more than 50 questions', () => {

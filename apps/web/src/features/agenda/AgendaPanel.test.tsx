@@ -1083,6 +1083,24 @@ describe('AgendaPanel reordering', () => {
     });
   });
 
+  // A held key repeats faster than the server answers: the moves would
+  // overlap, and every one after the first be refused as a stale agenda.
+  it('sends one keyboard move at a time', async () => {
+    post.mockReturnValueOnce(new Promise(() => {}));
+    renderPanel({
+      questions: [question(0, 'discussion'), question(1, 'pending'), question(2, 'pending')],
+      activeQuestionId: 'q1',
+    });
+
+    screen.getByRole('button', { name: 'Question 2' }).focus();
+    await userEvent.keyboard('{Alt>}{ArrowDown}{ArrowDown}{ArrowDown}{/Alt}');
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q2/move', {
+      direction: 'down',
+    });
+  });
+
   it('drags a question into another one’s place', async () => {
     renderPanel({
       questions: [

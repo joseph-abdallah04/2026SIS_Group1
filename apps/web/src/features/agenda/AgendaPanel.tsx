@@ -980,13 +980,19 @@ export function AgendaPanel({
     if (!canUp && !canDown) return undefined;
     return (event: React.KeyboardEvent<HTMLButtonElement>) => {
       if (!event.altKey) return;
-      if (event.key === 'ArrowUp' && canUp) {
-        event.preventDefault();
-        void move(question.id, 'up');
-      } else if (event.key === 'ArrowDown' && canDown) {
-        event.preventDefault();
-        void move(question.id, 'down');
-      }
+      const direction =
+        event.key === 'ArrowUp' && canUp
+          ? 'up'
+          : event.key === 'ArrowDown' && canDown
+            ? 'down'
+            : null;
+      if (!direction) return;
+      event.preventDefault();
+      // One move at a time: a held key repeats faster than the server answers,
+      // and a second move sent before the first lands is refused as the
+      // agenda having changed under it.
+      if (moveBusyId !== null) return;
+      void move(question.id, direction);
     };
   }
 

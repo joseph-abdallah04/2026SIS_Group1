@@ -8,10 +8,7 @@ import { getSocket } from '../../lib/socket';
  * session detail, so this patches that list in place — a full reload would
  * blank the live view the same way a phase change used to.
  */
-export function useQuestionAddedListener(
-  sessionId: string,
-  onAdded: (question: Question) => void,
-) {
+export function useQuestionAddedListener(sessionId: string, onAdded: (question: Question) => void) {
   useEffect(() => {
     if (!sessionId) return;
     const socket = getSocket();

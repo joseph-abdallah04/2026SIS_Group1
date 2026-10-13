@@ -90,10 +90,10 @@ describe('SessionEndedPage', () => {
     const reviewBoards = screen.getByRole('button', { name: 'Review boards' });
     expect(reviewBoards).toBeInTheDocument();
     expect(reviewBoards).toHaveClass('bg-rt-secondary');
-    expect(screen.getByRole('link', { name: 'Back to dashboard' })).not.toHaveClass('bg-rt-secondary');
-    expect(
-      screen.getByRole('button', { name: /Download Session Summary/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to dashboard' })).not.toHaveClass(
+      'bg-rt-secondary',
+    );
+    expect(screen.getByRole('button', { name: /Download Session Summary/ })).toBeInTheDocument();
   });
 
   it('asks for the PDF with the bearer header, never a token in the URL', async () => {

@@ -3,6 +3,8 @@ import {
   createSessionSchema,
   DISCUSSION_TIMER_MAX_SECONDS,
   SESSION_QUESTION_TEXT_MAX,
+  sessionIssueMessage,
+  updateSessionSchema,
   VOTING_TIMER_MAX_SECONDS,
   type CreateSessionInput,
   type SessionQuestionInput,
@@ -31,6 +33,12 @@ interface SessionQuestionsFormProps {
   onSubmit: (input: CreateSessionInput) => void | Promise<void>;
   /** Rendered after the submit button — F05's Delete, or create-page Cancel. */
   extraActions?: React.ReactNode;
+  /**
+   * Saving a draft rather than creating a session: its questions may run to
+   * the old, longer limit, so a draft written before the limit came down
+   * still saves (`updateSessionSchema`).
+   */
+  editingDraft?: boolean;
 }
 
 const ZERO_DURATION: TimerDurationParts = { hours: 0, minutes: 0, seconds: 0 };
@@ -62,6 +70,7 @@ export function SessionQuestionsForm({
   initialDiscussionTimerSeconds = null,
   initialVotingTimerSeconds = null,
   initialVoiceEnabled = false,
+  editingDraft = false,
   submitLabel,
   submittingLabel,
   submitting,
@@ -123,7 +132,7 @@ export function SessionQuestionsForm({
     if (!ready || submitting) return;
     setValidationError(null);
 
-    const parsed = createSessionSchema.safeParse({
+    const parsed = (editingDraft ? updateSessionSchema : createSessionSchema).safeParse({
       title,
       questions: questions
         .map((q) => ({ ...q, text: q.text.trim() }))
@@ -133,7 +142,7 @@ export function SessionQuestionsForm({
       voiceEnabled,
     });
     if (!parsed.success) {
-      setValidationError(parsed.error.issues[0]?.message ?? 'Invalid session');
+      setValidationError(sessionIssueMessage(parsed.error.issues, 'Invalid session'));
       return;
     }
 

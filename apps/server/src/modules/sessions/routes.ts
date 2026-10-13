@@ -9,6 +9,7 @@ import {
   setBoardLockSchema,
   setQuestionPhaseSchema,
   setQuestionTextSchema,
+  sessionIssueMessage,
   setQuestionVotingSchema,
   updateSessionSchema,
 } from '@roundtable/shared/schemas';
@@ -73,6 +74,12 @@ const boardLockLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
 // keying — its own bucket, so flipping votes cannot use up the board lock's.
 const questionVotingLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
 
+// Rewording and moving get buckets of their own too, so a long reorder cannot
+// lock the leader out of the vote switch or the editor's Save. A move is a
+// step (Alt+Arrow sends one per press), so its budget is wider.
+const questionTextLimiter = rateLimit(LEADER_TOGGLE_LIMIT);
+const questionMoveLimiter = rateLimit({ ...LEADER_TOGGLE_LIMIT, limit: 120 });
+
 /**
  * A factory, not a module-level Router, because F09's POST /:id/start
  * needs to broadcast on `io` after it succeeds.
@@ -87,7 +94,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       if (!parsed.success) {
         throw new ApiError(
           400,
-          parsed.error.issues[0]?.message ?? 'Invalid session',
+          sessionIssueMessage(parsed.error.issues, 'Invalid session'),
           'VALIDATION_ERROR',
         );
       }
@@ -133,7 +140,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
       if (!parsed.success) {
         throw new ApiError(
           400,
-          parsed.error.issues[0]?.message ?? 'Invalid session',
+          sessionIssueMessage(parsed.error.issues, 'Invalid session'),
           'VALIDATION_ERROR',
         );
       }
@@ -323,11 +330,12 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     },
   );
 
-  // Reword a question that has not started. Leader-only; clients pick the
-  // change up from `questionUpdated`, like the vote switch.
+  // Reword a question until voting opens on it: still to come, or under
+  // discussion. Leader-only; clients pick the change up from
+  // `questionUpdated`, like the vote switch.
   sessionsRoutes.put<{ id: string; questionId: string }>(
     '/:id/questions/:questionId/text',
-    questionVotingLimiter,
+    questionTextLimiter,
     requireAuth,
     async (req, res, next) => {
       try {
@@ -354,11 +362,12 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     },
   );
 
-  // Move a question that has not started one place up or down the agenda.
-  // Both questions it swaps with go out on `questionUpdated`.
+  // Move a question that has not started: one place up or down the agenda, or
+  // into another such question's place. Every question that moves goes out on
+  // `questionUpdated`.
   sessionsRoutes.post<{ id: string; questionId: string }>(
     '/:id/questions/:questionId/move',
-    questionVotingLimiter,
+    questionMoveLimiter,
     requireAuth,
     async (req, res, next) => {
       try {

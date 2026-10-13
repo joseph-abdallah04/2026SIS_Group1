@@ -794,28 +794,22 @@ export async function setQuestionPhase({
     // left staring at a finished card. The leader can still look back via
     // `focusQuestion` without touching statuses.
     //
-    // A question skipped further down the agenda while another is still open
-    // leaves the board where it is: the room is still working on that one.
+    // No other question can be open here: only one is ever open at a time, and
+    // a question further down cannot be skipped while one is (the guard above).
     if (status === 'discussion' || status === 'voting') {
       await tx.session.update({
         where: { id: sessionId },
         data: { currentQuestionId: questionId },
       });
     } else if (status === 'answered' || status === 'skipped') {
-      const stillOpen = await tx.question.findFirst({
-        where: { sessionId, id: { not: questionId }, status: { in: ['discussion', 'voting'] } },
+      const next = await tx.question.findFirst({
+        where: { sessionId, status: 'pending' },
+        orderBy: { position: 'asc' },
         select: { id: true },
       });
-      const next = stillOpen
-        ? null
-        : await tx.question.findFirst({
-            where: { sessionId, status: 'pending' },
-            orderBy: { position: 'asc' },
-            select: { id: true },
-          });
       await tx.session.update({
         where: { id: sessionId },
-        data: { currentQuestionId: stillOpen?.id ?? next?.id ?? questionId },
+        data: { currentQuestionId: next?.id ?? questionId },
       });
     }
 

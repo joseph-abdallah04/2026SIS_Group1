@@ -47,6 +47,7 @@ export function EditSessionPage() {
 
         {session && session.status === 'draft' && (
           <SessionQuestionsForm
+            editingDraft
             initialTitle={session.title}
             initialQuestions={session.questions.map(({ text, votingEnabled }) => ({
               text,

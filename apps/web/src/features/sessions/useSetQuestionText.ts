@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { api, ApiClientError } from '../../lib/api';
 
 /**
- * The leader rewording a question that has not started: a typo fixed rather
+ * The leader rewording a question until voting opens on it: a typo fixed rather
  * than the question removed.
  *
  * Nothing is applied locally on success: the new wording arrives on
