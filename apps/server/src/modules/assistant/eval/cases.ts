@@ -32,7 +32,7 @@ const AFTER_STICKIES: AssistantHistoryMessage[] = [
 const BOARD = `Session: Pick a database
 Active question: What should we use for the MVP? (phase: discussion)
 Recent proposals:
-- sticky by Alice: Postgres: boring and everyone knows it
+- sticky by Alice: Postgres — boring and everyone knows it
 - sticky by Bob: SQLite for the demo, migrate later
 - sticky by Alice: Managed Neon so nobody runs a server`;
 

@@ -286,7 +286,7 @@ export function renderSessionRecapPdf(summary: SessionRecap): Promise<Buffer> {
       margin: MARGIN,
       compress: false,
       info: {
-        Title: `${summary.title} | RoundTable recap`,
+        Title: `${summary.title} — RoundTable recap`,
         Author: 'RoundTable',
         Creator: 'RoundTable',
       },

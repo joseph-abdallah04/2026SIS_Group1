@@ -97,7 +97,7 @@ function ackFailure(
   if (err instanceof ApiError) {
     // Refusals are expected (wrong author, closed board), but silent on the
     // server they make "my change did not stick" impossible to diagnose.
-    console.warn(`[pinboard] ${intent} refused: ${err.code ?? err.status}: ${err.message}`);
+    console.warn(`[pinboard] ${intent} refused: ${err.code ?? err.status} — ${err.message}`);
     ack?.({ ok: false, error: err.message, code: err.code });
     return;
   }

@@ -437,7 +437,7 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     try {
       const preview = await resolveSessionByCode(req.params.code);
       if (!preview) {
-        throw new ApiError(404, 'Session not found. Check the code', 'INVALID_CODE');
+        throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
       }
       res.json(preview);
     } catch (err) {

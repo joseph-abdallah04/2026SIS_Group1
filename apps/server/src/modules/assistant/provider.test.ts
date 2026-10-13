@@ -37,7 +37,7 @@ describe('describeProviderError', () => {
     expect(code).toBe('LLM_REQUEST_REJECTED');
     expect(message).toBe(assistantErrorMessage('LLM_REQUEST_REJECTED'));
     expect(message).not.toContain('messages.2');
-    expect(detail).toBe(`HTTP 400: ${said}`);
+    expect(detail).toBe(`HTTP 400 — ${said}`);
   });
 
   it.each([

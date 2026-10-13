@@ -387,7 +387,7 @@ describe('llm-config endpoints (F33)', () => {
         ok: false,
         error: assistantErrorMessage('LLM_AUTH_FAILED'),
         code: 'LLM_AUTH_FAILED',
-        detail: 'HTTP 401: Invalid API Key',
+        detail: 'HTTP 401 — Invalid API Key',
       });
     } finally {
       probeFailure = undefined;
@@ -516,7 +516,7 @@ describe('chat stream (F35/F36)', () => {
     expect(frames[0]).toMatchObject({
       code: 'LLM_REQUEST_REJECTED',
       message: assistantErrorMessage('LLM_REQUEST_REJECTED'),
-      detail: `HTTP 400: ${said}`,
+      detail: `HTTP 400 — ${said}`,
     });
   });
 

@@ -244,7 +244,7 @@ export async function deleteSession({ sessionId, userId }: DeleteSessionArgs): P
       throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
     }
     if (session.status === 'lobby' || session.status === 'active') {
-      throw new ApiError(409, 'Cannot delete a live session. End it first', 'INVALID_TRANSITION');
+      throw new ApiError(409, 'Cannot delete a live session — end it first', 'INVALID_TRANSITION');
     }
 
     if (session.status === 'draft') {
@@ -484,7 +484,11 @@ export async function openSessionForJoining({
   // Every attempt collided. Surfaced as our own error rather than the raw
   // `P2002`, which would reach the client as an unexplained 500: nothing the
   // caller did is wrong and retrying is the correct response.
-  throw new ApiError(503, 'Could not allocate a session code. Try again', 'CODE_ALLOCATION_FAILED');
+  throw new ApiError(
+    503,
+    'Could not allocate a session code — try again',
+    'CODE_ALLOCATION_FAILED',
+  );
 }
 
 export interface StartSessionArgs {
@@ -661,7 +665,7 @@ export async function setQuestionPhase({
     if (status === 'voting' && !question.votingEnabled) {
       throw new ApiError(
         409,
-        'This question is brainstorm-only. Turn its vote on to open voting',
+        'This question is brainstorm-only — turn its vote on to open voting',
         'VOTING_DISABLED',
       );
     }
@@ -696,7 +700,7 @@ export async function setQuestionPhase({
       if (round && round.status !== 'shortlisting') {
         throw new ApiError(
           409,
-          'The vote has already started. It cannot go back to discussion',
+          'The vote has already started — it cannot go back to discussion',
           'VOTING_ALREADY_STARTED',
         );
       }
@@ -738,7 +742,7 @@ export async function setQuestionPhase({
       if (open) {
         throw new ApiError(
           409,
-          `Question ${open.position + 1} is still open. Answer or skip it first`,
+          `Question ${open.position + 1} is still open — answer or skip it first`,
           'QUESTION_ALREADY_OPEN',
         );
       }
@@ -769,7 +773,7 @@ export async function setQuestionPhase({
       if (current?.status === status) return current;
       throw new ApiError(
         409,
-        'This question changed while you were moving it. Check the agenda and try again',
+        'This question changed while you were moving it — check the agenda and try again',
         'QUESTION_CHANGED',
       );
     }
@@ -1279,7 +1283,7 @@ export async function moveQuestion({
       if (written.count === 0) {
         throw new ApiError(
           409,
-          'The agenda changed while you were moving it. Check it and try again',
+          'The agenda changed while you were moving it — check it and try again',
           'QUESTION_CHANGED',
         );
       }
@@ -1448,7 +1452,7 @@ export async function leaveSession({ sessionId, userId }: LeaveSessionArgs): Pro
   if (session.leaderId === userId) {
     throw new ApiError(
       409,
-      'The leader cannot leave. End the session instead',
+      'The leader cannot leave — end the session instead',
       'LEADER_CANNOT_LEAVE',
     );
   }
@@ -1530,7 +1534,7 @@ export async function joinSessionByCode({
 }: JoinSessionArgs): Promise<{ sessionId: string }> {
   const session = await resolveSessionByCode(rawCode);
   if (!session) {
-    throw new ApiError(404, 'Session not found. Check the code', 'INVALID_CODE');
+    throw new ApiError(404, 'Session not found — check the code', 'INVALID_CODE');
   }
 
   if (session.status !== 'lobby' && session.status !== 'active') {

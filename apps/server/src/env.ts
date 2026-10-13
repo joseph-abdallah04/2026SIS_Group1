@@ -76,7 +76,7 @@ if (!parsed.success) {
 // behaves as though it were deployed.
 if (!process.env.NODE_ENV) {
   console.warn(
-    '⚠️  NODE_ENV is not set; assuming production.\n' +
+    '⚠️  NODE_ENV is not set — assuming production.\n' +
       '    For local development add NODE_ENV=development to your .env (see .env.example).',
   );
 }
@@ -86,7 +86,7 @@ if (!process.env.NODE_ENV) {
 // real keys, so refuse to boot instead of discovering it at runtime.
 if (parsed.data.NODE_ENV === 'production' && !parsed.data.LLM_KEY_ENCRYPTION_SECRET) {
   console.error(
-    '❌ LLM_KEY_ENCRYPTION_SECRET is required in production: user API keys are stored\n' +
+    '❌ LLM_KEY_ENCRYPTION_SECRET is required in production — user API keys are stored\n' +
       '   AES-256-GCM encrypted with it. Generate one with `openssl rand -base64 32`.',
   );
   process.exit(1);

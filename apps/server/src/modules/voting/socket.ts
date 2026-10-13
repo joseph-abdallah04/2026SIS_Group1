@@ -84,7 +84,7 @@ function ackFailure(
   intent: string,
 ): void {
   if (err instanceof ApiError) {
-    console.warn(`[voting] ${intent} refused: ${err.code ?? err.status}: ${err.message}`);
+    console.warn(`[voting] ${intent} refused: ${err.code ?? err.status} — ${err.message}`);
     ack?.({ ok: false, error: err.message, code: err.code });
     return;
   }

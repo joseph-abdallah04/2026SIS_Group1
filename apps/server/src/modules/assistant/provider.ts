@@ -143,7 +143,7 @@ const TOOLS_UNSUPPORTED =
 function fromApiCallError(error: APICallError): ApiError {
   const status = error.statusCode ?? 0;
   const said = extractProviderMessage(error.responseBody) || error.message;
-  const detail = `HTTP ${status || '?'}${said ? `: ${said}` : ''}`;
+  const detail = `HTTP ${status || '?'}${said ? ` — ${said}` : ''}`;
 
   const clientError = status >= 400 && status < 500;
 

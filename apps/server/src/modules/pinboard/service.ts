@@ -173,7 +173,7 @@ function requireLiveSession(session: SessionRef | null): asserts session is Sess
     throw new ApiError(
       409,
       session?.status === 'ended'
-        ? 'This session has ended. The board is read-only'
+        ? 'This session has ended — the board is read-only'
         : 'This session is not live',
       'SESSION_NOT_ACTIVE',
     );
@@ -212,7 +212,7 @@ export async function createProposal({
   if (question.status !== 'discussion') {
     throw new ApiError(
       409,
-      `This question is ${question.status}: proposals are closed`,
+      `This question is ${question.status} — proposals are closed`,
       'QUESTION_CLOSED',
     );
   }
