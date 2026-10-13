@@ -1,6 +1,7 @@
 import { Check, Eye, SkipForward } from 'lucide-react';
 import { useEffect, useRef, type LiHTMLAttributes, type ReactNode } from 'react';
 
+import { OverlayScrollbar } from '../../components/OverlayScrollbar';
 import type { AgendaStepState } from './agendaSummary';
 
 /**
@@ -403,11 +404,22 @@ export function AgendaStep({
   }
 }
 
-/** The list the steps sit in. Scrolls on its own under the progress header. */
+/**
+ * The list the steps sit in. Scrolls on its own under the progress header,
+ * with a slim scrollbar of its own in the panel's margin, between the cards
+ * and the panel's resize handle, rather than the system's gutter.
+ */
 export function AgendaTimeline({ children }: { children: ReactNode }) {
+  const listRef = useRef<HTMLOListElement>(null);
   return (
-    <ol className="-mx-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1 py-2">
-      {children}
-    </ol>
+    <div className="group/scroll relative -mx-1 flex min-h-0 flex-1 flex-col">
+      <ol
+        ref={listRef}
+        className="rt-no-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1 py-2"
+      >
+        {children}
+      </ol>
+      <OverlayScrollbar scroller={listRef} className="top-2 -right-1 bottom-2" />
+    </div>
   );
 }

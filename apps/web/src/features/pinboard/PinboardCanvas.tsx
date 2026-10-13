@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
 import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
-import { ImagePlus, Scan } from 'lucide-react';
+import { Eye, ImagePlus, Scan } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { copyText } from '../../lib/copyText';
@@ -155,6 +155,14 @@ interface PinboardCanvasProps {
   /** The way back to the recap, in the header slot End/Leave uses live. */
   archiveActions?: ReactNode;
   /**
+   * The board on screen is not the question in play: this person is looking
+   * at another question's on their own, or the leader has put one up for
+   * everyone. Nothing on it can be changed, while the rest of the session
+   * (header, mic, the room's vote) carries on live. A bar takes the toolbar's
+   * place: which board, what to know about it, and the ways back.
+   */
+  viewing?: { title: string; detail: string; actions: ReactNode } | null;
+  /**
    * F41: false when the question on screen is brainstorm-only, so the header
    * tells the room up front that no vote is coming. Defaults to a vote.
    */
@@ -246,6 +254,33 @@ function ZoomControl({
   );
 }
 
+/**
+ * Where the toolbar sits while the board is not the question in play: which
+ * board it is, the one thing worth knowing about it, and the ways back.
+ */
+function ViewingBar({
+  title,
+  detail,
+  actions,
+}: {
+  title: string;
+  detail: string;
+  actions: ReactNode;
+}) {
+  return (
+    <div role="status" className={`${FLOATING_BAR} ${BAR_BESIDE_ZOOM} gap-3 pl-4`}>
+      <span className="flex min-w-0 items-center gap-2 text-[12px] text-rt-ink-muted">
+        <Eye aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+        <span className="shrink-0 font-semibold whitespace-nowrap text-rt-ink">{title}</span>
+        {/* The same rule that parts the toolbar's own groups. */}
+        <span aria-hidden className="h-5 w-px shrink-0 bg-rt-tertiary" />
+        <span className="truncate font-medium">{detail}</span>
+      </span>
+      {actions ? <span className="flex shrink-0 items-center gap-1.5">{actions}</span> : null}
+    </div>
+  );
+}
+
 export function PinboardCanvas({
   board,
   isLive,
@@ -275,6 +310,7 @@ export function PinboardCanvas({
   onSelectProposal,
   readOnly = false,
   archiveActions,
+  viewing = null,
   questionVotingEnabled = true,
 }: PinboardCanvasProps) {
   const [zoom, setZoom] = useState<ZoomLevel>(100);
@@ -317,7 +353,10 @@ export function PinboardCanvas({
   // Opening a tool waits while a proposal is on its way, so the menu offers
   // nothing that would open one — the same way the toolbar goes dim.
   const toolsFree = submissionStatus !== 'submitting';
-  const boardOpen = !readOnly && board.questionStatus === 'discussion';
+  // Nothing on the board can be changed: an ended session's, or another
+  // question's that this person is only looking at.
+  const frozen = readOnly || viewing !== null;
+  const boardOpen = !frozen && board.questionStatus === 'discussion';
 
   // Which cards this viewer may move right now: the leader any of them, anyone
   // else their own while the board is unlocked, nobody once it has closed.
@@ -489,7 +528,7 @@ export function PinboardCanvas({
       // Drawn whenever the board is live, cards to pick up or not: a box that
       // only sometimes appears reads as the board ignoring the drag. With
       // nothing this viewer may move, it simply selects nothing.
-      if (readOnly) return;
+      if (frozen) return;
       const target = event.target as HTMLElement;
       if (target.closest('[data-proposal-card], button, a, input, textarea, [role="dialog"]')) {
         return;
@@ -1188,7 +1227,7 @@ export function PinboardCanvas({
                     stackIndex={stackIndexById.get(item.id) ?? 0}
                     stackSize={board.items.length}
                     isDragging={isDragging(item.id)}
-                    dragHandlers={readOnly ? undefined : cardDragHandlers}
+                    dragHandlers={frozen ? undefined : cardDragHandlers}
                     onDelete={onDelete}
                     onArrange={onArrange}
                     onCopyText={onCopyText}
@@ -1347,7 +1386,13 @@ export function PinboardCanvas({
                   // the hint that says how to make one has done its job.
                   toolOpen={activeTool !== null || (imageImport?.importing ?? false)}
                 />
-                {boardOpen ? (
+                {viewing ? (
+                  <ViewingBar
+                    title={viewing.title}
+                    detail={viewing.detail}
+                    actions={viewing.actions}
+                  />
+                ) : boardOpen ? (
                   // Reuse sits in the same pill as the tools that start from
                   // blank, because reusing an earlier proposal produces the
                   // same thing they do. It belongs inside this branch for
@@ -1432,7 +1477,7 @@ export function PinboardCanvas({
           <BoardLockToast
             questionId={board.questionId}
             locked={board.boardLocked}
-            enabled={!isLeader && board.questionStatus === 'discussion' && !readOnly}
+            enabled={!isLeader && board.questionStatus === 'discussion' && !frozen}
           />
         </div>
       </div>

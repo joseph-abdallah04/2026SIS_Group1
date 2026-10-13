@@ -113,15 +113,16 @@ describe('getBoardForSession', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it('409s a named question while the session is still live', async () => {
+  // Each member can look at another question's board on their own screen
+  // while the session runs, without moving the room's.
+  it('serves a named question while the session is still live', async () => {
     session.mockResolvedValue({ ...ENDED, status: 'active' });
 
-    await expect(getBoardForSession('s1', 'q2')).rejects.toMatchObject({
-      status: 409,
-      code: 'SESSION_NOT_ENDED',
-    });
-    expect(questionInSession).not.toHaveBeenCalled();
-    expect(findMany).not.toHaveBeenCalled();
+    const board = await getBoardForSession('s1', 'q2');
+
+    expect(questionInSession).toHaveBeenCalledWith('s1', 'q2');
+    expect(activeQuestion).not.toHaveBeenCalled();
+    expect(board.questionId).toBe('q2');
   });
 
   it('404s a session that does not exist before looking up a question', async () => {

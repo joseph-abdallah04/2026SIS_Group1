@@ -194,6 +194,16 @@ a.rt-sticky-link:focus-visible {
  * given a moment to be noticed. The retract is quick and held at the end so it
  * cannot flash back before it is removed.
  */
+/* A box that scrolls without the system's scrollbar, drawing its own
+   (`OverlayScrollbar`) over its edge instead. */
+.rt-no-scrollbar {
+  scrollbar-width: none;
+}
+
+.rt-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* The agenda's "Up next" label, opening out above the question it moves to
    rather than appearing at full height and shoving the rows below it down. */
 @keyframes rt-eyebrow-in {

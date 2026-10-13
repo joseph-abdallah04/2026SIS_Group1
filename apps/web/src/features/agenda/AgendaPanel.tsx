@@ -12,7 +12,6 @@ import { BoardRail } from '../../components/BoardRail';
 import { PhaseTimer } from '../../components/PhaseTimer';
 import { CARD_INK, REACTION_HOVER_FILL, REACTION_ON_BORDER } from '../pinboard/pinboardTokens';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
-import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
 import { useSetQuestionText } from '../sessions/useSetQuestionText';
@@ -37,8 +36,6 @@ import { SkipConfirm } from './SkipConfirm';
 interface AgendaPanelProps {
   sessionId: string;
   questions: Question[];
-  /** The question the board is showing, from the server (`getActiveQuestion`). */
-  activeQuestionId: string | null;
   /** Only the leader gets the phase controls (F25/F26); everyone sees the list. */
   isLeader: boolean;
   /** Hides Skip once the ballot shows the result (F30). */
@@ -58,6 +55,13 @@ interface AgendaPanelProps {
   proposalCount?: number;
   /** The discussion clock of the question the board is showing, if it has one. */
   timer?: { questionId: string; startedAt: string; durationSeconds: number } | null;
+  /**
+   * The question this person is looking at instead of the room's, if any. Each
+   * person's own: looking back or ahead moves nobody else's board.
+   */
+  viewingQuestionId?: string | null;
+  /** Look at another question's board, or `null` to go back to the room's. */
+  onView?: (questionId: string | null) => void;
 }
 
 /**
@@ -416,12 +420,13 @@ function BrainstormChip() {
 export function AgendaPanel({
   sessionId,
   questions,
-  activeQuestionId,
   isLeader,
   votingPhase,
   hasProposals,
   proposalCount,
   timer,
+  viewingQuestionId = null,
+  onView,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   // The question being confirmed for skipping: only ever the card's.
@@ -526,7 +531,6 @@ export function AgendaPanel({
   } = useSetQuestionVoting(sessionId);
   const { setText, busyQuestionId: textBusyId, error: textError } = useSetQuestionText(sessionId);
   const { move, place, busyQuestionId: moveBusyId, error: moveError } = useMoveQuestion(sessionId);
-  const { focus, error: focusError } = useFocusQuestion(sessionId);
   const { addQuestion, busy: adding, error: addError } = useAddSessionQuestion(sessionId);
   const [composing, setComposing] = useState(false);
   // The card in play's height as the form opened, so it is the same shape.
@@ -570,7 +574,7 @@ export function AgendaPanel({
   );
   const openQuestion = openIndex === -1 ? undefined : questions[openIndex];
   const firstPending = questions.find((question) => question.status === 'pending');
-  const error = phaseError ?? votingError ?? textError ?? moveError ?? focusError ?? addError;
+  const error = phaseError ?? votingError ?? textError ?? moveError ?? addError;
   const canAdd = isLeader && questions.length < SESSION_QUESTION_LIMIT;
 
   // The card is the question the room is on: the one actually open, even
@@ -589,8 +593,11 @@ export function AgendaPanel({
     setUpNextArrivingId(upNext?.id ?? null);
   }, [upNext?.id]);
   const next = controlled ? nextPhase(controlled) : undefined;
-  const canSkip =
-    controlled !== undefined && (controlled.status !== 'voting' || votingPhase !== 'closed');
+  // Not while the ballot is up: from the moment the vote starts until its
+  // result is put away, the ballot lies over the whole agenda, so a Skip on
+  // the card could be seen but never pressed.
+  const ballotUp = votingPhase === 'open' || votingPhase === 'closed';
+  const canSkip = controlled !== undefined && !(controlled.status === 'voting' && ballotUp);
   const shortlisting =
     controlled?.status === 'voting' && votingPhase !== 'open' && votingPhase !== 'closed';
   const balloting = controlled?.status === 'voting' && votingPhase === 'open';
@@ -1022,13 +1029,12 @@ export function AgendaPanel({
         <AgendaTimeline>
           {listed.map((question, index) => {
             const isCard = question.id === controlled?.id;
-            const isFocused = question.id === activeQuestionId;
             const isPending = question.status === 'pending';
             const isEditing = editing?.id === question.id;
             // The board is showing this one rather than the question the room
             // is on: said out loud, so nobody mistakes the old board for the
             // live one.
-            const lookingBack = isFocused && !isCard;
+            const lookingBack = question.id === viewingQuestionId && !isCard;
             // Only before it starts: once under way its status already says
             // "Brainstorming", and a second chip would repeat it.
             const brainstorm = !question.votingEnabled && isPending ? <BrainstormChip /> : null;
@@ -1127,15 +1133,13 @@ export function AgendaPanel({
                 fresh={freshIds.includes(question.id)}
                 prefix={isEditing ? undefined : cardPrefix}
                 confirming={confirmingSkip}
-                // The leader can put any question's board up to look at —
-                // finished, or still to come — without changing where the room
-                // is. The row says "Viewing" while it is up.
+                // Anyone can look at any question's board — finished, or still
+                // to come — on their own screen, without moving the room's. The
+                // row says "Viewing" while it is up; pressing it again goes back
+                // to the room's. The card asks for its own question, which is
+                // the room's unless the leader has put another up.
                 onSelect={
-                  isLeader && !isEditing
-                    ? () => {
-                        if (!isFocused) void focus(question.id);
-                      }
-                    : undefined
+                  onView && !isEditing ? () => onView(lookingBack ? null : question.id) : undefined
                 }
                 // On the card the status is on top; elsewhere it is under the
                 // text, and a finished row leaves it to its node.
