@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/shared';
 import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
-import { Eye, ImagePlus, Scan } from 'lucide-react';
+import { Eye, ImagePlus, Scan, ScreenShare } from 'lucide-react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { copyText } from '../../lib/copyText';
@@ -161,7 +161,13 @@ interface PinboardCanvasProps {
    * (header, mic, the room's vote) carries on live. A bar takes the toolbar's
    * place: which board, what to know about it, and the ways back.
    */
-  viewing?: { title: string; detail: string; actions: ReactNode } | null;
+  viewing?: {
+    title: string;
+    detail: string;
+    actions: ReactNode;
+    /** Up for everyone (a shared screen) rather than looked at alone (an eye). */
+    shared?: boolean;
+  } | null;
   /**
    * F41: false when the question on screen is brainstorm-only, so the header
    * tells the room up front that no vote is coming. Defaults to a vote.
@@ -262,15 +268,23 @@ function ViewingBar({
   title,
   detail,
   actions,
+  shared = false,
 }: {
   title: string;
   detail: string;
   actions: ReactNode;
+  shared?: boolean;
 }) {
+  const Icon = shared ? ScreenShare : Eye;
   return (
-    <div role="status" className={`${FLOATING_BAR} ${BAR_BESIDE_ZOOM} gap-3 pl-4`}>
+    // With no buttons (a member, while a board is up for everyone) the words
+    // run to the bar's end, so they get the same room there as at the start.
+    <div
+      role="status"
+      className={`${FLOATING_BAR} ${BAR_BESIDE_ZOOM} gap-3 pl-4 ${actions ? '' : 'pr-4'}`}
+    >
       <span className="flex min-w-0 items-center gap-2 text-[12px] text-rt-ink-muted">
-        <Eye aria-hidden size={14} strokeWidth={2} className="shrink-0" />
+        <Icon aria-hidden size={14} strokeWidth={2} className="shrink-0" />
         <span className="shrink-0 font-semibold whitespace-nowrap text-rt-ink">{title}</span>
         {/* The same rule that parts the toolbar's own groups. */}
         <span aria-hidden className="h-5 w-px shrink-0 bg-rt-tertiary" />
@@ -1391,6 +1405,7 @@ export function PinboardCanvas({
                     title={viewing.title}
                     detail={viewing.detail}
                     actions={viewing.actions}
+                    shared={viewing.shared}
                   />
                 ) : boardOpen ? (
                   // Reuse sits in the same pill as the tools that start from

@@ -1,4 +1,4 @@
-import { Check, Eye, SkipForward } from 'lucide-react';
+import { Check, Eye, ScreenShare, SkipForward } from 'lucide-react';
 import { useEffect, useRef, type LiHTMLAttributes, type ReactNode } from 'react';
 
 import { OverlayScrollbar } from '../../components/OverlayScrollbar';
@@ -80,6 +80,15 @@ export function ViewingChip() {
   return (
     <AgendaChip tone="outline" icon={<Eye aria-hidden size={11} strokeWidth={2.25} />}>
       Viewing
+    </AgendaChip>
+  );
+}
+
+/** The question the leader has put up for everyone, when it is not the one in play. */
+export function ShowingChip() {
+  return (
+    <AgendaChip tone="outline" icon={<ScreenShare aria-hidden size={11} strokeWidth={2.25} />}>
+      Showing
     </AgendaChip>
   );
 }

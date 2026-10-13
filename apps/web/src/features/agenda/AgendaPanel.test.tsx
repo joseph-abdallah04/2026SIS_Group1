@@ -447,6 +447,24 @@ describe('AgendaPanel leader controls (F25/F26)', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  // The leader has put question 1 up for everyone while question 2 is in
+  // play: its row says so, on every screen, beside anyone's own Viewing.
+  it('marks the question the leader is showing everyone', () => {
+    render(
+      <AgendaPanel
+        sessionId="s1"
+        questions={[question(0, 'answered'), question(1, 'discussion'), question(2, 'pending')]}
+        viewingQuestionId="q3"
+        showingQuestionId="q1"
+        onView={onView}
+        isLeader={false}
+      />,
+    );
+
+    expect(screen.getByText('Showing').closest('li')).toBe(inList('Question 1').closest('li'));
+    expect(screen.getByText('Viewing').closest('li')).toBe(inList('Question 3').closest('li'));
+  });
+
   it('lets a member look at another question too', async () => {
     renderPanel({
       questions: [question(0, 'answered'), question(1, 'discussion'), question(2, 'pending')],

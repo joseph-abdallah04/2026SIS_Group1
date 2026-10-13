@@ -27,6 +27,7 @@ import {
   CARD_SHAPE,
   revealInList,
   StepNode,
+  ShowingChip,
   ViewingChip,
   type AgendaChipTone,
   REORDER_MS,
@@ -62,6 +63,12 @@ interface AgendaPanelProps {
   viewingQuestionId?: string | null;
   /** Look at another question's board, or `null` to go back to the room's. */
   onView?: (questionId: string | null) => void;
+  /**
+   * The question the leader has put up for everyone, when it is not the one
+   * in play: marked on its row for the whole room, so nobody loses track of
+   * where everyone is while they look around.
+   */
+  showingQuestionId?: string | null;
 }
 
 /**
@@ -426,6 +433,7 @@ export function AgendaPanel({
   proposalCount,
   timer,
   viewingQuestionId = null,
+  showingQuestionId = null,
   onView,
 }: AgendaPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1041,6 +1049,7 @@ export function AgendaPanel({
             // is on: said out loud, so nobody mistakes the old board for the
             // live one.
             const lookingBack = question.id === viewingQuestionId && !isCard;
+            const showing = question.id === showingQuestionId && !isCard;
             // Only before it starts: once under way its status already says
             // "Brainstorming", and a second chip would repeat it.
             const brainstorm = !question.votingEnabled && isPending ? <BrainstormChip /> : null;
@@ -1151,8 +1160,9 @@ export function AgendaPanel({
                 // text, and a finished row leaves it to its node.
                 status={isCard ? null : status}
                 extraChips={
-                  !isCard && (lookingBack || brainstorm) ? (
+                  !isCard && (lookingBack || showing || brainstorm) ? (
                     <>
+                      {showing ? <ShowingChip /> : null}
                       {lookingBack ? <ViewingChip /> : null}
                       {brainstorm}
                     </>

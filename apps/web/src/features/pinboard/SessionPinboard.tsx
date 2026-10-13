@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { ScreenShare } from 'lucide-react';
 import { SHORTLIST_MIN, type BoardResponse, type Question } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
@@ -35,7 +36,7 @@ import { usePinboard } from './usePinboard';
 const BAR_PRIMARY =
   'h-9 rounded-full bg-rt-secondary px-4 text-[12.5px] font-semibold whitespace-nowrap text-rt-ink transition-colors enabled:hover:bg-rt-secondary-deep enabled:hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
 const BAR_SECONDARY =
-  'h-9 rounded-full border border-rt-tertiary bg-white px-4 text-[12.5px] font-semibold whitespace-nowrap text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
+  'inline-flex h-9 items-center gap-1.5 rounded-full border border-rt-tertiary bg-white px-4 text-[12.5px] font-semibold whitespace-nowrap text-rt-ink-muted transition-colors enabled:hover:border-rt-ink-faint enabled:hover:text-rt-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary disabled:opacity-60';
 
 /** Nothing on another question's board is new to this person. */
 const NO_NEW_ITEMS: ReadonlySet<string> = new Set();
@@ -130,6 +131,17 @@ export function SessionPinboard({
     // A vote is everyone's moment, and its ballot covers the board anyway.
     if (ballotUp) setViewingId(null);
   }, [ballotUp]);
+  // The board the leader has put up for everyone, when it is not the question
+  // in play. Each time it changes, whoever was looking at another question is
+  // brought to it, once, like everyone else; they can step away again after.
+  const liveQuestionId =
+    questions.find((question) => question.status === 'discussion' || question.status === 'voting')
+      ?.id ?? null;
+  const shownToEveryoneId =
+    roomQuestionId && liveQuestionId && roomQuestionId !== liveQuestionId ? roomQuestionId : null;
+  useEffect(() => {
+    if (shownToEveryoneId) setViewingId(null);
+  }, [shownToEveryoneId]);
   useEffect(() => {
     if (viewingId === null) return;
     const onKey = (event: KeyboardEvent) => {
@@ -279,29 +291,34 @@ export function SessionPinboard({
         }
     : null;
   const roomPosition = questions.findIndex((question) => question.id === board.questionId);
-  // "Viewing Q1 | Only you can see this": which board, and the one thing worth knowing
-  // about it — that the room has moved on, that it has not started, or else
-  // that nobody else's board moved.
+  // The room's board is not the question in play: the leader has put another
+  // up for everyone (or a session was left that way). Everyone is told, its
+  // row is marked, and the leader can take the room back.
+  const openQuestion = questions.find(
+    (question) => question.status === 'discussion' || question.status === 'voting',
+  );
+  const presenting =
+    openQuestion && board.questionId && board.questionId !== openQuestion.id
+      ? questions.find((question) => question.id === board.questionId)
+      : undefined;
+  const roomShowing = viewingQuestion ? undefined : presenting;
+  // "Viewing Q1 | Only you can see this": which board, and the one thing worth
+  // knowing about it — that everyone is on a board the leader put up, that the
+  // room has moved on, that it has not started, or else that nobody else's
+  // board moved. While a board is up for everyone, the way back is to it.
   const viewingTitle = viewingQuestion ? `Viewing Q${questions.indexOf(viewingQuestion) + 1}` : '';
   const viewingDetail = !viewingQuestion
     ? ''
     : viewed.error
       ? 'Could not load this board'
-      : roomWhenViewing.current !== board.questionId && roomPosition !== -1
-        ? `The room is on Q${roomPosition + 1} now`
-        : viewingQuestion.status === 'pending'
-          ? 'Not started'
-          : 'Only you can see this';
-  // The room's board is not the question in play: the leader has put another
-  // up for everyone (or a session was left that way). Everyone is told; the
-  // leader can take the room back.
-  const openQuestion = questions.find(
-    (question) => question.status === 'discussion' || question.status === 'voting',
-  );
-  const roomShowing =
-    !viewingQuestion && openQuestion && board.questionId && board.questionId !== openQuestion.id
-      ? questions.find((question) => question.id === board.questionId)
-      : undefined;
+      : presenting
+        ? `Everyone is on Q${roomPosition + 1}`
+        : roomWhenViewing.current !== board.questionId && roomPosition !== -1
+          ? `The room is on Q${roomPosition + 1} now`
+          : viewingQuestion.status === 'pending'
+            ? 'Not started'
+            : 'Only you can see this';
+  const backLabel = presenting ? `Back to Q${roomPosition + 1}` : 'Back to live';
 
   const view = (questionId: string | null) => {
     if (questionId === null || questionId === board.questionId) {
@@ -355,6 +372,7 @@ export function SessionPinboard({
                             disabled={focusBusyId !== null}
                             className={BAR_SECONDARY}
                           >
+                            <ScreenShare aria-hidden size={14} strokeWidth={2} />
                             Show everyone
                           </button>
                         ) : null}
@@ -363,13 +381,14 @@ export function SessionPinboard({
                           onClick={() => setViewingId(null)}
                           className={BAR_PRIMARY}
                         >
-                          Back to live
+                          {backLabel}
                         </button>
                       </>
                     ),
                   }
                 : roomShowing && openQuestion
                   ? {
+                      shared: true,
                       title: `Showing Q${questions.indexOf(roomShowing) + 1}`,
                       detail: isLeader
                         ? 'Everyone can see this'
@@ -445,6 +464,7 @@ export function SessionPinboard({
                 sessionId={sessionId}
                 questions={questions}
                 viewingQuestionId={viewingQuestion?.id ?? null}
+                showingQuestionId={presenting?.id ?? null}
                 onView={view}
                 isLeader={isLeader}
                 votingPhase={voting.phase}
