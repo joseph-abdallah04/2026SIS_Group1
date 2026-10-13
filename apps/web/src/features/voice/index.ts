@@ -1,11 +1,12 @@
 // Public surface of the voice feature (F11, F12, F13). The session view
 // renders `VoiceNotice`, `VoiceReconnect`, `MicToggle` and
-// `ParticipantCluster`; the waiting room additionally layers voice onto the
-// seats it already draws, which is what the helpers below are for. Everything
-// else here is internal.
+// `ParticipantCluster` — or `NoCallTag`, for a session with no call; the
+// waiting room additionally layers voice onto the seats it already draws,
+// which is what the helpers below are for. Everything else here is internal.
 export { MicToggle } from './MicToggle';
+export { NoCallTag } from './NoCallTag';
 export { ParticipantCluster } from './ParticipantCluster';
-export { localName, voiceStateByIdentity } from './participantList';
+export { localName, presenceParticipants, voiceStateByIdentity } from './participantList';
 export { disconnectAllVoiceRooms } from './roomRegistry';
 export { useSustainedSpeaking } from './useSustainedSpeaking';
 export {

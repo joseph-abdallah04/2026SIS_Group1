@@ -434,6 +434,56 @@ describe('useVoiceRoom when the server has no LiveKit credentials', () => {
   });
 });
 
+describe('useVoiceRoom for a session created with no call', () => {
+  beforeEach(() => {
+    disconnectAllVoiceRooms();
+    localStorage.clear();
+    FakeRoom.last = null;
+    acquireError = null;
+    hangNextJoin = false;
+    hangNextMic = false;
+    tokenFetch.mockClear();
+  });
+
+  afterEach(() => {
+    tokenFetch.mockReset();
+    tokenFetch.mockResolvedValue({
+      token: 'jwt',
+      url: 'wss://example.invalid',
+      identity: 'user-1',
+      roomName: 'session-session-1',
+      expiresInSeconds: 900,
+    });
+  });
+
+  it('never asks for a token or builds a room, and reads `unavailable` so the voice UI steps aside', async () => {
+    const view = renderHook(() => useVoiceRoom('session-1', false));
+
+    expect(view.result.current.status).toBe('unavailable');
+    expect(view.result.current.participants).toEqual([]);
+
+    // The saving is in what never happens: no token, so no LiveKit minutes.
+    await wait(PAST_FIRST_RETRY_MS);
+    expect(tokenFetch).not.toHaveBeenCalled();
+    expect(FakeRoom.last).toBeNull();
+    expect(view.result.current.status).toBe('unavailable');
+  });
+
+  it('stops quietly at `unavailable` if the server says the session has no call', async () => {
+    // A view that did not know yet. Same answer as a server with no voice:
+    // asked once, no error to show, no Reconnect that cannot work.
+    tokenFetch.mockRejectedValue(new ApiClientError(409, 'This session has no call', 'VOICE_OFF'));
+
+    const view = renderHook(() => useVoiceRoom('session-1'));
+    await waitFor(() => expect(view.result.current.status).toBe('unavailable'));
+
+    expect(view.result.current.error).toBeNull();
+    await wait(PAST_FIRST_RETRY_MS);
+    expect(tokenFetch).toHaveBeenCalledTimes(1);
+    expect(view.result.current.status).toBe('unavailable');
+  });
+});
+
 describe('useVoiceRoom across the lobby -> board handover', () => {
   beforeEach(() => {
     disconnectAllVoiceRooms();

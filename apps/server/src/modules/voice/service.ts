@@ -7,7 +7,7 @@ import { AccessToken, TrackSource } from 'livekit-server-sdk';
 import { voiceRoom, type VoiceTokenResponse } from '@roundtable/shared';
 
 import { env } from '../../env.js';
-import { findSessionParticipant } from './sessionsAdapter.js';
+import { findSessionParticipant, isSessionVoiceEnabled } from './sessionsAdapter.js';
 
 /**
  * Token lifetime (F11 — "short-lived access token").
@@ -23,6 +23,8 @@ export type IssueTokenResult =
   | { ok: true; value: VoiceTokenResponse }
   /** Caller is not a member of this session — or the session does not exist. */
   | { ok: false; reason: 'not-a-member' }
+  /** The session was created with no call, so it has no room to join. */
+  | { ok: false; reason: 'voice-off' }
   /** LiveKit credentials are absent from the environment; nobody can join. */
   | { ok: false; reason: 'not-configured' };
 
@@ -63,6 +65,12 @@ export async function issueVoiceToken(
 
   const participant = await findSessionParticipant(sessionId, userId);
   if (!participant) return { ok: false, reason: 'not-a-member' };
+
+  // After the membership check, not before: someone outside the session gets
+  // the same `not-a-member` either way, so they cannot learn whether it has a
+  // call. Refusing here, at the signing, is what makes "no call" mean no
+  // LiveKit minutes even for a client that asks anyway.
+  if (!(await isSessionVoiceEnabled(sessionId))) return { ok: false, reason: 'voice-off' };
 
   const roomName = voiceRoom(sessionId);
 

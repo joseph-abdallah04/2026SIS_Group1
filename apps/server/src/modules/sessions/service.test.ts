@@ -161,6 +161,7 @@ describe('createSession', () => {
   const input = {
     title: 'Roadmap planning',
     questions: [q('What ships first?'), q('Who owns it?')],
+    voiceEnabled: false,
   };
 
   it('always writes a new session as draft with no code, regardless of what the caller passed', async () => {
@@ -181,7 +182,11 @@ describe('createSession', () => {
   it('stores each question\'s vote choice with its row (F41)', async () => {
     await createSession({
       leaderId: 'u1',
-      input: { title: 'X', questions: [q('Vote on this'), q('Just ideas', false)] },
+      input: {
+        title: 'X',
+        questions: [q('Vote on this'), q('Just ideas', false)],
+        voiceEnabled: false,
+      },
     });
     expect(
       questionCreateMany.mock.calls[0]?.[0].data.map(
@@ -193,7 +198,7 @@ describe('createSession', () => {
   it('preserves order exactly as submitted, even when reversed', async () => {
     await createSession({
       leaderId: 'u1',
-      input: { title: 'X', questions: [q('Third'), q('Second'), q('First')] },
+      input: { title: 'X', questions: [q('Third'), q('Second'), q('First')], voiceEnabled: false },
     });
     const texts = questionCreateMany.mock.calls[0]?.[0].data.map((q: { text: string }) => q.text);
     expect(texts).toEqual(['Third', 'Second', 'First']);
@@ -214,7 +219,13 @@ describe('createSession', () => {
   it('stores optional timer durations as seconds, and leaves them null when omitted', async () => {
     await createSession({
       leaderId: 'u1',
-      input: { title: 'X', questions: [q('Q')], discussionTimerSeconds: 615, votingTimerSeconds: 75 },
+      input: {
+        title: 'X',
+        questions: [q('Q')],
+        discussionTimerSeconds: 615,
+        votingTimerSeconds: 75,
+        voiceEnabled: false,
+      },
     });
     expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({
       discussionTimerSeconds: 615,
@@ -222,11 +233,23 @@ describe('createSession', () => {
     });
 
     sessionCreate.mockClear();
-    await createSession({ leaderId: 'u1', input: { title: 'X', questions: [q('Q')] } });
+    await createSession({
+      leaderId: 'u1',
+      input: { title: 'X', questions: [q('Q')], voiceEnabled: false },
+    });
     expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({
       discussionTimerSeconds: null,
       votingTimerSeconds: null,
     });
+  });
+
+  it("stores the leader's live call / no call choice", async () => {
+    await createSession({ leaderId: 'u1', input: { ...input, voiceEnabled: true } });
+    expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({ voiceEnabled: true });
+
+    sessionCreate.mockClear();
+    await createSession({ leaderId: 'u1', input });
+    expect(sessionCreate.mock.calls[0]?.[0].data).toMatchObject({ voiceEnabled: false });
   });
 });
 
@@ -235,6 +258,18 @@ describe('createSessionSchema', () => {
     expect(
       createSessionSchema.safeParse({ title: 'Sprint kickoff', questions: [q('Scope?')] }).success,
     ).toBe(true);
+  });
+
+  it('defaults to no call when the call choice is omitted, and keeps an explicit live call', () => {
+    const omitted = createSessionSchema.parse({ title: 'Sprint kickoff', questions: [q('Scope?')] });
+    expect(omitted.voiceEnabled).toBe(false);
+
+    const live = createSessionSchema.parse({
+      title: 'Sprint kickoff',
+      questions: [q('Scope?')],
+      voiceEnabled: true,
+    });
+    expect(live.voiceEnabled).toBe(true);
   });
 
   it('rejects an empty title', () => {
@@ -518,7 +553,7 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
       updateSessionDraft({
         sessionId: 's1',
         leaderId: 'not-the-leader',
-        input: { title: 'New title', questions: [q('Q1')] },
+        input: { title: 'New title', questions: [q('Q1')], voiceEnabled: false },
       }),
     ).rejects.toMatchObject({ code: 'NOT_SESSION_LEADER' });
     expect(sessionUpdateInTx).not.toHaveBeenCalled();
@@ -530,7 +565,7 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
       updateSessionDraft({
         sessionId: 's1',
         leaderId: 'leader-1',
-        input: { title: 'New title', questions: [q('Q1')] },
+        input: { title: 'New title', questions: [q('Q1')], voiceEnabled: false },
       }),
     ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
     expect(sessionUpdateInTx).not.toHaveBeenCalled();
@@ -547,7 +582,11 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
     const result = await updateSessionDraft({
       sessionId: 's1',
       leaderId: 'leader-1',
-      input: { title: 'New title', questions: [q('First'), q('Second', false)] },
+      input: {
+        title: 'New title',
+        questions: [q('First'), q('Second', false)],
+        voiceEnabled: true,
+      },
     });
 
     expect(sessionUpdateInTx).toHaveBeenCalledWith({
@@ -556,6 +595,7 @@ describe('updateSessionDraft / deleteSession (F05)', () => {
         title: 'New title',
         discussionTimerSeconds: null,
         votingTimerSeconds: null,
+        voiceEnabled: true,
       },
     });
     expect(questionDeleteMany).toHaveBeenCalledWith({ where: { sessionId: 's1' } });
@@ -1024,6 +1064,7 @@ describe('startSession (F09)', () => {
       endedAt: null,
       discussionTimerSeconds: null,
       votingTimerSeconds: null,
+      voiceEnabled: false,
     });
 
     expect(to).toHaveBeenCalledWith('session:s1');
@@ -1050,6 +1091,7 @@ describe('startSession (F09)', () => {
         endedAt: null,
         discussionTimerSeconds: null,
         votingTimerSeconds: null,
+        voiceEnabled: false,
       }),
     ).toThrow(/startedAt/);
   });
@@ -1151,6 +1193,7 @@ describe('endSession (F32)', () => {
       endedAt: new Date('2026-09-04T05:00:00.000Z'),
       discussionTimerSeconds: null,
       votingTimerSeconds: null,
+      voiceEnabled: false,
     });
 
     expect(to).toHaveBeenCalledWith('session:s1');
@@ -1173,6 +1216,7 @@ describe('endSession (F32)', () => {
         endedAt: null,
         discussionTimerSeconds: null,
         votingTimerSeconds: null,
+        voiceEnabled: false,
       }),
     ).toThrow(/endedAt/);
   });
@@ -1226,7 +1270,10 @@ describe('leaveSession (F07)', () => {
 
 describe('leftAt semantics', () => {
   it('the one-live-session guard ignores sessions the user has left', async () => {
-    await createSession({ leaderId: 'u1', input: { title: 'X', questions: [q('Q')] } });
+    await createSession({
+      leaderId: 'u1',
+      input: { title: 'X', questions: [q('Q')], voiceEnabled: false },
+    });
     expect(sessionFindFirst.mock.calls[0]?.[0]).toMatchObject({
       where: { members: { some: { userId: 'u1', leftAt: null } } },
     });

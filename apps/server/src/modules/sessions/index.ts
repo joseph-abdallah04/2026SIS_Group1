@@ -23,6 +23,7 @@ export {
   getSession,
   getSessionMemberIdentity,
   getSessionWithQuestions,
+  isSessionVoiceEnabled,
   findLiveSessionForUser,
   focusQuestion,
   hideSessionsForDeletedUser,

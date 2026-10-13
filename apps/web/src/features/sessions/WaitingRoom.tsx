@@ -1,5 +1,12 @@
 import { CopyField } from '../../components/ui/CopyField';
-import { MicToggle, VoiceNotice, VoiceReconnect, localName, useVoiceRoom } from '../voice';
+import {
+  MicToggle,
+  NoCallTag,
+  VoiceNotice,
+  VoiceReconnect,
+  localName,
+  useVoiceRoom,
+} from '../voice';
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
@@ -28,8 +35,9 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
   // F13: the lobby is a room people are sitting in, so they can talk in it.
   // The connection survives the leader pressing Start — the registry hands the
   // same room to the board (features/voice/roomRegistry.ts) — so this is the
-  // start of the call, not a preview of one.
-  const voice = useVoiceRoom(session.id);
+  // start of the call, not a preview of one. A session created with no call
+  // never joins at all, which is what saves its LiveKit minutes.
+  const voice = useVoiceRoom(session.id, session.voiceEnabled);
   const { start, starting, error: startError } = useStartSession(session.id);
   const isLeader = session.leaderId === useCurrentUserId();
   const joinLink = session.code ? `${window.location.origin}/join/${session.code}` : null;
@@ -41,16 +49,23 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Waiting room</span>
         <div className="ml-auto flex items-center gap-3">
           {/* Only one of these two is ever drawn: the mic, or — once voice has
-              given up — its Reconnect in the mic's place. */}
-          <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
-          <MicToggle
-            name={localName(voice.participants)}
-            micEnabled={voice.micEnabled}
-            micStatus={voice.micStatus}
-            status={voice.status}
-            busy={voice.micBusy}
-            toggle={voice.toggleMic}
-          />
+              given up — its Reconnect in the mic's place. A session with no
+              call has neither, so it says so instead. */}
+          {session.voiceEnabled ? (
+            <>
+              <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
+              <MicToggle
+                name={localName(voice.participants)}
+                micEnabled={voice.micEnabled}
+                micStatus={voice.micStatus}
+                status={voice.status}
+                busy={voice.micBusy}
+                toggle={voice.toggleMic}
+              />
+            </>
+          ) : (
+            <NoCallTag />
+          )}
           {isLeader ? (
             <EndSessionControl sessionId={session.id} />
           ) : (
