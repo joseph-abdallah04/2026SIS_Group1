@@ -1,10 +1,12 @@
 // The chat rail (F34/F35) — transcript, composer, artifact cards.
 //
-// The conversation itself does NOT live here. `AssistantBubble` owns it, because F34
+// The conversation itself does NOT live here. `useAssistantDock` owns it, because F34
 // requires the thread to survive collapsing the panel — and this component unmounts when
-// the rail closes. The panel is a view over state it does not hold.
+// the side panel closes or shows another tab. The panel is a view over state it does
+// not hold.
 //
-// The outer chrome is `BoardRail` (title, collapse). This file is what sits inside it.
+// The outer chrome is the side panel's `BoardRail` (title, collapse). This file is what
+// sits inside it, under the AI tab.
 // `.rt-assistant-dock` repaints the transcript for that light surface; the marketing
 // mock still uses the glass rules in assistant.css.
 import { useContext, useEffect, useRef, useState } from 'react';
@@ -27,7 +29,7 @@ const SUGGESTIONS = [
 ];
 
 export interface AssistantPanelProps {
-  /** Conversation state, owned by AssistantBubble so it outlives this component. */
+  /** Conversation state, owned by `useAssistantDock` so it outlives this component. */
   chat: AssistantChat;
   /** null while the config is still loading; false when the user has no provider set up. */
   configured: boolean | null;

@@ -4,13 +4,11 @@ import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from '
 import { useRailResize } from './useRailResize';
 
 export type BoardRailSide = 'left' | 'right';
-/** Agenda column, or the wider one the assistant needs for a conversation. */
-export type BoardRailWidth = 'narrow' | 'wide';
 
-const EXPANDED_WIDTH: Record<BoardRailWidth, string> = {
-  narrow: 'w-64 min-w-64 max-w-64 basis-64',
-  wide: 'w-96 min-w-96 max-w-96 basis-96',
-};
+/** The open column of a rail that does not resize. */
+const EXPANDED_WIDTH = 'w-64 min-w-64 max-w-64 basis-64';
+/** The collapsed strip, and the activity bar that stands in for it. */
+const STRIP_WIDTH = 'w-11 min-w-11 max-w-11 shrink-0 grow-0 basis-11';
 
 const TITLE_CLASSES = 'text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase';
 /** The same quiet round button as the agenda's +, so the header's controls match. */
@@ -20,9 +18,25 @@ const TOGGLE_CLASSES =
 interface BoardRailProps {
   /** Which edge of the board this dock sits on — flips the border and chevrons. */
   side: BoardRailSide;
-  /** Defaults to the agenda column. The assistant asks for `wide`. */
-  width?: BoardRailWidth;
+  /** Names the rail for assistive tech, and heads it when open unless `panelTitle` does. */
   title: string;
+  /**
+   * What the open panel's header says, when it is not `title`: the side panel
+   * names whichever of its features is on show, while the rail as a whole
+   * keeps one name.
+   */
+  panelTitle?: ReactNode;
+  /**
+   * An activity bar on the rail's outer edge, there whether the rail is open
+   * or not. It takes the place of the collapsed strip's toggle and title, and
+   * the open panel sits on its board side. The side panel's People, Chat and
+   * AI buttons are one.
+   *
+   * The rail stays one mounted piece either way, which is what lets a drag
+   * that closes it reopen it in the same gesture (`useRailResize` lets go of
+   * a drag when its rail unmounts).
+   */
+  strip?: ReactNode;
   collapsed: boolean;
   onToggle: () => void;
   expandLabel: string;
@@ -42,9 +56,10 @@ interface BoardRailProps {
    * Lets the rail's inner edge be dragged to any width between
    * `RAIL_MIN_WIDTH` and `RAIL_MAX_WIDTH`, and closed by dragging on past the
    * minimum (`useRailResize`). `storageKey` names the remembered width: rails
-   * that share one open at the same size. Overrides `width` while set.
+   * that share one open at the same size. `defaultWidth` is where it opens
+   * before anyone has dragged it.
    */
-  resize?: { storageKey: string; label: string };
+  resize?: { storageKey: string; label: string; defaultWidth?: number };
   /**
    * Under the title, in the same header zone and above its one divider: the
    * agenda's progress, which belongs to the heading rather than to the list.
@@ -67,17 +82,18 @@ function RailTitle({ children, vertical }: { children: ReactNode; vertical?: boo
 }
 
 /**
- * Shared chrome for the session's left and right docks (agenda, assistant).
+ * Shared chrome for the session's left and right docks (agenda, side panel).
  *
  * The two rails are mirrors of one piece: same padding, title and toggle.
- * `side` flips the border and the chevrons. `width` is the expanded column —
- * the agenda stays narrow, the assistant is wide enough to read a chat in.
- * `resize` trades the fixed column for one the user drags to size.
+ * `side` flips the border and the chevrons. `resize` trades the fixed column
+ * for one the user drags to size, and `strip` trades the collapsed strip for
+ * an activity bar that stays put while the panel opens beside it.
  */
 export function BoardRail({
   side,
-  width = 'narrow',
   title,
+  panelTitle,
+  strip,
   collapsed,
   onToggle,
   expandLabel,
@@ -92,20 +108,45 @@ export function BoardRail({
   headerAction,
   children,
 }: BoardRailProps) {
-  const resizer = useRailResize({ side, storageKey: resize?.storageKey, collapsed, onToggle });
+  const resizer = useRailResize({
+    side,
+    storageKey: resize?.storageKey,
+    collapsed,
+    onToggle,
+    defaultWidth: resize?.defaultWidth,
+  });
   const onLeft = side === 'left';
   const edge = onLeft ? 'border-r' : 'border-l';
   // A panel with its edge on the rail's side: closing it points back to that
   // edge, opening it points away.
   const ExpandIcon = onLeft ? PanelLeftOpen : PanelRightOpen;
   const CollapseIcon = onLeft ? PanelLeftClose : PanelRightClose;
+  const inertProps = inert ? { inert: '' } : {};
+
+  // The bar sits in the collapsed strip's place, with its padding and edge, so
+  // the board ends at the same line whether the panel beside it is open or not.
+  const activityBar = strip ? (
+    <div
+      className={`box-border flex ${STRIP_WIDTH} flex-col items-center ${edge} border-rt-tertiary bg-rt-surface-alt pt-1.5 pb-3`}
+    >
+      {strip}
+    </div>
+  ) : null;
+
+  if (collapsed && activityBar) {
+    return (
+      <aside aria-label={title} {...inertProps} className="flex shrink-0 grow-0">
+        {activityBar}
+      </aside>
+    );
+  }
 
   if (collapsed) {
     return (
       <aside
         aria-label={title}
-        {...(inert ? { inert: '' } : {})}
-        className={`box-border flex w-11 min-w-11 max-w-11 shrink-0 grow-0 basis-11 flex-col items-center gap-3 ${edge} border-rt-tertiary bg-rt-surface-alt py-3`}
+        {...inertProps}
+        className={`box-border flex ${STRIP_WIDTH} flex-col items-center gap-3 ${edge} border-rt-tertiary bg-rt-surface-alt py-3`}
       >
         <button
           ref={toggleRef}
@@ -144,25 +185,22 @@ export function BoardRail({
   );
 
   const sizedWidth = resizer.width;
+  const heading = panelTitle ?? title;
+  const panelClass = `relative box-border flex shrink-0 grow-0 flex-col ${
+    sizedWidth === null ? EXPANDED_WIDTH : ''
+  } ${edge} border-rt-tertiary bg-rt-surface-alt px-3`;
+  const panelStyle =
+    sizedWidth === null
+      ? undefined
+      : { width: sizedWidth, minWidth: sizedWidth, maxWidth: sizedWidth, flexBasis: sizedWidth };
 
-  return (
-    <aside
-      aria-label={title}
-      {...(inert ? { inert: '' } : {})}
-      className={`relative box-border flex shrink-0 grow-0 flex-col ${
-        sizedWidth === null ? EXPANDED_WIDTH[width] : ''
-      } ${edge} border-rt-tertiary bg-rt-surface-alt px-3`}
-      style={
-        sizedWidth === null
-          ? undefined
-          : { width: sizedWidth, minWidth: sizedWidth, maxWidth: sizedWidth, flexBasis: sizedWidth }
-      }
-    >
+  const panelContents = (
+    <>
       <div className="-mx-3 shrink-0 border-b border-rt-tertiary px-3 py-2">
         <div className="flex items-center justify-between">
           {onLeft ? (
             <>
-              <RailTitle>{title}</RailTitle>
+              <RailTitle>{heading}</RailTitle>
               <span className="flex items-center">
                 {headerAction}
                 {collapseButton}
@@ -174,7 +212,7 @@ export function BoardRail({
                 {collapseButton}
                 {headerAction}
               </span>
-              <RailTitle>{title}</RailTitle>
+              <RailTitle>{heading}</RailTitle>
             </>
           )}
         </div>
@@ -211,6 +249,26 @@ export function BoardRail({
           />
         </div>
       ) : null}
+    </>
+  );
+
+  if (activityBar) {
+    // One landmark for the bar and the panel: they are one rail, and the bar
+    // stays on the outer edge so it never moves when the panel opens.
+    return (
+      <aside aria-label={title} {...inertProps} className="flex shrink-0 grow-0">
+        {onLeft ? activityBar : null}
+        <div className={panelClass} style={panelStyle}>
+          {panelContents}
+        </div>
+        {onLeft ? null : activityBar}
+      </aside>
+    );
+  }
+
+  return (
+    <aside aria-label={title} {...inertProps} className={panelClass} style={panelStyle}>
+      {panelContents}
     </aside>
   );
 }

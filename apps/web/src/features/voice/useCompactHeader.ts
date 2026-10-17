@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Below this the board header has no room for a full roster.
+ * Below this the board header shows one face fewer.
  *
- * Measured rather than guessed: at 1280px the action group costs ~450px and the
- * phase pill's floor is ~140px, which with the timer and gaps leaves the header
- * about 800px of unavoidable content. A five-bubble chip is ~218px, so the two
- * stop fitting a little over 1000px, and 900 is the first round number below
- * that where the pill is already fully truncated anyway.
+ * The header's right side (faces, mic, Invite, the exit) is about 300px, and
+ * the question on the left is what gives way, by truncating. Under 900px it is
+ * down to a few words, and a face fewer hands it back about 20px.
  */
 const COMPACT_MAX_WIDTH = 900;
 
 /**
- * True while the header should show a reduced roster.
+ * True while the header should show a reduced people snapshot.
  *
  * A media query rather than Tailwind's `hidden sm:flex`, because the two widths
  * need *different data*, not the same data styled twice: the speaking-promotion

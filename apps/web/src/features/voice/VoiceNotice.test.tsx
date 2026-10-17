@@ -277,4 +277,34 @@ describe('VoiceNotice', () => {
       expect(vi.getTimerCount()).toBe(0);
     });
   });
+
+  describe('when the leader mutes you', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('says who did it, and unmutes from the same place the mic toggle does', async () => {
+      const props = { ...healthyProps(), mutedByLeader: true };
+      const user = userEvent.setup();
+      render(<VoiceNotice {...props} />);
+
+      expect(screen.getByRole('status')).toHaveTextContent('The leader muted you');
+      await user.click(screen.getByRole('button', { name: 'Unmute' }));
+      expect(props.requestMicrophone).toHaveBeenCalled();
+    });
+
+    it('steps aside, since the red mic toggle keeps saying it', () => {
+      vi.useFakeTimers();
+      render(<VoiceNotice {...healthyProps()} mutedByLeader />);
+
+      advance(NOTICE_AUTO_HIDE_MS);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('waits behind anything you may need to act on', () => {
+      render(<VoiceNotice {...healthyProps()} mutedByLeader status="reconnecting" />);
+
+      expect(screen.getByRole('status')).toHaveTextContent('Reconnecting to the room');
+    });
+  });
 });

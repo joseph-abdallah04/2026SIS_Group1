@@ -6,12 +6,20 @@ import { SHORTLIST_MIN, type BoardResponse, type Question } from '@roundtable/sh
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { PhaseTimer } from '../../components/PhaseTimer';
 import { AgendaPanel } from '../agenda/AgendaPanel';
-import { AssistantBubble } from '../assistant';
-import { JoinCodeCard } from '../sessions/JoinCodeCard';
 import { MyProposalsLauncher } from './MyProposalsLauncher';
+import { InviteButton } from '../sessions/InviteButton';
 import { SessionJoinNotices } from '../sessions/SessionJoinNotices';
 import { useFocusQuestion } from '../sessions/useFocusQuestion';
 import { useSetQuestionPhase } from '../sessions/useSetQuestionPhase';
+import {
+  MuteAllButton,
+  PeoplePanel,
+  SidePanel,
+  anyoneToMute,
+  mergeRoster,
+  useSidePanel,
+  type CallView,
+} from '../sidepanel';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
 import { ImageImportProvider } from '../tools/image/ImageImportProvider';
@@ -21,14 +29,15 @@ import { useVoting } from '../voting/useVoting';
 import { VotingBallot } from '../voting/VotingBallot';
 import {
   MicToggle,
-  NoCallTag,
-  ParticipantCluster,
+  PeopleSnapshot,
   VoiceNotice,
   VoiceReconnect,
   presenceParticipants,
+  useLeaderMute,
   useVoiceRoom,
 } from '../voice';
 import { PinboardCanvas } from './PinboardCanvas';
+import { SessionClock } from './SessionClock';
 import { useArchivedBoard } from './useArchivedBoard';
 import { usePinboard } from './usePinboard';
 
@@ -45,8 +54,9 @@ const NO_SHORTLIST: string[] = [];
 function BoardFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-[13px] text-rt-ink">
-        <RoundTableLogo />
+      {/* The board header's height and edges, so nothing jumps when it loads. */}
+      <header className="flex h-13 shrink-0 items-center gap-3.5 border-b border-rt-secondary/40 bg-rt-secondary-wash px-5 text-rt-ink">
+        <RoundTableLogo className="h-6.5 w-auto shrink-0" />
         <span className="text-[13px] font-semibold tracking-[-0.01em]">Loading session…</span>
       </header>
       <div
@@ -71,10 +81,12 @@ interface SessionPinboardProps {
   isLeader: boolean;
   /** The agenda F24 renders beside the board, from `SessionRouter`'s fetch. */
   questions: Question[];
-  /** Still joinable while the session is live — shown on the participant rail. */
+  /** Still joinable while the session is live: the header's Invite and People's footer. */
   joinCode: string | null;
   /** Live call or no call. With no call the board never joins a LiveKit room. */
   voiceEnabled: boolean;
+  /** When the leader started the session (F09), for the header's running time. */
+  startedAt: string | Date | null;
 }
 
 export function SessionPinboard({
@@ -82,6 +94,7 @@ export function SessionPinboard({
   questions,
   joinCode,
   voiceEnabled,
+  startedAt,
 }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
@@ -180,6 +193,29 @@ export function SessionPinboard({
     () => presenceParticipants(participants, viewerId),
     [participants, viewerId],
   );
+
+  // The side panel's state, and the call as the People tab reads it. Up here
+  // with the rest of the hooks, for the same early-return reason; the call is
+  // memoised so People's speaking tracker is not handed a new roster each render.
+  const sidePanel = useSidePanel();
+  const call = useMemo<CallView | null>(
+    () =>
+      voiceEnabled
+        ? { participants: voice.participants, status: voice.status, micStatus: voice.micStatus }
+        : null,
+    [voiceEnabled, voice.participants, voice.status, voice.micStatus],
+  );
+  // Everyone in the session once, call or not: what the header's snapshot
+  // shows and People counts, so the two never disagree.
+  const roster = useMemo(() => mergeRoster(presenceRoster, call), [presenceRoster, call]);
+  // The leader's mute buttons (F12). The hook is harmless for anyone else; it
+  // only ever acts when one of its buttons is pressed, and only the leader
+  // gets them. The server checks again regardless.
+  const leaderMute = useLeaderMute(sessionId);
+  const canMuteAnyone = useMemo(() => anyoneToMute(presenceRoster, call), [presenceRoster, call]);
+  // Not on a server with no LiveKit: there is no call to mute anyone in, and
+  // a greyed "Mute all" would only raise the question why.
+  const moderating = isLeader && call !== null && call.status !== 'unavailable';
 
   if (!sessionId) {
     return (
@@ -506,6 +542,7 @@ export function SessionPinboard({
                 micPermissionDenied={voice.micPermissionDenied}
                 error={voice.error}
                 audioBlocked={voice.audioBlocked}
+                mutedByLeader={voice.mutedByLeader}
                 retry={voice.retry}
                 requestMicrophone={voice.requestMicrophone}
                 unlockAudio={voice.unlockAudio}
@@ -514,11 +551,12 @@ export function SessionPinboard({
             micControl={
               // Only one of these two is ever drawn: the mic, or — once voice
               // has given up — its Reconnect in the mic's place. A session
-              // with no call has neither, so it says so instead.
+              // with no call has neither; its status line says "No call".
               voiceEnabled ? (
                 <>
                   <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
                   <MicToggle
+                    compact
                     name={selfName}
                     micEnabled={voice.micEnabled}
                     micStatus={voice.micStatus}
@@ -527,24 +565,20 @@ export function SessionPinboard({
                     toggle={voice.toggleMic}
                   />
                 </>
-              ) : (
-                <NoCallTag />
-              )
+              ) : null
             }
+            noCall={!voiceEnabled}
             participants={
-              voiceEnabled ? (
-                <ParticipantCluster participants={voice.participants} status={voice.status} />
-              ) : (
-                // No call: same chip, fed from the board's own connection. Its
-                // `reconnecting` wording already says what a dropped socket
-                // means for the list.
-                <ParticipantCluster
-                  participants={presenceRoster}
-                  status={isLive ? 'connected' : 'reconnecting'}
-                />
-              )
+              // Call or not, everyone in the session: the board's presence,
+              // with the call's mic and speaking state where there is one.
+              <PeopleSnapshot
+                participants={roster}
+                leaderId={board.leaderId}
+                onOpen={() => sidePanel.open('people')}
+              />
             }
-            joinCode={joinCode ? <JoinCodeCard code={joinCode} /> : null}
+            invite={joinCode ? <InviteButton code={joinCode} /> : null}
+            clock={<SessionClock startedAt={startedAt} />}
             reactToProposal={reactToProposal}
             onSelectProposal={onSelectProposal}
             headerTimer={
@@ -553,6 +587,7 @@ export function SessionPinboard({
               (board.questionStatus === 'discussion' ||
                 (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (
                 <PhaseTimer
+                  inline
                   startedAt={board.discussionTimer.startedAt}
                   durationSeconds={board.discussionTimer.durationSeconds}
                   allowOvertime
@@ -560,16 +595,33 @@ export function SessionPinboard({
                 />
               ) : null
             }
-            assistant={
+            sidePanel={
               /* Propose reads these items so it can unlock after a delete. The model
                 still reads the board server-side on every turn (F35). */
-              <AssistantBubble
+              <SidePanel
                 key={sessionId}
+                control={sidePanel}
+                suppressed={balloting}
+                people={
+                  <PeoplePanel
+                    present={presenceRoster}
+                    call={call}
+                    leaderId={board.leaderId}
+                    joinCode={joinCode}
+                    boardLive={isLive}
+                    {...(moderating ? { moderation: leaderMute } : {})}
+                  />
+                }
+                peopleCount={roster.length}
+                peopleAction={
+                  moderating ? (
+                    <MuteAllButton moderation={leaderMute} anyoneToMute={canMuteAnyone} />
+                  ) : null
+                }
                 sessionId={sessionId}
                 getContext={getAssistantContext}
                 boardItems={board.items}
                 questionStatus={board.questionStatus}
-                suppressed={balloting}
               />
             }
           />

@@ -16,6 +16,16 @@ beforeEach(() => {
 });
 
 describe('EndSessionControl', () => {
+  it('confirms the same way from the board header', async () => {
+    const user = userEvent.setup();
+    render(<EndSessionControl sessionId="s1" variant="header" />);
+
+    await user.click(screen.getByRole('button', { name: 'End session' }));
+    expect(
+      screen.getByRole('dialog', { name: 'End this session for everyone?' }),
+    ).toBeInTheDocument();
+  });
+
   it('confirms before ending — success does not navigate; the broadcast does', async () => {
     const user = userEvent.setup();
     render(<EndSessionControl sessionId="s1" />);

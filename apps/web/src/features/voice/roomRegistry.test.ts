@@ -38,9 +38,15 @@ const {
   acquireVoiceRoom,
   disconnectAllVoiceRooms,
   isVoiceRoomConnected,
+  isVoiceRoomMicChanging,
   releaseVoiceRoom,
   rememberVoiceIdentity,
 } = await import('./roomRegistry');
+
+/** Let settled promise chains run their handlers; timers here are fake. */
+async function flushMicrotasks() {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+}
 
 describe('voice room registry', () => {
   beforeEach(() => {
@@ -172,5 +178,35 @@ describe('voice room registry', () => {
 
     (room as unknown as FakeRoom).state = 'connected';
     expect(isVoiceRoomConnected(room)).toBe(true);
+  });
+
+  it('says its own mic change is landing until both the mute and the restore have', async () => {
+    const { room } = acquireVoiceRoom('s1');
+    const participant = (room as unknown as FakeRoom).localParticipant;
+    participant.isMicrophoneEnabled = true;
+    expect(isVoiceRoomMicChanging('s1')).toBe(false);
+
+    // Held open, as a mute waiting on LiveKit's lock is.
+    let finishMute: () => void = () => undefined;
+    participant.setMicrophoneEnabled = (enabled: boolean) => {
+      participant.micCalls.push(enabled);
+      return enabled
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            finishMute = resolve;
+          });
+    };
+
+    releaseVoiceRoom('s1');
+    expect(isVoiceRoomMicChanging('s1')).toBe(true);
+    acquireVoiceRoom('s1');
+    expect(participant.micCalls).toEqual([false, true]);
+    await flushMicrotasks();
+    // The restore has landed; the mute it overlapped has not.
+    expect(isVoiceRoomMicChanging('s1')).toBe(true);
+
+    finishMute();
+    await flushMicrotasks();
+    expect(isVoiceRoomMicChanging('s1')).toBe(false);
   });
 });

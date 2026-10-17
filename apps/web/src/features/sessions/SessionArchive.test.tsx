@@ -1,5 +1,5 @@
 import type { BoardItem, BoardResponse } from '@roundtable/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -180,11 +180,15 @@ describe('SessionArchive', () => {
     );
 
     expect(await screen.findByText('Ship the pinboard')).toBeInTheDocument();
-    expect(screen.getAllByText('Discussed')).toHaveLength(2);
+    // Twice in the question list, once in the header's status line.
+    expect(screen.getAllByText('Discussed')).toHaveLength(3);
     expect(screen.queryByText('Not voted on')).not.toBeInTheDocument();
     expect(screen.queryByText('Answered')).not.toBeInTheDocument();
     // Ended mid-discussion: discussed, like the agenda beside it says.
-    expect(screen.getByText('Q1 · Discussed')).toBeInTheDocument();
+    const status = document.querySelector<HTMLElement>('[data-board-status]')!;
+    expect(within(status).getByText('Q1')).toBeInTheDocument();
+    expect(within(status).getByText('Discussed')).toBeInTheDocument();
+    expect(within(status).getByText('Session ended')).toBeInTheDocument();
   });
 
   it('loads the next question when it is chosen, in agenda order', async () => {

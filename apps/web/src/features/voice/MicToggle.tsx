@@ -15,6 +15,8 @@ interface MicToggleProps {
   /** A toggle is in flight; a second one would race it. */
   busy: boolean;
   toggle: () => void | Promise<void>;
+  /** 32px for the board header, which is shorter than the waiting room's. */
+  compact?: boolean;
 }
 
 /**
@@ -34,7 +36,15 @@ interface MicToggleProps {
  * With no visible text the `aria-label` is the button's only name, so it still
  * spells out whose microphone this is and what pressing it will do.
  */
-export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }: MicToggleProps) {
+export function MicToggle({
+  name,
+  micEnabled,
+  micStatus,
+  status,
+  busy,
+  toggle,
+  compact = false,
+}: MicToggleProps) {
   // Nothing to mute until we are in the room. `reconnecting` counts as out:
   // the SDK queues the change and it lands whenever, which is worse than
   // saying "not now".
@@ -87,9 +97,9 @@ export function MicToggle({ name, micEnabled, micStatus, status, busy, toggle }:
       aria-label={`${label}: microphone ${problem ?? (micEnabled ? 'on' : 'muted')}. ${action}.`}
       aria-busy={busy}
       title={title}
-      // A 36px round button with a 16px icon. The border is always there,
-      // transparent when muted, so switching never shifts it by a pixel.
-      className={`relative flex size-9 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFA243] disabled:cursor-not-allowed disabled:opacity-50 ${
+      // A 36px round button (32px compact) with a 16px icon. The border is
+      // always there, transparent when muted, so switching never shifts it.
+      className={`relative flex ${compact ? 'size-8' : 'size-9'} shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFA243] disabled:cursor-not-allowed disabled:opacity-50 ${
         micEnabled
           ? // Quiet: a live microphone is the state you do not need to be told
             // about.

@@ -37,6 +37,12 @@ interface Entry {
   /** Whether the mic was on when released, so re-acquiring can restore it. */
   micWasEnabled: boolean;
   /**
+   * How many of the registry's own mic changes (the mute on release, the
+   * restore on acquire) are still landing. Counted, not flagged: a quick
+   * remount starts the restore while the release's mute is still in flight.
+   */
+  micChanges: number;
+  /**
    * The join currently in flight, if any.
    *
    * A room is only reusable-as-is once it is `Connected`; between acquiring it
@@ -82,7 +88,22 @@ function createEntry(sessionId: string): Entry {
   audioContainer.setAttribute('data-rt-voice-audio', sessionId);
   document.body.appendChild(audioContainer);
 
-  return { room, audioContainer, identity: null, micWasEnabled: false };
+  return { room, audioContainer, identity: null, micWasEnabled: false, micChanges: 0 };
+}
+
+/**
+ * Turn the mic on or off on the registry's behalf, and count the change while
+ * it lands. Nobody awaits these, so the count is how a view can tell this mute
+ * from someone else's (`isVoiceRoomMicChanging`).
+ */
+function changeMic(entry: Entry, enabled: boolean): void {
+  entry.micChanges += 1;
+  void entry.room.localParticipant
+    .setMicrophoneEnabled(enabled)
+    .catch(() => {})
+    .finally(() => {
+      entry.micChanges -= 1;
+    });
 }
 
 /**
@@ -102,9 +123,7 @@ export function acquireVoiceRoom(sessionId: string): AcquiredVoiceRoom {
       existing.teardown = undefined;
       // Put the microphone back the way the user left it. Only ever restores
       // a mic that was live — a deliberate mute is a preference, not damage.
-      if (existing.micWasEnabled) {
-        void existing.room.localParticipant.setMicrophoneEnabled(true).catch(() => {});
-      }
+      if (existing.micWasEnabled) changeMic(existing, true);
     }
     return {
       room: existing.room,
@@ -162,7 +181,7 @@ export function releaseVoiceRoom(sessionId: string): void {
   if (entry.teardown !== undefined) return;
 
   entry.micWasEnabled = entry.room.localParticipant.isMicrophoneEnabled;
-  void entry.room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+  changeMic(entry, false);
 
   entry.teardown = setTimeout(() => {
     // Dropped before disconnecting, never after: an acquire that arrives while
@@ -172,6 +191,16 @@ export function releaseVoiceRoom(sessionId: string): void {
     void entry.room.disconnect();
     entry.audioContainer.remove();
   }, DISCONNECT_GRACE_MS);
+}
+
+/**
+ * Whether a mic change of the registry's own is still landing on this
+ * session's room. `useVoiceRoom` asks, so that the release's mute, reaching a
+ * view that has just remounted onto the same room, is not taken for the
+ * leader's.
+ */
+export function isVoiceRoomMicChanging(sessionId: string): boolean {
+  return (rooms.get(sessionId)?.micChanges ?? 0) > 0;
 }
 
 /** True once the room is joined and can simply be picked back up. */

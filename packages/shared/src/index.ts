@@ -590,6 +590,12 @@ export interface VoiceTokenResponse {
   expiresInSeconds: number;
 }
 
+/** Response body of `POST /api/sessions/:id/voice/mute` — the leader muting the call. */
+export interface VoiceMuteResponse {
+  /** How many people's microphones were on and are now off. */
+  muted: number;
+}
+
 // === assistant module ===
 
 // Per-user LLM config (F33), session context (F35), agent tools (F36) and the SSE stream

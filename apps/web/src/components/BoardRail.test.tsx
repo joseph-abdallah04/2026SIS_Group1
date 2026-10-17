@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -63,31 +63,6 @@ describe('BoardRail', () => {
     );
   });
 
-  it('can open wider than the agenda column without changing the chrome', () => {
-    render(
-      <BoardRail
-        side="right"
-        width="wide"
-        title="Assistant"
-        collapsed={false}
-        onToggle={() => undefined}
-        expandLabel="Expand dock"
-        collapseLabel="Collapse dock"
-      >
-        <p>Open body</p>
-      </BoardRail>,
-    );
-    expect(screen.getByRole('complementary', { name: 'Assistant' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Collapse dock' }).querySelector('[data-rail-icon]'),
-    ).toHaveClass('lucide-panel-right-close');
-    expect(screen.getByRole('button', { name: 'Collapse dock' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
-    expect(screen.getByText('Open body')).toBeInTheDocument();
-  });
-
   it('keeps the strip title when collapsed', async () => {
     render(<Harness side="right" />);
     await userEvent.click(screen.getByRole('button', { name: 'Collapse dock' }));
@@ -97,5 +72,72 @@ describe('BoardRail', () => {
     expect(
       screen.getByRole('button', { name: 'Expand dock' }).querySelector('[data-rail-icon]'),
     ).toHaveClass('lucide-panel-right-open');
+  });
+});
+
+describe('BoardRail with an activity bar', () => {
+  function WithBar({ startOpen = false }: { startOpen?: boolean }) {
+    const [collapsed, setCollapsed] = useState(!startOpen);
+    return (
+      <BoardRail
+        side="right"
+        title="Side panel"
+        panelTitle="People"
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((open) => !open)}
+        expandLabel="Open side panel"
+        collapseLabel="Collapse side panel"
+        resize={{ storageKey: 'bar-test', label: 'Resize side panel' }}
+        strip={
+          <button type="button" onClick={() => setCollapsed((open) => !open)}>
+            Bar button
+          </button>
+        }
+      >
+        <p>Open body</p>
+      </BoardRail>
+    );
+  }
+
+  const rail = () => screen.getByRole('complementary', { name: 'Side panel' });
+
+  it('shows the bar in place of the strip toggle and title while collapsed', () => {
+    render(<WithBar />);
+    expect(screen.getByRole('button', { name: 'Bar button' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open side panel' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Side panel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open body')).not.toBeInTheDocument();
+  });
+
+  it('opens the panel on the board side of the bar, headed by its own title', async () => {
+    render(<WithBar />);
+    await userEvent.click(screen.getByRole('button', { name: 'Bar button' }));
+
+    const [panel, bar] = Array.from(rail().children) as HTMLElement[];
+    expect(within(panel!).getByText('Open body')).toBeInTheDocument();
+    expect(within(panel!).getByText('People')).toBeInTheDocument();
+    // The bar is the rail's last child: the screen edge, where it always is.
+    expect(bar).toContainElement(screen.getByRole('button', { name: 'Bar button' }));
+    expect(screen.getByRole('button', { name: 'Collapse side panel' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
+
+  it('closes and reopens in one drag, because the rail never unmounts', () => {
+    render(<WithBar startOpen />);
+    fireEvent.pointerDown(screen.getByRole('separator', { name: 'Resize side panel' }), {
+      clientX: 1000,
+      button: 0,
+    });
+    // A right-hand rail grows to the left: moving right narrows it, past the
+    // minimum and its grace distance, and it closes.
+    fireEvent.pointerMove(window, { clientX: 1000 + 400 });
+    expect(screen.queryByText('Open body')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bar button' })).toBeInTheDocument();
+
+    fireEvent.pointerMove(window, { clientX: 1000 - 20 });
+    expect(screen.getByText('Open body')).toBeInTheDocument();
+    fireEvent.pointerUp(window);
   });
 });

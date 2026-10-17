@@ -103,6 +103,7 @@ export function SessionRouter() {
             questions={session.questions}
             joinCode={session.code}
             voiceEnabled={session.voiceEnabled}
+            startedAt={session.startedAt}
           />
         </>
       );

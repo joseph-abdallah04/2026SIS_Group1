@@ -1,11 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
-type TooltipPlacement = 'top' | 'right' | 'bottom';
+type TooltipPlacement = 'top' | 'right' | 'bottom' | 'left';
 
 const PLACEMENT_CLASSES: Record<TooltipPlacement, string> = {
   top: 'bottom-full left-1/2 -translate-x-1/2 mb-1.5',
   right: 'left-full top-1/2 -translate-y-1/2 ml-1.5',
   bottom: 'top-full left-1/2 -translate-x-1/2 mt-1.5',
+  // For controls on the screen's right edge, where `right` would leave it.
+  left: 'right-full top-1/2 -translate-y-1/2 mr-1.5',
 };
 
 interface TooltipProps {
@@ -18,7 +20,8 @@ interface TooltipProps {
 }
 
 /**
- * A tooltip for the studio's icon-only toolbars.
+ * A tooltip for icon-only controls: the studio's toolbars and the side panel's
+ * strip.
  *
  * The native `title` cannot do this job: it waits about a second, cannot render
  * a key chip, and is styled by the browser. This opens quickly, on focus as well
