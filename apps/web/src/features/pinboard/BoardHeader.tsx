@@ -78,12 +78,16 @@ function Connection({ state }: { state: BoardConnection }) {
   );
 }
 
-/** Pieces of the status line with a dot between each. */
-function Run({ children }: { children: readonly ReactNode[] }) {
-  const pieces = children.filter(
-    (piece) => piece !== null && piece !== undefined && piece !== false,
-  );
-  return pieces.map((piece, index) => (
+/**
+ * Pieces of the status line with a dot between each.
+ *
+ * Taken as a prop, not as children: an array written as JSX children is
+ * checked for keys, and the pieces come keyless from the page (the countdown,
+ * the clock). Each is wrapped in a keyed span here instead.
+ */
+function Run({ pieces }: { pieces: readonly ReactNode[] }) {
+  const shown = pieces.filter((piece) => piece !== null && piece !== undefined && piece !== false);
+  return shown.map((piece, index) => (
     // Index keys: the pieces are positional, and never reorder within a render.
     <span key={index} className="inline-flex items-center gap-1.5">
       {index > 0 ? <Sep /> : null}
@@ -136,23 +140,19 @@ export function BoardHeader({
           data-board-status
           className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[11.5px] leading-[15px] whitespace-nowrap text-rt-ink-muted"
         >
-          <Run>
-            {[
+          <Run
+            pieces={[
               questionNumber,
-              <span key="phase" className="font-semibold text-rt-secondary-deep">
-                {phase}
-              </span>,
+              <span className="font-semibold text-rt-secondary-deep">{phase}</span>,
               ...phaseDetails,
             ]}
-          </Run>
+          />
           <span
             aria-hidden="true"
             className="mx-1 h-[11px] w-px shrink-0 bg-rt-secondary-deep/25"
           />
           <span className="sr-only">. </span>
-          <Run>
-            {[<Connection key="connection" state={connection} />, clock, noCall ? 'No call' : null]}
-          </Run>
+          <Run pieces={[<Connection state={connection} />, clock, noCall ? 'No call' : null]} />
         </p>
       </div>
       <div aria-hidden="true" className="min-w-3 flex-1" />

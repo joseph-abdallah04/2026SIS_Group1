@@ -78,13 +78,17 @@ export function SidePanel({
 
   // The studio is a page-modal. A panel left open underneath is out of the way,
   // but closing it keeps the board clear when the editor closes.
+  // Watching `tab` too: something outside the panel can open it (the header's
+  // people snapshot sits above the ballot, which only covers the board row),
+  // and an open that lands while it is meant to be shut would otherwise wait
+  // hidden and pop the panel open the moment the vote or the editor ends.
   useEffect(() => {
-    if (creativeTools?.activeTool) close();
-  }, [close, creativeTools?.activeTool]);
+    if (creativeTools?.activeTool && tab !== null) close();
+  }, [close, creativeTools?.activeTool, tab]);
 
   useEffect(() => {
-    if (suppressed) close();
-  }, [close, suppressed]);
+    if (suppressed && tab !== null) close();
+  }, [close, suppressed, tab]);
 
   // Escape does not close this panel. It belongs to whatever is in hand: a
   // dialog, the studio, a half-typed message. The agenda rail does not close

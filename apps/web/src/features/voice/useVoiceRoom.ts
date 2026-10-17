@@ -15,6 +15,7 @@ import { readMicMuted, writeMicMuted } from './micPreference';
 import {
   acquireVoiceRoom,
   isVoiceRoomConnected,
+  isVoiceRoomMicChanging,
   releaseVoiceRoom,
   rememberVoiceIdentity,
   setVoiceRoomJoin,
@@ -332,16 +333,21 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
     /**
      * Your microphone muted by someone other than you.
      *
-     * Only two things in RoundTable ever mute it: you, through `applyMicEnabled`,
-     * which holds `micBusyRef` for as long as it runs, and the leader, through
-     * the server (`POST …/voice/mute`), which LiveKit carries out on this
-     * track. So a mute that lands while nothing of yours is in flight is the
-     * leader's. Leaving takes the listeners down before it mutes, so that one
-     * never reaches here.
+     * Three things ever mute it: you, through `applyMicEnabled`, which holds
+     * `micBusyRef` for as long as it runs; the room registry, when a view lets
+     * the room go; and the leader, through the server (`POST …/voice/mute`),
+     * which LiveKit carries out on this track. So a mute that lands while
+     * neither of the first two is in flight is the leader's.
+     *
+     * Leaving takes this view's listeners down before the registry mutes, but
+     * a view that remounts at once (React's development double mount, or any
+     * quick remount) is listening again before that mute lands, which is why
+     * the registry's changes are asked about too.
      */
     const onTrackMuted = (publication: TrackPublication, participant: Participant) => {
       if (cancelled || participant !== room.localParticipant) return;
       if (publication.source !== Track.Source.Microphone || micBusyRef.current) return;
+      if (isVoiceRoomMicChanging(sessionId)) return;
       setMutedByLeader(true);
     };
 

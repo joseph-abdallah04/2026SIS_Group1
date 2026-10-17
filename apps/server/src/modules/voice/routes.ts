@@ -1,10 +1,33 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import { voiceMuteSchema } from '@roundtable/shared/schemas';
 
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
 import { issueVoiceToken, muteParticipants } from './service.js';
 
 export const voiceRoutes = Router();
+
+// The leader's mute fans out to LiveKit, once per live microphone, so it gets
+// the same budget as the other leader writes (sessions/routes.ts): 30 a
+// minute, in a bucket of its own. It has to run before `requireAuth`, as
+// there: CodeQL wants the limiter ahead of that check. Keyed by the verified
+// user, so a second login does not open a new budget; unverified requests
+// share one address bucket.
+function muteClientKey(req: Request): string {
+  const userId = verifiedUserId(req);
+  if (userId) return `user:${userId}`;
+  return req.ip ? `anon:${ipKeyGenerator(req.ip)}` : 'anon';
+}
+
+const muteLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
+  keyGenerator: muteClientKey,
+  validate: { keyGeneratorIpFallback: false },
+});
 
 // docs/06 §6 gives voice `/api/sessions/:id/*-token` and the sessions owner the
 // rest of `/api/sessions/:id`. KAN-56 names the path `/livekit-token`.
@@ -68,6 +91,7 @@ voiceRoutes.post<{ sessionId: string }>(
 // says who is asking, `muteParticipants` decides whether they may.
 voiceRoutes.post<{ sessionId: string }>(
   '/:sessionId/voice/mute',
+  muteLimiter,
   requireAuth,
   async (req, res, next) => {
     try {

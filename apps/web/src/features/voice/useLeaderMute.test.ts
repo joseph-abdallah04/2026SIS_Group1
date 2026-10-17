@@ -7,6 +7,8 @@ vi.mock('./voiceApi', () => ({
 }));
 
 const { MUTE_ALL, useLeaderMute } = await import('./useLeaderMute');
+const { ApiClientError } = await import('../../lib/api');
+const { NOTICE_AUTO_HIDE_MS } = await import('./VoiceNotice');
 
 afterEach(() => {
   muteInCall.mockReset();
@@ -67,5 +69,37 @@ describe('useLeaderMute', () => {
       await result.current.mute('u2');
     });
     expect(result.current.error).toBeNull();
+  });
+
+  it('says when the server has had too many mutes, rather than just "failed"', async () => {
+    muteInCall.mockRejectedValueOnce(
+      new ApiClientError(429, 'Too many requests. Try again shortly.', 'RATE_LIMITED'),
+    );
+    const { result } = renderHook(() => useLeaderMute('s1'));
+
+    await act(async () => {
+      await result.current.mute();
+    });
+    expect(result.current.error).toBe('Too many mutes at once. Try again in a moment.');
+  });
+
+  it('lets a failure go by itself after a few seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      muteInCall.mockRejectedValueOnce(new Error('offline'));
+      const { result } = renderHook(() => useLeaderMute('s1'));
+
+      await act(async () => {
+        await result.current.mute('u2');
+      });
+      expect(result.current.error).not.toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(NOTICE_AUTO_HIDE_MS);
+      });
+      expect(result.current.error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

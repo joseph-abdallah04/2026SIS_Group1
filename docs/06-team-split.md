@@ -490,7 +490,7 @@ Frontend: apps/web/src/features/voice/
 
 ```
 POST   /api/sessions/:id/livekit-token   → { token, url, identity, roomName, expiresInSeconds }
-POST   /api/sessions/:id/voice/mute      → { muted }   (leader only; body { identity? }, none = everyone but the leader)
+POST   /api/sessions/:id/voice/mute      → { muted }   (leader only, 30/min; body { identity? }, none = everyone but the leader)
 ```
 
 ### Frontend interactions

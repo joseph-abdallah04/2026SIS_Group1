@@ -429,6 +429,30 @@ describe('useVoiceRoom mute (F12)', () => {
       expect(view.result.current.mutedByLeader).toBe(false);
     });
 
+    it('does not blame the leader for the registry letting go on a quick remount', async () => {
+      // React's development double mount, or any remount within the grace
+      // window: the old view's release mutes, and the mute lands after the new
+      // view is listening.
+      const first = await joinRoom();
+      await waitFor(() => expect(first.result.current.micEnabled).toBe(true));
+      const room = FakeRoom.last!;
+      room.localParticipant.hangNext = true;
+      first.unmount();
+
+      const second = renderHook(() => useVoiceRoom('session-1'));
+      await waitFor(() => expect(second.result.current.status).toBe('connected'));
+      act(() => {
+        room.emit(RoomEvent.TrackMuted, { source: Track.Source.Microphone }, room.localParticipant);
+      });
+      expect(second.result.current.mutedByLeader).toBe(false);
+
+      await act(async () => {
+        room.localParticipant.release();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(second.result.current.mutedByLeader).toBe(false);
+    });
+
     it('ignores someone else being muted', async () => {
       const view = await joinRoom();
       await waitFor(() => expect(view.result.current.micEnabled).toBe(true));

@@ -138,6 +138,10 @@ export type MuteResult =
  * a microphone coming on is the person's own decision. Whoever was muted sees
  * their mic go off, and turns it back on themselves.
  *
+ * The leader is never one of the people muted, named or not: their own
+ * microphone is the toggle's job, and "Mute all" and the People rows already
+ * leave them out. Naming yourself mutes nobody.
+ *
  * Leadership is checked here rather than in the route, next to the LiveKit
  * call it guards, as membership is next to the token's signing. A session that
  * does not exist answers the same as one someone else leads.
@@ -163,14 +167,14 @@ export async function muteParticipants(
     participants = await rooms.listParticipants(roomName);
   } catch (err) {
     // LiveKit only has a room once someone has joined it. No room, no microphones.
-    if (err instanceof ServerError && (err.status === 404 || err.code === 'not_found')) {
-      return { ok: true, value: { muted: 0 } };
-    }
+    if (isNotFound(err)) return { ok: true, value: { muted: 0 } };
     throw err;
   }
 
-  const targets = participants.filter((participant) =>
-    identity === undefined ? participant.identity !== callerId : participant.identity === identity,
+  const targets = participants.filter(
+    (participant) =>
+      participant.identity !== callerId &&
+      (identity === undefined || participant.identity === identity),
   );
   // Only microphones that are on: muting one already off would count someone
   // who was never heard.
@@ -180,9 +184,28 @@ export async function muteParticipants(
       .map((track) => ({ identity: participant.identity, sid: track.sid })),
   );
 
-  await Promise.all(
+  // Every mute is tried, whatever happens to the others. Someone who left
+  // between the list and their mute is a 404: nothing left to mute, so it is
+  // not a failure. Anything else fails the request, once the rest have gone
+  // through, so a retry only has whoever is still on to deal with.
+  const settled = await Promise.allSettled(
     live.map((track) => rooms.mutePublishedTrack(roomName, track.identity, track.sid, true)),
   );
+  const failure = settled.find(
+    (result): result is PromiseRejectedResult =>
+      result.status === 'rejected' && !isNotFound(result.reason),
+  );
+  if (failure) throw failure.reason;
 
-  return { ok: true, value: { muted: new Set(live.map((track) => track.identity)).size } };
+  const muted = new Set(
+    live
+      .filter((_, index) => settled[index]?.status === 'fulfilled')
+      .map((track) => track.identity),
+  );
+  return { ok: true, value: { muted: muted.size } };
+}
+
+/** LiveKit saying the room, participant or track is not there (any more). */
+function isNotFound(err: unknown): boolean {
+  return err instanceof ServerError && (err.status === 404 || err.code === 'not_found');
 }

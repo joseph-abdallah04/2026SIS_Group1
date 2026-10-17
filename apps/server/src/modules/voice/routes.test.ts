@@ -20,6 +20,12 @@ vi.mock('../../middleware/auth.js', () => ({
     req.userId = userId;
     next();
   },
+  // What the rate limiter keys on. The same header, so each test user has a
+  // bucket of their own, as each signed-in user does.
+  verifiedUserId: (req: express.Request) => {
+    const userId = req.headers['x-test-user-id'];
+    return typeof userId === 'string' && userId ? userId : null;
+  },
 }));
 
 vi.mock('./service.js', () => ({ issueVoiceToken, muteParticipants }));
@@ -210,6 +216,26 @@ describe('POST /api/sessions/:sessionId/voice/mute', () => {
       const missing = await post('voice/mute', '{}');
       expect(missing.status).toBe(503);
       expect(missing.body?.code).toBe('VOICE_NOT_CONFIGURED');
+    });
+  });
+
+  // Like the sessions module's leader writes: limited before the auth check,
+  // in a bucket of its own, so a flood never reaches LiveKit.
+  it('turns a flood of mutes away before they reach the service', async () => {
+    muteParticipants.mockResolvedValue({ ok: true, value: { muted: 0 } });
+
+    await withServer(async (_request, post) => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 31; i += 1) {
+        statuses.push((await post('voice/mute', '{}', 'flooding-leader')).status);
+      }
+
+      expect(statuses.slice(0, 30).every((status) => status === 200)).toBe(true);
+      expect(statuses.at(-1)).toBe(429);
+      expect(muteParticipants).toHaveBeenCalledTimes(30);
+
+      // Someone else's budget is their own.
+      expect((await post('voice/mute', '{}', 'another-leader')).status).toBe(200);
     });
   });
 

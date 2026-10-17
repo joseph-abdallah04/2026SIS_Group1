@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { BoardHeader } from './BoardHeader';
 
@@ -32,6 +32,22 @@ const shown = () => statusWithout('.sr-only');
 const spoken = () => statusWithout('[aria-hidden="true"]');
 
 describe('BoardHeader', () => {
+  // First in the file: React reports a missing key once per component, so a
+  // later test would be told nothing.
+  it('takes the page’s pieces as they come, without React asking for keys', () => {
+    // The countdown and the clock arrive as plain elements from the page.
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      renderHeader({
+        phaseDetails: [<span>3 selected</span>, <span>4:12 left</span>],
+        clock: <span>32 min</span>,
+      });
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   it('gives the question the first line, and its state and the session’s the second', () => {
     renderHeader({
       phaseDetails: [<span key="t">4:12 left</span>],

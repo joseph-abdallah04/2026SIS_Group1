@@ -241,6 +241,40 @@ describe('muteParticipants', () => {
     expect(liveKitRooms.mutePublishedTrack).not.toHaveBeenCalled();
   });
 
+  it('mutes nobody when the leader names themselves', async () => {
+    const result = await muteParticipants('sess_1', LEADER, LEADER);
+
+    expect(result).toEqual({ ok: true, value: { muted: 0 } });
+    expect(liveKitRooms.mutePublishedTrack).not.toHaveBeenCalled();
+  });
+
+  it('still mutes everyone else when someone leaves before their mute lands', async () => {
+    liveKitRooms.mutePublishedTrack.mockImplementation(async (_room: string, who: string) => {
+      if (who === 'user_alice') {
+        throw new ServerError('not_found', 'participant not found', 404, 'not_found');
+      }
+      return {};
+    });
+
+    const result = await muteParticipants('sess_1', LEADER);
+
+    expect(result).toEqual({ ok: true, value: { muted: 1 } });
+    expect(liveKitRooms.mutePublishedTrack).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails on any other LiveKit error, but only after trying everyone', async () => {
+    liveKitRooms.mutePublishedTrack.mockImplementation(async (_room: string, who: string) => {
+      if (who === 'user_alice') throw new ServerError('unavailable', 'upstream down', 503);
+      return {};
+    });
+
+    await expect(muteParticipants('sess_1', LEADER)).rejects.toThrow('upstream down');
+    expect(liveKitRooms.mutePublishedTrack.mock.calls.map((call) => call[1])).toEqual([
+      'user_alice',
+      'user_cara',
+    ]);
+  });
+
   it('only ever mutes, and leaves anything but microphones alone', async () => {
     liveKitRooms.listParticipants.mockResolvedValue([
       inRoom('user_alice', [{ sid: 'TR_screen', source: TrackSource.SCREEN_SHARE, muted: false }]),

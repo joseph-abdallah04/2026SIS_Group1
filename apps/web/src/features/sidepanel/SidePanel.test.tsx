@@ -26,14 +26,20 @@ const { useSidePanel } = await import('./useSidePanel');
 function Harness({ suppressed = false }: { suppressed?: boolean }) {
   const control = useSidePanel();
   return (
-    <SidePanel
-      control={control}
-      suppressed={suppressed}
-      people={<p>Everyone here</p>}
-      peopleCount={3}
-      peopleAction={<button type="button">Mute all</button>}
-      sessionId="s1"
-    />
+    <>
+      {/* Outside the panel, as the header's people snapshot is. */}
+      <button type="button" onClick={() => control.open('people')}>
+        Snapshot
+      </button>
+      <SidePanel
+        control={control}
+        suppressed={suppressed}
+        people={<p>Everyone here</p>}
+        peopleCount={3}
+        peopleAction={<button type="button">Mute all</button>}
+        sessionId="s1"
+      />
+    </>
   );
 }
 
@@ -157,6 +163,21 @@ describe('side panel', () => {
 
     rerender(<Harness />);
     expect(screen.queryByText('Everyone here')).toBeNull();
+  });
+
+  it('ignores an open from outside while a ballot covers the board', async () => {
+    // The header sits above the ballot, so its snapshot can still be pressed.
+    const user = userEvent.setup();
+    const { rerender } = render(<Harness suppressed />);
+
+    await user.click(screen.getByRole('button', { name: 'Snapshot' }));
+    expect(screen.queryByText('Everyone here')).toBeNull();
+
+    rerender(<Harness />);
+    expect(screen.queryByText('Everyone here')).toBeNull();
+    // And it still opens normally once the vote is over.
+    await user.click(screen.getByRole('button', { name: 'Snapshot' }));
+    expect(screen.getByText('Everyone here')).toBeInTheDocument();
   });
 
   it('keeps the conversation through a switch to another feature', async () => {
