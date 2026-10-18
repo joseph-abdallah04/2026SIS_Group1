@@ -170,11 +170,12 @@ export function localName(participants: readonly VoiceParticipant[]): string | n
 }
 
 /**
- * The board's roster for a session with no call: who is connected to the
- * session, in the shape `ParticipantCluster` draws.
+ * Who is connected to the session's board, in the shape the voice roster has,
+ * so the header snapshot and the People panel can draw everyone the same way.
+ * The call, where there is one, stands in for these entries (`mergeRoster`).
  *
- * There is no audio, so nobody is ever speaking or muted — which is also what
- * makes the chip draw plain initials and names, with no rings or badges.
+ * There is no audio here, so nobody is ever speaking or muted — which is also
+ * what makes the faces plain initials, with no rings or badges.
  * `viewerId` is who the server says this socket is, so "(you)" lands on the
  * same person the rest of the board treats as you.
  */

@@ -5,7 +5,9 @@ import {
   Room,
   RoomEvent,
   Track,
+  type Participant,
   type RemoteTrack,
+  type TrackPublication,
 } from 'livekit-client';
 
 import { ApiClientError } from '../../lib/api';
@@ -13,6 +15,7 @@ import { readMicMuted, writeMicMuted } from './micPreference';
 import {
   acquireVoiceRoom,
   isVoiceRoomConnected,
+  isVoiceRoomMicChanging,
   releaseVoiceRoom,
   rememberVoiceIdentity,
   setVoiceRoomJoin,
@@ -117,6 +120,12 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
    * the banner can stop suggesting a retry that cannot succeed.
    */
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+  /**
+   * The leader turned your microphone off, and you have not turned it back on
+   * since. LiveKit mutes the track itself, so the toggle already shows it;
+   * this is only so you can be told who did it.
+   */
+  const [mutedByLeader, setMutedByLeader] = useState(false);
 
   /**
    * A toggle is in flight. Acquiring a device takes long enough to double-click
@@ -245,6 +254,7 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
             room.localParticipant.getTrackPublication(Track.Source.Microphone) !== undefined;
           setMicStatus(publishing ? 'live' : 'idle');
           setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+          if (room.localParticipant.isMicrophoneEnabled) setMutedByLeader(false);
           // Only an unmute proves the permission is ours; a mute proves nothing.
           if (enabled) setMicPermissionDenied(false);
           if (identityRef.current) writeMicMuted(sessionId, identityRef.current, !enabled);
@@ -316,6 +326,29 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
         })),
       );
       setMicEnabledState(room.localParticipant.isMicrophoneEnabled);
+      // Back on, by your hand: whatever the leader did is no longer news.
+      if (room.localParticipant.isMicrophoneEnabled) setMutedByLeader(false);
+    };
+
+    /**
+     * Your microphone muted by someone other than you.
+     *
+     * Three things ever mute it: you, through `applyMicEnabled`, which holds
+     * `micBusyRef` for as long as it runs; the room registry, when a view lets
+     * the room go; and the leader, through the server (`POST …/voice/mute`),
+     * which LiveKit carries out on this track. So a mute that lands while
+     * neither of the first two is in flight is the leader's.
+     *
+     * Leaving takes this view's listeners down before the registry mutes, but
+     * a view that remounts at once (React's development double mount, or any
+     * quick remount) is listening again before that mute lands, which is why
+     * the registry's changes are asked about too.
+     */
+    const onTrackMuted = (publication: TrackPublication, participant: Participant) => {
+      if (cancelled || participant !== room.localParticipant) return;
+      if (publication.source !== Track.Source.Microphone || micBusyRef.current) return;
+      if (isVoiceRoomMicChanging(sessionId)) return;
+      setMutedByLeader(true);
     };
 
     const onTrackSubscribed = (track: RemoteTrack) => {
@@ -495,6 +528,7 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
       .on(RoomEvent.ParticipantDisconnected, syncParticipants)
       .on(RoomEvent.ActiveSpeakersChanged, syncParticipants)
       .on(RoomEvent.TrackMuted, syncParticipants)
+      .on(RoomEvent.TrackMuted, onTrackMuted)
       .on(RoomEvent.TrackUnmuted, syncParticipants)
       .on(RoomEvent.LocalTrackPublished, syncParticipants)
       .on(RoomEvent.LocalTrackUnpublished, syncParticipants)
@@ -554,6 +588,7 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
       // toggle claiming to be on.
       setMicStatus('idle');
       setMicEnabledState(false);
+      setMutedByLeader(false);
     };
     // `applyMicEnabled` changes only with `sessionId`, which is already here:
     // this does not cost the room an extra rebuild.
@@ -596,6 +631,8 @@ export function useVoiceRoom(sessionId: string, enabled = true) {
     micEnabled,
     micBusy,
     micPermissionDenied,
+    /** The leader muted you, and you have not unmuted since. */
+    mutedByLeader,
     participants,
     error,
     audioBlocked,

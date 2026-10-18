@@ -3,7 +3,6 @@ import type { BoardItem, BoardResponse, QuestionStatus } from '@roundtable/share
 import type { ProposalArrangeInput, ProposalUpdateInput } from '@roundtable/shared/schemas';
 import { Eye, ImagePlus, Scan, ScreenShare } from 'lucide-react';
 
-import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { copyText } from '../../lib/copyText';
 import { EndSessionControl } from '../sessions/EndSessionControl';
 import { LeaveSessionControl } from '../sessions/LeaveSessionControl';
@@ -20,6 +19,7 @@ import {
   FLOATING_BAR,
   TOOL_LABEL,
 } from '../toolbar/CreativeToolbar';
+import { BoardHeader } from './BoardHeader';
 import { BoardLockControl, BoardLockToast } from './BoardLock';
 import { BoardScrollbar } from './BoardScrollbar';
 import { cardWidth } from './cardMetrics';
@@ -76,10 +76,11 @@ interface PinboardCanvasProps {
    */
   boardLock?: { locked: boolean; onToggle?: () => Promise<void> };
   /**
-   * The assistant rail, opposite the agenda. A node for the same reason:
-   * the board owns the row, and the chat owns what goes in the rail.
+   * The side panel (People, Chat, the assistant), opposite the agenda. A node
+   * for the same reason: the board owns the row, and the panel owns what goes
+   * in it.
    */
-  assistant?: ReactNode;
+  sidePanel?: ReactNode;
   /**
    * F38's way to put one of your earlier proposals on the board, rendered in
    * the floating toolbar beside the creative tools. A node for the same reason
@@ -102,20 +103,22 @@ interface PinboardCanvasProps {
    */
   voiceNotice?: ReactNode;
   /**
-   * F13's roster, centred in the header. A node for the same reason `agenda`
-   * is: the board owns where things sit, but not what a LiveKit roster is.
-   *
-   * It was a rail on the right until the assistant needed that edge. The roster
-   * stayed in the header; the assistant is the right rail now.
+   * F13's people snapshot, on the right of the header: a few faces that open
+   * the side panel's People tab, which is the full list. A node for the same
+   * reason `agenda` is: the board owns where things sit, but not what a
+   * LiveKit roster is.
    */
   participants?: ReactNode;
   /**
-   * The live join code, in the header under the item count and live dot. It
-   * followed the roster out of the retired right rail, then came up from the
-   * retired footer, and is shown in every phase because inviting someone is
-   * worth doing in any of them.
+   * The header's Invite, beside the mic: the join link and code. Shown in every
+   * phase, because inviting someone is worth doing in any of them; left out on
+   * an ended session's board, which nobody can join.
    */
-  joinCode?: ReactNode;
+  invite?: ReactNode;
+  /** How long the session has been running, in the header's status line. */
+  clock?: ReactNode;
+  /** The session has no call, which the status line says in place of a mic. */
+  noCall?: boolean;
   /**
    * Who the server believes this client is, or null before the join snapshot.
    * Author-only affordances key off this; the server re-checks regardless (F16).
@@ -136,13 +139,16 @@ interface PinboardCanvasProps {
   /** Leader, voting phase, round not yet locked — checkboxes on cards. */
   canToggleShortlist: boolean;
   onToggleShortlist: (id: string) => void;
-  /** F27 header chrome (count / “leader is selecting”). */
+  /** F27's words in the header's status line (count / “leader is selecting”). */
   shortlistControl?: ReactNode;
   /** Leader shortlist prompt. Takes the floating toolbar's place while the board is closed. */
   boardOverlay?: ReactNode;
   /** F28 ballot — covers the board + rails until the leader ends the vote. */
   ballot?: ReactNode;
-  /** Discussion clock. Hidden by the parent once the ballot overlay is up. */
+  /**
+   * Discussion countdown, as a phrase in the header's status line. Hidden by
+   * the parent once the ballot overlay is up.
+   */
   headerTimer?: ReactNode;
   /** Last card the viewer interacted with, so the assistant can resolve "this one". */
   onSelectProposal?: (id: string) => void;
@@ -306,12 +312,14 @@ export function PinboardCanvas({
   isLeader,
   agenda,
   boardLock,
-  assistant,
+  sidePanel,
   myProposals,
   micControl,
   voiceNotice,
   participants,
-  joinCode,
+  invite,
+  clock,
+  noCall = false,
   viewerId,
   editProposal,
   arrangeProposal,
@@ -985,12 +993,12 @@ export function PinboardCanvas({
   // Human wording, not the raw enum: "Q2 · pending" reads as a bug, and the
   // difference between the phases is the difference between the board taking
   // proposals and not (F25).
+  const onQuestion = board.questionPosition != null && board.questionStatus != null;
+  const questionNumber = onQuestion ? `Q${(board.questionPosition ?? 0) + 1}` : null;
   const phaseLabel =
-    board.questionPosition != null && board.questionStatus
-      ? `Q${board.questionPosition + 1} · ${
-          (questionVotingEnabled ? undefined : brainstormLabel) ??
-          PHASE_LABELS[board.questionStatus]
-        }`
+    onQuestion && board.questionStatus
+      ? ((questionVotingEnabled ? undefined : brainstormLabel) ??
+        PHASE_LABELS[board.questionStatus])
       : // No active question at all: every question has been answered or
         // skipped, so the agenda is done and the leader's move is to end it.
         'Agenda complete';
@@ -1070,84 +1078,37 @@ export function PinboardCanvas({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-3 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-3 text-rt-ink">
-        <RoundTableLogo />
-        {/* `min-w-0` so the truncating child below can actually give way. The
-            cap dropped from 70% when the roster took the centre: at 70% this
-            pill could run all the way to where the action group starts,
-            leaving the middle nothing. The agenda rail carries the same
-            question text untruncated, so shortening it here costs a duplicate. */}
-        <div className="flex max-w-[46%] min-w-0 items-center gap-2 rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 shadow-sm">
-          <span className="text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
-            {phaseLabel}
-          </span>
-          {board.questionText ? (
-            <p className="truncate text-[12.5px] text-rt-ink">&ldquo;{board.questionText}&rdquo;</p>
-          ) : (
-            <h1 className="truncate text-[12.5px] font-semibold text-rt-ink">
-              {board.sessionTitle}
-            </h1>
-          )}
-        </div>
-        {headerTimer}
-
-        {/* Two spacers, not `ml-auto` on the group: they centre the roster
-            against the header while there is slack and collapse evenly when
-            there is not, so it never drifts with the question's length. */}
-        <div className="min-w-0 flex-1" />
-        {participants}
-        <div className="min-w-0 flex-1" />
-
-        {/* `shrink-0`: none of these pills truncate, so left shrinkable they
-            compress to min-content and wrap their labels onto a second line,
-            which makes the whole header taller. Pinned, they hold their size
-            and the question pill above is the only thing that gives — which is
-            what its `min-w-0` and `max-w` are for. There is no `flex-wrap`
-            here, so past the point where even a truncated pill will not fit
-            the row overflows rather than reflowing. */}
-        <div className="flex shrink-0 items-center gap-2.5">
-          {shortlistControl}
-          {micControl}
-          {/* Two short rows in the height one pill used to take: the count
-              (and an offline flag while disconnected) above, the join code below. The join code came
-              up from the retired footer, and stacking it here rather than
-              adding it to the row keeps the header neither taller nor wider.
-              `items-end` lines both rows up against the exit button. */}
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-1.5">
-              <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2.5 text-[10px] font-semibold text-rt-secondary-deep shadow-sm">
-                {board.items.length} {board.items.length === 1 ? 'item' : 'items'}
-              </span>
-              {readOnly ? (
-                <span className="flex h-4.5 items-center rounded-full border border-rt-secondary/25 bg-white px-2 text-[10px] font-medium text-rt-secondary-deep shadow-sm">
-                  Session ended
-                </span>
-              ) : isLive ? null : (
-                // Only the exception is worth the room: being connected is the
-                // normal state, so it goes unsaid.
-                <div
-                  className="flex h-4.5 items-center gap-1.5 rounded-full border border-rt-secondary/25 bg-white px-2 shadow-sm"
-                  title="Not receiving live updates; reconnecting"
-                >
-                  <div className="size-1.5 rounded-full bg-rt-tertiary" />
-                  <span className="text-[10px] font-medium text-rt-secondary-deep">offline</span>
-                </div>
-              )}
-            </div>
-            {joinCode}
-          </div>
-          {readOnly ? (
+      <BoardHeader
+        question={board.questionText || null}
+        sessionTitle={board.sessionTitle}
+        questionNumber={questionNumber}
+        phase={phaseLabel}
+        phaseDetails={[shortlistControl, headerTimer]}
+        connection={readOnly ? 'ended' : isLive ? 'live' : 'reconnecting'}
+        clock={readOnly ? null : clock}
+        noCall={!readOnly && noCall}
+        people={participants}
+        controls={
+          readOnly ? null : (
+            <>
+              {micControl}
+              {invite}
+            </>
+          )
+        }
+        exit={
+          readOnly ? (
             archiveActions
           ) : isLeader ? (
-            <EndSessionControl sessionId={board.sessionId} />
+            <EndSessionControl sessionId={board.sessionId} variant="header" />
           ) : (
-            <LeaveSessionControl sessionId={board.sessionId} />
-          )}
-        </div>
-      </header>
+            <LeaveSessionControl sessionId={board.sessionId} variant="header" />
+          )
+        }
+      />
 
       {/* Everything under the header. There is no footer: the agenda and the
-          assistant run to the bottom of the screen, and the toolbars float
+          side panel run to the bottom of the screen, and the toolbars float
           over the board instead of taking a strip of it. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {agenda}
@@ -1496,7 +1457,7 @@ export function PinboardCanvas({
           </div>
         </div>
 
-        {assistant}
+        {sidePanel}
         {ballot}
       </div>
     </div>

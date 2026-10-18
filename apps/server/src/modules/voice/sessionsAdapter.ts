@@ -13,7 +13,11 @@
 //
 // `isSessionVoiceEnabled` answers the other half: whether the session has a
 // call at all. A session with no call has no room, so nobody gets a token.
+//
+// `getSession` is for the leader's mute: its `leaderId` is who may silence
+// other people's microphones.
 export {
+  getSession as findSession,
   getSessionMemberIdentity as findSessionParticipant,
   isSessionVoiceEnabled,
 } from '../sessions/index.js';

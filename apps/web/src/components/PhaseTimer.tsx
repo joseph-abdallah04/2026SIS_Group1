@@ -27,6 +27,14 @@ export function phaseTimerView(
   };
 }
 
+/**
+ * The timer as a phrase, for a line of status text rather than a clock face:
+ * "4:12 left" while it runs, "0:42 over" once a discussion runs past zero.
+ */
+export function phaseTimerPhrase(view: { label: string }): string {
+  return view.label.startsWith('+') ? `${view.label.slice(1)} over` : `${view.label} left`;
+}
+
 interface PhaseTimerProps {
   startedAt: string;
   durationSeconds: number;
@@ -45,9 +53,15 @@ export function PhaseTimer({
   allowOvertime,
   label,
   compact = false,
+  inline = false,
 }: PhaseTimerProps & {
   /** Just the time, for a card that already says what it is timing. */
   compact?: boolean;
+  /**
+   * A phrase in a line of text ("4:12 left"), for the board header's status
+   * line, which already says which phase it is timing.
+   */
+  inline?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -58,6 +72,21 @@ export function PhaseTimer({
 
   const remainingMs = Date.parse(startedAt) + durationSeconds * 1000 - now;
   const view = phaseTimerView(remainingMs, allowOvertime);
+
+  if (inline) {
+    const phrase = phaseTimerPhrase(view);
+    return (
+      <span
+        role="timer"
+        aria-label={`${label} ${phrase}`}
+        className={`tabular-nums ${view.tone === 'over' ? 'font-semibold text-red-600' : ''}`}
+      >
+        <span className={view.tone === 'warn' ? 'rt-timer-flash font-semibold' : undefined}>
+          {phrase}
+        </span>
+      </span>
+    );
+  }
 
   if (compact) {
     return (

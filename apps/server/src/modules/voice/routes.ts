@@ -1,9 +1,33 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
+import { voiceMuteSchema } from '@roundtable/shared/schemas';
 
-import { requireAuth } from '../../middleware/auth.js';
-import { issueVoiceToken } from './service.js';
+import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
+import { issueVoiceToken, muteParticipants } from './service.js';
 
 export const voiceRoutes = Router();
+
+// The leader's mute fans out to LiveKit, once per live microphone, so it gets
+// the same budget as the other leader writes (sessions/routes.ts): 30 a
+// minute, in a bucket of its own. It has to run before `requireAuth`, as
+// there: CodeQL wants the limiter ahead of that check. Keyed by the verified
+// user, so a second login does not open a new budget; unverified requests
+// share one address bucket.
+function muteClientKey(req: Request): string {
+  const userId = verifiedUserId(req);
+  if (userId) return `user:${userId}`;
+  return req.ip ? `anon:${ipKeyGenerator(req.ip)}` : 'anon';
+}
+
+const muteLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again shortly.', code: 'RATE_LIMITED' },
+  keyGenerator: muteClientKey,
+  validate: { keyGeneratorIpFallback: false },
+});
 
 // docs/06 §6 gives voice `/api/sessions/:id/*-token` and the sessions owner the
 // rest of `/api/sessions/:id`. KAN-56 names the path `/livekit-token`.
@@ -54,6 +78,61 @@ voiceRoutes.post<{ sessionId: string }>(
       res.status(403).json({
         error: 'You are not a participant in this session',
         code: 'NOT_A_PARTICIPANT',
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// F12, the leader's side: mute one person (`{ identity }`, their user id) or
+// everyone but the leader (`{}`). Under `voice/` so it is plainly this module's
+// path rather than the sessions owner's. Same split as above: `requireAuth`
+// says who is asking, `muteParticipants` decides whether they may.
+voiceRoutes.post<{ sessionId: string }>(
+  '/:sessionId/voice/mute',
+  muteLimiter,
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const parsed = voiceMuteSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Name one person to mute, or no one to mute everyone',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      const result = await muteParticipants(
+        req.params.sessionId,
+        req.userId!,
+        parsed.data.identity,
+      );
+
+      if (result.ok) {
+        res.json(result.value);
+        return;
+      }
+
+      if (result.reason === 'not-configured') {
+        res.status(503).json({
+          error: 'Voice is not configured on this server',
+          code: 'VOICE_NOT_CONFIGURED',
+        });
+        return;
+      }
+
+      if (result.reason === 'voice-off') {
+        res.status(409).json({ error: 'This session has no call', code: 'VOICE_OFF' });
+        return;
+      }
+
+      // One answer for a member who is not the leader, a stranger, and a
+      // session that does not exist, for the same reason as the token's 403.
+      res.status(403).json({
+        error: 'Only the session leader can mute people',
+        code: 'NOT_SESSION_LEADER',
       });
     } catch (err) {
       next(err);

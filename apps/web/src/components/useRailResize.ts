@@ -82,6 +82,12 @@ interface UseRailResizeOptions {
   storageKey?: string;
   collapsed: boolean;
   onToggle: () => void;
+  /**
+   * Where this rail opens before anyone has dragged it, and what double-click
+   * restores. `RAIL_DEFAULT_WIDTH` unless the rail needs more room to begin
+   * with, as the side panel does for the assistant's conversation.
+   */
+  defaultWidth?: number;
 }
 
 interface RailResize {
@@ -132,11 +138,12 @@ export function useRailResize({
   storageKey,
   collapsed,
   onToggle,
+  defaultWidth = RAIL_DEFAULT_WIDTH,
 }: UseRailResizeOptions): RailResize {
   const enabled = storageKey !== undefined;
   // The width chosen, uncapped. The window's cap is applied when it is shown.
   const [preferred, setPreferred] = useState(
-    () => (storageKey ? readRailWidth(storageKey) : null) ?? RAIL_DEFAULT_WIDTH,
+    () => (storageKey ? readRailWidth(storageKey) : null) ?? defaultWidth,
   );
   // Where the edge is mid-drag. Null otherwise, so the preference shows.
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -258,7 +265,7 @@ export function useRailResize({
     [commit, maxWidth, shown, side],
   );
 
-  const onDoubleClick = useCallback(() => commit(RAIL_DEFAULT_WIDTH), [commit]);
+  const onDoubleClick = useCallback(() => commit(defaultWidth), [commit, defaultWidth]);
 
   if (!enabled) return { width: null, pendingClose: false, dragging: false, handleProps: null };
 

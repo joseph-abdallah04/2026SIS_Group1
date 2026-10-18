@@ -312,6 +312,14 @@ export const focusQuestionSchema = z.object({
 
 export type FocusQuestionInput = z.infer<typeof focusQuestionSchema>;
 
+// Leader muting the call: one person's microphone by their LiveKit identity
+// (their user id), or everyone's but the leader's when `identity` is left out.
+export const voiceMuteSchema = z.object({
+  identity: z.string().min(1).max(200).optional(),
+});
+
+export type VoiceMuteInput = z.infer<typeof voiceMuteSchema>;
+
 // Leader appending one pending question to a live agenda. Position and
 // status are assigned server-side — the body is the text and whether it
 // goes to a vote.

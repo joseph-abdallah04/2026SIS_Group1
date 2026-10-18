@@ -1,13 +1,20 @@
-// Token issuance for in-session voice (F11).
+// Server-side voice (F11, F12).
 //
-// The only thing our server does for voice: mint a short-lived LiveKit access
-// token scoped to one session's room (docs/02 §1 — "LiveKit Cloud … our server
-// merely issues join tokens"). Audio itself never touches this process.
-import { AccessToken, TrackSource } from 'livekit-server-sdk';
-import { voiceRoom, type VoiceTokenResponse } from '@roundtable/shared';
+// Two things, and audio itself never touches this process: mint a short-lived
+// LiveKit access token scoped to one session's room (docs/02 §1 — "LiveKit
+// Cloud … our server merely issues join tokens"), and let the session's leader
+// mute people in that room, which only LiveKit's server API can do.
+import {
+  AccessToken,
+  RoomServiceClient,
+  ServerError,
+  TrackSource,
+  type ParticipantInfo,
+} from 'livekit-server-sdk';
+import { voiceRoom, type VoiceMuteResponse, type VoiceTokenResponse } from '@roundtable/shared';
 
 import { env } from '../../env.js';
-import { findSessionParticipant, isSessionVoiceEnabled } from './sessionsAdapter.js';
+import { findSession, findSessionParticipant, isSessionVoiceEnabled } from './sessionsAdapter.js';
 
 /**
  * Token lifetime (F11 — "short-lived access token").
@@ -111,4 +118,94 @@ export async function issueVoiceToken(
       expiresInSeconds: TOKEN_TTL_SECONDS,
     },
   };
+}
+
+export type MuteResult =
+  | { ok: true; value: VoiceMuteResponse }
+  /** Not this session's leader — or there is no such session. */
+  | { ok: false; reason: 'not-the-leader' }
+  /** The session was created with no call, so there is nobody to mute. */
+  | { ok: false; reason: 'voice-off' }
+  /** LiveKit credentials are absent from the environment. */
+  | { ok: false; reason: 'not-configured' };
+
+/**
+ * The leader turning off one person's microphone, or everyone's but their own
+ * when `identity` is left out (F12).
+ *
+ * Mute only. LiveKit lets the server mute a published track but not unmute
+ * one unless the project allows remote unmute, which RoundTable does not want:
+ * a microphone coming on is the person's own decision. Whoever was muted sees
+ * their mic go off, and turns it back on themselves.
+ *
+ * The leader is never one of the people muted, named or not: their own
+ * microphone is the toggle's job, and "Mute all" and the People rows already
+ * leave them out. Naming yourself mutes nobody.
+ *
+ * Leadership is checked here rather than in the route, next to the LiveKit
+ * call it guards, as membership is next to the token's signing. A session that
+ * does not exist answers the same as one someone else leads.
+ */
+export async function muteParticipants(
+  sessionId: string,
+  callerId: string,
+  identity?: string,
+): Promise<MuteResult> {
+  const config = liveKitConfig();
+  if (!config) return { ok: false, reason: 'not-configured' };
+
+  const session = await findSession(sessionId);
+  if (!session || session.leaderId !== callerId) return { ok: false, reason: 'not-the-leader' };
+  if (!(await isSessionVoiceEnabled(sessionId))) return { ok: false, reason: 'voice-off' };
+
+  const roomName = voiceRoom(sessionId);
+  // The SDK turns the `wss://` URL the clients use into the `https://` its API needs.
+  const rooms = new RoomServiceClient(config.url, config.apiKey, config.apiSecret);
+
+  let participants: ParticipantInfo[];
+  try {
+    participants = await rooms.listParticipants(roomName);
+  } catch (err) {
+    // LiveKit only has a room once someone has joined it. No room, no microphones.
+    if (isNotFound(err)) return { ok: true, value: { muted: 0 } };
+    throw err;
+  }
+
+  const targets = participants.filter(
+    (participant) =>
+      participant.identity !== callerId &&
+      (identity === undefined || participant.identity === identity),
+  );
+  // Only microphones that are on: muting one already off would count someone
+  // who was never heard.
+  const live = targets.flatMap((participant) =>
+    participant.tracks
+      .filter((track) => track.source === TrackSource.MICROPHONE && !track.muted)
+      .map((track) => ({ identity: participant.identity, sid: track.sid })),
+  );
+
+  // Every mute is tried, whatever happens to the others. Someone who left
+  // between the list and their mute is a 404: nothing left to mute, so it is
+  // not a failure. Anything else fails the request, once the rest have gone
+  // through, so a retry only has whoever is still on to deal with.
+  const settled = await Promise.allSettled(
+    live.map((track) => rooms.mutePublishedTrack(roomName, track.identity, track.sid, true)),
+  );
+  const failure = settled.find(
+    (result): result is PromiseRejectedResult =>
+      result.status === 'rejected' && !isNotFound(result.reason),
+  );
+  if (failure) throw failure.reason;
+
+  const muted = new Set(
+    live
+      .filter((_, index) => settled[index]?.status === 'fulfilled')
+      .map((track) => track.identity),
+  );
+  return { ok: true, value: { muted: muted.size } };
+}
+
+/** LiveKit saying the room, participant or track is not there (any more). */
+function isNotFound(err: unknown): boolean {
+  return err instanceof ServerError && (err.status === 404 || err.code === 'not_found');
 }

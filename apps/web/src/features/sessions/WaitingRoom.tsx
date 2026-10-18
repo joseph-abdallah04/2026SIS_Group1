@@ -11,6 +11,7 @@ import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
 import { EndSessionControl } from './EndSessionControl';
+import { joinLink } from './joinLink';
 import { LeaveSessionControl } from './LeaveSessionControl';
 import { useStartSession } from './useStartSession';
 import { useWaitingRoom } from './useWaitingRoom';
@@ -40,7 +41,7 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
   const voice = useVoiceRoom(session.id, session.voiceEnabled);
   const { start, starting, error: startError } = useStartSession(session.id);
   const isLeader = session.leaderId === useCurrentUserId();
-  const joinLink = session.code ? `${window.location.origin}/join/${session.code}` : null;
+  const link = session.code ? joinLink(session.code) : null;
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#f7f4ee] text-rt-ink">
@@ -101,10 +102,10 @@ export function WaitingRoom({ session, onStarted }: WaitingRoomProps) {
               </p>
             </div>
 
-            {session.code && joinLink && (
+            {session.code && link && (
               <div className="flex flex-col gap-4">
                 <CopyField label="Code" value={session.code} />
-                <CopyField label="Link" value={joinLink} />
+                <CopyField label="Link" value={link} />
               </div>
             )}
 

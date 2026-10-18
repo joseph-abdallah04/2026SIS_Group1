@@ -170,7 +170,7 @@ vi.mock('./voiceApi', () => ({
 // Imported after the mock factory, not statically: a top-level
 // `import ... from 'livekit-client'` runs the hoisted factory above before
 // `FakeRoom` is initialised.
-const { DisconnectReason, RoomEvent } = await import('livekit-client');
+const { DisconnectReason, RoomEvent, Track } = await import('livekit-client');
 const { useVoiceRoom } = await import('./useVoiceRoom');
 const { ApiClientError } = await import('../../lib/api');
 const { disconnectAllVoiceRooms } = await import('./roomRegistry');
@@ -367,6 +367,106 @@ describe('useVoiceRoom mute (F12)', () => {
     await waitFor(() => expect(view.result.current.micStatus).toBe('blocked'));
 
     expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBeNull();
+  });
+
+  describe('when the leader mutes you', () => {
+    /** What LiveKit does when the server mutes this track: mute it, and say so. */
+    function leaderMutes() {
+      const room = FakeRoom.last!;
+      act(() => {
+        room.localParticipant.muted = true;
+        room.emit(RoomEvent.TrackMuted, { source: Track.Source.Microphone }, room.localParticipant);
+      });
+    }
+
+    it('turns the toggle off and says it was the leader', async () => {
+      const view = await joinRoom();
+      await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+
+      leaderMutes();
+
+      expect(view.result.current.micEnabled).toBe(false);
+      expect(view.result.current.mutedByLeader).toBe(true);
+      // Not your choice, so not remembered as one: a refresh brings back
+      // whatever you last chose yourself.
+      expect(localStorage.getItem('rt_mic_muted:session-1:user-1')).toBeNull();
+    });
+
+    it('lets you unmute yourself, and drops the news once you have', async () => {
+      const view = await joinRoom();
+      await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+      leaderMutes();
+
+      await act(async () => {
+        await view.result.current.toggleMic();
+      });
+
+      expect(FakeRoom.last?.localParticipant.calls.at(-1)).toBe(true);
+      expect(view.result.current.micEnabled).toBe(true);
+      expect(view.result.current.mutedByLeader).toBe(false);
+    });
+
+    it('does not blame the leader for a mute of your own', async () => {
+      const view = await joinRoom();
+      await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+      const participant = FakeRoom.last!.localParticipant;
+
+      // Your own mute, still settling when the SDK reports it, as it does
+      // from inside `setMicrophoneEnabled`.
+      participant.hangNext = true;
+      act(() => {
+        void view.result.current.toggleMic();
+      });
+      act(() => {
+        FakeRoom.last!.emit(RoomEvent.TrackMuted, { source: Track.Source.Microphone }, participant);
+      });
+      await act(async () => {
+        participant.release();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(view.result.current.micEnabled).toBe(false);
+      expect(view.result.current.mutedByLeader).toBe(false);
+    });
+
+    it('does not blame the leader for the registry letting go on a quick remount', async () => {
+      // React's development double mount, or any remount within the grace
+      // window: the old view's release mutes, and the mute lands after the new
+      // view is listening.
+      const first = await joinRoom();
+      await waitFor(() => expect(first.result.current.micEnabled).toBe(true));
+      const room = FakeRoom.last!;
+      room.localParticipant.hangNext = true;
+      first.unmount();
+
+      const second = renderHook(() => useVoiceRoom('session-1'));
+      await waitFor(() => expect(second.result.current.status).toBe('connected'));
+      act(() => {
+        room.emit(RoomEvent.TrackMuted, { source: Track.Source.Microphone }, room.localParticipant);
+      });
+      expect(second.result.current.mutedByLeader).toBe(false);
+
+      await act(async () => {
+        room.localParticipant.release();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(second.result.current.mutedByLeader).toBe(false);
+    });
+
+    it('ignores someone else being muted', async () => {
+      const view = await joinRoom();
+      await waitFor(() => expect(view.result.current.micEnabled).toBe(true));
+
+      act(() => {
+        FakeRoom.last!.emit(
+          RoomEvent.TrackMuted,
+          { source: Track.Source.Microphone },
+          { identity: 'user-2', isLocal: false },
+        );
+      });
+
+      expect(view.result.current.mutedByLeader).toBe(false);
+    });
   });
 });
 

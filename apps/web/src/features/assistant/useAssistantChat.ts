@@ -213,9 +213,9 @@ export function useAssistantChat({ sessionId, getContext }: UseAssistantChatOpti
 /**
  * The conversation, as handed to the panel.
  *
- * Held by `AssistantBubble` rather than the panel: F34 requires the thread to survive
- * collapsing, and a stream in flight must keep arriving while the panel is shut so the
- * unread dot has an answer to point at.
+ * Held by `useAssistantDock`, in the side panel, rather than by the panel: F34 requires
+ * the thread to survive collapsing and switching tabs, and a stream in flight must keep
+ * arriving while the panel is away so the unread dot has an answer to point at.
  */
 export type AssistantChat = ReturnType<typeof useAssistantChat>;
 
