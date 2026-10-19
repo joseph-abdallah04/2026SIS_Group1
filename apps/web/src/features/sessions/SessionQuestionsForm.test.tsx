@@ -4,7 +4,7 @@ import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { SESSION_QUESTION_LIMIT } from '@roundtable/shared/schemas';
 
-import { SessionQuestionsForm, type SetupAction } from './SessionQuestionsForm';
+import { pasteNoticeText, SessionQuestionsForm, type SetupAction } from './SessionQuestionsForm';
 import { BUILT_IN_TEMPLATES, findTemplate } from './templates';
 
 const ACTIONS: SetupAction[] = [
@@ -68,6 +68,29 @@ describe('SessionQuestionsForm', () => {
       }),
       'save',
     );
+  });
+
+  // Code review: a draft's question written before the limit came down showed
+  // a red "300/150", which reads as an error, though it saves.
+  it('counts a draft’s older long question without marking it as an error', () => {
+    renderForm({
+      editingDraft: true,
+      initialTitle: 'Roadmap',
+      initialQuestions: [{ text: 'x'.repeat(300), votingEnabled: true }],
+      actions: [{ kind: 'save', label: 'Save changes', busyLabel: 'Saving…', primary: true }],
+    });
+
+    const count = screen.getByText('300/150');
+    expect(count).not.toHaveClass('text-red-700');
+    expect(count).toHaveAttribute('title', 'Written before the limit came down: it still saves');
+  });
+
+  it('marks a new session’s question as too long only past the limit', async () => {
+    const user = userEvent.setup();
+    renderWith(['x'.repeat(149)]);
+
+    await user.type(question(1), 'y');
+    expect(screen.getByText('150/150')).not.toHaveClass('text-red-700');
   });
 
   it('names the question that is too long when creating a session', async () => {
@@ -511,16 +534,47 @@ describe('SessionQuestionsForm templates', () => {
 
     await user.click(screen.getByRole('button', { name: 'Brainstorming' }));
     expect(title()).toHaveValue('Brainstorm');
-    expect(screen.getByRole('status')).toHaveTextContent('Applied Brainstorming');
+    expect(screen.getByText('Applied Brainstorming')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Undo' }));
     expect(title()).toHaveValue('Mine');
     expect(questionTexts()).toEqual(['My own question']);
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Applied Brainstorming')).not.toBeInTheDocument();
   });
 
   it('shows no template cards where none are given', () => {
     renderWith(['A']);
     expect(screen.queryByRole('group', { name: 'Start from a template' })).not.toBeInTheDocument();
+  });
+});
+
+// Review of 60a1c15: a paste used to lose the ends of long lines, and lines
+// past the limit, without a word.
+describe('SessionQuestionsForm pasting a long list', () => {
+  it('says what did not fit, and keeps a long line whole for the leader to shorten', async () => {
+    const user = userEvent.setup();
+    renderWith(Array.from({ length: SESSION_QUESTION_LIMIT - 1 }, (_, i) => `Q${i + 1}`));
+    const long = 'z'.repeat(160);
+
+    await user.click(
+      screen.getByRole('textbox', { name: `Question ${SESSION_QUESTION_LIMIT - 1}` }),
+    );
+    await user.paste(`${long}\nOne more\nAnd another`);
+
+    expect(questionTexts()).toHaveLength(SESSION_QUESTION_LIMIT);
+    expect(questionTexts().at(-1)).toBe(long);
+    expect(screen.getByText('160/150')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `Added 1 question. 2 more didn’t fit: a session holds up to ${SESSION_QUESTION_LIMIT}. 1 is over 150 characters: shorten it before sending.`,
+      ),
+    ).toHaveAttribute('role', 'status');
+  });
+
+  it('says nothing more for a paste that simply worked', () => {
+    expect(pasteNoticeText(3, 0, 0)).toBeNull();
+    expect(pasteNoticeText(2, 0, 2)).toBe(
+      'Added 2 questions. 2 are over 150 characters: shorten them before sending.',
+    );
   });
 });

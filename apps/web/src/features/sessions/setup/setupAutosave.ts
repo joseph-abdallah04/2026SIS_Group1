@@ -85,6 +85,15 @@ export function clearSetup(key: string | null): void {
   }
 }
 
+/**
+ * Lets a user's kept form go: on logging out, or deleting the account, so an
+ * agenda written on a shared computer does not wait there for the next person.
+ * Not when a login simply expires: that is just when the copy is wanted.
+ */
+export function forgetSetup(userId: string | null | undefined): void {
+  clearSetup(setupAutosaveKey(userId));
+}
+
 /** "just now", "12 min ago", "3 h ago", "yesterday", "4 days ago". */
 export function savedAgo(savedAt: number, now = Date.now()): string {
   const minutes = Math.floor((now - savedAt) / 60_000);

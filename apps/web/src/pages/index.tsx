@@ -7,9 +7,11 @@ import { RoundTableLogo } from '../components/RoundTableLogo';
 import { logout } from '../features/auth/api';
 import { JoinByCodeForm } from '../features/sessions/JoinByCodeForm';
 import { SessionCardActions } from '../features/sessions/SessionCardActions';
+import { forgetSetup } from '../features/sessions/setup/setupAutosave';
 import { TemplateShortcuts } from '../features/sessions/setup/TemplateShortcuts';
 import { liveMembershipOf, useSessions } from '../features/sessions/useSessions';
 import { clearToken } from '../lib/auth';
+import { getCurrentUserId } from '../lib/currentUser';
 import { disconnectSocket } from '../lib/socket';
 
 // F01/F02 own these two screens; the dashboard below re-exports them so
@@ -198,11 +200,13 @@ export function DashboardPage() {
   // client dropping it *is* the logout (see auth's `/logout` route) — a network
   // error must not leave someone stuck logged in. Also drops the socket
   // singleton, otherwise a same-tab login as someone else would keep the
-  // previous identity's live connection around.
+  // previous identity's live connection around, and lets go of any session
+  // setup this browser was keeping for them (a shared computer).
   async function onLogout() {
     try {
       await logout();
     } finally {
+      forgetSetup(getCurrentUserId());
       clearToken();
       disconnectSocket();
       navigate('/login', { replace: true });

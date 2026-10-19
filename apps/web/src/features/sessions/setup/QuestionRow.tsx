@@ -6,12 +6,11 @@ import type {
   PointerEventHandler,
   DragEventHandler,
 } from 'react';
-import { SESSION_QUESTION_TEXT_MAX } from '@roundtable/shared/schemas';
 
 import type { SetupQuestion } from './useSessionSetupForm';
 
 /** The counter shows once a question is within this many characters of the limit. */
-const COUNTER_FROM = SESSION_QUESTION_TEXT_MAX - 30;
+const COUNTER_WITHIN = 30;
 
 export interface DragHandleProps {
   onPointerDown: PointerEventHandler<HTMLElement>;
@@ -22,8 +21,13 @@ interface QuestionRowProps {
   question: SetupQuestion;
   /** Its number as shown: during a drag, the place it would land in. */
   number: number;
-  /** The text box's own limit: a draft may hold longer questions than a new session. */
+  /** The text box's own limit: nothing longer can be typed. */
   maxLength: number;
+  /**
+   * A draft being edited: a question longer than the limit, written before it
+   * came down, still saves. Its count is shown, but not as an error.
+   */
+  acceptsLonger?: boolean;
   lifted: boolean;
   /** Arrives with a template or a paste: slides in, `entering` places after the first. */
   entering: number | null;
@@ -31,6 +35,8 @@ interface QuestionRowProps {
   handle: DragHandleProps;
   canRemove: boolean;
   inputRef: (element: HTMLInputElement | null) => void;
+  /** The drag handle, for focus to go back to after the arrow keys move the row. */
+  handleRef: (element: HTMLButtonElement | null) => void;
   onText: (text: string) => void;
   onVoting: (votingEnabled: boolean) => void;
   onRemove: () => void;
@@ -49,12 +55,14 @@ export function QuestionRow({
   question,
   number,
   maxLength,
+  acceptsLonger = false,
   lifted,
   entering,
   style,
   handle,
   canRemove,
   inputRef,
+  handleRef,
   onText,
   onVoting,
   onRemove,
@@ -63,7 +71,9 @@ export function QuestionRow({
   onPaste,
 }: QuestionRowProps) {
   const length = question.text.length;
-  const counting = length >= COUNTER_FROM;
+  const counting = length >= maxLength - COUNTER_WITHIN;
+  // Past what a new question may be. A draft's older long one still saves.
+  const over = length > maxLength;
   const kind = (on: boolean, tone: 'vote' | 'ideas') =>
     `flex h-7 items-center gap-[5px] rounded-full px-2.5 text-[11.5px] font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none max-sm:px-2 ${
       on
@@ -86,6 +96,7 @@ export function QuestionRow({
       }`}
     >
       <button
+        ref={handleRef}
         type="button"
         aria-label={`Move question ${number}`}
         title="Drag to move, or use the arrow keys"
@@ -126,11 +137,20 @@ export function QuestionRow({
         {counting ? (
           <span
             aria-live="polite"
-            className={`pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-[10.5px] font-semibold tabular-nums ${
-              length >= SESSION_QUESTION_TEXT_MAX ? 'text-red-700' : 'text-rt-ink-faint'
+            title={
+              over && acceptsLonger
+                ? 'Written before the limit came down: it still saves'
+                : undefined
+            }
+            className={`absolute top-1/2 right-2.5 -translate-y-1/2 text-[10.5px] font-semibold tabular-nums ${
+              over && !acceptsLonger
+                ? 'pointer-events-none text-red-700'
+                : length >= maxLength
+                  ? 'text-rt-secondary-deep'
+                  : 'pointer-events-none text-rt-ink-faint'
             }`}
           >
-            {length}/{SESSION_QUESTION_TEXT_MAX}
+            {length}/{maxLength}
           </span>
         ) : null}
       </span>

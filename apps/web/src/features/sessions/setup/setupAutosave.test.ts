@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   clearSetup,
+  forgetSetup,
   readSetup,
   savedAgo,
   SETUP_AUTOSAVE_MAX_AGE_MS,
@@ -48,6 +49,16 @@ describe('setupAutosave', () => {
     );
     expect(readSetup(key)).toBeNull();
     expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  it('forgets a user’s kept form, and only theirs', () => {
+    writeSetup(setupAutosaveKey('u1')!, state);
+    writeSetup(setupAutosaveKey('u2')!, state);
+    forgetSetup('u1');
+    expect(readSetup(setupAutosaveKey('u1')!)).toBeNull();
+    expect(readSetup(setupAutosaveKey('u2')!)).not.toBeNull();
+    // No one logged in: nothing to forget, and nothing breaks.
+    expect(() => forgetSetup(null)).not.toThrow();
   });
 
   it('says how long ago, in words', () => {

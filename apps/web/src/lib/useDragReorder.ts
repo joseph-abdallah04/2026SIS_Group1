@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 
 import {
   droppedOrder,
+  followPointer,
   landingIndex,
   landingOffset,
   measureRows,
@@ -28,6 +29,8 @@ interface DragState {
 interface UseDragReorderOptions {
   /** The data attribute each row carries its id in, e.g. `data-question-key`. */
   attribute: string;
+  /** The rows' ids, in their order now. */
+  ids: readonly string[];
   /** Called once the dropped row has eased into its gap. */
   onMove: (id: string, toIndex: number) => void;
 }
@@ -45,23 +48,19 @@ interface UseDragReorderOptions {
  * Pointer events rather than the browser's drag and drop, which draws its own
  * ghost image and cursor that cannot be changed.
  */
-export function useDragReorder({ attribute, onMove }: UseDragReorderOptions) {
+export function useDragReorder({ attribute, ids, onMove }: UseDragReorderOptions) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const press = useRef<{
     id: string;
-    pointerId: number;
-    startY: number;
-    /** The pointer's latest height, for a scroll that comes without a move. */
-    lastY: number;
     row: HTMLElement;
-    /** Where the list's top was when the press began, to see it scroll since. */
-    listTop: number;
     layout?: RowLayout;
     target?: number;
   } | null>(null);
   const settleTimer = useRef<number | undefined>(undefined);
   const detach = useRef<(() => void) | null>(null);
   const onMoveRef = useRef(onMove);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
   onMoveRef.current = onMove;
   useEffect(
     () => () => {
@@ -71,17 +70,10 @@ export function useDragReorder({ attribute, onMove }: UseDragReorderOptions) {
     [],
   );
 
-  function listTopOf(row: HTMLElement) {
-    return row.parentElement?.getBoundingClientRect().top ?? 0;
-  }
-
-  /** Follows the pointer: how far it has travelled down the list, scrolling included. */
-  function follow() {
+  /** Follows the pointer down the list, `travelled` scrolling included. */
+  function follow(travelled: number) {
     const started = press.current;
     if (!started) return;
-    // A list that scrolls under a held row moves its rows, not the pointer:
-    // the pointer has travelled that far along the list all the same.
-    const travelled = started.lastY - started.startY + (started.listTop - listTopOf(started.row));
     if (!started.layout) {
       // A few pixels of wobble is still a press.
       if (Math.abs(travelled) < 4) return;
@@ -115,7 +107,10 @@ export function useDragReorder({ attribute, onMove }: UseDragReorderOptions) {
     const moved = target !== layout.self;
     const finish = () => {
       setDrag(null);
-      if (moved) onMoveRef.current(id, target);
+      // The place was worked out on the rows as they were when it lifted. If
+      // they changed while it settled (one removed, pasted in, moved by key),
+      // that place may be another now: it goes back where it was instead.
+      if (moved && idsRef.current.join() === layout.ids.join()) onMoveRef.current(id, target);
     };
     if (!closingFades()) {
       finish();
@@ -134,6 +129,9 @@ export function useDragReorder({ attribute, onMove }: UseDragReorderOptions) {
     settleTimer.current = window.setTimeout(finish, REORDER_MS);
   }
 
+  const handlers = useRef({ follow, letGo });
+  handlers.current = { follow, letGo };
+
   function handleProps(id: string) {
     return {
       onPointerDown: (event: PointerEvent<HTMLElement>) => {
@@ -143,44 +141,22 @@ export function useDragReorder({ attribute, onMove }: UseDragReorderOptions) {
         // Text selected anywhere on the page would otherwise be what moves.
         event.preventDefault();
         window.getSelection()?.removeAllRanges();
-        const pointerId = event.pointerId;
         try {
-          event.currentTarget.setPointerCapture(pointerId);
+          event.currentTarget.setPointerCapture(event.pointerId);
         } catch {
-          // Not every pointer can be captured; the window still hears it.
+          // Not every pointer can be captured; `followPointer` hears it anyway.
         }
-        press.current = {
-          id,
-          pointerId,
-          startY: event.clientY,
-          lastY: event.clientY,
-          row,
-          listTop: listTopOf(row),
-        };
-        // Heard on the window, not the handle: the handle may slide out from
-        // under the pointer (a scroll, a held row at its limit), and a let-go
-        // that lands elsewhere must still end the drag.
-        const onPointerMove = (e: globalThis.PointerEvent) => {
-          if (e.pointerId !== pointerId || !press.current) return;
-          press.current.lastY = e.clientY;
-          follow();
-        };
-        const onPointerUp = (e: globalThis.PointerEvent) => {
-          if (e.pointerId === pointerId) letGo(false);
-        };
-        const onPointerCancel = (e: globalThis.PointerEvent) => {
-          if (e.pointerId === pointerId) letGo(true);
-        };
-        window.addEventListener('pointermove', onPointerMove);
-        window.addEventListener('pointerup', onPointerUp);
-        window.addEventListener('pointercancel', onPointerCancel);
-        window.addEventListener('scroll', follow, true);
-        detach.current = () => {
-          window.removeEventListener('pointermove', onPointerMove);
-          window.removeEventListener('pointerup', onPointerUp);
-          window.removeEventListener('pointercancel', onPointerCancel);
-          window.removeEventListener('scroll', follow, true);
-        };
+        press.current = { id, row };
+        // The handlers are read through a ref when the events come, not
+        // closed over now: they belong to whichever render is current then.
+        detach.current = followPointer(
+          { pointerId: event.pointerId, startY: event.clientY, list: row.parentElement },
+          {
+            move: (travelled) => handlers.current.follow(travelled),
+            up: () => handlers.current.letGo(false),
+            cancel: () => handlers.current.letGo(true),
+          },
+        );
       },
       onDragStart: (event: React.DragEvent<HTMLElement>) => event.preventDefault(),
     };

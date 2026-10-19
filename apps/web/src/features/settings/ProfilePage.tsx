@@ -5,8 +5,10 @@ import { updateProfileSchema } from '@roundtable/shared/schemas';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { ApiClientError } from '../../lib/api';
 import { clearToken } from '../../lib/auth';
+import { getCurrentUserId } from '../../lib/currentUser';
 import { disconnectSocket } from '../../lib/socket';
 import { deleteAccount, getMe, updateProfile } from '../auth/api';
+import { forgetSetup } from '../sessions/setup/setupAutosave';
 
 const INPUT_CLASSES =
   'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:outline-none';
@@ -36,6 +38,8 @@ function DeleteAccountSection() {
     setError(null);
     try {
       await deleteAccount({ password });
+      // Nothing of the account's is left behind in this browser either.
+      forgetSetup(getCurrentUserId());
       clearToken();
       disconnectSocket();
       navigate('/login', { replace: true });
@@ -50,9 +54,9 @@ function DeleteAccountSection() {
     <div className="mt-10 border-t border-dashed border-rt-tertiary pt-6">
       <h2 className="text-sm font-semibold text-red-600">Delete account</h2>
       <p className="mt-1 max-w-xl text-sm text-rt-ink-muted">
-        Permanently deletes your account. Sessions you led and proposals you posted stay in
-        place, credited to "Deleted user". You'll need to end or leave any session you're
-        currently in first. This cannot be undone.
+        Permanently deletes your account. Sessions you led and proposals you posted stay in place,
+        credited to "Deleted user". You'll need to end or leave any session you're currently in
+        first. This cannot be undone.
       </p>
 
       <label className="mt-4 flex max-w-xs flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted">
@@ -94,9 +98,8 @@ function DeleteAccountSection() {
           onCancel={() => setConfirming(false)}
         >
           <p>
-            This permanently deletes your account and logs you out immediately. Sessions you led
-            and proposals you posted stay in place, credited to "Deleted user". This cannot be
-            undone.
+            This permanently deletes your account and logs you out immediately. Sessions you led and
+            proposals you posted stay in place, credited to "Deleted user". This cannot be undone.
           </p>
         </ConfirmDialog>
       ) : null}

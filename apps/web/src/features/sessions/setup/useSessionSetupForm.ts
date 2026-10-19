@@ -207,20 +207,27 @@ export function setupReducer(state: SetupFormState, action: Action): SetupFormSt
 /**
  * A paste of several lines, one question each: blank lines dropped, and the
  * bullets or numbers of a copied list taken off. `null` for a single line,
- * which pastes as ordinary text.
+ * which pastes as ordinary text. A line is never cut short: one over the
+ * limit shows its counter in red and is named on submit, rather than losing
+ * its end without a word.
  */
 export function splitPastedLines(text: string): string[] | null {
   if (!/\r?\n/.test(text.trim())) return null;
   const lines = text
     .split(/\r?\n/)
-    .map((line) =>
-      line
-        .replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '')
-        .trim()
-        .slice(0, SESSION_QUESTION_TEXT_MAX),
-    )
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim())
     .filter((line) => line.length > 0);
   return lines.length > 0 ? lines : null;
+}
+
+/** What a paste did: the rows holding its lines, and what to tell the leader. */
+export interface PasteResult {
+  /** The rows that now hold pasted lines, in order. */
+  keys: string[];
+  /** Lines left out because the agenda was full. */
+  dropped: number;
+  /** Pasted lines over the question limit, kept whole to be shortened. */
+  long: number;
 }
 
 export function hasContent(state: SetupFormState): boolean {
@@ -302,16 +309,26 @@ export function useSessionSetupForm(init: SetupFormInit) {
         return (list[index - 1] ?? list[index + 1])?.key ?? null;
       },
       moveQuestion: (key: string, to: number) => dispatch({ type: 'move', key, to }),
-      /** Puts pasted lines in as questions from `key`; the keys of the rows that now hold them. */
-      pasteLines: (key: string, lines: string[]): string[] => {
+      /**
+       * Puts pasted lines in as questions from `key`, as many as the agenda
+       * has room for. Answers with the rows that now hold them, and how many
+       * lines were left out or run long, for the page to say so.
+       */
+      pasteLines: (key: string, lines: string[]): PasteResult => {
         const list = current.current.questions;
         const row = list.find((q) => q.key === key);
-        if (!row) return [];
+        if (!row) return { keys: [], dropped: 0, long: 0 };
         const fill = row.text.trim() === '';
         const room = SESSION_QUESTION_LIMIT - list.length;
-        const keys = (fill ? lines.slice(1) : lines).slice(0, room).map(() => makeKey());
+        const rest = fill ? lines.slice(1) : lines;
+        const keys = rest.slice(0, room).map(() => makeKey());
         dispatch({ type: 'insert-lines', key, lines, keys });
-        return fill ? [key, ...keys] : keys;
+        const placed = fill ? lines.slice(0, keys.length + 1) : rest.slice(0, keys.length);
+        return {
+          keys: fill ? [key, ...keys] : keys,
+          dropped: rest.length - keys.length,
+          long: placed.filter((line) => line.length > SESSION_QUESTION_TEXT_MAX).length,
+        };
       },
       /**
        * Fills the form from a template. Answers with what it held before, to

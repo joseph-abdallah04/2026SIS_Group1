@@ -78,6 +78,21 @@ describe('EditSessionPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/sessions/s1');
   });
 
+  // Code review: the create page warned before refresh or close, the edit page did not.
+  it('warns before the page is closed once something has been changed', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const untouched = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+
+    await user.type(screen.getByLabelText('Session title'), ' v2');
+    const changed = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(changed);
+    expect(changed.defaultPrevented).toBe(true);
+  });
+
   it('goes back to the draft once saved', async () => {
     const user = userEvent.setup();
     updateMock.mockResolvedValue(draft);

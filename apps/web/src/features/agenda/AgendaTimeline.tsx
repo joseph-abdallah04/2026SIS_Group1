@@ -2,7 +2,7 @@ import { Check, Eye, ScreenShare, SkipForward } from 'lucide-react';
 import { useEffect, useRef, type LiHTMLAttributes, type ReactNode } from 'react';
 
 import { OverlayScrollbar } from '../../components/OverlayScrollbar';
-import { REORDER_MS } from '../../lib/dragReorder';
+import { REORDER_EASING, REORDER_MS } from '../../lib/dragReorder';
 import type { AgendaStepState } from './agendaSummary';
 
 /**
@@ -312,9 +312,7 @@ export function AgendaStep({
           ? {}
           : {
               transform: `translateY(${shift}px)`,
-              transition: glide
-                ? `transform ${REORDER_MS}ms cubic-bezier(0.25, 1, 0.5, 1)`
-                : 'none',
+              transition: glide ? `transform ${REORDER_MS}ms ${REORDER_EASING}` : 'none',
             }),
       }}
       className={`group/step relative flex gap-2.5 rounded-2xl transition-[background-color,border-color,opacity,box-shadow] duration-500 ${

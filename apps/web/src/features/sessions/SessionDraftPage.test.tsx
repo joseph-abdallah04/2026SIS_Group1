@@ -112,6 +112,8 @@ describe('SessionDraftPage', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('You are already in a live session');
     expect(screen.getByRole('button', { name: 'Open the room' })).toBeEnabled();
+    // Said once: cleared from history, so a reload or Back does not say it again.
+    expect(navigateMock).toHaveBeenCalledWith('/sessions/s1', { replace: true, state: null });
   });
 
   it('offers no Open or Edit to anyone else, only the way back', async () => {

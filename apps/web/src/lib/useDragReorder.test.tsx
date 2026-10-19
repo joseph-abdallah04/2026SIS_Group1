@@ -9,6 +9,7 @@ function List() {
   const [ids, setIds] = useState(['a', 'b', 'c']);
   const drag = useDragReorder({
     attribute: 'data-row',
+    ids,
     onMove: (id, to) =>
       setIds((current) => {
         const next = current.filter((x) => x !== id);
@@ -17,14 +18,19 @@ function List() {
       }),
   });
   return (
-    <ul>
-      {ids.map((id) => (
-        <li key={id} data-row={id} data-testid={`row-${id}`} style={drag.rowStyle(id)}>
-          <button type="button" aria-label={`Move ${id}`} {...drag.handleProps(id)} />
-          {id}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul>
+        {ids.map((id) => (
+          <li key={id} data-row={id} data-testid={`row-${id}`} style={drag.rowStyle(id)}>
+            <button type="button" aria-label={`Move ${id}`} {...drag.handleProps(id)} />
+            {id}
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => setIds((current) => current.slice(0, -1))}>
+        Remove last
+      </button>
+    </>
   );
 }
 
@@ -107,6 +113,26 @@ describe('useDragReorder with motion', () => {
     act(() => vi.advanceTimersByTime(REORDER_MS));
 
     expect(order()).toEqual(['b', 'c', 'a']);
+  });
+
+  // Code review: the place is worked out on the rows as they were at the lift.
+  // If they change while the row settles, that place may be another one now.
+  it('moves nothing if the rows changed while the dropped row settled', () => {
+    render(<List />);
+    for (const [index, id] of ['a', 'b', 'c'].entries()) {
+      screen.getByTestId(`row-${id}`).getBoundingClientRect = () =>
+        new DOMRect(0, index * 50, 300, 40);
+    }
+    const handle = screen.getByRole('button', { name: 'Move a' });
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientY: 20 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: 120 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: 120 });
+    // Mid-settle, the last row goes.
+    act(() => screen.getByRole('button', { name: 'Remove last' }).click());
+    act(() => vi.advanceTimersByTime(REORDER_MS));
+
+    expect(order()).toEqual(['a', 'b']);
   });
 
   it('eases a row dropped where it started back home, changing nothing', () => {

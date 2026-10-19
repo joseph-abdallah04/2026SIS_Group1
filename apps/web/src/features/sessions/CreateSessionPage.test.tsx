@@ -181,6 +181,41 @@ describe('CreateSessionPage', () => {
   });
 
   // Pick up where you left off: what was being written is kept in this browser.
+  // Code review: once a room is made, this form must not send again while the
+  // room-set moment plays over it.
+  it('stays busy once the room has been opened', async () => {
+    const user = userEvent.setup();
+    createAndOpenMock.mockResolvedValue({ sessionId: 's9', opened: true, code: 'K7NP-3WQZ' });
+    renderPage();
+
+    await fillRequired(user);
+    await user.click(screen.getByRole('button', { name: /Open the room/ }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalled());
+
+    expect(screen.getByRole('button', { name: 'Opening…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save as draft' })).toBeDisabled();
+    expect(createAndOpenMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Review of 60a1c15: a save timer set by the last keystroke fired after
+  // "Open the room" had cleared the kept copy (the form stays up during the
+  // room-set moment), so the next New session offered back a session that
+  // already existed, and picking it up would have made a duplicate.
+  it('keeps nothing once the room is opened, even straight after typing', async () => {
+    const user = userEvent.setup();
+    createAndOpenMock.mockResolvedValue({ sessionId: 's9', opened: true, code: 'K7NP-3WQZ' });
+    renderPage();
+
+    await user.type(screen.getByLabelText('Session title'), 'Roadmap');
+    await user.type(screen.getByRole('textbox', { name: 'Question 1' }), 'Q?');
+    // Inside the 400 ms the last keystroke's save waits.
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(navigateMock).toHaveBeenCalled());
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(readSetup(KEY)).toBeNull();
+  });
+
   it('keeps the form while it is written', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -211,6 +246,9 @@ describe('CreateSessionPage', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('dialog', { name: 'Discard this session?' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Discard' }));
+    // Past the wait of any save the last change set off: it must not put the
+    // copy back (the page stays up here, as navigation is mocked).
+    await new Promise((resolve) => setTimeout(resolve, 600));
     expect(readSetup(KEY)).toBeNull();
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
@@ -7,6 +7,7 @@ import { CreateSessionForm, type OpenedSession } from './CreateSessionForm';
 import { RoomSetMoment } from './setup/RoomSetMoment';
 import { clearSetup, setupAutosaveKey } from './setup/setupAutosave';
 import { SetupHeader } from './setup/SetupHeader';
+import { useLeaveWarning } from './setup/useLeaveWarning';
 import { findTemplate, useSessionTemplates } from './templates';
 
 /** What the draft page is handed when "Open the room" made the draft but could not open it. */
@@ -25,18 +26,21 @@ export function CreateSessionPage() {
   // The room just opened, while its moment plays.
   const [opened, setOpened] = useState<OpenedSession | null>(null);
   const autosaveKey = setupAutosaveKey(useCurrentUserId());
+  // Saved, opened or discarded: done with. From then on the form keeps
+  // nothing in this browser, so no save still waiting can put back the copy
+  // just let go of, while this page stays up (the room-set moment) or before
+  // it has gone.
+  const [finished, setFinished] = useState(false);
+
+  function finish() {
+    setFinished(true);
+    clearSetup(autosaveKey);
+  }
 
   // Refresh, close or typing a new address would lose it all without a word.
-  // (In-app Back is covered by the copy kept in this browser instead.)
-  useEffect(() => {
-    if (!unsaved || opened) return;
-    function onBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = '';
-    }
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [unsaved, opened]);
+  // (In-app Back is covered by the copy kept in this browser instead.) Once
+  // the room is open there is nothing left to lose.
+  useLeaveWarning(unsaved && !opened);
 
   function goToDashboard() {
     navigate('/dashboard');
@@ -56,7 +60,7 @@ export function CreateSessionPage() {
   }
 
   return (
-    <main className="rt-setup-page flex h-dvh flex-col text-rt-ink">
+    <main className="rt-setup-page flex h-dvh flex-col overflow-hidden text-rt-ink">
       <SetupHeader
         current="New session"
         status="Not saved yet"
@@ -66,14 +70,14 @@ export function CreateSessionPage() {
       <CreateSessionForm
         templates={templates}
         initialTemplate={template}
-        autosaveKey={autosaveKey}
+        autosaveKey={finished ? null : autosaveKey}
         onUnsavedWorkChange={setUnsaved}
         onSaved={(id) => {
-          clearSetup(autosaveKey);
+          finish();
           toSession(id);
         }}
         onOpened={(session) => {
-          clearSetup(autosaveKey);
+          finish();
           // Made, but it would not open: to the draft, which says why.
           if (session.openError) toSession(session.sessionId, session.openError);
           else setOpened(session);
@@ -91,7 +95,7 @@ export function CreateSessionPage() {
           title="Discard this session?"
           confirmLabel="Discard"
           onConfirm={() => {
-            clearSetup(autosaveKey);
+            finish();
             goToDashboard();
           }}
           onCancel={() => setConfirmingLeave(false)}

@@ -98,7 +98,9 @@ export function LobbyInfoCard({
             >
               {copied === 'code' ? 'Copied' : 'Copy code'}
             </button>
-            <Tooltip label="Show the code full-screen" placement="bottom">
+            {/* On the page, not in the card: the card scrolls, so a bubble
+                inside it is cut off and pushes out a scrollbar. */}
+            <Tooltip label="Show the code full-screen" placement="bottom" portal>
               <button
                 type="button"
                 onClick={() => setPresenting(true)}

@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { SessionQuestionsForm, type SetupAction } from './SessionQuestionsForm';
 import { SetupHeader } from './setup/SetupHeader';
+import { useLeaveWarning } from './setup/useLeaveWarning';
 import { useDeleteSession } from './useDeleteSession';
 import { useSessionDetail } from './useSessionDetail';
 import { useUpdateSession } from './useUpdateSession';
@@ -31,6 +32,8 @@ export function EditSessionPage() {
   const { remove, deleting, error: deleteError } = useDeleteSession();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
+  // Refresh or close would throw the edits away without a word.
+  useLeaveWarning(unsaved);
   const [leavingFor, setLeavingFor] = useState<string | null>(null);
   const draftPath = `/sessions/${sessionId}`;
 
@@ -47,7 +50,7 @@ export function EditSessionPage() {
   const editable = session && session.status === 'draft';
 
   return (
-    <main className="rt-setup-page flex h-dvh flex-col text-rt-ink">
+    <main className="rt-setup-page flex h-dvh flex-col overflow-hidden text-rt-ink">
       <SetupHeader
         current="Edit draft"
         status="Draft"

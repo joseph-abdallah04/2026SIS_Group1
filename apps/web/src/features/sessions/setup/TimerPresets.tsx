@@ -24,15 +24,6 @@ interface TimerPresetsProps {
   onChange: (seconds: number | null) => void;
 }
 
-/** A chip's face: "Off", "5m", "1h 30m". */
-function chipLabel(seconds: number): string {
-  if (!seconds) return 'Off';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return [h ? `${h}h` : '', m ? `${m}m` : '', s ? `${s}s` : ''].filter(Boolean).join(' ');
-}
-
 /**
  * TM2: one optional session clock as a click on its usual lengths, with
  * Custom… opening the spinners for anything else. A value that is none of the
@@ -81,7 +72,7 @@ export function TimerPresets({
             }}
             className={chip(!custom && seconds === preset)}
           >
-            {chipLabel(preset)}
+            {formatTimer(preset, 'short')}
           </button>
         ))}
         <button
@@ -92,7 +83,7 @@ export function TimerPresets({
           onClick={() => setCustomOpen(true)}
           className={chip(custom)}
         >
-          {custom && !isPreset ? chipLabel(seconds) : 'Custom…'}
+          {custom && !isPreset ? formatTimer(seconds, 'short') : 'Custom…'}
         </button>
       </div>
       {customOpen ? (

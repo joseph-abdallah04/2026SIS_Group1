@@ -21,15 +21,11 @@ import {
 import { closingFades } from '../../lib/motion';
 import { useDragReorder } from '../../lib/useDragReorder';
 import { CallChoice } from './setup/CallChoice';
-import {
-  clearSetup,
-  readSetup,
-  savedAgo,
-  writeSetup,
-  type SavedSetup,
-} from './setup/setupAutosave';
+import { savedAgo } from './setup/setupAutosave';
 import { QuestionRow } from './setup/QuestionRow';
-import { summaryParts } from './setup/setupSummary';
+import { FactLine } from './setup/FactLine';
+import { sessionFacts } from './setup/setupSummary';
+import { useSetupAutosave } from './setup/useSetupAutosave';
 import { TemplateCards } from './setup/TemplateCards';
 import { TimerPresets } from './setup/TimerPresets';
 import {
@@ -87,14 +83,36 @@ interface SessionQuestionsFormProps {
   autosaveKey?: string | null;
 }
 
-/** How long after the last change the form is kept. */
-const AUTOSAVE_MS = 400;
-
 const DISCUSSION_PRESETS = [0, 2 * 60, 5 * 60, 10 * 60, 15 * 60] as const;
 const VOTING_PRESETS = [0, 60, 2 * 60, 3 * 60, 5 * 60] as const;
 
 /** How long Undo stays offered after a template replaces the leader's work. */
 const UNDO_MS = 6000;
+
+/** How long a note about a paste stays up. */
+const PASTE_NOTICE_MS = 6000;
+
+/** How many arriving questions slide in one after another; the rest come with the last. */
+const CASCADE_STEPS = 6;
+
+/**
+ * What to say after a paste, when there is something the leader would not
+ * otherwise see: lines that did not fit, or lines too long to send. Nothing
+ * for a paste that simply worked.
+ */
+export function pasteNoticeText(added: number, dropped: number, long: number): string | null {
+  if (dropped === 0 && long === 0) return null;
+  const parts = [`Added ${added} ${added === 1 ? 'question' : 'questions'}.`];
+  if (dropped > 0) {
+    parts.push(`${dropped} more didn’t fit: a session holds up to ${SESSION_QUESTION_LIMIT}.`);
+  }
+  if (long > 0) {
+    parts.push(
+      `${long === 1 ? '1 is' : `${long} are`} over ${SESSION_QUESTION_TEXT_MAX} characters: shorten ${long === 1 ? 'it' : 'them'} before sending.`,
+    );
+  }
+  return parts.join(' ');
+}
 
 /** A question to put the caret in once the render that brings it has landed. */
 type FocusRequest = { key: string; caret: 'end' | [number, number] };
@@ -187,12 +205,22 @@ export function SessionQuestionsForm({
   // paste or Enter), each with its place in the cascade.
   const [entering, setEntering] = useState<ReadonlyMap<string, number>>(new Map());
   const [undo, setUndo] = useState<{ name: string; before: SetupFormState } | null>(null);
+  // What the last paste left out or ran long, while it is worth saying.
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const inputs = useRef(new Map<string, HTMLInputElement>());
   const focusRequest = useRef<FocusRequest | null>(null);
+  // Drag handles, and one to put focus back on once the render that moved its
+  // row has landed: moving a focused row in the page can drop its focus.
+  const handles = useRef(new Map<string, HTMLButtonElement>());
+  const handleFocusRequest = useRef<string | null>(null);
   const titleRequest = useRef<'select' | 'end' | null>(null);
-  const drag = useDragReorder({ attribute: 'data-question-key', onMove: form.moveQuestion });
+  const drag = useDragReorder({
+    attribute: 'data-question-key',
+    ids: state.questions.map((q) => q.key),
+    onMove: form.moveQuestion,
+  });
   const primary = actions.find((action) => action.primary) ?? actions[actions.length - 1];
 
   // A message about what was wrong goes once anything changes (B8).
@@ -204,29 +232,25 @@ export function SessionQuestionsForm({
     onUnsavedWorkChange?.(form.hasUnsavedWork);
   }, [form.hasUnsavedWork, onUnsavedWorkChange]);
 
-  // A form kept from last time, offered back until the leader answers.
-  const [kept, setKept] = useState<SavedSetup | null>(() =>
-    autosaveKey ? readSetup(autosaveKey) : null,
-  );
-  // The state that was sent: nothing is kept for it, so a form that has gone
-  // to the server is not offered back. The next change keeps it again.
-  const sentState = useRef<SetupFormState | null>(null);
-  const { hasUnsavedWork } = form;
-  useEffect(() => {
-    // Writing now would overwrite the one on offer.
-    if (!autosaveKey || kept || sentState.current === state) return;
-    const timer = window.setTimeout(() => {
-      if (hasUnsavedWork) writeSetup(autosaveKey, state);
-      else clearSetup(autosaveKey);
-    }, AUTOSAVE_MS);
-    return () => window.clearTimeout(timer);
-  }, [autosaveKey, kept, state, hasUnsavedWork]);
+  // The form as kept in this browser, and one kept from last time on offer.
+  const autosave = useSetupAutosave({
+    key: autosaveKey,
+    state,
+    hasUnsavedWork: form.hasUnsavedWork,
+  });
+  const { kept } = autosave;
 
   useEffect(() => {
     if (!undo) return;
     const timer = window.setTimeout(() => setUndo(null), UNDO_MS);
     return () => window.clearTimeout(timer);
   }, [undo]);
+
+  useEffect(() => {
+    if (!pasteNotice) return;
+    const timer = window.setTimeout(() => setPasteNotice(null), PASTE_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [pasteNotice]);
 
   useLayoutEffect(() => {
     const title = titleRequest.current;
@@ -244,6 +268,9 @@ export function SessionQuestionsForm({
         );
       }
     }
+    const handleKey = handleFocusRequest.current;
+    handleFocusRequest.current = null;
+    if (handleKey) handles.current.get(handleKey)?.focus();
     const request = focusRequest.current;
     if (!request) return;
     focusRequest.current = null;
@@ -256,13 +283,15 @@ export function SessionQuestionsForm({
     input.scrollIntoView?.({ block: 'nearest' });
   });
 
-  /** Slides these questions in, one after another. */
+  /**
+   * Slides these questions in, one after another. Only the latest arrivals are
+   * held: rows that came earlier have long since landed, and dropping their
+   * class does not replay anything.
+   */
   function cascade(keys: string[]) {
-    setEntering((current) => {
-      const next = new Map(current);
-      keys.forEach((key, index) => next.set(key, index));
-      return next;
-    });
+    // A long paste arrives together after the first few: one by one, the
+    // last of 25 would still be hidden two seconds on.
+    setEntering(new Map(keys.map((key, index) => [key, Math.min(index, CASCADE_STEPS)])));
   }
 
   /** Into a question already on the page, at the end of its text. */
@@ -327,10 +356,13 @@ export function SessionQuestionsForm({
     const lines = splitPastedLines(event.clipboardData.getData('text/plain'));
     if (!lines) return;
     event.preventDefault();
-    const keys = form.pasteLines(key, lines);
+    const { keys, dropped, long } = form.pasteLines(key, lines);
     cascade(keys.filter((k) => k !== key));
     const last = keys[keys.length - 1];
     if (last) focusRequest.current = { key: last, caret: 'end' };
+    // A draft takes questions past the limit (see `updateSessionSchema`), so
+    // long lines are only worth a word on a new session.
+    setPasteNotice(pasteNoticeText(keys.length, dropped, editingDraft ? 0 : long));
   }
 
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
@@ -350,20 +382,16 @@ export function SessionQuestionsForm({
       setValidationError(result.message);
       return;
     }
-    sentState.current = state;
+    // Gone to the server: nothing more is kept for it.
+    autosave.markSent(state);
     await onSubmit(result.input, kind);
   }
 
   function pickUpKept() {
-    if (!kept) return;
-    cascade(form.resume(kept.state));
+    const taken = autosave.take();
+    if (!taken) return;
+    cascade(form.resume(taken.state));
     titleRequest.current = 'end';
-    setKept(null);
-  }
-
-  function startFresh() {
-    clearSetup(autosaveKey);
-    setKept(null);
   }
 
   function handleSubmit(event: FormEvent) {
@@ -373,7 +401,6 @@ export function SessionQuestionsForm({
 
   const atLimit = !form.canAddQuestion;
   const writtenCount = state.questions.filter((q) => q.text.trim().length > 0).length;
-  const [questionsFact, ...restFacts] = summaryParts(state);
   const problem = validationError ?? error;
 
   return (
@@ -383,7 +410,10 @@ export function SessionQuestionsForm({
       onKeyDown={onFormKeyDown}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* `relative`, so what is placed absolutely inside (the screen-reader-only
+          labels) is placed in here and scrolls with it, rather than against the
+          page, where it would stretch the page past the footer. */}
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4 px-4 pt-6 pb-10 sm:px-6 sm:pt-7">
           {kept ? (
             <div
@@ -409,7 +439,7 @@ export function SessionQuestionsForm({
                 </button>
                 <button
                   type="button"
-                  onClick={startFresh}
+                  onClick={autosave.discard}
                   className="h-8 rounded-full px-3 text-[12.5px] font-semibold text-rt-ink-muted hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
                 >
                   Start fresh
@@ -473,6 +503,7 @@ export function SessionQuestionsForm({
                     question={question}
                     number={shown + 1}
                     maxLength={SESSION_QUESTION_TEXT_MAX}
+                    acceptsLonger={editingDraft}
                     lifted={drag.draggingId === question.key}
                     entering={entering.get(question.key) ?? null}
                     style={drag.rowStyle(question.key)}
@@ -481,6 +512,10 @@ export function SessionQuestionsForm({
                     inputRef={(element) => {
                       if (element) inputs.current.set(question.key, element);
                       else inputs.current.delete(question.key);
+                    }}
+                    handleRef={(element) => {
+                      if (element) handles.current.set(question.key, element);
+                      else handles.current.delete(question.key);
                     }}
                     onText={(text) => form.setQuestionText(question.key, text)}
                     onVoting={(votingEnabled) =>
@@ -491,6 +526,7 @@ export function SessionQuestionsForm({
                     onHandleKeyDown={(event) => {
                       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
                       event.preventDefault();
+                      handleFocusRequest.current = question.key;
                       form.moveQuestion(question.key, index + (event.key === 'ArrowUp' ? -1 : 1));
                     }}
                     onPaste={(event) => onQuestionPaste(event, question.key)}
@@ -512,10 +548,18 @@ export function SessionQuestionsForm({
               >
                 <span aria-hidden>+</span> Add question
               </button>
-              <span className="min-w-[120px] flex-1 text-[11.5px] leading-snug text-rt-ink-faint">
-                {atLimit
-                  ? `That’s the most one session can hold (${SESSION_QUESTION_LIMIT}).`
-                  : 'Enter adds the next one · Alt+↑/↓ moves one · paste a list to split it'}
+              {/* A status, so what a paste left out, or the limit, is heard as
+                  well as seen; the plain hint does not change, so is not read. */}
+              <span
+                role="status"
+                className={`min-w-[120px] flex-1 text-[11.5px] leading-snug ${
+                  pasteNotice ? 'font-medium text-rt-secondary-deep' : 'text-rt-ink-faint'
+                }`}
+              >
+                {pasteNotice ??
+                  (atLimit
+                    ? `That’s the most one session can hold (${SESSION_QUESTION_LIMIT}).`
+                    : 'Enter adds the next one · Alt+↑/↓ moves one · paste a list to split it')}
               </span>
               <span className="text-[11.5px] text-rt-ink-faint tabular-nums">
                 {state.questions.length >= SESSION_QUESTION_LIMIT - 10
@@ -558,16 +602,7 @@ export function SessionQuestionsForm({
 
       <footer className="relative z-20 flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-rt-secondary/30 bg-[#fffcf6]/95 px-3 py-2.5 backdrop-blur-md sm:px-5 sm:py-3">
         {footerStart}
-        <p className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 text-[12.5px] text-rt-ink-muted sm:basis-auto">
-          <span className="font-semibold text-rt-ink">{questionsFact}</span>
-          {restFacts.map((fact) => (
-            <span key={fact} className="inline-flex items-center gap-2">
-              <span aria-hidden className="size-[3px] rounded-full bg-[#c9bfae]" />
-              <span className="sr-only">, </span>
-              {fact}
-            </span>
-          ))}
-        </p>
+        <FactLine facts={sessionFacts(state)} className="basis-full sm:basis-auto" />
         <span aria-hidden className="hidden flex-1 sm:block" />
         {problem ? (
           <p role="alert" className="basis-full text-[12.5px] text-red-700 sm:basis-auto">

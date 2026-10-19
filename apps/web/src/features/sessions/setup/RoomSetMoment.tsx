@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 
+import { keepTabWithin } from '../../../lib/focus';
 import { closingFades } from '../../../lib/motion';
 import { CodeTiles } from '../CodeTiles';
 
@@ -25,18 +26,47 @@ interface RoomSetMomentProps {
 export function RoomSetMoment({ title, code, onDone }: RoomSetMomentProps) {
   const done = useRef(onDone);
   done.current = onDone;
+  // Once only: "Go now" and the end of the scene must not both go on, or the
+  // waiting room would be asked for twice.
+  const finished = useRef(false);
+  const finish = useRef(() => {
+    if (finished.current) return;
+    finished.current = true;
+    done.current();
+  });
+
+  const root = useRef<HTMLDivElement>(null);
+  const goNow = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!closingFades()) {
-      done.current();
+      finish.current();
       return;
     }
-    const timer = window.setTimeout(() => done.current(), ROOM_SET_MS);
+    const timer = window.setTimeout(() => finish.current(), ROOM_SET_MS);
     return () => window.clearTimeout(timer);
   }, []);
 
+  // Modal while it plays: the page under it is done with, and a key pressed
+  // there (Enter on the button that opened the room, say) must not reach it.
+  // Focus comes here, and Tab stays here.
+  useEffect(() => {
+    goNow.current?.focus();
+    function onKeyDown(event: KeyboardEvent) {
+      if (root.current) keepTabWithin(event, root.current);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   return (
-    <div className="rt-room-set rt-setup-page fixed inset-0 z-50 flex items-center justify-center px-6">
+    <div
+      ref={root}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="room-set-title"
+      className="rt-room-set rt-setup-page fixed inset-0 z-50 flex items-center justify-center px-6"
+    >
       <div className="flex max-w-md flex-col items-center gap-2 text-center">
         <div aria-hidden className="relative mb-2 size-[200px]">
           <span className="rt-room-glow absolute top-1/2 left-1/2 size-[190px] -translate-1/2 rounded-full" />
@@ -70,7 +100,10 @@ export function RoomSetMoment({ title, code, onDone }: RoomSetMomentProps) {
         >
           Your room is open
         </p>
-        <h2 className="text-[22px] leading-tight font-semibold tracking-[-0.01em] text-rt-ink">
+        <h2
+          id="room-set-title"
+          className="text-[22px] leading-tight font-semibold tracking-[-0.01em] text-rt-ink"
+        >
           {title}
         </h2>
         {code ? (
@@ -85,8 +118,9 @@ export function RoomSetMoment({ title, code, onDone }: RoomSetMomentProps) {
           <span className="rt-room-bar block h-full rounded-full bg-rt-secondary" />
         </span>
         <button
+          ref={goNow}
           type="button"
-          onClick={() => done.current()}
+          onClick={() => finish.current()}
           className="mt-1 rounded-full px-3 py-1 text-[12.5px] font-semibold text-rt-ink-muted hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
         >
           Go now

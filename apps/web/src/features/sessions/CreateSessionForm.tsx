@@ -63,11 +63,15 @@ export function CreateSessionForm({
       busy={busy}
       error={error}
       onSubmit={async (input, kind) => {
+        // Held busy once it has gone through, until the page has moved on:
+        // the room-set moment plays over this form, which must not send again.
         setBusy(kind);
         if (kind === 'open') {
           const result = await createAndOpen(input);
-          setBusy(null);
-          if (!result) return;
+          if (!result) {
+            setBusy(null);
+            return;
+          }
           onOpened(
             result.opened
               ? { sessionId: result.sessionId, title: input.title, code: result.code }
@@ -81,8 +85,8 @@ export function CreateSessionForm({
           return;
         }
         const session = await create(input);
-        setBusy(null);
         if (session) onSaved(session.id);
+        else setBusy(null);
       }}
     />
   );

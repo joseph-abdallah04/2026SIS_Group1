@@ -10,6 +10,7 @@ import {
   setupReducer,
   splitPastedLines,
   useSessionSetupForm,
+  type PasteResult,
   type SetupFormState,
 } from './useSessionSetupForm';
 
@@ -220,11 +221,42 @@ describe('useSessionSetupForm', () => {
     });
     expect(neighbour).toBe(a);
 
-    let pasted: string[] = [];
+    let pasted: PasteResult | undefined;
     act(() => {
       pasted = result.current.pasteLines(b!, ['C', 'D']);
     });
-    expect(pasted).toHaveLength(2);
+    expect(pasted).toMatchObject({ dropped: 0, long: 0 });
+    expect(pasted?.keys).toHaveLength(2);
     expect(texts(result.current.state)).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  // Review of 60a1c15: a paste used to cut long lines and drop lines past the
+  // limit without a word. It keeps them whole now, and says what it left out.
+  it('keeps pasted lines whole and counts what did not fit', () => {
+    const { result } = renderHook(() =>
+      useSessionSetupForm({
+        questions: Array.from({ length: SESSION_QUESTION_LIMIT - 2 }, (_, i) => ({
+          text: `Q${i}`,
+          votingEnabled: true,
+        })),
+      }),
+    );
+    const last = result.current.state.questions.at(-1)!.key;
+    const long = 'x'.repeat(200);
+    let pasted: PasteResult | undefined;
+    act(() => {
+      pasted = result.current.pasteLines(last, [long, 'Two', 'Three', 'Four']);
+    });
+
+    expect(pasted).toMatchObject({ dropped: 2, long: 1 });
+    expect(result.current.state.questions).toHaveLength(SESSION_QUESTION_LIMIT);
+    expect(texts(result.current.state).at(-2)).toBe(long);
+  });
+});
+
+describe('splitPastedLines keeps long lines whole', () => {
+  it('does not cut a line at the question limit', () => {
+    const long = 'y'.repeat(180);
+    expect(splitPastedLines(`One\n${long}`)).toEqual(['One', long]);
   });
 });

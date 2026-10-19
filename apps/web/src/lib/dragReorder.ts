@@ -116,6 +116,75 @@ export function slideShifts({ ids, self, step }: RowLayout, target: number) {
   return shifts;
 }
 
+interface FollowPointerOptions {
+  pointerId: number;
+  /** Where the pointer was pressed. */
+  startY: number;
+  /** The list being reordered: if it scrolls under a held row, that is travel too. */
+  list: HTMLElement | null;
+}
+
+interface FollowPointerHandlers {
+  /** How far the pointer has travelled down the list since the press, scrolling included. */
+  move: (travelled: number) => void;
+  up: () => void;
+  cancel: () => void;
+}
+
+/**
+ * Follows one pressed pointer until it is let go, wherever it goes, and
+ * answers with a way to stop following it early (on unmount, say).
+ *
+ * On the window, not on the row or handle that was pressed: that can slide out
+ * from under the pointer (the list scrolls, the row is held at its limit), and
+ * pointer capture, which would keep the events coming to it, does not always
+ * take hold. A let-go anywhere must still end the drag, or the row stays lifted
+ * and the move is never made.
+ *
+ * A list that scrolls under a held pointer moves its rows, not the pointer:
+ * the pointer has travelled that far along the list all the same, so scrolling
+ * reports a move as well.
+ */
+export function followPointer(
+  { pointerId, startY, list }: FollowPointerOptions,
+  handlers: FollowPointerHandlers,
+): () => void {
+  const listTop = () => list?.getBoundingClientRect().top ?? 0;
+  const startTop = listTop();
+  let lastY = startY;
+  const travelled = () => lastY - startY + (startTop - listTop());
+
+  const onMove = (event: PointerEvent) => {
+    if (event.pointerId !== pointerId) return;
+    lastY = event.clientY;
+    handlers.move(travelled());
+  };
+  const onScroll = () => handlers.move(travelled());
+  const onUp = (event: PointerEvent) => {
+    if (event.pointerId !== pointerId) return;
+    stop();
+    handlers.up();
+  };
+  const onCancel = (event: PointerEvent) => {
+    if (event.pointerId !== pointerId) return;
+    stop();
+    handlers.cancel();
+  };
+
+  function stop() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('scroll', onScroll, true);
+  }
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+  window.addEventListener('scroll', onScroll, true);
+  return stop;
+}
+
 /** The order the rows would be in with the dragged row dropped at `target`. */
 export function droppedOrder({ ids, self }: RowLayout, target: number) {
   const moved = ids[self];
