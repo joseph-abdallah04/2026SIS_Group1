@@ -4,7 +4,7 @@ Collaborative brainstorming, ideation, and planning tool for software teams. A l
 
 ## Prerequisites
 
-- Node.js 20+ (see `.nvmrc`)
+- Node.js 20.19+, 22.12+ or 24+ (see `.nvmrc`). Older versions run the app, but the web tests fail to start.
 - Git
 
 ## Setup
