@@ -57,6 +57,17 @@ export interface StickyBlock {
   number: number | null;
   /** How that place is written at its depth: 3, then c, then iii. */
   label: string | null;
+  /**
+   * How many characters the longest label in its numbered list has, so every
+   * item in a list that reaches 10 (or "viii") leaves the same room for it.
+   */
+  labelWidth: number | null;
+  /**
+   * The `labelWidth` of each list it is nested in, outermost first (null for a
+   * bulleted one), so a nested item steps in from where its parent's words
+   * start, however wide the parent's numbers are.
+   */
+  outerLabelWidths: (number | null)[];
   segments: StickySegment[];
 }
 
@@ -669,6 +680,8 @@ export function stickyBlocks(content: StickyContent): StickyBlock[] {
     level: levels[index]!,
     number: null,
     label: null,
+    labelWidth: null,
+    outerLabelWidths: [],
     segments: [],
   }));
 
@@ -681,21 +694,40 @@ export function stickyBlocks(content: StickyContent): StickyBlock[] {
     });
   }
 
-  // How far each depth of the list being drawn has counted.
-  const counts: { list: StickyLineStyle; count: number }[] = [];
+  // How far each depth of the list being drawn has counted, and the items of
+  // the numbered list it is counting.
+  const counts: { list: StickyLineStyle; count: number; items: StickyBlock[] }[] = [];
+  const numberedLists: StickyBlock[][] = [];
+  // The items of each list a line is nested in, read once every list is counted.
+  const outerLists = new Map<StickyBlock, (StickyBlock[] | undefined)[]>();
   for (const block of blocks) {
     if (!block.list) {
       counts.length = 0;
       continue;
     }
     counts.length = Math.min(counts.length, block.level + 1);
+    outerLists.set(
+      block,
+      Array.from({ length: block.level }, (_, level) => counts[level]?.items),
+    );
     const at = counts[block.level];
-    const count = at && at.list === block.list ? at.count + 1 : 1;
-    counts[block.level] = { list: block.list, count };
+    const continues = at !== undefined && at.list === block.list;
+    const count = continues ? at.count + 1 : 1;
+    const items = continues ? at.items : [];
+    counts[block.level] = { list: block.list, count, items };
     if (block.list === 'number') {
       block.number = count;
       block.label = listLabel(count, block.level);
+      if (!continues) numberedLists.push(items);
+      items.push(block);
     }
+  }
+  for (const items of numberedLists) {
+    const labelWidth = Math.max(...items.map((item) => item.label!.length));
+    for (const item of items) item.labelWidth = labelWidth;
+  }
+  for (const [block, lists] of outerLists) {
+    block.outerLabelWidths = lists.map((items) => items?.[0]?.labelWidth ?? null);
   }
   return blocks;
 }

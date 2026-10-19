@@ -56,26 +56,27 @@ body {
  * the marker is never part of what is selected or copied. Each level of nesting
  * moves the item, marker and all, one step in, and changes the bullet, so a
  * nested list reads as nested even on a small card.
+ *
+ * How far in, and how much room the marker gets, come from the line itself
+ * (`lineStyle`): a numbered list that reaches "10." or "viii." gives every one of
+ * its items room for it, and anything nested under it steps in from where its
+ * words start.
  */
 .rt-sticky-line[data-list] {
   --rt-list-indent: 0em;
+  --rt-marker-width: 1.15em;
   position: relative;
-  padding-left: calc(1.5em + var(--rt-list-indent));
+  padding-left: calc(var(--rt-marker-width) + 0.35em + var(--rt-list-indent));
 }
 
-.rt-sticky-line[data-level='1'] {
-  --rt-list-indent: 1.25em;
-}
-
-.rt-sticky-line[data-level='2'] {
-  --rt-list-indent: 2.5em;
-}
-
+/*
+ * The marker's right edge is pinned just before the text, so if it is ever wider
+ * than its room it grows out into the margin rather than over the words.
+ */
 .rt-sticky-line[data-list]::before {
   position: absolute;
-  left: var(--rt-list-indent);
-  width: 1.15em;
-  text-align: right;
+  right: calc(100% - var(--rt-list-indent) - var(--rt-marker-width));
+  white-space: nowrap;
   font-style: normal;
   font-weight: 600;
 }

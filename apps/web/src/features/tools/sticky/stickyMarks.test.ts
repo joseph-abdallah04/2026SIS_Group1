@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { lineStyle } from './stickyDom';
+
 import {
   autoLinkBefore,
   canIndent,
@@ -310,6 +312,47 @@ describe('nested lists', () => {
 
     expect(blocks.map((block) => block.label)).toEqual(['1', 'a', 'b', 'i', '2', 'a', '3']);
     expect(blocks.map((block) => block.level)).toEqual([0, 1, 1, 2, 0, 1, 0]);
+  });
+
+  it('gives every item of a list that reaches 10 room for the widest number', () => {
+    const blocks = stickyBlocks({
+      text: Array.from({ length: 12 }, (_, index) => `item ${index}`).join('\n'),
+      lines: [...Array(10).fill('number'), null, 'number'],
+      levels: Array(12).fill(0),
+    });
+
+    expect(blocks.map((block) => block.labelWidth)).toEqual([
+      ...Array(10).fill(2),
+      null,
+      1,
+    ]);
+  });
+
+  it('tells a nested item how wide the numbers of the lists it is in are', () => {
+    const blocks = stickyBlocks({
+      text: Array.from({ length: 12 }, (_, index) => `item ${index}`).join('\n'),
+      lines: [...Array(11).fill('number'), 'bullet'],
+      levels: [...Array(10).fill(0), 1, 2],
+    });
+
+    expect(blocks[0]!.outerLabelWidths).toEqual([]);
+    expect(blocks[10]!.outerLabelWidths).toEqual([2]);
+    expect(blocks[11]!.outerLabelWidths).toEqual([2, 1]);
+
+    // Room for "10." at the top; each nested level starts just before the
+    // words of the one it is in, which now start further in.
+    expect(lineStyle(blocks[0]!)).toEqual({
+      '--rt-list-indent': '0em',
+      '--rt-marker-width': '1.5em',
+    });
+    expect(lineStyle(blocks[10]!)).toEqual({
+      '--rt-list-indent': '1.6em',
+      '--rt-marker-width': '1.15em',
+    });
+    expect(lineStyle(blocks[11]!)).toEqual({
+      '--rt-list-indent': '2.85em',
+      '--rt-marker-width': '1.15em',
+    });
   });
 
   it('writes places in letters and numerals past the first few', () => {
