@@ -313,223 +313,735 @@ a.rt-sticky-link:focus-visible {
 }
 
 /*
- * F08 waiting-room seats. Position slides via left/top; pop/leave scale the
- * same wrapper (transform always includes the centering translate).
+ * F08 waiting room: the lobby's layout and its round table.
+ *
+ * The table is `TableScene`'s, which the landing page draws too. Everything
+ * round it hangs off a zero-size point per chair: `--dx`/`--dy` point outward
+ * from the table, `--rot` turns a chair to face it, and `--seat` (a share of
+ * the scene's width, set from the number of chairs) sizes the seat and all
+ * that is pinned to it. The scene is a container, so `cqw` there means "of
+ * the table's box" whatever the page around it is doing.
  */
-@keyframes rt-seat-arrive {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.72);
+.rt-lobby-main {
+  container: lobby / inline-size;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  background: radial-gradient(ellipse at 52% 48%, #fbf6ec 0%, #f5eee1 55%, #ece2d1 100%);
+}
+
+/* Three zones: the session and its invite, the table, the questions. */
+.rt-lobby-grid {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 19rem minmax(0, 1fr) 18rem;
+  grid-template-areas: 'card stage agenda';
+  gap: 1.25rem;
+  padding: 1.25rem;
+}
+
+.rt-lobby-card {
+  grid-area: card;
+  min-height: 0;
+  max-height: 100%;
+  align-self: center;
+  overflow-y: auto;
+}
+
+.rt-lobby-stage {
+  grid-area: stage;
+}
+
+.rt-lobby-agenda {
+  grid-area: agenda;
+  min-height: 0;
+  max-height: 100%;
+  align-self: center;
+  overflow-y: auto;
+}
+
+/* Less room: the questions fold under the card, and the table keeps the rest. */
+@container lobby (max-width: 67.5rem) {
+  .rt-lobby-grid {
+    grid-template-columns: 18rem minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      'card stage'
+      'agenda stage';
+    gap: 0.875rem 1.25rem;
   }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+
+  .rt-lobby-card {
+    align-self: start;
+  }
+
+  .rt-lobby-agenda {
+    align-self: stretch;
   }
 }
 
-@keyframes rt-seat-leave {
-  from {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+/* A phone, or a laptop with the side panel open: the table first, as big as
+   the width allows, and the cards scroll on under it. */
+@container lobby (max-width: 47.5rem) {
+  .rt-lobby-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    overflow-y: auto;
+    padding: 0.875rem;
   }
-  to {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.72);
+
+  .rt-lobby-stage {
+    height: min(30rem, 92cqw);
+    flex: none;
+    order: -1;
+  }
+
+  .rt-lobby-card,
+  .rt-lobby-agenda {
+    max-height: none;
+    flex: none;
+    align-self: stretch;
+    overflow: visible;
   }
 }
 
-.rt-waiting-scene {
-  width: min(100%, calc(100dvh - 6.5rem));
+.rt-lobby-panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(224, 163, 60, 0.3);
+  background: rgba(255, 252, 246, 0.94);
+  padding: 1.125rem;
+  box-shadow: 0 8px 24px rgba(122, 106, 76, 0.07);
 }
 
-.rt-waiting-table {
+/* The code, as tiles big enough to read across a room. */
+.rt-code-tiles {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.rt-code-tile {
+  display: inline-flex;
+  height: 2.2rem;
+  width: 1.7rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 1px solid #e6dcc6;
+  background: #fff;
+  box-shadow: 0 1.5px 0 #e9dcc2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-rt-ink);
+}
+
+.rt-code-dash {
+  margin: 0 0.125rem;
+  font-weight: 600;
+  color: var(--color-rt-ink-faint);
+}
+
+/* Present: the same tiles, sized off the screen. */
+.rt-code-tiles[data-size='present'] {
+  gap: clamp(4px, 0.7vw, 10px);
+}
+
+.rt-code-tiles[data-size='present'] .rt-code-tile {
+  height: clamp(3rem, 9vw, 7.5rem);
+  width: clamp(2.25rem, 6.8vw, 5.75rem);
+  border-radius: clamp(8px, 1vw, 14px);
+  font-size: clamp(1.6rem, 5.4vw, 4.4rem);
+}
+
+.rt-code-tiles[data-size='present'] .rt-code-dash {
+  font-size: clamp(1.5rem, 4vw, 3.5rem);
+}
+
+/* --- The table --- */
+.rt-table-stage {
+  container-type: size;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.rt-table-scene {
+  --rt-wood: #b98a52;
+  --rt-wood-deep: #8f6334;
+  --rt-chair: #d6b383;
+  --rt-chair-deep: #bd935d;
+  --rt-card: #fffdf8;
+  container-type: inline-size;
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+/* The largest square the stage holds, so the whole table always shows. */
+.rt-table-stage > .rt-table-scene {
+  height: 100cqmin;
+  width: 100cqmin;
+  flex: none;
+}
+
+/* Wood round a linen top, lit warmly from underneath. */
+.rt-table-top {
   position: absolute;
-  inset: 14%;
+  overflow: hidden;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 42%, #fffaf0 0%, #fdf4e5 48%, #f3e2bc 100%);
+  background: radial-gradient(circle at 50% 36%, #fffaf0 0%, #fbf1dd 45%, #efdcb6 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.65),
-    0 0 0 3px #f1c881,
-    0 0 0 4px #e0a33c,
-    0 14px 32px rgba(122, 106, 76, 0.12);
+    0 0 0 1.9cqw var(--rt-wood),
+    0 0 0 2.5cqw var(--rt-wood-deep),
+    0 4cqw 8cqw rgba(90, 60, 25, 0.25),
+    inset 0 0 3cqw rgba(185, 138, 82, 0.2);
 }
 
-.rt-waiting-table::before {
+.rt-table-top::before {
   content: '';
   position: absolute;
-  inset: 11px;
+  inset: 0;
   border-radius: inherit;
-  border: 1px solid rgba(224, 163, 60, 0.28);
+  background:
+    repeating-linear-gradient(0deg, rgba(122, 106, 76, 0.045) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(122, 106, 76, 0.035) 0 1px, transparent 1px 3px);
+}
+
+.rt-table-top::after {
+  content: '';
+  position: absolute;
+  inset: 5%;
+  border-radius: inherit;
+  border: 1px solid rgba(185, 138, 82, 0.3);
+  transition: border-color 400ms ease;
+}
+
+.rt-table-glow {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 196, 100, 0.42), rgba(255, 196, 100, 0) 66%);
+  pointer-events: none;
+  scale: 1.2;
+  animation: rt-table-breathe 6s ease-in-out infinite;
+}
+
+@keyframes rt-table-breathe {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* The light in front of whoever is talking. */
+.rt-table-pool {
+  position: absolute;
+  height: 56%;
+  width: 56%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 206, 120, 0.7) 0%,
+    rgba(255, 206, 120, 0.28) 42%,
+    rgba(255, 206, 120, 0) 70%
+  );
+  pointer-events: none;
+  translate: -50% -50%;
+  transition:
+    left 400ms ease,
+    top 400ms ease;
+  animation: rt-table-fade-in 500ms ease both;
+}
+
+/* While members wait: a small warm light circling the rim. */
+.rt-table-orbit {
+  position: absolute;
+  z-index: 2;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: rt-table-spin 10s linear infinite;
+}
+
+.rt-table-orbit::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: calc(50% - 4px);
+  height: 8px;
+  width: 8px;
+  border-radius: 50%;
+  background: #ffe2a3;
+  box-shadow: 0 0 10px 4px rgba(255, 190, 90, 0.75);
+}
+
+@keyframes rt-table-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes rt-table-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rt-table-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* A chair's or a seat's point on the ring. Slides when the table regrows. */
+.rt-table-chair,
+.rt-table-seat {
+  position: absolute;
+  height: 0;
+  width: 0;
+  transition:
+    left 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rt-table-chair {
+  z-index: 3;
+}
+
+.rt-table-seats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rt-table-seat {
+  z-index: 5;
+  transition:
+    left 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    translate 450ms ease;
+}
+
+.rt-table-chair-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: calc(var(--seat) * 0.5);
+  width: calc(var(--seat) * 1.1);
+  border-radius: calc(var(--seat) * 0.26) calc(var(--seat) * 0.26) calc(var(--seat) * 0.1)
+    calc(var(--seat) * 0.1);
+  background: linear-gradient(180deg, var(--rt-chair), var(--rt-chair-deep));
+  box-shadow:
+    inset 0 0 0 1px rgba(110, 74, 36, 0.28),
+    0 2px 4px rgba(60, 40, 20, 0.2);
+  transform: translate(-50%, -50%)
+    translate(calc(var(--dx) * var(--seat) * 0.54), calc(var(--dy) * var(--seat) * 0.54))
+    rotate(var(--rot));
+  transition:
+    translate 300ms ease,
+    opacity 300ms ease;
+}
+
+/* Empty chairs are tucked in. */
+.rt-table-chair[data-empty] .rt-table-chair-back {
+  opacity: 0.6;
+  translate: calc(var(--dx) * var(--seat) * -0.14) calc(var(--dy) * var(--seat) * -0.14);
+}
+
+.rt-table-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: calc(var(--seat) * 0.78);
+  width: calc(var(--seat) * 0.78);
+  border-radius: 50%;
+  border: 1.5px dashed rgba(122, 106, 76, 0.33);
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+}
+
+.rt-table-chair[data-host] .rt-table-ghost {
+  border-color: rgba(224, 163, 60, 0.8);
+  background: rgba(253, 244, 229, 0.7);
+}
+
+.rt-table-bubble {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  height: var(--seat);
+  width: var(--seat);
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: calc(var(--seat) * 0.3);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 0 calc(var(--seat) * 0.045) #fff,
+    0 2px 6px rgba(60, 40, 20, 0.22);
+  transform: translate(-50%, -50%);
+}
+
+/* The board's green ring, sized to the seat. */
+.rt-table-seat[data-speaking] .rt-table-bubble::after {
+  content: '';
+  position: absolute;
+  inset: -14%;
+  border-radius: 50%;
+  border: max(2px, calc(var(--seat) * 0.055)) solid #2f8f5b;
+  pointer-events: none;
+  animation: rt-voice-speaking 1.5s ease-in-out infinite;
+}
+
+.rt-table-crown,
+.rt-table-muted {
+  position: absolute;
+  display: flex;
+  height: 38%;
+  width: 38%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.rt-table-crown {
+  top: -8%;
+  right: -6%;
+  background: var(--color-rt-secondary);
+}
+
+.rt-table-muted {
+  right: -6%;
+  bottom: -6%;
+  background: #b42318;
+}
+
+.rt-table-crown svg,
+.rt-table-muted svg {
+  height: 58%;
+  width: 58%;
+}
+
+.rt-table-ghost .rt-table-crown {
+  background: rgba(224, 163, 60, 0.6);
+  box-shadow: none;
+}
+
+/* The place card, on the tabletop in front of its seat. */
+.rt-table-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  border-radius: 4px;
+  border: 1px solid rgba(122, 106, 76, 0.28);
+  background: var(--rt-card);
+  padding: 1px 6px 2px;
+  font-size: clamp(9px, calc(var(--seat) * 0.2), 11.5px);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  color: var(--color-rt-ink);
+  box-shadow:
+    0 1px 0 rgba(122, 106, 76, 0.2),
+    0 2px 4px rgba(60, 40, 20, 0.08);
+  transform: translate(-50%, -50%)
+    translate(calc(var(--dx) * var(--seat) * -1), calc(var(--dy) * var(--seat) * -1));
+}
+
+.rt-table-you {
+  font-weight: 500;
+  color: var(--color-rt-ink-faint);
+}
+
+.rt-table-seat[data-speaking] .rt-table-card {
+  color: #2f8f5b;
+}
+
+.rt-table-chair[data-host] .rt-table-card {
+  border-style: dashed;
+  background: rgba(255, 253, 248, 0.7);
+  font-weight: 500;
+  color: var(--color-rt-secondary-deep);
+  box-shadow: none;
+}
+
+/* Crowded: only the cards worth finding — the leader's, yours, and the voice in the room. */
+.rt-table-scene[data-compact]
+  .rt-table-seat:not([data-leader]):not([data-local]):not([data-speaking])
+  .rt-table-card {
+  display: none;
+}
+
+/* Arriving: the chair slides back, the person drops in, the card stands up.
+   `--delay` holds a batch back so it arrives one after another. */
+.rt-table-chair[data-anim='joining'] .rt-table-chair-back {
+  animation: rt-table-chair-out 800ms cubic-bezier(0.22, 1, 0.36, 1) var(--delay, 0ms) both;
+}
+
+@keyframes rt-table-chair-out {
+  0% {
+    opacity: 0.6;
+    translate: calc(var(--dx) * var(--seat) * -0.14) calc(var(--dy) * var(--seat) * -0.14);
+  }
+  45% {
+    opacity: 1;
+    translate: calc(var(--dx) * var(--seat) * 0.26) calc(var(--dy) * var(--seat) * 0.26);
+  }
+  100% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.rt-table-seat[data-anim='joining'] .rt-table-bubble {
+  animation: rt-table-drop-in 600ms cubic-bezier(0.34, 1.56, 0.64, 1)
+    calc(var(--delay, 0ms) + 250ms) both;
+}
+
+@keyframes rt-table-drop-in {
+  from {
+    opacity: 0;
+    translate: 0 calc(var(--seat) * -0.6);
+    scale: 1.22;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+.rt-table-seat[data-anim='joining'] .rt-table-card {
+  animation: rt-table-card-up 450ms cubic-bezier(0.22, 1, 0.36, 1) calc(var(--delay, 0ms) + 650ms)
+    both;
+}
+
+@keyframes rt-table-card-up {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+/* Leaving: up and out of the chair, which is then tucked back in. */
+.rt-table-seat[data-anim='leaving'] .rt-table-bubble {
+  animation: rt-table-rise 500ms ease forwards;
+}
+
+@keyframes rt-table-rise {
+  to {
+    opacity: 0;
+    translate: 0 calc(var(--seat) * -0.45);
+    scale: 0.8;
+  }
+}
+
+.rt-table-seat[data-anim='leaving'] .rt-table-card {
+  animation: rt-table-fade-out 300ms ease forwards;
+}
+
+/* On the tabletop. */
+.rt-table-centre {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   pointer-events: none;
 }
 
-.rt-waiting-seat {
-  position: absolute;
-  z-index: 20;
+.rt-table-centre > * {
+  pointer-events: auto;
+}
+
+.rt-table-start {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  transform: translate(-50%, -50%);
-  transition:
-    left 400ms cubic-bezier(0.22, 1, 0.36, 1),
-    top 400ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.rt-waiting-seat[data-just-joined='true'] {
-  animation: rt-seat-arrive 280ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.rt-waiting-seat[data-leaving='true'] {
-  animation: rt-seat-leave 200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  transition: none;
-}
-
-.rt-waiting-seat-bubble {
-  display: flex;
-  height: 3.5rem;
-  width: 3.5rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  box-shadow: 0 1px 3px rgba(8, 12, 21, 0.12);
-}
-
-.rt-waiting-start {
-  display: flex;
-  height: 8.75rem;
-  width: 8.75rem;
+  height: 30cqw;
+  width: 30cqw;
+  min-height: 5.75rem;
+  min-width: 5.75rem;
+  max-height: 10.75rem;
+  max-width: 10.75rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 9999px;
+  gap: 3px;
+  border-radius: 50%;
   border: none;
-  background: #f4e3ad;
-  padding: 0.75rem;
-  text-align: center;
-  font-size: 13px;
+  background: radial-gradient(circle at 50% 32%, #fbecc2, #f0d48b);
+  font-size: clamp(12px, 3cqw, 15px);
   font-weight: 600;
-  letter-spacing: -0.01em;
-  color: #5c4e2e;
+  color: #4e4126;
   box-shadow:
     0 0 0 4px #fff8ec,
-    0 0 0 6px rgba(224, 163, 60, 0.4),
-    0 10px 22px rgba(122, 106, 76, 0.12);
+    0 0 0 6px rgba(224, 163, 60, 0.45),
+    0 10px 24px rgba(122, 106, 76, 0.24);
   transition:
-    background 180ms ease,
-    transform 180ms ease;
+    transform 180ms ease,
+    box-shadow 180ms ease;
 }
 
-.rt-waiting-start:hover:not(:disabled) {
-  background: #f0d98f;
-  transform: scale(1.03);
+.rt-table-start:hover:not(:disabled) {
+  transform: scale(1.04);
+  box-shadow:
+    0 0 0 4px #fff8ec,
+    0 0 0 6px rgba(224, 163, 60, 0.7),
+    0 12px 28px rgba(122, 106, 76, 0.3);
 }
 
-.rt-waiting-start:focus-visible {
+.rt-table-start:focus-visible {
   outline: 2px solid var(--color-rt-secondary);
   outline-offset: 4px;
 }
 
-.rt-waiting-start:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.rt-table-start:disabled {
+  cursor: default;
+  opacity: 0.75;
 }
 
-.rt-waiting-wait {
-  max-width: 10.5rem;
-  text-align: center;
+.rt-table-start-count {
+  font-size: clamp(10px, 2.2cqw, 11.5px);
+  font-weight: 500;
+  color: var(--color-rt-secondary-deep);
+}
+
+.rt-table-wait {
+  margin: 0;
+  max-width: 34cqw;
   font-family: var(--font-serif);
-  font-size: 15px;
+  font-size: clamp(13px, 3.3cqw, 18px);
   line-height: 1.35;
   color: var(--color-rt-secondary-deep);
 }
 
-.rt-lobby-panel {
-  width: 100%;
-  border-radius: 1rem;
-  border: 1px solid rgba(224, 163, 60, 0.35);
-  background: rgba(255, 250, 240, 0.92);
-  padding: 1.25rem;
-  box-shadow: 0 8px 24px rgba(122, 106, 76, 0.06);
+.rt-table-wait-sub {
+  margin: 6px 0 0;
+  font-size: clamp(10px, 2.2cqw, 11.5px);
+  color: var(--color-rt-ink-faint);
 }
 
-.rt-waiting-seat-bubble:focus-visible {
-  outline: 2px solid var(--color-rt-secondary);
-  outline-offset: 3px;
+.rt-table-dots::after {
+  content: '';
+  animation: rt-table-dots 1.6s steps(4) infinite;
 }
 
-.rt-waiting-seat-bubble-leader {
-  box-shadow:
-    0 0 0 3px #fdf4e5,
-    0 0 0 6px var(--color-rt-secondary),
-    0 1px 3px rgba(8, 12, 21, 0.12);
+@keyframes rt-table-dots {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
 }
 
-.rt-waiting-seat-name {
-  position: absolute;
-  left: 50%;
-  z-index: 21;
-  width: max-content;
-  max-width: 10rem;
-  border-radius: 0.75rem;
-  background: var(--color-rt-ink);
-  padding: 0.2rem 0.45rem;
-  font-size: 11px;
+/* The start: a 3-2-1 on the tabletop (`useStartMoment`), then the table lights
+   up and everyone leans in, then the board. */
+.rt-table-count {
+  font-family: var(--font-serif);
+  font-size: clamp(2.75rem, 15cqw, 7.75rem);
   font-weight: 600;
-  color: #fff;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-50%);
+  line-height: 1;
+  color: var(--color-rt-secondary-deep);
+  animation: rt-table-count 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.rt-waiting-seat-name[data-placement='below'] {
-  top: calc(100% + 6px);
+.rt-table-go {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: clamp(1rem, 4.5cqw, 1.9rem);
+  font-weight: 600;
+  color: var(--color-rt-secondary-deep);
+  animation: rt-table-count 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.rt-waiting-seat-name[data-placement='above'] {
-  bottom: calc(100% + 6px);
-}
-
-.rt-waiting-seat:hover .rt-waiting-seat-name,
-.rt-waiting-seat:focus-within .rt-waiting-seat-name {
-  opacity: 1;
-}
-
-@media (max-width: 640px) {
-  .rt-waiting-table {
-    inset: 16%;
+@keyframes rt-table-count {
+  from {
+    opacity: 0;
+    scale: 1.7;
   }
-
-  .rt-waiting-seat-bubble {
-    height: 2.85rem;
-    width: 2.85rem;
-    font-size: 12px;
+  30% {
+    opacity: 1;
+    scale: 1;
   }
-
-  .rt-waiting-start {
-    height: 7.25rem;
-    width: 7.25rem;
-    font-size: 12px;
+  to {
+    opacity: 0.9;
+    scale: 0.95;
   }
+}
+
+.rt-table-scene[data-mood='lit'] .rt-table-glow {
+  background: radial-gradient(circle, rgba(255, 196, 100, 0.85), rgba(255, 196, 100, 0) 66%);
+  scale: 1.32;
+  transition: scale 500ms ease;
+}
+
+.rt-table-scene[data-mood='lit'] .rt-table-top::after {
+  border-color: rgba(224, 163, 60, 0.95);
+}
+
+.rt-table-scene[data-mood='lit'] .rt-table-seat {
+  translate: calc(var(--dx) * -6px) calc(var(--dy) * -6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rt-waiting-seat {
-    transition: none;
-  }
-
-  .rt-waiting-seat[data-just-joined='true'],
-  .rt-waiting-seat[data-leaving='true'] {
+  .rt-table-glow,
+  .rt-table-pool,
+  .rt-table-dots::after,
+  .rt-table-count,
+  .rt-table-go,
+  .rt-table-seat[data-speaking] .rt-table-bubble::after,
+  .rt-table-chair[data-anim] .rt-table-chair-back,
+  .rt-table-seat[data-anim] .rt-table-bubble,
+  .rt-table-seat[data-anim] .rt-table-card {
     animation: none;
   }
 
-  .rt-waiting-start {
+  /* A light frozen on the rim would only look like a mark on the table. */
+  .rt-table-orbit {
+    display: none;
+  }
+
+  /* Gone at once rather than fading. */
+  .rt-table-seat[data-anim='leaving'] {
+    visibility: hidden;
+  }
+
+  .rt-table-chair,
+  .rt-table-seat,
+  .rt-table-chair-back,
+  .rt-table-pool,
+  .rt-table-start {
     transition: none;
   }
 
-  .rt-waiting-start:hover:not(:disabled) {
+  .rt-table-start:hover:not(:disabled) {
     transform: none;
   }
 }
@@ -1132,25 +1644,6 @@ a.rt-sticky-link:focus-visible {
   height: 0.72rem;
   width: 0.72rem;
   --rt-seat-surface: var(--color-rt-secondary-wash);
-}
-
-/* The waiting room's head is 3.5rem — roughly twice the rail's — so the ring
-   needs the extra stand-off and weight to read as the same signal at that
-   size, and the badge has to grow with it or it turns into a speck. The
-   surface is the lobby's own page fill (WaitingRoom.tsx), without which the
-   badge ring reads as the mismatched halo the header variant above already
-   documents. */
-.rt-voice-seat[data-size='lobby']::after {
-  inset: -5px;
-  border-width: 3px;
-}
-
-.rt-voice-seat[data-size='lobby'] .rt-voice-bubble-muted {
-  right: 1px;
-  bottom: 1px;
-  height: 1.15rem;
-  width: 1.15rem;
-  --rt-seat-surface: #f7f4ee;
 }
 
 /* The header's faces sit straight on its amber wash now, not in a white chip,

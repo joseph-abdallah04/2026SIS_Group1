@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 
 import { SessionPinboard } from '../pinboard/SessionPinboard';
+import { useSidePanel } from '../sidepanel';
 import { SessionArchive } from './SessionArchive';
 import { useCurrentUserId } from '../../lib/currentUser';
 import { SessionDraftPage } from './SessionDraftPage';
@@ -29,14 +31,24 @@ export function SessionRouter() {
     loading,
     error,
     reload,
+    refresh,
     applyQuestionPhase,
     applyAddedQuestion,
     applyUpdatedQuestion,
   } = useSessionDetail(sessionId);
   const currentUserId = useCurrentUserId();
   // F32: one listener for both live views, since the waiting room and the
-  // pinboard can each be the thing the leader ends from.
-  useSessionEndedListener(sessionId, reload);
+  // pinboard can each be the thing the leader ends from. A refresh, not a
+  // reload: the live view stays up until the ended page replaces it.
+  useSessionEndedListener(sessionId, refresh);
+  // The side panel's open feature, held above both live views so that People
+  // (or Chat) open in the waiting room is still open on the board after Start.
+  // Shut again for another session.
+  const sidePanel = useSidePanel();
+  const { close: closeSidePanel } = sidePanel;
+  useEffect(() => {
+    closeSidePanel();
+  }, [sessionId, closeSidePanel]);
   // F25: patch the agenda in place instead of re-fetching, so advancing a
   // question doesn't blank the live view (see `applyQuestionPhase`).
   useSessionPhaseListener(sessionId, applyQuestionPhase);
@@ -88,7 +100,10 @@ export function SessionRouter() {
       return (
         <>
           {exitGuard}
-          <WaitingRoom session={session} onStarted={reload} />
+          {/* `refresh` keeps this page up until the board is ready to replace
+              it, in the same render: the board's room joins then cancel this
+              page's deferred leaves, and nobody drops out of the room. */}
+          <WaitingRoom session={session} onLeftLobby={refresh} sidePanel={sidePanel} />
         </>
       );
     case 'active':
@@ -104,6 +119,7 @@ export function SessionRouter() {
             joinCode={session.code}
             voiceEnabled={session.voiceEnabled}
             startedAt={session.startedAt}
+            sidePanel={sidePanel}
           />
         </>
       );

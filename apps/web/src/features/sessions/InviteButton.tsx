@@ -23,7 +23,7 @@ function InvitePanel({ code }: { code: string }) {
     <div className="p-3.5">
       <p className="text-[13px] font-semibold text-rt-ink">Invite people</p>
       <p className="mt-1 text-[11.5px] leading-snug text-rt-ink-muted">
-        Anyone with the link or the code can join while the session is live.
+        Anyone with the link or the code can join until the session ends.
       </p>
       <input
         ref={linkRef}
@@ -77,9 +77,10 @@ function InvitePanel({ code }: { code: string }) {
 }
 
 /**
- * The board header's Invite: a small panel under the button with the link
- * that opens the join flow and the code people read out, each a press from
- * the clipboard. The People panel's footer copies the same two things.
+ * The session header's Invite, in the lobby and on the board: a small panel
+ * under the button with the link that opens the join flow and the code people
+ * read out, each a press from the clipboard. The People panel's footer copies
+ * the same two things.
  */
 export function InviteButton({ code }: { code: string }) {
   const triggerRef = useRef<HTMLButtonElement>(null);

@@ -25,6 +25,17 @@ export const PERSON_STATUS_LABEL: Record<PersonStatus, string> = {
   'on-board': 'On the board',
 };
 
+/**
+ * Where the People panel is open. Before the session starts there is no board
+ * to be on yet, so the lobby words being present as being in the waiting room.
+ */
+export type PeoplePlace = 'board' | 'lobby';
+
+export function personStatusLabel(status: PersonStatus, place: PeoplePlace = 'board'): string {
+  if (place === 'lobby' && status === 'on-board') return 'In the waiting room';
+  return PERSON_STATUS_LABEL[status];
+}
+
 /** The call as this browser sees it. Null for a session created with no call. */
 export interface CallView {
   participants: readonly VoiceParticipant[];
@@ -118,14 +129,22 @@ export function anyoneToMute(present: readonly VoiceParticipant[], call: CallVie
 
 /**
  * The one line above the list that explains it, when it needs explaining.
- * `boardLive` is the board's own connection, which presence comes from.
+ * `boardLive` is the page's own connection, which presence comes from.
  */
-export function peopleNote(call: CallView | null, boardLive: boolean): string | null {
+export function peopleNote(
+  call: CallView | null,
+  boardLive: boolean,
+  place: PeoplePlace = 'board',
+): string | null {
   // First: while it holds, it is the one thing about the list worth knowing.
   if (!boardLive || call?.status === 'reconnecting') {
     return 'Reconnecting. This list may be out of date.';
   }
-  if (call === null) return 'No call in this session. Everyone works on the board.';
+  if (call === null) {
+    return place === 'lobby'
+      ? 'No call in this session. Everyone joins on the board.'
+      : 'No call in this session. Everyone works on the board.';
+  }
   switch (call.status) {
     case 'idle':
     case 'connecting':

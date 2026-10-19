@@ -5,10 +5,22 @@ interface ConfirmDialogProps {
   children: ReactNode;
   confirmLabel: string;
   confirmingLabel?: string;
+  /** "Cancel" unless the moment has a better word for staying put. */
+  cancelLabel?: string;
+  /**
+   * `danger` (red) for the irreversible; `primary` (the app's amber) for a
+   * go-ahead that only asks to be sure, like starting a session alone.
+   */
+  tone?: 'danger' | 'primary';
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
+
+const CONFIRM_TONE = {
+  danger: 'bg-red-600 text-white hover:bg-red-700',
+  primary: 'bg-rt-secondary text-rt-ink hover:bg-rt-secondary-deep hover:text-white',
+};
 
 /**
  * Centered overlay for irreversible exits (end session / leave session).
@@ -20,6 +32,8 @@ export function ConfirmDialog({
   children,
   confirmLabel,
   confirmingLabel,
+  cancelLabel = 'Cancel',
+  tone = 'danger',
   busy,
   onConfirm,
   onCancel,
@@ -50,13 +64,13 @@ export function ConfirmDialog({
             disabled={busy}
             className="rounded-full px-3 py-2 text-[13px] font-semibold text-rt-ink-muted hover:bg-rt-primary-tint hover:text-rt-ink"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="rounded-full bg-red-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+            className={`rounded-full px-3 py-2 text-[13px] font-semibold disabled:opacity-60 ${CONFIRM_TONE[tone]}`}
           >
             {busy ? (confirmingLabel ?? confirmLabel) : confirmLabel}
           </button>

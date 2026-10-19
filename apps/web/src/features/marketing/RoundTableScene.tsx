@@ -1,9 +1,16 @@
-import { motion, useReducedMotion } from 'motion/react';
-import type { ReactNode } from 'react';
+import { useInView, useReducedMotion } from 'motion/react';
+import { useRef, useState, type ReactNode } from 'react';
 
-import { initialsFromName, SEAT_PALETTE, seatPositions } from '../sessions/waitingRoomSeats';
+import { TableScene, type TableSeatView } from '../sessions/TableScene';
+import {
+  HOST_SLOT,
+  chairFillOrder,
+  chairsFor,
+  initialsFromName,
+  SEAT_PALETTE,
+} from '../sessions/waitingRoomSeats';
 import { ProductFrame } from './ProductFrame';
-import { DEMO, DEMO_QUESTIONS } from './story';
+import { DEMO, DEMO_QUESTIONS, DEMO_SEATS } from './story';
 
 export interface DemoSeat {
   name: string;
@@ -11,110 +18,82 @@ export interface DemoSeat {
   speaking?: boolean;
 }
 
-function namePlacement(y: number): 'above' | 'below' {
-  return y < 50 ? 'above' : 'below';
-}
+/** Only to satisfy the checker: the modulo cannot leave the palette. */
+const DEMO_FALLBACK = { background: '#4d6a74', color: '#ffffff' };
+
+/** Between arrivals in a batch, the way a lobby actually fills. */
+const ARRIVAL_GAP_MS = 120;
+
+/** Set for the whole demo room, so the table does not regrow as it fills. */
+const DEMO_CHAIRS = chairsFor(DEMO_SEATS.length);
 
 interface RoundTableSceneProps {
   seats: readonly DemoSeat[];
   joinCode?: string;
-  showNames?: boolean;
-  /** Seats arrive one after another, the way a lobby actually fills. */
+  /** Seats arrive one after another, once the table is in view. */
   stagger?: boolean;
   className?: string;
 }
 
 /**
- * Decorative top-down tabletop, painted with the waiting room's own CSS so the
- * landing page shows the real lobby rather than an illustration of it. No
- * session, socket or voice state — the seats are fixed props.
+ * The waiting room's own table (`TableScene`), so the landing page shows the
+ * real lobby rather than an illustration of it: the same chairs, place cards,
+ * crown and speaking light. No session, socket or voice state — the seats are
+ * fixed props, seated the way the lobby seats people: the leader at the head,
+ * everyone else filling in either side.
  */
 export function RoundTableScene({
   seats,
   joinCode = DEMO.joinCode,
-  showNames = false,
   stagger = false,
   className = '',
 }: RoundTableSceneProps) {
   const reduce = useReducedMotion();
-  const positions = seatPositions(seats.length, 42, 42);
-  const animateSeats = stagger && !reduce;
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, amount: 0.4 });
+  const animate = stagger && !reduce;
+  // Nobody sits down until the table is on screen, so the arrivals are seen.
+  const shown = !animate || inView;
+  // How many were there to seat when it came into view: those arrive one after
+  // another; anyone who turns up later (the hero fills over time) arrives as
+  // they come. Stored the render the table is first shown, before it paints.
+  const [batch, setBatch] = useState<number | null>(null);
+  if (shown && batch === null) setBatch(seats.length);
+
+  const order = chairFillOrder(DEMO_CHAIRS);
+  let next = 0;
+  const views: TableSeatView[] = shown
+    ? seats.map((seat, index) => {
+        const slot = seat.leader ? HOST_SLOT : (order[next++] ?? 0);
+        const swatch = SEAT_PALETTE[index % SEAT_PALETTE.length] ?? DEMO_FALLBACK;
+        return {
+          id: seat.name,
+          name: seat.name,
+          initials: initialsFromName(seat.name),
+          swatch,
+          slot,
+          isLeader: Boolean(seat.leader),
+          isSpeaking: Boolean(seat.speaking),
+          ...(animate ? { motion: 'joining' as const } : {}),
+          ...(animate && batch !== null && index < batch
+            ? { delayMs: index * ARRIVAL_GAP_MS }
+            : {}),
+        };
+      })
+    : [];
 
   return (
-    <div className={`relative aspect-square w-full ${className}`} aria-hidden="true">
-      <div className="rt-waiting-table pointer-events-none" />
-
-      <div className="absolute inset-[16%] z-10 flex items-center justify-center">
-        <motion.span
-          initial={animateSeats ? { y: 8 } : false}
-          whileInView={{ y: 0 }}
-          viewport={{ once: true }}
-          transition={{ delay: seats.length * 0.12 + 0.1, duration: 0.5 }}
-          className="rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase shadow-sm"
-        >
-          Join {joinCode}
-        </motion.span>
-      </div>
-
-      {seats.map((seat, index) => {
-        const spot = positions[index];
-        const swatch = SEAT_PALETTE[index % SEAT_PALETTE.length];
-        if (!spot || !swatch) return null;
-
-        const placement = namePlacement(spot.y);
-        const nameAbove = showNames && placement === 'above';
-
-        // Motion owns `transform` while it scales the seat in, which would
-        // otherwise wipe the CSS `translate(-50%, -50%)` and leave the ring
-        // sitting low and right of the table. `x`/`y` keep that centering
-        // inside the same transform.
-        return (
-          <motion.div
-            key={seat.name}
-            className="rt-waiting-seat"
-            style={{ left: `${spot.x}%`, top: `${spot.y}%`, x: '-50%', y: '-50%' }}
-            initial={animateSeats ? { scale: 0.6 } : false}
-            whileInView={{ scale: 1 }}
-            viewport={{ once: true, amount: 0.4 }}
-            transition={{
-              delay: index * 0.12,
-              type: 'spring',
-              stiffness: 260,
-              damping: 18,
-            }}
-          >
-            {seat.leader && !nameAbove ? (
-              <span className="pointer-events-none absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-semibold tracking-[0.08em] text-rt-secondary-deep uppercase">
-                Leader
-              </span>
-            ) : null}
-            <span
-              className="rt-voice-seat"
-              data-size="lobby"
-              data-speaking={seat.speaking ? 'true' : undefined}
-            >
-              <span
-                className={`rt-waiting-seat-bubble ${seat.leader ? 'rt-waiting-seat-bubble-leader' : ''}`}
-                style={{ background: swatch.background, color: swatch.color }}
-              >
-                <span>{initialsFromName(seat.name)}</span>
-              </span>
-            </span>
-            {showNames && nameAbove && seat.leader ? (
-              <span className="rt-landing-seat-caption" data-placement="above">
-                <span className="rt-landing-leader-tag">Leader</span>
-                <span className="rt-waiting-seat-name" data-placement="above" data-always>
-                  {seat.name}
-                </span>
-              </span>
-            ) : showNames ? (
-              <span className="rt-waiting-seat-name" data-placement={placement} data-always>
-                {seat.name}
-              </span>
-            ) : null}
-          </motion.div>
-        );
-      })}
+    <div ref={ref} className={`relative aspect-square w-full ${className}`}>
+      <TableScene
+        chairs={DEMO_CHAIRS}
+        seats={views}
+        decorative
+        centre={
+          <span className="rounded-full border border-rt-secondary/25 bg-white px-3.5 py-1.5 text-[10px] font-semibold tracking-[0.14em] text-rt-ink-faint uppercase shadow-sm">
+            Join {joinCode}
+          </span>
+        }
+      />
     </div>
   );
 }
@@ -137,8 +116,8 @@ export function LandingLobby({
         badge="Lobby"
         footer={footer}
       >
-        <div className="rt-landing-scene mx-auto w-[72%] pt-14 pb-10">
-          <RoundTableScene seats={seats} showNames stagger={stagger} joinCode={DEMO.joinCode} />
+        <div className="mx-auto w-[88%] py-3">
+          <RoundTableScene seats={seats} stagger={stagger} joinCode={DEMO.joinCode} />
         </div>
       </ProductFrame>
     </div>

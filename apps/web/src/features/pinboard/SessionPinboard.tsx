@@ -19,6 +19,7 @@ import {
   mergeRoster,
   useSidePanel,
   type CallView,
+  type SidePanelControl,
 } from '../sidepanel';
 import { CreativeStudio } from '../tools/CreativeStudio';
 import { CreativeToolsProvider } from '../tools/CreativeToolsProvider';
@@ -87,6 +88,11 @@ interface SessionPinboardProps {
   voiceEnabled: boolean;
   /** When the leader started the session (F09), for the header's running time. */
   startedAt: string | Date | null;
+  /**
+   * Which side panel feature is open, from the router, so what was open in the
+   * waiting room stays open here. Left out, the board holds its own.
+   */
+  sidePanel?: SidePanelControl;
 }
 
 export function SessionPinboard({
@@ -95,6 +101,7 @@ export function SessionPinboard({
   joinCode,
   voiceEnabled,
   startedAt,
+  sidePanel: heldPanel,
 }: SessionPinboardProps) {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? '';
@@ -197,7 +204,8 @@ export function SessionPinboard({
   // The side panel's state, and the call as the People tab reads it. Up here
   // with the rest of the hooks, for the same early-return reason; the call is
   // memoised so People's speaking tracker is not handed a new roster each render.
-  const sidePanel = useSidePanel();
+  const ownPanel = useSidePanel();
+  const sidePanel = heldPanel ?? ownPanel;
   const call = useMemo<CallView | null>(
     () =>
       voiceEnabled

@@ -42,13 +42,13 @@ export function orderParticipants(
  * Order the room and give everyone their bubble.
  *
  * The colour comes from `swatchForId`, keyed on LiveKit identity — which the
- * token mints as the user id (`issueVoiceToken`). Deliberately the *unwalked*
- * hash rather than `colorsForParticipants`: that one resolves collisions
- * against the set it is handed, so a person's fill would depend on who else
- * happened to be connected, and someone already on the rail would visibly
- * change colour when a fifth person joined. Here a person's swatch is a
- * function of that person alone, which is what makes it stable across joins,
- * drops, reconnects and every other client's screen.
+ * token mints as the user id (`issueVoiceToken`). Deliberately a plain hash
+ * rather than one that walks collisions against the room: that would make a
+ * person's fill depend on who else happened to be connected, and someone
+ * already on the rail would visibly change colour when a fifth person joined.
+ * Here a person's swatch is a function of that person alone, which is what
+ * makes it stable across joins, drops, reconnects, every other client's
+ * screen, and the waiting room's table, which uses the same rule.
  */
 export function seatParticipants(
   participants: readonly VoiceParticipant[],

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionStatePayload, SessionUserPayload } from '@roundtable/shared/events';
 
 import { api } from '../../lib/api';
@@ -11,30 +11,71 @@ interface SessionMemberRow {
 }
 
 /**
- * Live participant list for the waiting room (F08). First paint comes from
- * persisted membership (`GET /:id/members`) since it answers instantly and
- * without a socket; the join snapshot's `participants` then replaces it with
- * who is actually connected right now (docs/02 §4 — presence is in-memory,
- * membership history is persisted), and `memberJoined`/`memberLeft` keep it
- * live from there. Follows the reconnect pattern in
- * `features/pinboard/usePinboard.ts`: every `connect` re-emits `memberJoin`,
- * because a reconnected socket belongs to no rooms yet. Cleanup asks the
- * server to leave the room (`scheduleLeaveSessionRoom`): a client cannot
- * `socket.leave()` a server room, and the singleton stays connected on the
- * dashboard. The leave is deferred one tick so lobby → pinboard (and Strict
- * Mode remounts) can rejoin the same session without a presence flicker.
- *
- * `onStarted` (F09) fires on the `sessionStarted` broadcast — the caller
- * (`SessionRouter`, via `WaitingRoom`) re-fetches the session on receipt,
- * which flips `status` to `active` and switches every connected client to
- * the pinboard at the same moment, without a poll or a manual refresh.
+ * How long someone who drops out stays seated before they are drawn leaving.
+ * A refresh is a disconnect and a reconnect a moment later; held this long,
+ * it reads as nothing happening rather than as a leave and a join. The same
+ * window `SessionJoinNotices` uses on the board.
  */
-export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
-  const [participants, setParticipants] = useState<SessionUserPayload[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLive, setIsLive] = useState(false);
+export const LEAVE_HOLD_MS = 1500;
 
-  const loading = participants === null && error === null;
+/** Why the lobby is over: the Start everyone heard, or news of it on a rejoin. */
+export type LobbyExit = 'started' | 'moved-on';
+
+/**
+ * Who is in the waiting room right now (F08), live: the join snapshot's
+ * `participants` (docs/02 §4 — presence is in-memory), kept current by
+ * `memberJoined`/`memberLeft`. Null until that first snapshot.
+ *
+ * Persisted membership (`GET /:id/members`) is read too, but only for names
+ * (`memberNames`): it lists everyone who has joined and not left, including
+ * people who closed their tab days ago, so seating it first put strangers at
+ * the table who then had to leave again once the snapshot arrived. What it is
+ * good for is naming the leader while they are away.
+ *
+ * Follows the reconnect pattern in `features/pinboard/usePinboard.ts`: every
+ * `connect` re-emits `memberJoin`, because a reconnected socket belongs to no
+ * rooms yet. Cleanup asks the server to leave the room
+ * (`scheduleLeaveSessionRoom`): a client cannot `socket.leave()` a server
+ * room, and the singleton stays connected on the dashboard. The leave is
+ * deferred one tick so lobby → pinboard (and Strict Mode remounts) can rejoin
+ * the same session without a presence flicker.
+ *
+ * `onLeftLobby` fires once the session is no longer waiting, saying why:
+ * `started` on the `sessionStarted` broadcast (F09), the moment everyone shares;
+ * `moved-on` on a join snapshot that says the session is already `active` or
+ * `ended`. The second covers a socket that was down for the broadcast: it
+ * rejoins on reconnect, and the snapshot is the only word it gets that the
+ * room moved on, with no moment left to share. The caller (`WaitingRoom`, for
+ * `SessionRouter`) re-reads the session, which switches the page to the board
+ * or the ended page, without a poll or a manual refresh.
+ */
+export function useWaitingRoom(sessionId: string, onLeftLobby?: (why: LobbyExit) => void) {
+  const [participants, setParticipants] = useState<SessionUserPayload[] | null>(null);
+  const [memberNames, setMemberNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  /** The server refused this socket's join; it will not retry on its own. */
+  const [joinFailed, setJoinFailed] = useState(false);
+  const rejoinRef = useRef<(() => void) | null>(null);
+
+  // Read through a ref, so the room effect below does not depend on it: a
+  // caller passing a fresh callback each render would otherwise leave and
+  // rejoin the room every render, and each rejoin's snapshot re-renders.
+  const onLeftLobbyRef = useRef(onLeftLobby);
+  useEffect(() => {
+    onLeftLobbyRef.current = onLeftLobby;
+  });
+
+  const loading = participants === null && !joinFailed;
+
+  const rememberNames = useCallback((people: readonly SessionUserPayload[]) => {
+    setMemberNames((prev) => {
+      if (people.every((person) => prev.get(person.id) === person.displayName)) return prev;
+      const next = new Map(prev);
+      for (const person of people) next.set(person.id, person.displayName);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -44,14 +85,10 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
       try {
         const members = await api.get<SessionMemberRow[]>(`/api/sessions/${sessionId}/members`);
         if (!cancelled) {
-          // Never overwrites a live snapshot that already arrived — this is
-          // strictly the placeholder before the socket confirms who's really here.
-          setParticipants(
-            (prev) => prev ?? members.map((m) => ({ id: m.userId, displayName: m.displayName })),
-          );
+          rememberNames(members.map((m) => ({ id: m.userId, displayName: m.displayName })));
         }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load members');
+      } catch {
+        // Names only. Without them an absent leader is "the leader".
       }
     }
 
@@ -59,17 +96,27 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, rememberNames]);
 
   useEffect(() => {
     if (!sessionId) return;
     const socket = getSocket();
     let cancelled = false;
+    const heldLeaves = new Map<string, ReturnType<typeof setTimeout>>();
+
+    const releaseLeave = (id: string) => {
+      const held = heldLeaves.get(id);
+      if (held === undefined) return false;
+      clearTimeout(held);
+      heldLeaves.delete(id);
+      return true;
+    };
 
     const join = () => {
       joinSessionRoom(sessionId, (res) => {
         if (cancelled) return;
         setIsLive(res.ok);
+        setJoinFailed(!res.ok);
         if (!res.ok) {
           console.error(
             `[waiting-room] could not join the session room: ${res.error ?? 'unknown'}`,
@@ -77,17 +124,31 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
         }
       });
     };
+    rejoinRef.current = join;
 
     const onConnect = () => join();
     const onDisconnect = () => setIsLive(false);
 
     const onSessionState = (snapshot: SessionStatePayload) => {
       if (cancelled || snapshot.sessionId !== sessionId) return;
-      setError(null);
+      // The snapshot is the whole truth: nothing held from before it stands.
+      for (const id of [...heldLeaves.keys()]) releaseLeave(id);
+      setJoinFailed(false);
       setParticipants(snapshot.participants);
+      rememberNames(snapshot.participants);
+      setViewerId(snapshot.viewer.id);
+      // Named rather than "not lobby", so a snapshot without a status (an
+      // older server, a test fixture) is not read as the session moving on.
+      if (snapshot.status === 'active' || snapshot.status === 'ended') {
+        onLeftLobbyRef.current?.('moved-on');
+      }
     };
 
     const onJoined = ({ user }: { user: SessionUserPayload }) => {
+      if (cancelled) return;
+      // Back within the hold: they never left, as far as anyone can see.
+      releaseLeave(user.id);
+      rememberNames([user]);
       setParticipants((prev) => {
         const base = prev ?? [];
         return base.some((p) => p.id === user.id) ? base : [...base, user];
@@ -95,12 +156,21 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
     };
 
     const onLeft = ({ user }: { user: SessionUserPayload }) => {
-      setParticipants((prev) => (prev ? prev.filter((p) => p.id !== user.id) : prev));
+      if (cancelled) return;
+      releaseLeave(user.id);
+      heldLeaves.set(
+        user.id,
+        setTimeout(() => {
+          heldLeaves.delete(user.id);
+          if (cancelled) return;
+          setParticipants((prev) => (prev ? prev.filter((p) => p.id !== user.id) : prev));
+        }, LEAVE_HOLD_MS),
+      );
     };
 
     const onStartedEvent = (payload: { sessionId: string; startedAt: string }) => {
       if (cancelled || payload.sessionId !== sessionId) return;
-      onStarted?.();
+      onLeftLobbyRef.current?.('started');
     };
 
     if (socket.connected) onConnect();
@@ -113,6 +183,8 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
 
     return () => {
       cancelled = true;
+      rejoinRef.current = null;
+      for (const held of heldLeaves.values()) clearTimeout(held);
       scheduleLeaveSessionRoom(sessionId);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
@@ -121,7 +193,10 @@ export function useWaitingRoom(sessionId: string, onStarted?: () => void) {
       socket.off('memberLeft', onLeft);
       socket.off('sessionStarted', onStartedEvent);
     };
-  }, [sessionId, onStarted]);
+  }, [sessionId, rememberNames]);
 
-  return { participants, loading, error, isLive };
+  /** Ask to join again, after the server refused. */
+  const retryJoin = useCallback(() => rejoinRef.current?.(), []);
+
+  return { participants, memberNames, viewerId, loading, isLive, joinFailed, retryJoin };
 }

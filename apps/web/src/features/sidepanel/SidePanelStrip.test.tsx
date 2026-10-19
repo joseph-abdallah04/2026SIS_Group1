@@ -52,6 +52,23 @@ describe('SidePanelStrip', () => {
     );
   });
 
+  it('has only the buttons it is given, in strip order', () => {
+    render(
+      <SidePanelStrip
+        tabs={['chat', 'people']}
+        active={null}
+        onSelect={() => undefined}
+        panelId="panel"
+        buttonRef={() => undefined}
+      />,
+    );
+    expect(screen.getAllByRole('button').map((button) => button.dataset.sideTab)).toEqual([
+      'people',
+      'chat',
+    ]);
+    expect(mark()).toBeUndefined();
+  });
+
   it('controls the panel only from the pressed button', () => {
     renderStrip({}, 'people');
     expect(screen.getByRole('button', { name: 'People' })).toHaveAttribute(

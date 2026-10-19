@@ -14,9 +14,12 @@ export interface AssistantMarks {
 }
 
 interface SidePanelStripProps {
+  /** Which buttons it has, in strip order. The waiting room's has no assistant. */
+  tabs?: readonly SidePanelTab[];
   active: SidePanelTab | null;
   onSelect: (tab: SidePanelTab) => void;
-  assistant: AssistantMarks;
+  /** The assistant button's marks. Left out, it shows none. */
+  assistant?: AssistantMarks;
   /** The open panel's body, which the pressed button controls. */
   panelId: string;
   /** Each button, so focus can come back to the one whose panel just closed. */
@@ -86,19 +89,22 @@ function AssistantMark({ unread, unconfigured, busy }: AssistantMarks) {
  * pointing at the panel it opened.
  */
 export function SidePanelStrip({
+  tabs,
   active,
   onSelect,
   assistant,
   panelId,
   buttonRef,
 }: SidePanelStripProps) {
+  const shown = tabs ? SIDE_PANEL_TABS.filter(({ tab }) => tabs.includes(tab)) : SIDE_PANEL_TABS;
   return (
     <div role="group" aria-label="Side panel" className="flex flex-col items-center gap-1">
-      {SIDE_PANEL_TABS.map(({ tab, label, Icon }) => {
+      {shown.map(({ tab, label, Icon }) => {
         const pressed = active === tab;
         // The marks only matter while the assistant's panel is away; open, the
         // panel says the same things in full.
-        const note = tab === 'assistant' && !pressed ? assistantNote(assistant) : null;
+        const marks = tab === 'assistant' && !pressed ? assistant : undefined;
+        const note = marks ? assistantNote(marks) : null;
         return (
           <Tooltip key={tab} label={label} placement="left">
             <button
@@ -122,7 +128,7 @@ export function SidePanelStrip({
                 />
               ) : null}
               <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
-              {tab === 'assistant' && !pressed ? <AssistantMark {...assistant} /> : null}
+              {marks ? <AssistantMark {...marks} /> : null}
             </button>
           </Tooltip>
         );

@@ -85,6 +85,21 @@ describe('BoardHeader', () => {
     expect(within(status()).getByText('Session ended')).toBeInTheDocument();
   });
 
+  // The waiting room's: connected, but nothing has started, so never "Live".
+  it('says "Connected" for a session that is waiting to start', () => {
+    renderHeader({
+      question: null,
+      questionNumber: null,
+      phase: 'Waiting room',
+      phaseDetails: ['4 questions'],
+      connection: 'waiting',
+    });
+    expect(screen.getByRole('heading', { name: 'Onboarding retro' })).toBeInTheDocument();
+    expect(within(status()).getByText('Connected')).toBeInTheDocument();
+    expect(within(status()).queryByText('Live')).toBeNull();
+    expect(shown()).toMatch(/^Waiting room·4 questions/);
+  });
+
   it('keeps people apart from the controls with a divider, and leaves the middle empty', () => {
     renderHeader({
       people: <button type="button">People</button>,

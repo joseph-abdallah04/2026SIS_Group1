@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  HOST_SLOT,
   SEAT_PALETTE,
-  colorsForParticipants,
-  idsThatJustJoined,
+  SEAT_RING_PERCENT,
+  chairFillOrder,
+  chairsFor,
   initialsFromName,
-  orderSeats,
+  reseat,
   seatPositions,
+  seatSizePercent,
+  swatchForId,
 } from './waitingRoomSeats';
 
 describe('initialsFromName', () => {
@@ -31,49 +35,13 @@ describe('initialsFromName', () => {
   });
 });
 
-describe('colorsForParticipants', () => {
-  it('gives the same person the same swatch', () => {
-    const first = colorsForParticipants(['user-a']);
-    const second = colorsForParticipants(['user-a']);
-    expect(first['user-a']).toEqual(second['user-a']);
-  });
-
-  it('assigns unique swatches in a typical room', () => {
-    const ids = ['u1', 'u2', 'u3', 'u4', 'u5', 'u6'];
-    const colors = colorsForParticipants(ids);
-    const backgrounds = ids.map((id) => colors[id]?.background);
-    expect(new Set(backgrounds).size).toBe(ids.length);
-  });
-
-  it('resolves collisions the same way regardless of input order', () => {
-    const ids = ['zeta', 'alpha', 'mu'];
-    const forward = colorsForParticipants(ids);
-    const reverse = colorsForParticipants([...ids].reverse());
-    expect(forward).toEqual(reverse);
+describe('swatchForId', () => {
+  it('gives the same person the same swatch every time', () => {
+    expect(swatchForId('user-a')).toEqual(swatchForId('user-a'));
   });
 
   it('picks from the curated palette', () => {
-    const colors = colorsForParticipants(['anyone']);
-    expect(SEAT_PALETTE).toContainEqual(colors.anyone);
-  });
-});
-
-describe('orderSeats', () => {
-  it('pins the leader at index 0 and keeps everyone else in arrival order', () => {
-    const people = [
-      { id: 'a', displayName: 'A' },
-      { id: 'leader', displayName: 'L' },
-      { id: 'b', displayName: 'B' },
-    ];
-    expect(orderSeats(people, 'leader').map((p) => p.id)).toEqual(['leader', 'a', 'b']);
-  });
-
-  it('leaves the list as-is when the leader is not present', () => {
-    const people = [
-      { id: 'a', displayName: 'A' },
-      { id: 'b', displayName: 'B' },
-    ];
-    expect(orderSeats(people, 'leader').map((p) => p.id)).toEqual(['a', 'b']);
+    expect(SEAT_PALETTE).toContainEqual(swatchForId('anyone'));
   });
 });
 
@@ -93,12 +61,67 @@ describe('seatPositions', () => {
   });
 });
 
-describe('idsThatJustJoined', () => {
-  it('pops nobody on the first snapshot', () => {
-    expect(idsThatJustJoined(null, ['a', 'b'])).toEqual(new Set());
+describe('chairs', () => {
+  it('sets two spare chairs, and never fewer than eight', () => {
+    expect(chairsFor(0)).toBe(8);
+    expect(chairsFor(6)).toBe(8);
+    expect(chairsFor(7)).toBe(9);
+    expect(chairsFor(20)).toBe(22);
   });
 
-  it('returns only ids that were not already seen', () => {
-    expect(idsThatJustJoined(new Set(['a']), ['a', 'b'])).toEqual(new Set(['b']));
+  it('fills either side of the host in turn, never the host’s own chair', () => {
+    expect(chairFillOrder(8)).toEqual([1, 7, 2, 6, 3, 5, 4]);
+    expect(chairFillOrder(9)).toEqual([1, 8, 2, 7, 3, 6, 4, 5]);
+    expect(chairFillOrder(8)).not.toContain(HOST_SLOT);
+  });
+
+  it('shrinks seats for a crowded table before they would touch', () => {
+    expect(seatSizePercent(8)).toBe(11.5);
+    expect(seatSizePercent(30)).toBeLessThan(seatSizePercent(16));
+    // Never wider than the arc each chair has round the ring.
+    const arc = (2 * Math.PI * SEAT_RING_PERCENT) / 30;
+    expect(seatSizePercent(30)).toBeLessThan(arc);
+  });
+});
+
+describe('reseat', () => {
+  const slotsOf = (seating: { slots: ReadonlyMap<string, number> }) =>
+    Object.fromEntries(seating.slots);
+
+  it('seats the leader at the head and everyone else either side', () => {
+    const seating = reseat(null, ['a', 'leader', 'b', 'c'], 'leader');
+    expect(seating.chairs).toBe(8);
+    expect(slotsOf(seating)).toEqual({ leader: 0, a: 1, b: 7, c: 2 });
+  });
+
+  it('keeps the host’s chair for them while they are away', () => {
+    const seating = reseat(null, ['a', 'b'], 'leader');
+    expect([...seating.slots.values()]).not.toContain(HOST_SLOT);
+  });
+
+  it('leaves everyone in their chair when someone arrives, and seats the newcomer in the next', () => {
+    const before = reseat(null, ['leader', 'a', 'b'], 'leader');
+    const after = reseat(before, ['leader', 'a', 'b', 'c'], 'leader');
+    expect(slotsOf(after)).toEqual({ ...slotsOf(before), c: 2 });
+  });
+
+  it('frees a chair for the next arrival once someone has gone', () => {
+    const before = reseat(null, ['leader', 'a', 'b'], 'leader');
+    const gone = reseat(before, ['leader', 'b'], 'leader');
+    expect(slotsOf(gone)).toEqual({ leader: 0, b: 7 });
+    // a's old chair, the first in the fill order, goes to whoever comes next.
+    expect(slotsOf(reseat(gone, ['leader', 'b', 'd'], 'leader')).d).toBe(1);
+  });
+
+  it('grows the table by two when it is full, keeping everyone’s order round it', () => {
+    const ids = ['leader', 'a', 'b', 'c', 'd', 'e', 'f', 'g'];
+    const full = reseat(null, ids.slice(0, 7), 'leader');
+    expect(full.chairs).toBe(9);
+    const grown = reseat(full, [...ids, 'h', 'i'], 'leader');
+    expect(grown.chairs).toBeGreaterThan(full.chairs);
+    const order = chairFillOrder(grown.chairs);
+    const rank = (id: string) => order.indexOf(grown.slots.get(id) ?? -1);
+    expect(['a', 'b', 'c', 'd', 'e', 'f'].map(rank)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(new Set(grown.slots.values()).size).toBe(grown.slots.size);
   });
 });

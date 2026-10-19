@@ -80,8 +80,8 @@ export function SessionJoinNotices() {
     };
   }, []);
 
-  if (notices.length === 0) return null;
-
+  // Always there, empty when there is nothing to say: a live region added at
+  // the moment it has something in it is easily missed by a screen reader.
   return (
     <div
       aria-live="polite"
