@@ -4,10 +4,10 @@ import { Search } from 'lucide-react';
 import { type SessionStatus, type SessionSummary } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../components/RoundTableLogo';
-import { Button } from '../components/ui/Button';
 import { logout } from '../features/auth/api';
 import { JoinByCodeForm } from '../features/sessions/JoinByCodeForm';
 import { SessionCardActions } from '../features/sessions/SessionCardActions';
+import { TemplateShortcuts } from '../features/sessions/setup/TemplateShortcuts';
 import { liveMembershipOf, useSessions } from '../features/sessions/useSessions';
 import { clearToken } from '../lib/auth';
 import { disconnectSocket } from '../lib/socket';
@@ -230,11 +230,18 @@ export function DashboardPage() {
       </header>
 
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-6 py-8">
-        <div className="flex items-center justify-between">
-          <h1 className="text-[19px] font-semibold tracking-[-0.01em]">My sessions</h1>
-          <Link to="/sessions/new">
-            <Button type="button">+ Create session</Button>
-          </Link>
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center justify-between">
+            <h1 className="text-[19px] font-semibold tracking-[-0.01em]">My sessions</h1>
+            {/* A link drawn as the primary button, rather than a button inside a link. */}
+            <Link
+              to="/sessions/new"
+              className="inline-flex min-h-10 items-center justify-center rounded-full bg-rt-secondary px-4 text-[13px] font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              + Create session
+            </Link>
+          </div>
+          <TemplateShortcuts />
         </div>
 
         <JoinByCodeForm />

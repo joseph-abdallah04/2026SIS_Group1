@@ -1,13 +1,15 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { DoorOpen, Pencil } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import type { Session } from '@roundtable/shared';
 
-import { RoundTableLogo } from '../../components/RoundTableLogo';
-import { Button } from '../../components/ui/Button';
 import { api, ApiClientError } from '../../lib/api';
 import { useCurrentUserId } from '../../lib/currentUser';
+import type { DraftPageState } from './CreateSessionPage';
+import { agendaMinutes, LobbyAgenda } from './LobbyAgenda';
+import { RoomSetMoment } from './setup/RoomSetMoment';
+import { SetupHeader } from './setup/SetupHeader';
 import type { SessionDetail } from './useSessionDetail';
-import { NoVoteTag } from './VoteToggle';
 
 interface SessionDraftPageProps {
   session: SessionDetail;
@@ -15,24 +17,47 @@ interface SessionDraftPageProps {
   onOpened: () => void;
 }
 
+/** The session's facts in a line: questions, length, call. */
+function facts(session: SessionDetail): string[] {
+  const count = session.questions.length;
+  const minutes = agendaMinutes(
+    session.questions,
+    session.discussionTimerSeconds,
+    session.votingTimerSeconds,
+  );
+  return [
+    `${count} ${count === 1 ? 'question' : 'questions'}`,
+    minutes === null ? 'No timers' : `About ${minutes} min`,
+    session.voiceEnabled ? 'Live call' : 'No call',
+  ];
+}
+
 /**
- * F04's setup screen plus F06's "open for joining" action. Opening jumps
- * straight to the waiting room (via `onOpened`); the join code and link live
- * there, next to the people who are arriving.
+ * A saved draft (F04), and F06's "open for joining": the setup pages' look,
+ * with the questions as the lobby will show them. Opening plays the "room
+ * set" moment, then the waiting room takes over (via `onOpened`); the join
+ * code and link live there, next to the people who are arriving. Edit goes
+ * back to the form (F05), so a typo is one click away rather than via the
+ * dashboard.
  */
 export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
   const navigate = useNavigate();
   const [opening, setOpening] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Opened: its code, while the moment plays.
+  const [opened, setOpened] = useState<{ code: string | null } | null>(null);
+  // Arriving from "Open the room" when the draft was made but would not open.
+  const arrival = useLocation().state as DraftPageState | null;
+  const [error, setError] = useState<string | null>(arrival?.openError ?? null);
 
   const isLeader = session.leaderId === useCurrentUserId();
+  const [questionsFact, ...restFacts] = facts(session);
 
   async function handleOpen() {
     setOpening(true);
     setError(null);
     try {
-      await api.post<Session>(`/api/sessions/${session.id}/open`, {});
-      onOpened();
+      const open = await api.post<Session>(`/api/sessions/${session.id}/open`, {});
+      setOpened({ code: open.code });
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : 'Failed to open the session');
       setOpening(false);
@@ -40,67 +65,84 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <header className="flex shrink-0 items-center gap-4 border-b border-rt-secondary/40 bg-rt-secondary-wash px-6 py-[13px] text-rt-ink">
-        <RoundTableLogo />
-        <span className="text-[13px] font-semibold tracking-[-0.01em]">Session setup</span>
-        <Link
-          to="/dashboard"
-          className="ml-auto text-[12px] font-semibold text-rt-ink/70 hover:text-rt-ink hover:underline"
-        >
-          Dashboard
-        </Link>
-      </header>
+    <main className="rt-setup-page flex h-dvh flex-col text-rt-ink">
+      <SetupHeader
+        current="Draft"
+        status="Not joinable yet"
+        onDashboard={() => navigate('/dashboard')}
+      />
 
-      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-6 py-10">
-        <div>
-          <h1 className="text-[19px] font-semibold tracking-[-0.01em]">{session.title}</h1>
-          <p className="mt-1 text-[13px] text-rt-ink-muted">Draft: not joinable yet</p>
-        </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4 px-4 pt-6 pb-10 sm:px-6 sm:pt-7">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-bold tracking-[0.1em] text-rt-secondary-deep uppercase">
+              Draft session
+            </span>
+            <h1 className="text-[22px] leading-tight font-semibold tracking-[-0.01em]">
+              {session.title}
+            </h1>
+            <p className="flex flex-wrap items-center gap-x-2 text-[12.5px] text-rt-ink-muted">
+              <span className="font-semibold text-rt-ink">{questionsFact}</span>
+              {restFacts.map((fact) => (
+                <span key={fact} className="inline-flex items-center gap-2">
+                  <span aria-hidden className="size-[3px] rounded-full bg-[#c9bfae]" />
+                  <span className="sr-only">, </span>
+                  {fact}
+                </span>
+              ))}
+              <span className="inline-flex items-center gap-2">
+                <span aria-hidden className="size-[3px] rounded-full bg-[#c9bfae]" />
+                <span className="sr-only">, </span>
+                Not joinable until it is opened
+              </span>
+            </p>
+          </div>
 
-        <ol className="flex flex-col gap-2">
-          {session.questions.map((question, index) => (
-            <li
-              key={question.id}
-              className="flex items-baseline gap-2 rounded-2xl border border-rt-tertiary bg-rt-surface px-3 py-2 text-[13px]"
-            >
-              <span className="font-semibold text-rt-ink-faint">{index + 1}.</span>
-              <span className="flex-1 text-rt-ink">{question.text}</span>
-              {question.votingEnabled ? null : <NoVoteTag />}
-            </li>
-          ))}
-        </ol>
+          <LobbyAgenda
+            questions={session.questions}
+            discussionTimerSeconds={session.discussionTimerSeconds}
+            votingTimerSeconds={session.votingTimerSeconds}
+          />
 
-        {!isLeader && (
-          <>
+          {!isLeader && (
             <p className="text-[13px] text-rt-ink-muted">
               Only the session leader can open this for joining.
             </p>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => navigate('/dashboard')}
-              className="self-start"
-            >
-              Back to dashboard
-            </Button>
-          </>
-        )}
+          )}
 
-        {isLeader && (
-          <>
-            {error && <p className="text-[13px] text-red-600">{error}</p>}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" onClick={() => void handleOpen()} disabled={opening}>
-                {opening ? 'Opening…' : 'Open for joining'}
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => navigate('/dashboard')}>
-                Back to dashboard
-              </Button>
+          {isLeader && (
+            <div className="flex flex-col gap-3">
+              {error && (
+                <p role="alert" className="text-[13px] text-red-700">
+                  {error}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => void handleOpen()}
+                  disabled={opening}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-rt-secondary px-[18px] text-[13.5px] font-semibold text-rt-ink shadow-[0_1px_0_rgba(122,106,76,0.25),0_6px_16px_rgba(224,163,60,0.28)] transition-colors hover:enabled:bg-rt-secondary-deep hover:enabled:text-white focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <DoorOpen aria-hidden size={16} />
+                  {opening ? 'Opening…' : 'Open the room'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/sessions/${session.id}/edit`)}
+                  disabled={opening}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-rt-tertiary bg-white px-[18px] text-[13.5px] font-semibold text-rt-ink hover:enabled:bg-[#f6f2ea] focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Pencil aria-hidden size={14} />
+                  Edit
+                </button>
+              </div>
             </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
+
+      {opened ? <RoomSetMoment title={session.title} code={opened.code} onDone={onOpened} /> : null}
     </main>
   );
 }

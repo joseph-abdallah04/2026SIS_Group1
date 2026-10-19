@@ -2,6 +2,7 @@ import { Check, Eye, ScreenShare, SkipForward } from 'lucide-react';
 import { useEffect, useRef, type LiHTMLAttributes, type ReactNode } from 'react';
 
 import { OverlayScrollbar } from '../../components/OverlayScrollbar';
+import { REORDER_MS } from '../../lib/dragReorder';
 import type { AgendaStepState } from './agendaSummary';
 
 /**
@@ -10,12 +11,7 @@ import type { AgendaStepState } from './agendaSummary';
  * over or never reached, and `outline` is a note beside the status rather
  * than a status.
  */
-/**
- * How long a row takes to slide out of a dragged question's way, or for the
- * dragged one to ease into its place. Long enough to follow by eye, short
- * enough to keep up with the pointer.
- */
-export const REORDER_MS = 240;
+export { REORDER_MS };
 
 /**
  * The one shape shared by the question in play, a question being edited, one

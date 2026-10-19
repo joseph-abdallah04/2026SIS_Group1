@@ -10,6 +10,16 @@ import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/s
 
 import { BoardRail } from '../../components/BoardRail';
 import { PhaseTimer } from '../../components/PhaseTimer';
+import {
+  boxAt,
+  droppedOrder,
+  landingIndex,
+  landingOffset,
+  measureRows,
+  rubberBand,
+  slideShifts,
+  type RowLayout,
+} from '../../lib/dragReorder';
 import { CARD_INK, REACTION_HOVER_FILL, REACTION_ON_BORDER } from '../pinboard/pinboardTokens';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
@@ -259,59 +269,6 @@ function EndsWith({
   );
 }
 
-/** Where the rows a dragged question can trade places with sat when it lifted. */
-interface RowLayout {
-  ids: string[];
-  boxes: { top: number; bottom: number }[];
-  /** The dragged row's index. */
-  self: number;
-  /** How far a row slides to make room: the dragged row's height and the gap after it. */
-  step: number;
-  /** How far up and down the dragged row may travel: level with the first and the last. */
-  min: number;
-  max: number;
-}
-
-/**
- * Measured once, as the drag begins: the rows are about to slide, and their
- * boxes from then on would say where they have gone, not where they belong.
- */
-function measureRows(row: HTMLElement, id: string): RowLayout {
-  const list = row.parentElement;
-  const rows = list ? [...list.querySelectorAll<HTMLElement>('[data-question-id]')] : [row];
-  const ids = rows.map((element) => element.dataset.questionId ?? '');
-  const boxes = rows.map((element) => {
-    const box = element.getBoundingClientRect();
-    return { top: box.top, bottom: box.bottom };
-  });
-  const self = Math.max(0, ids.indexOf(id));
-  const gap = list ? Number.parseFloat(getComputedStyle(list).rowGap) || 0 : 0;
-  const own = boxAt(boxes, self);
-  return {
-    ids,
-    boxes,
-    self,
-    step: own.bottom - own.top + gap,
-    min: Math.min(0, boxAt(boxes, 0).top - own.top),
-    max: Math.max(0, boxAt(boxes, boxes.length - 1).bottom - own.bottom),
-  };
-}
-
-function boxAt(boxes: RowLayout['boxes'], index: number) {
-  return boxes[index] ?? { top: 0, bottom: 0 };
-}
-
-/** The most a dragged row moves past the first or last question it can trade with. */
-const RUBBER_MAX = 14;
-
-/**
- * How far a row dragged `overshoot` pixels past its limit actually goes: about
- * a third as far at first, closing on `RUBBER_MAX` however far it is pulled.
- */
-function rubberBand(overshoot: number) {
-  return Math.sign(overshoot) * RUBBER_MAX * (1 - Math.exp(-Math.abs(overshoot) / 40));
-}
-
 /** `questions`, with the ones in `held` back in that order, in the places they fill. */
 function holdOrder(questions: Question[], held: string[]) {
   const byId = new Map(questions.map((question) => [question.id, question]));
@@ -323,42 +280,12 @@ function holdOrder(questions: Question[], held: string[]) {
 }
 
 /**
- * Whose place a dragged row takes: the furthest row its leading edge has
- * passed the middle of, going the way it is moving. Edges rather than the
- * dragged row's own middle, which on a row taller than the rest (the one being
- * viewed, with its chip) could still sit inside its own place with the row
- * already as far as it can go.
- */
-function landingIndex({ boxes, self }: RowLayout, offset: number) {
-  const own = boxAt(boxes, self);
-  const middle = (index: number) => (boxAt(boxes, index).top + boxAt(boxes, index).bottom) / 2;
-  let target = self;
-  if (offset > 0) {
-    for (let i = self + 1; i < boxes.length; i++) {
-      if (middle(i) <= own.bottom + offset) target = i;
-    }
-  } else if (offset < 0) {
-    for (let i = self - 1; i >= 0; i--) {
-      if (middle(i) >= own.top + offset) target = i;
-    }
-  }
-  return target;
-}
-
-/**
  * How tall the card for the question in play is right now, if there is one.
  * The add form opens at that height: its box starts empty, a line tall, and
  * the card's question may run to more.
  */
 function liveCardHeight() {
   return document.querySelector<HTMLElement>('[data-agenda-card]')?.getBoundingClientRect().height;
-}
-
-/** How far the dragged row travels to sit in the gap opened at `target`. */
-function landingOffset({ boxes, self }: RowLayout, target: number) {
-  const own = boxAt(boxes, self);
-  const there = boxAt(boxes, target);
-  return target > self ? there.bottom - own.bottom : there.top - own.top;
 }
 
 /**
@@ -890,19 +817,15 @@ export function AgendaPanel({
             // A few pixels of wobble is still a click.
             if (Math.abs(travelled) < 4) return;
             event.currentTarget.setPointerCapture(event.pointerId);
-            started.layout = measureRows(event.currentTarget, question.id);
+            started.layout = measureRows(event.currentTarget, question.id, 'data-question-id');
           }
-          const { ids, self, step, min, max } = started.layout;
+          const { min, max } = started.layout;
           const offset = Math.min(max, Math.max(min, travelled));
           const target = landingIndex(started.layout, offset);
           started.target = target;
           // Every row between its place and the one it would take slides one
           // place towards where it came from.
-          const shifts: Record<string, number> = {};
-          for (let i = Math.min(self, target); i <= Math.max(self, target); i++) {
-            const id = ids[i];
-            if (i !== self && id) shifts[id] = target > self ? -step : step;
-          }
+          const shifts = slideShifts(started.layout, target);
           // Past the first or last, the row gives a little and no more, so
           // the end is felt rather than hit; let go, it springs back.
           const give = rubberBand(travelled - offset);
@@ -922,8 +845,7 @@ export function AgendaPanel({
             setDrag({ id: question.id, offset: 0, shifts: {}, settling: true });
             return;
           }
-          const expected = ids.filter((id) => id !== question.id);
-          expected.splice(target, 0, question.id);
+          const expected = droppedOrder(layout, target);
           const list = event.currentTarget.parentElement;
           if (list) {
             const listTop = list.getBoundingClientRect().top;
