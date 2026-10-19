@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { VoiceParticipant } from '../voice';
-import { anyoneToMute, mergeRoster, peopleNote, peopleRows, type CallView } from './peopleRoster';
+import {
+  anyoneToMute,
+  mergeRoster,
+  peopleNote,
+  peopleRows,
+  personStatusLabel,
+  type CallView,
+} from './peopleRoster';
 
 function person(
   identity: string,
@@ -120,5 +127,20 @@ describe('peopleNote', () => {
     expect(peopleNote(call([], { status: 'reconnecting' }), true)).toMatch(/reconnecting/i);
     expect(peopleNote(null, false)).toMatch(/reconnecting/i);
     expect(peopleNote(call([]), false)).toMatch(/reconnecting/i);
+  });
+
+  it('words a session with no call for the waiting room there', () => {
+    expect(peopleNote(null, true, 'lobby')).toBe(
+      'No call in this session. Everyone joins on the board.',
+    );
+    expect(peopleNote(null, false, 'lobby')).toMatch(/reconnecting/i);
+  });
+});
+
+describe('personStatusLabel', () => {
+  it('says "In the waiting room" for presence before the board exists, and nothing else changes', () => {
+    expect(personStatusLabel('on-board')).toBe('On the board');
+    expect(personStatusLabel('on-board', 'lobby')).toBe('In the waiting room');
+    expect(personStatusLabel('muted', 'lobby')).toBe('Muted');
   });
 });

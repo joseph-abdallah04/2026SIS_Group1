@@ -101,10 +101,10 @@ describe('seatParticipants', () => {
   });
 
   it('does not recolour anyone when the room changes around them', () => {
-    // The bug this guards: `colorsForParticipants` resolves collisions against
-    // whichever set it is handed, so seating the rail with it made a person's
-    // fill depend on who else was connected — about a fifth of five-person
-    // rooms visibly recoloured someone when the next person joined.
+    // The bug this guards: a colour rule that resolved collisions against
+    // whichever set it was handed made a person's fill depend on who else was
+    // connected — about a fifth of five-person rooms visibly recoloured
+    // someone when the next person joined.
     const alone = seatParticipants([person({ identity: 'user-15' })]);
     const crowded = seatParticipants(
       ['user-15', 'user-0', 'user-3', 'user-7'].map((identity) => person({ identity })),

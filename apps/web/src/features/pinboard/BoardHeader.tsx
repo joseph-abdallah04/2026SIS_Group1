@@ -2,8 +2,11 @@ import type { ReactNode } from 'react';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 
-/** The board's own connection, as the status line words it. */
-export type BoardConnection = 'live' | 'reconnecting' | 'ended';
+/**
+ * The page's own connection, as the status line words it. `waiting` is the
+ * lobby's: connected, but the session has not started, so not yet "Live".
+ */
+export type BoardConnection = 'live' | 'waiting' | 'reconnecting' | 'ended';
 
 interface BoardHeaderProps {
   /** The question on the board, or null when there is none: the agenda is done. */
@@ -44,38 +47,62 @@ function Sep() {
   );
 }
 
-function Connection({ state }: { state: BoardConnection }) {
-  if (state === 'reconnecting') {
-    // Only the exception used to be worth a pill. Here it simply takes the
-    // place of "Live", in the board's amber, pulsing until it is live again.
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 font-medium text-rt-secondary-deep"
-        title="Not receiving live updates; reconnecting"
-      >
-        <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-rt-secondary" />
-        Reconnecting…
-      </span>
-    );
-  }
-  if (state === 'ended') {
-    return (
-      <span className="inline-flex items-center gap-1.5 font-medium text-rt-ink-muted">
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-rt-tertiary" />
-        Session ended
-      </span>
-    );
-  }
+/** The speaking ring's green: the one hue that means "connected and working" here. */
+function GreenDot() {
   return (
-    <span className="inline-flex items-center gap-1.5 font-semibold text-rt-ink">
-      {/* The speaking ring's green: the one hue that means "live" here. */}
-      <span
-        aria-hidden="true"
-        className="size-1.5 rounded-full bg-[#2f8f5b] shadow-[0_0_0_3px_rgba(47,143,91,0.14)]"
-      />
-      Live
-    </span>
+    <span
+      aria-hidden="true"
+      className="size-1.5 rounded-full bg-[#2f8f5b] shadow-[0_0_0_3px_rgba(47,143,91,0.14)]"
+    />
   );
+}
+
+/**
+ * A switch the checker holds to every state, so a new one cannot fall through
+ * to "Live" by default the way an `if` chain would let it.
+ */
+function Connection({ state }: { state: BoardConnection }) {
+  switch (state) {
+    case 'reconnecting':
+      // Only the exception used to be worth a pill. Here it simply takes the
+      // place of "Live", in the board's amber, pulsing until it is live again.
+      return (
+        <span
+          className="inline-flex items-center gap-1.5 font-medium text-rt-secondary-deep"
+          title="Not receiving live updates; reconnecting"
+        >
+          <span
+            aria-hidden="true"
+            className="size-1.5 animate-pulse rounded-full bg-rt-secondary"
+          />
+          Reconnecting…
+        </span>
+      );
+    case 'ended':
+      return (
+        <span className="inline-flex items-center gap-1.5 font-medium text-rt-ink-muted">
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-rt-tertiary" />
+          Session ended
+        </span>
+      );
+    case 'waiting':
+      return (
+        <span
+          className="inline-flex items-center gap-1.5 font-semibold text-rt-ink"
+          title="Connected. The session starts when the leader starts it."
+        >
+          <GreenDot />
+          Connected
+        </span>
+      );
+    case 'live':
+      return (
+        <span className="inline-flex items-center gap-1.5 font-semibold text-rt-ink">
+          <GreenDot />
+          Live
+        </span>
+      );
+  }
 }
 
 /**

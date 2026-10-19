@@ -44,6 +44,18 @@ describe('useStartSession', () => {
     expect(post).toHaveBeenCalledWith('/api/sessions/s1/start', {});
   });
 
+  // The page switches to the board on the broadcast, a moment after this
+  // resolves. A button handed back in between could start it a second time.
+  it('stays starting once the start has gone through', async () => {
+    const { result } = renderHook(() => useStartSession('s1'));
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(result.current.starting).toBe(true);
+  });
+
   it('surfaces a non-leader refusal', async () => {
     post.mockRejectedValue(
       new ApiClientError(403, 'Only the session leader can start it', 'NOT_SESSION_LEADER'),
@@ -57,5 +69,6 @@ describe('useStartSession', () => {
 
     expect(session).toBeNull();
     expect(result.current.error).toBe('Only the session leader can start it');
+    expect(result.current.starting).toBe(false);
   });
 });

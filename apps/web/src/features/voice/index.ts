@@ -1,11 +1,10 @@
 // Public surface of the voice feature (F11, F12, F13). The session view
 // renders `VoiceNotice`, `VoiceReconnect`, `MicToggle` and `PeopleSnapshot`,
 // and its People panel draws `ParticipantBubble`s with the leader's
-// `useLeaderMute`. The waiting room shows `NoCallTag` for a session with no
-// call, and layers voice onto the seats it already draws, which is what the
+// `useLeaderMute`. The waiting room uses the same pieces in the same header,
+// and layers voice onto the seats it already draws, which is what the
 // helpers below are for. Everything else here is internal.
 export { MicToggle } from './MicToggle';
-export { NoCallTag } from './NoCallTag';
 export { PeopleSnapshot } from './PeopleSnapshot';
 export { localName, presenceParticipants, voiceStateByIdentity } from './participantList';
 export { disconnectAllVoiceRooms } from './roomRegistry';

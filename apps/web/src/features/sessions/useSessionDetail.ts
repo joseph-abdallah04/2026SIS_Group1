@@ -19,6 +19,23 @@ export function useSessionDetail(sessionId: string) {
   }, []);
 
   /**
+   * Re-read the session without blanking it. What the page shows stays up
+   * until the new copy arrives, so a status change swaps one view for the other
+   * in a single render: lobby → board on Start, either → the ended page on End.
+   * That matters beyond looks. The two views join the same socket and voice
+   * rooms, and a swap in one commit lets the board's join cancel the lobby's
+   * deferred leave, where a "Loading session…" gap in between used to drop
+   * everyone out of the room and back in. Overlapping calls collapse: the
+   * effect below abandons the older fetch.
+   *
+   * A failed refresh still lands on the error page (`error` wins in the
+   * router), the same as a failed `reload`.
+   */
+  const refresh = useCallback(() => {
+    setReloadToken((n) => n + 1);
+  }, []);
+
+  /**
    * Patch one question's status in place (F25) — deliberately not a `reload`.
    * `reload` blanks the session while it refetches, which on a phase change
    * would drop the whole live view behind "Loading session…" every time the
@@ -111,6 +128,7 @@ export function useSessionDetail(sessionId: string) {
     loading,
     error,
     reload,
+    refresh,
     applyQuestionPhase,
     applyAddedQuestion,
     applyUpdatedQuestion,

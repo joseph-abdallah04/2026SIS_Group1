@@ -65,6 +65,25 @@ describe('PeoplePanel', () => {
     expect(within(rowOf('Jordan Avery')).getByText('On the board')).toBeInTheDocument();
   });
 
+  // Before Start there is no board to be on yet.
+  it('words presence for the waiting room there', () => {
+    render(
+      <PeoplePanel
+        place="lobby"
+        present={[me, lead]}
+        call={null}
+        leaderId="u-lead"
+        joinCode={null}
+        boardLive
+      />,
+    );
+    expect(
+      screen.getByText('No call in this session. Everyone joins on the board.'),
+    ).toBeInTheDocument();
+    expect(within(rowOf('Jordan Avery')).getByText('In the waiting room')).toBeInTheDocument();
+    expect(screen.queryByText('On the board')).toBeNull();
+  });
+
   it('copies the join code and the invite link from its footer', async () => {
     const user = userEvent.setup();
     copyText.mockResolvedValue(true);

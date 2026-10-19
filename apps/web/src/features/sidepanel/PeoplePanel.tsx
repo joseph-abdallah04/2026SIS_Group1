@@ -5,11 +5,12 @@ import { useSustainedSpeaking, type LeaderMute, type VoiceParticipant } from '..
 import { ParticipantBubble } from '../voice/ParticipantBubble';
 import { InviteFooter } from './InviteFooter';
 import {
-  PERSON_STATUS_LABEL,
   canBeMuted,
   peopleNote,
   peopleRows,
+  personStatusLabel,
   type CallView,
+  type PeoplePlace,
   type PersonRow,
   type PersonStatus,
 } from './peopleRoster';
@@ -46,17 +47,21 @@ interface PeoplePanelProps {
   boardLive: boolean;
   /** The leader's mute buttons. Left out for everyone else, and with no call. */
   moderation?: LeaderMute;
+  /** The waiting room words presence as "In the waiting room", not "On the board". */
+  place?: PeoplePlace;
 }
 
 function Person({
   row,
   onMute,
   muting,
+  place,
 }: {
   row: PersonRow;
   /** Only where the leader's Mute has something to do. */
   onMute?: () => void;
   muting: boolean;
+  place: PeoplePlace;
 }) {
   const { seat, status, isLeader } = row;
   return (
@@ -88,7 +93,7 @@ function Person({
           ) : null}
         </p>
         <p className={`text-[11px] leading-snug ${STATUS_TONE[status]}`}>
-          {PERSON_STATUS_LABEL[status]}
+          {personStatusLabel(status, place)}
         </p>
       </div>
       {onMute ? (
@@ -124,6 +129,7 @@ export function PeoplePanel({
   joinCode,
   boardLive,
   moderation,
+  place = 'board',
 }: PeoplePanelProps) {
   // Called here rather than by the page, so a speech edge repaints this list
   // and not the session around it.
@@ -132,7 +138,7 @@ export function PeoplePanel({
     () => peopleRows({ present, call, speaking, leaderId }),
     [present, call, speaking, leaderId],
   );
-  const note = peopleNote(call, boardLive);
+  const note = peopleNote(call, boardLive, place);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -160,6 +166,7 @@ export function PeoplePanel({
               ? { onMute: () => void moderation.mute(row.seat.identity) }
               : {})}
             muting={moderation?.pending.has(row.seat.identity) ?? false}
+            place={place}
           />
         ))}
       </ul>

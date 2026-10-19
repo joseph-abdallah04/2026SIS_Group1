@@ -5,11 +5,13 @@ import { ConnectionState, Room } from 'livekit-client';
  *
  * `lib/socket.ts` solves the same problem — the waiting room unmounts when the
  * session starts and the board mounts for the same room — by deferring its
- * leave one macrotask. That is enough there and nowhere near enough here:
- * lobby → board is not a synchronous remount. `useSessionDetail.reload()`
- * blanks the session, the router renders "Loading session…", and the board
- * only mounts once a **network refetch** resolves. A zero-delay teardown fires
- * long before that.
+ * leave one macrotask. Lobby → board is now a swap in one render (the router
+ * re-reads the session with `useSessionDetail.refresh()`, which keeps the
+ * lobby up until the board replaces it), so the board usually re-acquires the
+ * room straight away. The window still matters for anything slower: a remount
+ * that is not one commit, a route change and back, React StrictMode's dev
+ * remount, or a page that re-reads the session with `reload()`, which blanks it
+ * behind "Loading session…" until a **network refetch** resolves.
  *
  * Three seconds is ~100x a local round-trip, so it covers a refetch far slower
  * than anything a developer will see, and overshooting it is safe: the room is
