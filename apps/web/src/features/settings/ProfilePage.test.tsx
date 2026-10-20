@@ -56,7 +56,7 @@ describe('ProfilePage', () => {
     vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
     renderPage();
 
-    expect(await screen.findByText('alice@example.com')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('alice@example.com')).toBeInTheDocument();
     expect(screen.getByLabelText(/display name/i)).toHaveValue('Alice');
   });
 
@@ -115,7 +115,21 @@ describe('ProfilePage', () => {
 
     resolveUpdate({ ...USER, displayName: 'Bob' });
     await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled();
+    // Back to Save, waiting for the next change: there is nothing left to save.
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    await user.type(input, '!');
+    expect(screen.getByRole('button', { name: 'Save changes' })).not.toBeDisabled();
+  });
+
+  it('offers Save only once the name has changed', async () => {
+    vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+    const user = userEvent.setup();
+    renderPage();
+
+    const input = await screen.findByLabelText(/display name/i);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    await user.type(input, 'ce');
+    expect(screen.getByRole('button', { name: 'Save changes' })).not.toBeDisabled();
   });
 
   it('saves successfully and shows a confirmation', async () => {
@@ -134,30 +148,29 @@ describe('ProfilePage', () => {
   });
 
   describe('delete account', () => {
-    it('keeps the delete button disabled until a password is entered', async () => {
-      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
-      const user = userEvent.setup();
-      renderPage();
-
-      await screen.findByText('alice@example.com');
-      const deleteButton = screen.getByRole('button', { name: /delete account/i });
-      expect(deleteButton).toBeDisabled();
-
-      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
-      expect(deleteButton).not.toBeDisabled();
-    });
-
-    it('requires a second, explicit confirmation before calling the API', async () => {
-      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
-      const user = userEvent.setup();
-      renderPage();
-
-      await screen.findByText('alice@example.com');
-      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
+    /** Opens the question and types the password into it. */
+    async function askToDelete(user: ReturnType<typeof userEvent.setup>, password: string) {
+      await screen.findByDisplayValue('alice@example.com');
       await user.click(screen.getByRole('button', { name: /delete account/i }));
+      const dialog = screen.getByRole('dialog');
+      await user.type(within(dialog).getByLabelText(/password to confirm/i), password);
+      return dialog;
+    }
 
+    it('asks first, and will not go ahead until the password is typed', async () => {
+      vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByDisplayValue('alice@example.com');
+      await user.click(screen.getByRole('button', { name: /delete account/i }));
+      const dialog = screen.getByRole('dialog');
+      const confirm = within(dialog).getByRole('button', { name: /delete account/i });
+      expect(confirm).toBeDisabled();
+
+      await user.type(within(dialog).getByLabelText(/password to confirm/i), 'hunter2');
+      expect(confirm).not.toBeDisabled();
       expect(authApi.deleteAccount).not.toHaveBeenCalled();
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
     it('deletes the account, clears the session, and redirects to /login on confirm', async () => {
@@ -166,10 +179,7 @@ describe('ProfilePage', () => {
       const user = userEvent.setup();
       renderPage();
 
-      await screen.findByText('alice@example.com');
-      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
-      await user.click(screen.getByRole('button', { name: /delete account/i }));
-      const dialog = screen.getByRole('dialog');
+      const dialog = await askToDelete(user, 'hunter2');
       await user.click(within(dialog).getByRole('button', { name: /delete account/i }));
 
       await waitFor(() =>
@@ -188,10 +198,7 @@ describe('ProfilePage', () => {
       const user = userEvent.setup();
       renderPage();
 
-      await screen.findByText('alice@example.com');
-      await user.type(screen.getByLabelText(/confirm your password/i), 'wrongpass');
-      await user.click(screen.getByRole('button', { name: /delete account/i }));
-      const dialog = screen.getByRole('dialog');
+      const dialog = await askToDelete(user, 'wrongpass');
       await user.click(within(dialog).getByRole('button', { name: /delete account/i }));
 
       expect(await screen.findByText('Incorrect password')).toBeInTheDocument();
@@ -211,10 +218,7 @@ describe('ProfilePage', () => {
       const user = userEvent.setup();
       renderPage();
 
-      await screen.findByText('alice@example.com');
-      await user.type(screen.getByLabelText(/confirm your password/i), 'hunter2');
-      await user.click(screen.getByRole('button', { name: /delete account/i }));
-      const dialog = screen.getByRole('dialog');
+      const dialog = await askToDelete(user, 'hunter2');
       await user.click(within(dialog).getByRole('button', { name: /delete account/i }));
 
       expect(

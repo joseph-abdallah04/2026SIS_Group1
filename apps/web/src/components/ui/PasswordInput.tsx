@@ -6,6 +6,8 @@ interface PasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   /** The label and field together, as the form's other labelled fields are laid out. */
   className?: string;
   inputClassName?: string;
+  /** What the eye says it shows: "Show password" unless this is, say, an API key. */
+  revealNoun?: string;
 }
 
 /**
@@ -20,6 +22,7 @@ export function PasswordInput({
   label,
   className = '',
   inputClassName = '',
+  revealNoun = 'password',
   ...props
 }: PasswordInputProps) {
   const id = useId();
@@ -38,7 +41,7 @@ export function PasswordInput({
         />
         <button
           type="button"
-          aria-label={shown ? 'Hide password' : 'Show password'}
+          aria-label={`${shown ? 'Hide' : 'Show'} ${revealNoun}`}
           aria-pressed={shown}
           onClick={() => setShown((value) => !value)}
           className="absolute top-1/2 right-2 flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-rt-ink-faint transition-colors hover:bg-rt-ink/5 hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"

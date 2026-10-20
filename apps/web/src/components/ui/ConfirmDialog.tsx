@@ -13,6 +13,8 @@ interface ConfirmDialogProps {
    */
   tone?: 'danger' | 'primary';
   busy?: boolean;
+  /** Not ready to confirm yet: something in `children` still needs filling in. */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -35,6 +37,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   tone = 'danger',
   busy,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -69,8 +72,8 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={busy}
-            className={`rounded-full px-3 py-2 text-[13px] font-semibold disabled:opacity-60 ${CONFIRM_TONE[tone]}`}
+            disabled={busy || confirmDisabled}
+            className={`rounded-full px-3 py-2 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${CONFIRM_TONE[tone]}`}
           >
             {busy ? (confirmingLabel ?? confirmLabel) : confirmLabel}
           </button>
