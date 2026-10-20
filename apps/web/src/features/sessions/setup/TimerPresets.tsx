@@ -45,15 +45,15 @@ export function TimerPresets({
   const [customOpen, setCustomOpen] = useState(false);
   const custom = customOpen || !isPreset;
   const chip = (on: boolean) =>
-    `h-[30px] rounded-full border px-2.5 text-[12.5px] font-semibold tabular-nums transition-[background-color,border-color,color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none ${
+    `h-9 min-w-9 cursor-pointer rounded-full border px-3 text-[13px] font-semibold tabular-nums transition-[background-color,border-color,color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none ${
       on
         ? 'border-rt-secondary bg-rt-secondary-wash text-rt-secondary-deep shadow-[0_0_0_2px_rgba(224,163,60,0.28)]'
-        : 'border-[#e3d9c6] bg-white text-rt-ink-muted hover:border-rt-secondary hover:text-rt-ink'
+        : 'border-rt-tertiary/80 bg-white text-rt-ink-muted hover:border-rt-ink-faint hover:text-rt-ink'
     }`;
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-rt-ink">
+      <div className="flex items-center gap-1.5 text-[13.5px] font-semibold text-rt-ink">
         <span id={`${id}-label`}>{label}</span>
         <InfoTip label={`About the ${label.toLowerCase()} timer`} text={info} />
         <span className="ml-auto text-[12px] font-semibold text-rt-secondary-deep tabular-nums">
@@ -98,7 +98,7 @@ export function TimerPresets({
           />
         </div>
       ) : null}
-      <p className="text-[11.5px] leading-snug text-rt-ink-faint">{hint}</p>
+      <p className="text-[12px] leading-snug text-rt-ink-muted">{hint}</p>
     </div>
   );
 }

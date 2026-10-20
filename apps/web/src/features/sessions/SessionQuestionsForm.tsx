@@ -1,4 +1,4 @@
-import { GripVertical, History, Undo2 } from 'lucide-react';
+import { GripVertical, History, Lock, Undo2 } from 'lucide-react';
 import {
   useEffect,
   useLayoutEffect,
@@ -118,6 +118,12 @@ export function pasteNoticeText(added: number, dropped: number, long: number): s
 type FocusRequest = { key: string; caret: 'end' | [number, number] };
 
 /** One numbered step of the page, as a quiet panel. */
+/** The page's one column, which the footer lines up with too. */
+const COLUMN = 'mx-auto w-full max-w-[880px] px-4 sm:px-6';
+
+/** Over the title and the template cards. */
+const EYEBROW = 'text-[11px] font-bold tracking-[0.1em] text-rt-ink-muted uppercase';
+
 function Step({
   number,
   title,
@@ -130,19 +136,15 @@ function Step({
   children: ReactNode;
 }) {
   const id = `setup-step-${number}`;
+  // A plain white card on the white page, edged in grey: the dashboard's and
+  // settings' cards. Its order is the page's, so it carries no number.
   return (
     <section
       aria-labelledby={id}
-      className="rounded-2xl border border-rt-secondary/30 bg-[#fffcf6]/95 p-3.5 shadow-[0_8px_24px_rgba(122,106,76,0.07)] sm:p-[18px]"
+      className="rounded-2xl border border-rt-tertiary/70 bg-rt-surface p-4 sm:p-6"
     >
-      <div className="mb-3 flex min-h-6 items-center gap-2.5">
-        <span
-          aria-hidden
-          className="flex size-[22px] shrink-0 items-center justify-center rounded-full border border-rt-secondary/55 bg-rt-secondary-wash text-[11px] font-bold text-rt-secondary-deep"
-        >
-          {number}
-        </span>
-        <h2 id={id} className="text-[13.5px] font-semibold tracking-[-0.005em] text-rt-ink">
+      <div className="mb-4 flex min-h-6 items-center gap-2.5">
+        <h2 id={id} className="text-[16px] font-semibold tracking-[-0.01em] text-rt-ink">
           {title}
         </h2>
         {aside ? (
@@ -414,7 +416,7 @@ export function SessionQuestionsForm({
           labels) is placed in here and scrolls with it, rather than against the
           page, where it would stretch the page past the footer. */}
       <div className="relative min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4 px-4 pt-6 pb-10 sm:px-6 sm:pt-7">
+        <div className={`${COLUMN} flex flex-col gap-5 pt-6 pb-10 sm:pt-8`}>
           {kept ? (
             <div
               role="region"
@@ -448,10 +450,7 @@ export function SessionQuestionsForm({
             </div>
           ) : null}
           <div className="flex flex-col gap-2.5">
-            <label
-              htmlFor="session-title"
-              className="text-[11px] font-bold tracking-[0.1em] text-rt-secondary-deep uppercase"
-            >
+            <label htmlFor="session-title" className={EYEBROW}>
               Session title
             </label>
             <input
@@ -467,15 +466,13 @@ export function SessionQuestionsForm({
               }}
               placeholder={state.titlePlaceholder}
               maxLength={120}
-              className="h-12 w-full rounded-xl border border-[#e6dccb] bg-white px-3.5 text-[17px] font-semibold tracking-[-0.01em] text-rt-ink transition-[border-color,box-shadow] outline-none placeholder:font-medium placeholder:text-[#aaa59b] focus:border-rt-secondary focus:shadow-[0_0_0_3px_rgba(224,163,60,0.28)]"
+              className="h-[52px] w-full rounded-xl border border-rt-tertiary bg-white px-4 text-[17px] font-semibold tracking-[-0.01em] text-rt-ink transition-[border-color,box-shadow] outline-none placeholder:font-medium placeholder:text-rt-ink-faint focus:border-rt-secondary focus:shadow-[0_0_0_3px_rgba(224,163,60,0.28)]"
             />
           </div>
 
           {templates && templates.length > 0 ? (
             <div className="flex flex-col gap-2">
-              <span className="text-[11px] font-bold tracking-[0.1em] text-rt-secondary-deep uppercase">
-                Start from
-              </span>
+              <span className={EYEBROW}>Start from</span>
               <TemplateCards
                 templates={templates}
                 selectedId={state.templateId}
@@ -544,7 +541,7 @@ export function SessionQuestionsForm({
                   cascade([key]);
                   focusRequest.current = { key, caret: 'end' };
                 }}
-                className="inline-flex h-[34px] items-center gap-1.5 rounded-full border border-dashed border-[#d8cbb2] px-[13px] text-[12.5px] font-semibold text-rt-secondary-deep transition-colors hover:border-solid hover:border-rt-secondary hover:bg-rt-secondary-wash focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-dashed border-rt-tertiary px-4 text-[13px] font-semibold text-rt-ink transition-colors hover:border-solid hover:border-rt-secondary hover:bg-rt-secondary-wash focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <span aria-hidden>+</span> Add question
               </button>
@@ -594,50 +591,64 @@ export function SessionQuestionsForm({
             </div>
           </Step>
 
-          <Step number={3} title="Call">
+          <Step
+            number={3}
+            title="Call"
+            aside={
+              <>
+                <Lock aria-hidden size={12} />
+                Locked once the room opens
+              </>
+            }
+          >
             <CallChoice voiceEnabled={state.voiceEnabled} onChange={form.setVoiceEnabled} />
           </Step>
         </div>
       </div>
 
-      <footer className="relative z-20 flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-rt-secondary/30 bg-[#fffcf6]/95 px-3 py-2.5 backdrop-blur-md sm:px-5 sm:py-3">
-        {footerStart}
-        <FactLine facts={sessionFacts(state)} className="basis-full sm:basis-auto" />
-        <span aria-hidden className="hidden flex-1 sm:block" />
-        {problem ? (
-          <p role="alert" className="basis-full text-[12.5px] text-red-700 sm:basis-auto">
-            {problem}
-          </p>
-        ) : form.notReady ? (
-          <p
-            id="setup-not-ready"
-            className="hidden text-[12px] whitespace-nowrap text-rt-ink-faint sm:block"
-          >
-            {form.notReady}
-          </p>
-        ) : null}
-        {actions.map((action) => {
-          const isBusy = busy === action.kind;
-          return (
-            <button
-              key={action.kind}
-              type="button"
-              disabled={!!form.notReady || busy !== null}
-              // The shortcut is said on hover, not drawn on the button: most
-              // people never use it, and the badge only crowded the label.
-              title={form.notReady ?? (action.primary ? `${action.label} (Ctrl+Enter)` : undefined)}
-              onClick={() => void submit(action.kind)}
-              className={`inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full px-[18px] text-[13.5px] font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed sm:flex-none ${
-                action.primary
-                  ? 'bg-rt-secondary text-rt-ink shadow-[0_1px_0_rgba(122,106,76,0.25),0_6px_16px_rgba(224,163,60,0.28)] hover:enabled:bg-rt-secondary-deep hover:enabled:text-white disabled:opacity-45 disabled:shadow-none'
-                  : 'border border-rt-tertiary bg-white text-rt-ink hover:enabled:bg-[#f6f2ea] disabled:opacity-45'
-              }`}
+      {/* White, edged above, and lined up with the column the cards are in. */}
+      <footer className="relative z-20 shrink-0 border-t border-rt-tertiary/70 bg-rt-surface/95 backdrop-blur-md">
+        <div className={`${COLUMN} flex flex-wrap items-center gap-x-2.5 gap-y-2 py-2.5 sm:py-3`}>
+          {footerStart}
+          <FactLine facts={sessionFacts(state)} className="basis-full sm:basis-auto" />
+          <span aria-hidden className="hidden flex-1 sm:block" />
+          {problem ? (
+            <p role="alert" className="basis-full text-[12.5px] text-red-700 sm:basis-auto">
+              {problem}
+            </p>
+          ) : form.notReady ? (
+            <p
+              id="setup-not-ready"
+              className="hidden text-[12px] whitespace-nowrap text-rt-ink-faint sm:block"
             >
-              {action.icon}
-              {isBusy ? action.busyLabel : action.label}
-            </button>
-          );
-        })}
+              {form.notReady}
+            </p>
+          ) : null}
+          {actions.map((action) => {
+            const isBusy = busy === action.kind;
+            return (
+              <button
+                key={action.kind}
+                type="button"
+                disabled={!!form.notReady || busy !== null}
+                // The shortcut is said on hover, not drawn on the button: most
+                // people never use it, and the badge only crowded the label.
+                title={
+                  form.notReady ?? (action.primary ? `${action.label} (Ctrl+Enter)` : undefined)
+                }
+                onClick={() => void submit(action.kind)}
+                className={`inline-flex h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full px-5 text-[14px] font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed sm:flex-none ${
+                  action.primary
+                    ? 'bg-rt-secondary text-rt-ink shadow-[0_1px_0_rgba(122,106,76,0.25),0_6px_16px_rgba(224,163,60,0.28)] hover:enabled:bg-rt-secondary-deep hover:enabled:text-white disabled:opacity-45 disabled:shadow-none'
+                    : 'border border-rt-tertiary bg-white text-rt-ink hover:enabled:bg-rt-surface-alt disabled:opacity-45'
+                }`}
+              >
+                {action.icon}
+                {isBusy ? action.busyLabel : action.label}
+              </button>
+            );
+          })}
+        </div>
       </footer>
 
       {undo ? (

@@ -26,7 +26,7 @@ export function SetupHeader({ current, status, onDashboard, onCancel }: SetupHea
         <button
           type="button"
           onClick={onDashboard}
-          className="shrink-0 rounded-md font-medium text-rt-ink-muted hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
+          className="shrink-0 cursor-pointer rounded-md font-medium text-rt-ink-muted hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
         >
           Dashboard
         </button>
@@ -46,7 +46,7 @@ export function SetupHeader({ current, status, onDashboard, onCancel }: SetupHea
         <button
           type="button"
           onClick={onCancel}
-          className="h-8 shrink-0 rounded-full px-3 text-[12.5px] font-semibold text-rt-ink-muted hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
+          className="h-8 shrink-0 cursor-pointer rounded-full px-3 text-[12.5px] font-semibold text-rt-ink-muted hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
         >
           Cancel
         </button>

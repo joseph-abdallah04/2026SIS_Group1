@@ -1697,11 +1697,11 @@ a.rt-sticky-link:focus-visible {
 }
 
 /*
- * Session setup (F04/F05): the lobby's warm paper, lit from the top, under a
- * column of quiet panels.
+ * Session setup (F04/F05): plain white, as the dashboard and settings are,
+ * under a column of quiet cards.
  */
 .rt-setup-page {
-  background: radial-gradient(ellipse at 50% 0%, #fdf9f1 0%, #f6f0e4 55%, #efe6d6 100%);
+  background: var(--color-rt-surface);
 }
 
 /*
