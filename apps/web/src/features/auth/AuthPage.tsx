@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { loginSchema, signupSchema } from '@roundtable/shared/schemas';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 import { ApiClientError } from '../../lib/api';
 import { setToken, safeReturnPath } from '../../lib/auth';
 import { disconnectSocket } from '../../lib/socket';
@@ -117,20 +118,18 @@ function LoginForm() {
         />
       </label>
 
-      <label className={LABEL_CLASSES}>
-        Password
-        <input
-          className={INPUT_CLASSES}
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setError(null);
-          }}
-          required
-        />
-      </label>
+      <PasswordInput
+        label="Password"
+        className={LABEL_CLASSES}
+        inputClassName={INPUT_CLASSES}
+        autoComplete="current-password"
+        value={password}
+        onChange={(e) => {
+          setPassword(e.target.value);
+          setError(null);
+        }}
+        required
+      />
 
       {error ? <FormError>{error}</FormError> : null}
 
@@ -213,37 +212,33 @@ function SignupForm() {
         />
       </label>
 
-      <label className={LABEL_CLASSES}>
-        Password
-        <input
-          className={INPUT_CLASSES}
-          type="password"
-          autoComplete="new-password"
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setError(null);
-          }}
-          minLength={8}
-          required
-        />
-      </label>
+      <PasswordInput
+        label="Password"
+        className={LABEL_CLASSES}
+        inputClassName={INPUT_CLASSES}
+        autoComplete="new-password"
+        value={password}
+        onChange={(e) => {
+          setPassword(e.target.value);
+          setError(null);
+        }}
+        minLength={8}
+        required
+      />
 
-      <label className={LABEL_CLASSES}>
-        Confirm password
-        <input
-          className={INPUT_CLASSES}
-          type="password"
-          autoComplete="new-password"
-          value={confirmPassword}
-          onChange={(e) => {
-            setConfirmPassword(e.target.value);
-            setError(null);
-          }}
-          minLength={8}
-          required
-        />
-      </label>
+      <PasswordInput
+        label="Confirm password"
+        className={LABEL_CLASSES}
+        inputClassName={INPUT_CLASSES}
+        autoComplete="new-password"
+        value={confirmPassword}
+        onChange={(e) => {
+          setConfirmPassword(e.target.value);
+          setError(null);
+        }}
+        minLength={8}
+        required
+      />
 
       {error ? <FormError>{error}</FormError> : null}
 

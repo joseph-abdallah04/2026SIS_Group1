@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { updateProfileSchema } from '@roundtable/shared/schemas';
 
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 import { ApiClientError } from '../../lib/api';
 import { clearToken } from '../../lib/auth';
 import { disconnectSocket } from '../../lib/socket';
@@ -55,19 +56,17 @@ function DeleteAccountSection() {
         currently in first. This cannot be undone.
       </p>
 
-      <label className="mt-4 flex max-w-xs flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted">
-        Confirm your password
-        <input
-          type="password"
-          autoComplete="current-password"
-          className={INPUT_CLASSES}
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setError(null);
-          }}
-        />
-      </label>
+      <PasswordInput
+        label="Confirm your password"
+        className="mt-4 flex max-w-xs flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted"
+        inputClassName={INPUT_CLASSES}
+        autoComplete="current-password"
+        value={password}
+        onChange={(e) => {
+          setPassword(e.target.value);
+          setError(null);
+        }}
+      />
 
       {error ? (
         <p role="alert" className="mt-2 text-sm text-red-600">

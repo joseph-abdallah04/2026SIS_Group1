@@ -35,7 +35,7 @@ describe('LoginPage', () => {
   it('renders the login form fields', () => {
     renderPage();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/password/i, { selector: 'input' })).toBeInTheDocument();
   });
 
   it('shows the generic error and does not navigate on invalid credentials', async () => {
@@ -46,7 +46,7 @@ describe('LoginPage', () => {
     renderPage();
 
     await user.type(screen.getByLabelText(/email/i), 'alice@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'wrongpassword');
+    await user.type(screen.getByLabelText(/password/i, { selector: 'input' }), 'wrongpassword');
     await user.click(screen.getByRole('button', { name: /log in/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Incorrect email or password');
@@ -67,7 +67,7 @@ describe('LoginPage', () => {
     renderPage();
 
     await user.type(screen.getByLabelText(/email/i), 'alice@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText(/password/i, { selector: 'input' }), 'password123');
     await user.click(screen.getByRole('button', { name: /log in/i }));
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true }));
@@ -88,7 +88,7 @@ describe('LoginPage', () => {
     renderPage('/login?next=/join/K7NP-3WQZ');
 
     await user.type(screen.getByLabelText(/email/i), 'bob@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText(/password/i, { selector: 'input' }), 'password123');
     await user.click(screen.getByRole('button', { name: /log in/i }));
 
     await waitFor(() =>
