@@ -9,7 +9,6 @@ import {
 import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/shared/schemas';
 
 import { BoardRail } from '../../components/BoardRail';
-import { PhaseTimer } from '../../components/PhaseTimer';
 import { CARD_INK, REACTION_HOVER_FILL, REACTION_ON_BORDER } from '../pinboard/pinboardTokens';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
@@ -54,8 +53,6 @@ interface AgendaPanelProps {
    * question.
    */
   proposalCount?: number;
-  /** The discussion clock of the question the board is showing, if it has one. */
-  timer?: { questionId: string; startedAt: string; durationSeconds: number } | null;
   /**
    * The question this person is looking at instead of the room's, if any. Each
    * person's own: looking back or ahead moves nobody else's board.
@@ -431,7 +428,6 @@ export function AgendaPanel({
   votingPhase,
   hasProposals,
   proposalCount,
-  timer,
   viewingQuestionId = null,
   showingQuestionId = null,
   onView,
@@ -1117,15 +1113,8 @@ export function AgendaPanel({
                   </AgendaChip>
                 </span>
                 {brainstorm}
-                {timer && timer.questionId === question.id && question.status !== 'pending' ? (
-                  <PhaseTimer
-                    compact
-                    startedAt={timer.startedAt}
-                    durationSeconds={timer.durationSeconds}
-                    allowOvertime
-                    label="Discussion"
-                  />
-                ) : null}
+                {/* No discussion clock here: the header carries it, always on
+                    screen, where the agenda can be folded away. */}
                 {cardEdit}
               </div>
             ) : upNext?.id === question.id ? (

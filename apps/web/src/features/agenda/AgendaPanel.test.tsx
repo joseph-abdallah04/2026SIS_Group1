@@ -854,7 +854,8 @@ describe('AgendaPanel card', () => {
     expect(card).toContainElement(screen.getByRole('button', { name: 'Start discussion' }));
   });
 
-  it('shows the discussion clock, and no count line under the question', () => {
+  // The header carries the discussion clock, so the card does not repeat it.
+  it('shows no discussion clock and no count line under the question', () => {
     render(
       <AgendaPanel
         sessionId="s1"
@@ -862,15 +863,10 @@ describe('AgendaPanel card', () => {
         viewingQuestionId="q1"
         isLeader={false}
         proposalCount={5}
-        timer={{
-          questionId: 'q1',
-          startedAt: new Date().toISOString(),
-          durationSeconds: 300,
-        }}
       />,
     );
 
-    expect(screen.getByRole('timer')).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.queryByText(/proposals?\b/)).not.toBeInTheDocument();
   });
 
