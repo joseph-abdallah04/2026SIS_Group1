@@ -19,8 +19,10 @@ interface PeopleSnapshotProps {
   /** Everyone in the session, call or not, in any order. */
   participants: readonly VoiceParticipant[];
   leaderId: string | null;
-  /** The full list, in the side panel's People tab. */
-  onOpen: () => void;
+  /** The full list, in the side panel's People tab: shown, or put away again. */
+  onToggle: () => void;
+  /** Whether that list is on show now, so a second press says it closes it. */
+  listOpen?: boolean;
 }
 
 /** Names, as a sentence: "Ada", "Ada and Sam", "Ada, Sam and Kim". */
@@ -32,7 +34,8 @@ function listNames(names: readonly string[]): string {
 /**
  * Who is in the session at a glance, in the board header (F13): a few faces,
  * the leader's crowned, whoever is talking ringed in green. Pressing it opens
- * the People tab, which is the whole list.
+ * the People tab, which is the whole list, and pressing it again closes it, as
+ * the side strip's own People button does.
  *
  * Up to four sit apart, so a small room reads as people rather than a stack.
  * Past four, four overlap and the total follows. Someone who is not among the
@@ -44,7 +47,12 @@ function listNames(names: readonly string[]): string {
  * re-render on every speech edge stays inside this button instead of
  * repainting the whole header with it.
  */
-export function PeopleSnapshot({ participants, leaderId, onOpen }: PeopleSnapshotProps) {
+export function PeopleSnapshot({
+  participants,
+  leaderId,
+  onToggle,
+  listOpen = false,
+}: PeopleSnapshotProps) {
   const compact = useCompactHeader();
   const speaking = useSustainedSpeaking(participants);
   // The sort and the swatches do not change between speech edges.
@@ -60,12 +68,15 @@ export function PeopleSnapshot({ participants, leaderId, onOpen }: PeopleSnapsho
   const count = presenceLabel(seats.length);
 
   return (
-    <Tooltip label={`${count} • open list`} placement="bottom">
+    <Tooltip label={`${count} • ${listOpen ? 'close' : 'open'} list`} placement="bottom">
       <button
         type="button"
-        onClick={onOpen}
+        onClick={onToggle}
         data-people-snapshot
-        aria-label={`${count}${speakers.length ? `, ${listNames(speakers)} speaking` : ''}. Open the people list`}
+        aria-expanded={listOpen}
+        aria-label={`${count}${speakers.length ? `, ${listNames(speakers)} speaking` : ''}. ${
+          listOpen ? 'Close' : 'Open'
+        } the people list`}
         className="flex h-8 shrink-0 items-center gap-2 rounded-full px-1.5 transition-colors hover:bg-rt-ink/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rt-secondary"
       >
         <span

@@ -577,7 +577,8 @@ export function SessionPinboard({
               <PeopleSnapshot
                 participants={roster}
                 leaderId={board.leaderId}
-                onOpen={() => sidePanel.open('people')}
+                onToggle={() => sidePanel.toggle('people')}
+                listOpen={sidePanel.tab === 'people'}
               />
             }
             invite={joinCode ? <InviteButton code={joinCode} /> : null}

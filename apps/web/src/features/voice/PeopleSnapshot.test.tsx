@@ -21,9 +21,20 @@ function crowd(size: number): VoiceParticipant[] {
 
 function renderSnapshot(
   participants: VoiceParticipant[],
-  { leaderId = null, onOpen = vi.fn() }: { leaderId?: string | null; onOpen?: () => void } = {},
+  {
+    leaderId = null,
+    onToggle = vi.fn(),
+    listOpen = false,
+  }: { leaderId?: string | null; onToggle?: () => void; listOpen?: boolean } = {},
 ) {
-  return render(<PeopleSnapshot participants={participants} leaderId={leaderId} onOpen={onOpen} />);
+  return render(
+    <PeopleSnapshot
+      participants={participants}
+      leaderId={leaderId}
+      onToggle={onToggle}
+      listOpen={listOpen}
+    />,
+  );
 }
 
 const snapshot = () => document.querySelector<HTMLElement>('[data-people-snapshot]')!;
@@ -107,14 +118,26 @@ describe('PeopleSnapshot', () => {
 
   it('opens the people list, and says so on hover', async () => {
     const user = userEvent.setup();
-    const onOpen = vi.fn();
-    renderSnapshot(crowd(6), { onOpen });
+    const onToggle = vi.fn();
+    renderSnapshot(crowd(6), { onToggle });
 
     await user.hover(screen.getByRole('button'));
     expect(await screen.findByText('6 people • open list')).toBeInTheDocument();
+    expect(screen.getByRole('button')).toHaveAttribute('aria-expanded', 'false');
 
     await user.click(screen.getByRole('button'));
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  // A second press puts the list away, as the side strip's People button does.
+  it('says it closes the list while the list is open', async () => {
+    const user = userEvent.setup();
+    renderSnapshot(crowd(6), { listOpen: true });
+
+    expect(screen.getByRole('button')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button')).toHaveAccessibleName(/Close the people list$/);
+    await user.hover(screen.getByRole('button'));
+    expect(await screen.findByText('6 people • close list')).toBeInTheDocument();
   });
 
   it('shows nothing before anyone is known to be here', () => {

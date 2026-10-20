@@ -268,7 +268,8 @@ export function WaitingRoom({
             <PeopleSnapshot
               participants={roster}
               leaderId={session.leaderId}
-              onOpen={() => panel.open('people')}
+              onToggle={() => panel.toggle('people')}
+              listOpen={panel.tab === 'people'}
             />
           )
         }
