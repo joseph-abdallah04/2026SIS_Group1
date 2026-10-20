@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check } from 'lucide-react';
 import type { SessionSummary } from '@roundtable/shared';
@@ -10,22 +11,39 @@ export function formatDay(date: Date | string): string {
 
 /**
  * A session still being set up: work to pick back up. The whole card opens
- * the draft, where the leader opens it for joining; Edit and Delete are in its
- * ⋯. Its title is the link, stretched over the card, so the card reads as one
- * control and the ⋯ above it is still its own press.
+ * it straight in the editor, which can also open the room, so there is no
+ * stop on the way; anyone but its leader, who cannot edit it, gets the draft
+ * page instead. Delete is in its ⋯. Its title is the link, stretched over the
+ * card, so the card reads as one control and the ⋯ above it is still its own
+ * press.
  */
 export function DraftCard({
   session,
   onChanged,
+  fresh = false,
 }: {
   session: SessionSummary;
   onChanged: () => void;
+  /** Just saved: tinted for a moment, and brought into view, so it is easy to find. */
+  fresh?: boolean;
 }) {
+  const ref = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (fresh) ref.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [fresh]);
+
   return (
-    <li className="group relative flex min-h-36 has-[[aria-expanded=true]]:z-20 flex-col rounded-2xl border border-dashed border-rt-tertiary bg-rt-surface p-5 transition-[border-color,box-shadow] hover:border-solid hover:border-rt-secondary/60 hover:shadow-[0_6px_18px_rgb(31_35_40/0.08)] focus-within:border-solid focus-within:border-rt-secondary/60">
+    <li
+      ref={ref}
+      className={`group relative flex min-h-36 has-[[aria-expanded=true]]:z-20 flex-col rounded-2xl border p-5 transition-[border-color,box-shadow,background-color] duration-700 hover:border-solid hover:border-rt-secondary/60 hover:shadow-[0_6px_18px_rgb(31_35_40/0.08)] focus-within:border-solid focus-within:border-rt-secondary/60 ${
+        fresh
+          ? 'border-solid border-rt-secondary bg-rt-secondary-wash'
+          : 'border-dashed border-rt-tertiary bg-rt-surface'
+      }`}
+    >
       <h3 className="pr-8 text-[15px] leading-snug font-semibold text-rt-ink">
         <Link
-          to={`/sessions/${session.id}`}
+          to={session.isLeader ? `/sessions/${session.id}/edit` : `/sessions/${session.id}`}
           className="line-clamp-2 outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:after:ring-2 focus-visible:after:ring-rt-secondary"
         >
           {session.title}
@@ -37,7 +55,7 @@ export function DraftCard({
           aria-hidden
           className="flex items-center gap-1 font-semibold text-rt-ink group-hover:underline"
         >
-          Open draft
+          {session.isLeader ? 'Continue editing' : 'Open draft'}
           <ArrowRight size={14} strokeWidth={2.2} />
         </span>
       </div>

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Check, Plus, Search } from 'lucide-react';
 import type { SessionSummary } from '@roundtable/shared';
 
 import { JoinByCodeForm } from '../sessions/JoinByCodeForm';
 import { liveMembershipOf, useSessions } from '../sessions/useSessions';
-import { AppHeader } from './AppHeader';
+import { AppHeader, useMe } from './AppHeader';
+import type { DashboardState } from './dashboardState';
 import { DraftCard, PastSessionRow } from './SessionItems';
 
 type Filter = 'all' | 'led';
@@ -103,6 +104,24 @@ function FirstVisit() {
 export function DashboardPage() {
   const { sessions, loading, error, reload } = useSessions();
   const navigate = useNavigate();
+  const location = useLocation();
+  const user = useMe();
+
+  // A draft just saved, handed over by the page that saved it: pointed out
+  // for a few seconds, with a word that it worked. Taken off the history
+  // entry straight away, so a refresh or coming Back does not say it again.
+  const [savedDraftId, setSavedDraftId] = useState(
+    () => (location.state as DashboardState | null)?.savedDraftId ?? null,
+  );
+  useEffect(() => {
+    if (!(location.state as DashboardState | null)?.savedDraftId) return;
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, navigate]);
+  useEffect(() => {
+    if (!savedDraftId) return;
+    const timer = window.setTimeout(() => setSavedDraftId(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [savedDraftId]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -127,12 +146,29 @@ export function DashboardPage() {
   const listed = (sessions ?? []).filter((s) => s.status === 'draft' || s.status === 'ended');
   const narrowed = query.trim().length > 0 || filter === 'led';
 
+  // A welcome the first time, with nothing here yet; after that, a nudge to
+  // get on with it. Written only once both the name and the list are in, so
+  // it never changes under somebody's eyes.
+  const firstName = user?.displayName.trim().split(/\s+/)[0];
+  const greeting =
+    firstName && sessions
+      ? listed.length === 0
+        ? `Welcome to RoundTable, ${firstName}`
+        : `Let’s decide, ${firstName}`
+      : null;
+
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
       {/* Its heading is the page's: the cards below say what can be done here. */}
-      <AppHeader page="Dashboard" />
+      <AppHeader page="Dashboard" user={user} />
 
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8 sm:px-6 sm:py-10">
+        {/* The page's one display line. Its height is kept while the name
+            loads, so the cards below never jump down when it arrives. */}
+        <p className="mb-6 min-h-[1.2em] font-serif text-[32px] leading-tight font-normal tracking-[-0.02em] text-rt-ink sm:text-[40px]">
+          {greeting}
+        </p>
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <JoinByCodeForm />
           <section
@@ -265,7 +301,12 @@ export function DashboardPage() {
                   />
                   <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {drafts.map((session) => (
-                      <DraftCard key={session.id} session={session} onChanged={reload} />
+                      <DraftCard
+                        key={session.id}
+                        session={session}
+                        onChanged={reload}
+                        fresh={session.id === savedDraftId}
+                      />
                     ))}
                   </ul>
                 </div>
@@ -297,6 +338,19 @@ export function DashboardPage() {
             </div>
           ) : null}
         </section>
+      </div>
+
+      {/* Said where it will be heard, and gone again with the highlight. */}
+      <div
+        aria-live="polite"
+        className="pointer-events-none fixed inset-x-0 bottom-6 flex justify-center px-4"
+      >
+        {savedDraftId ? (
+          <p className="flex animate-[rt-toast-in_220ms_ease-out] items-center motion-reduce:animate-none gap-2 rounded-full bg-rt-ink px-4 py-2.5 text-[13px] font-semibold text-white shadow-lg">
+            <Check aria-hidden size={15} strokeWidth={2.6} className="text-rt-primary" />
+            Draft saved
+          </p>
+        ) : null}
       </div>
     </main>
   );

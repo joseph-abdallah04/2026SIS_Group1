@@ -54,8 +54,7 @@ export function JoinByCodeForm() {
           Got a code? Jump straight in.
         </h2>
         <p className="mt-1.5 text-[13px] text-rt-ink-muted">
-          Your session leader shares a code like{' '}
-          <span className="whitespace-nowrap">K7NP-3WQZ</span>.
+          Your session leader shares it with you.
         </p>
         <div className="mt-auto flex items-center gap-2 pt-5">
           <label htmlFor="join-session-code" className="sr-only">

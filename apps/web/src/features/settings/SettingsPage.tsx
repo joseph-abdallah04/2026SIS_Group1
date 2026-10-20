@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Sparkles, UserRound, type LucideIcon } from 'lucide-react';
 
-import { AppHeader } from '../dashboard/AppHeader';
+import { AppHeader, useMe } from '../dashboard/AppHeader';
 import { liveMembershipOf, useSessions } from '../sessions/useSessions';
 import { LlmSettingsForm } from './LlmSettingsForm';
 import { ProfilePage } from './ProfilePage';
@@ -37,6 +37,7 @@ function AssistantState({ on }: { on: boolean }) {
 export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('profile');
   const [assistantOn, setAssistantOn] = useState<boolean | null>(null);
+  const user = useMe();
   const { sessions, loading } = useSessions();
   const navigate = useNavigate();
   const liveSession = liveMembershipOf(sessions);
@@ -59,7 +60,7 @@ export function SettingsPage() {
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <AppHeader page="Settings" />
+      <AppHeader page="Settings" user={user} />
 
       <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
         <h1 className="text-[28px] font-semibold tracking-[-0.02em]">Settings</h1>

@@ -37,9 +37,9 @@ function session(overrides: Partial<SessionSummary>): SessionSummary {
   };
 }
 
-const renderPage = () =>
+const renderPage = (state?: unknown) =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[{ pathname: '/dashboard', state }]}>
       <DashboardPage />
     </MemoryRouter>,
   );
@@ -63,6 +63,17 @@ beforeEach(() => {
 });
 
 describe('dashboard', () => {
+  it('greets by first name: a nudge once there is history, a welcome before', async () => {
+    renderPage();
+    expect(await screen.findByText('Let’s decide, Mohamad')).toBeInTheDocument();
+  });
+
+  it('welcomes a first visit by name', async () => {
+    sessions = [];
+    renderPage();
+    expect(await screen.findByText('Welcome to RoundTable, Mohamad')).toBeInTheDocument();
+  });
+
   it('puts joining and leading side by side, under the page heading', () => {
     renderPage();
 
@@ -77,9 +88,13 @@ describe('dashboard', () => {
   it('lists drafts as cards and past sessions by month, with what each decided', () => {
     renderPage();
 
+    // A draft opens straight in its editor.
     expect(screen.getByRole('link', { name: 'Q4 roadmap' })).toHaveAttribute(
       'href',
-      '/sessions/d1',
+      '/sessions/d1/edit',
+    );
+    expect(screen.getByRole('link', { name: 'Q4 roadmap' }).closest('li')).toHaveTextContent(
+      'Continue editing',
     );
     const decided = screen.getByRole('link', { name: 'Design review' }).closest('li')!;
     expect(decided).toHaveTextContent('Group by account');
@@ -91,6 +106,20 @@ describe('dashboard', () => {
     expect(undecided).toHaveTextContent('Member');
     expect(screen.getByRole('region', { name: /october 2026/i })).toContainElement(decided);
     expect(screen.getByRole('region', { name: /september 2026/i })).toContainElement(undecided);
+  });
+
+  it('says a draft was saved, and points it out', () => {
+    renderPage({ savedDraftId: 'd1' });
+
+    expect(screen.getByText('Draft saved')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Q4 roadmap' }).closest('li')).toHaveClass(
+      'bg-rt-secondary-wash',
+    );
+  });
+
+  it('says nothing about saving when arriving any other way', () => {
+    renderPage();
+    expect(screen.queryByText('Draft saved')).not.toBeInTheDocument();
   });
 
   it('narrows to sessions this person led', async () => {
