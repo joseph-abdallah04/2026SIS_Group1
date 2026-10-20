@@ -23,6 +23,12 @@ export interface ProposeOptions {
 export interface CreativeToolsContextValue {
   activeTool: ToolKind | null;
   /**
+   * The studio has stepped aside to the bottom of the board (peeking), so the
+   * board, and the panels beside it, are live again until it comes back up.
+   */
+  studioPeeking: boolean;
+  setStudioPeeking: (peeking: boolean) => void;
+  /**
    * Which board this editor belongs to, so an unfinished canvas can be kept
    * against it. A draft made for one question must never open on another.
    */

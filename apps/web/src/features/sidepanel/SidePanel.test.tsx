@@ -22,11 +22,23 @@ vi.mock('../assistant/api', () => ({
 
 const { SidePanel } = await import('./SidePanel');
 const { useSidePanel } = await import('./useSidePanel');
+const { CreativeToolsContext } = await import('../tools/CreativeToolsContext');
+type CreativeToolsContextValue = import('../tools/CreativeToolsContext').CreativeToolsContextValue;
 
-function Harness({ suppressed = false }: { suppressed?: boolean }) {
+function Harness({
+  suppressed = false,
+  activeTool = null,
+  studioPeeking = false,
+}: {
+  suppressed?: boolean;
+  activeTool?: CreativeToolsContextValue['activeTool'];
+  studioPeeking?: boolean;
+}) {
   const control = useSidePanel();
   return (
-    <>
+    <CreativeToolsContext.Provider
+      value={{ activeTool, studioPeeking } as CreativeToolsContextValue}
+    >
       {/* Outside the panel, as the header's people snapshot is. */}
       <button type="button" onClick={() => control.open('people')}>
         Snapshot
@@ -39,7 +51,7 @@ function Harness({ suppressed = false }: { suppressed?: boolean }) {
         peopleAction={<button type="button">Mute all</button>}
         sessionId="s1"
       />
-    </>
+    </CreativeToolsContext.Provider>
   );
 }
 
@@ -178,6 +190,38 @@ describe('side panel', () => {
     // And it still opens normally once the vote is over.
     await user.click(screen.getByRole('button', { name: 'Snapshot' }));
     expect(screen.getByText('Everyone here')).toBeInTheDocument();
+  });
+
+  it('closes while the studio is open, but not for a sticky popup', async () => {
+    // The press that opens the panel is what closes the sticky, which counts
+    // as open until it has faded out.
+    const user = userEvent.setup();
+    const { rerender } = render(<Harness activeTool="sticky" />);
+
+    await user.click(strip(/^people$/i));
+    expect(screen.getByText('Everyone here')).toBeInTheDocument();
+
+    rerender(<Harness activeTool="drawing" />);
+    expect(screen.queryByText('Everyone here')).toBeNull();
+  });
+
+  it('opens while the studio is peeking, and stays open when it comes back up', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Harness activeTool="drawing" studioPeeking />);
+
+    await user.click(strip(/^people$/i));
+    expect(screen.getByText('Everyone here')).toBeInTheDocument();
+
+    rerender(<Harness activeTool="drawing" />);
+    expect(screen.getByText('Everyone here')).toBeInTheDocument();
+  });
+
+  it('shuts an open that lands while the studio is up', async () => {
+    const user = userEvent.setup();
+    render(<Harness activeTool="drawing" />);
+
+    await user.click(screen.getByRole('button', { name: 'Snapshot' }));
+    expect(screen.queryByText('Everyone here')).toBeNull();
   });
 
   it('keeps the conversation through a switch to another feature', async () => {

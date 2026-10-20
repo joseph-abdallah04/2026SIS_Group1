@@ -15,6 +15,7 @@ import { ArrowLeft, ArrowUp, LoaderCircle } from 'lucide-react';
 
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
+import { CreativeToolsContext } from './CreativeToolsContext';
 
 interface StudioOverlayProps {
   children: ReactNode;
@@ -398,6 +399,16 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
   const [column, remeasureColumn] = useStudioColumn();
   const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
 
+  // Said to the rest of the board while it rests at the bottom, so the side
+  // panel can be opened then like anything else on a live board. Not there in
+  // the tools workbench, which has no board.
+  const setStudioPeeking = useContext(CreativeToolsContext)?.setStudioPeeking;
+  const onBoard = ON_BOARD.has(phase);
+  useEffect(() => {
+    setStudioPeeking?.(onBoard);
+  }, [setStudioPeeking, onBoard]);
+  useEffect(() => () => setStudioPeeking?.(false), [setStudioPeeking]);
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog || dialog.open) return;
@@ -690,8 +701,6 @@ export function StudioOverlay({ children, onClose, proposed = false, title }: St
   // nothing, and a diagram is kept as a draft anyway, so "unsaved" was neither
   // true nor anything to act on from here.
   const summary = status ? status.parts.join(', ') : '';
-
-  const onBoard = ON_BOARD.has(phase);
   // Worded only while the studio is down or on its way, so the canvas's own
   // counts are not said twice while it is up.
   const faceWorded = AWAY.has(phase) || phase === 'restoring';

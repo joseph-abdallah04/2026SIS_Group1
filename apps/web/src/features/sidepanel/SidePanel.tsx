@@ -7,7 +7,7 @@
 // conversation lives here (F34), and so does the resize drag that can close
 // and reopen it in one gesture. The strip, the rail and the People and Chat
 // tabs are `SidePanelFrame`'s, which the waiting room uses without this.
-import { useContext, useEffect, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, type ReactNode } from 'react';
 import type { ArtifactJson, AssistantContext, QuestionStatus } from '@roundtable/shared';
 
 import { AssistantPanel } from '../assistant/AssistantPanel';
@@ -59,11 +59,28 @@ export function SidePanel({
   });
 
   // The studio is a page-modal. A panel left open underneath is out of the way,
-  // but closing it keeps the board clear when the editor closes. Watching `tab`
-  // too, for an open that lands while the studio is up (see `SidePanelFrame`).
+  // but closing it as the studio opens keeps the board clear when it closes.
+  //
+  // Not for a sticky: that is a popup over the board, not the studio, and it is
+  // closed by the very press that opens a panel. It is still open while it
+  // fades, so counting it here shut the panel that press had just opened.
+  const activeTool = creativeTools?.activeTool ?? null;
+  const studioTool = activeTool !== null && activeTool !== 'sticky' ? activeTool : null;
   useEffect(() => {
-    if (creativeTools?.activeTool && tab !== null) close();
-  }, [close, creativeTools?.activeTool, tab]);
+    if (studioTool !== null) close();
+  }, [close, studioTool]);
+
+  // An open that lands while the studio is up is shut too (see `SidePanelFrame`).
+  // But not while it is peeking: the board is live then, and the panel is part
+  // of looking at it. One opened then stays as it was left when the studio
+  // comes back up, so only a new open is shut, not one already showing.
+  const studioUp = studioTool !== null && !creativeTools?.studioPeeking;
+  const lastTab = useRef(tab);
+  useEffect(() => {
+    const opened = tab !== null && tab !== lastTab.current;
+    lastTab.current = tab;
+    if (opened && studioUp) close();
+  }, [close, studioUp, tab]);
 
   return (
     <SidePanelFrame
