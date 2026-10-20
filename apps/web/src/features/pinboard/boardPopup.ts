@@ -75,14 +75,27 @@ function roomWithin(surface: HTMLElement | null): BoardPopupRoom | null {
   };
 }
 
+/** The board's floating toolbar, and the row spanning the board it sits in. */
+export function boardToolbarElements(): { toolbar: HTMLElement; row: HTMLElement } | null {
+  const toolbar = document.querySelector<HTMLElement>('[data-creative-toolbar]');
+  if (!toolbar) return null;
+  return { toolbar, row: toolbar.closest<HTMLElement>('[data-board-toolbar]') ?? toolbar };
+}
+
 /**
  * Where a popup over the board goes: resting just above the board's floating
- * toolbar, centred on the board.
+ * toolbar, centred on it.
  *
- * Centred on the board's own toolbar row rather than on the window, because the
- * panels either side of the board are not the same width, and the middle of the
- * window is not the middle of the thing being worked on. Measured rather than
- * offset by a fixed amount for the same reason.
+ * Centred on the toolbar itself, measured, rather than on the window: the
+ * panels either side of the board are not the same width, so the middle of the
+ * window is not the middle of the thing being worked on. On a wide board the
+ * toolbar sits in the board's middle, so that is where the popup goes; on a
+ * narrow one the toolbar moves to the board's left, and the popup follows it
+ * there rather than floating over empty board.
+ *
+ * Kept as far inside the board as the toolbar is, where it fits: a popup wider
+ * than a toolbar on the left lines its left edge up with the toolbar's, rather
+ * than being pushed flat against the agenda. Always within the window.
  *
  * Anchored by the bottom, so a popup that grows grows upward, away from the
  * toolbar, instead of down over it. Null when there is no toolbar on screen, as
@@ -93,23 +106,32 @@ function roomWithin(surface: HTMLElement | null): BoardPopupRoom | null {
  * middle of it: see `centreOnBoard`.
  */
 export function placeAboveBoardToolbar(width: number): CSSProperties | null {
-  const toolbar = document.querySelector<HTMLElement>('[data-creative-toolbar]');
+  const elements = boardToolbarElements();
   // In the page but not laid out: on a board too narrow for its controls the
   // toolbar row is `display: none`, and every rect it reports is zero — which
   // would put the popup's foot at the window's top edge and the popup above
   // it. Treated as no toolbar, so the popup centres on the window instead.
-  if (!toolbar || toolbar.getClientRects().length === 0) return null;
+  if (!elements || elements.toolbar.getClientRects().length === 0) return null;
 
-  const board = (
-    toolbar.closest<HTMLElement>('[data-board-toolbar]') ?? toolbar
-  ).getBoundingClientRect();
-  const centred = board.left + board.width / 2 - width / 2;
+  const bar = elements.toolbar.getBoundingClientRect();
+  const board = elements.row.getBoundingClientRect();
+  // The row's own padding is how far in from the board's edges the toolbar sits.
+  const rowStyle = getComputedStyle(elements.row);
+  const insetLeft = parseFloat(rowStyle.paddingLeft) || 0;
+  const insetRight = parseFloat(rowStyle.paddingRight) || 0;
+  const minLeft = board.left + insetLeft;
+  const maxLeft = board.right - insetRight - width;
+  let left = bar.left + bar.width / 2 - width / 2;
+  left =
+    minLeft <= maxLeft
+      ? Math.max(minLeft, Math.min(left, maxLeft))
+      : board.left + board.width / 2 - width / 2;
   return {
     top: 'auto',
     right: 'auto',
     // The row spans the board but is only as tall as the toolbar, so its top
     // edge is the toolbar's and the popup rests just clear of it.
     bottom: window.innerHeight - board.top + FOOTER_GAP_PX,
-    left: Math.max(EDGE_PX, Math.min(centred, window.innerWidth - width - EDGE_PX)),
+    left: Math.max(EDGE_PX, Math.min(left, window.innerWidth - width - EDGE_PX)),
   };
 }

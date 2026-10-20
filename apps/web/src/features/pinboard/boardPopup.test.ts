@@ -2,19 +2,30 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { EDGE_PX, FOOTER_GAP_PX, placeAboveBoardToolbar } from './boardPopup';
 
-/** A toolbar row spanning the board, with the toolbar inside it. */
-function mountToolbar(row: DOMRect | null) {
+/**
+ * A toolbar row spanning the board, with the toolbar inside it. The toolbar is
+ * centred in the row unless it is given a box of its own.
+ */
+function mountToolbar(row: DOMRect | null, bar?: DOMRect) {
   const rowElement = document.createElement('div');
   rowElement.setAttribute('data-board-toolbar', '');
+  // As the board's row is, with `px-6`: the toolbar's gap from the board's edges.
+  rowElement.style.padding = '0 24px';
   const toolbar = document.createElement('nav');
   toolbar.setAttribute('data-creative-toolbar', '');
   rowElement.append(toolbar);
   document.body.append(rowElement);
   // jsdom lays nothing out: a laid-out toolbar is given a box, a hidden one
   // (`display: none`) reports none, as a browser does.
-  toolbar.getClientRects = () => (row ? [row] : []) as unknown as DOMRectList;
+  const box = bar ?? (row && new DOMRect(row.x + row.width / 2 - 150, row.y, 300, row.height));
+  toolbar.getClientRects = () => (box ? [box] : []) as unknown as DOMRectList;
+  if (box) toolbar.getBoundingClientRect = () => box;
   if (row) rowElement.getBoundingClientRect = () => row;
 }
+
+/** Where the popup's left edge lands, kept inside the window. */
+const inWindow = (left: number, width: number) =>
+  Math.max(EDGE_PX, Math.min(left, window.innerWidth - width - EDGE_PX));
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -32,13 +43,29 @@ describe('placeAboveBoardToolbar', () => {
     expect(placeAboveBoardToolbar(400)).toBeNull();
   });
 
-  it('rests the popup just above a laid-out toolbar, centred on the board', () => {
-    mountToolbar(new DOMRect(300, 700, 600, 44));
+  it('rests the popup just above a laid-out toolbar, centred on it', () => {
+    mountToolbar(new DOMRect(100, 700, 800, 44));
     expect(placeAboveBoardToolbar(400)).toEqual({
       top: 'auto',
       right: 'auto',
       bottom: window.innerHeight - 700 + FOOTER_GAP_PX,
-      left: Math.max(EDGE_PX, Math.min(300 + 300 - 200, window.innerWidth - 400 - EDGE_PX)),
+      left: inWindow(100 + 400 - 200, 400),
     });
+  });
+
+  // On a narrow board the toolbar anchors to the board's left; the popup
+  // follows it, lining up with its left edge rather than meeting the agenda.
+  it('follows a toolbar on the left of the board, lined up with its left edge', () => {
+    mountToolbar(new DOMRect(300, 700, 600, 44), new DOMRect(324, 700, 200, 44));
+    expect(placeAboveBoardToolbar(400)?.left).toBe(inWindow(324, 400));
+
+    document.body.innerHTML = '';
+    mountToolbar(new DOMRect(300, 700, 600, 44), new DOMRect(500, 700, 200, 44));
+    expect(placeAboveBoardToolbar(400)?.left).toBe(inWindow(500 + 100 - 200, 400));
+  });
+
+  it('centres on the board when the popup is wider than it', () => {
+    mountToolbar(new DOMRect(300, 700, 300, 44), new DOMRect(324, 700, 200, 44));
+    expect(placeAboveBoardToolbar(400)?.left).toBe(inWindow(300 + 150 - 200, 400));
   });
 });
