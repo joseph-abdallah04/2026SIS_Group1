@@ -10,6 +10,18 @@ import { SESSION_QUESTION_LIMIT, SESSION_QUESTION_TEXT_MAX } from '@roundtable/s
 
 import { BoardRail } from '../../components/BoardRail';
 import { PhaseTimer } from '../../components/PhaseTimer';
+import {
+  boxAt,
+  droppedOrder,
+  followPointer,
+  landingIndex,
+  landingOffset,
+  measureRows,
+  REORDER_EASING,
+  rubberBand,
+  slideShifts,
+  type RowLayout,
+} from '../../lib/dragReorder';
 import { CARD_INK, REACTION_HOVER_FILL, REACTION_ON_BORDER } from '../pinboard/pinboardTokens';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
@@ -259,59 +271,6 @@ function EndsWith({
   );
 }
 
-/** Where the rows a dragged question can trade places with sat when it lifted. */
-interface RowLayout {
-  ids: string[];
-  boxes: { top: number; bottom: number }[];
-  /** The dragged row's index. */
-  self: number;
-  /** How far a row slides to make room: the dragged row's height and the gap after it. */
-  step: number;
-  /** How far up and down the dragged row may travel: level with the first and the last. */
-  min: number;
-  max: number;
-}
-
-/**
- * Measured once, as the drag begins: the rows are about to slide, and their
- * boxes from then on would say where they have gone, not where they belong.
- */
-function measureRows(row: HTMLElement, id: string): RowLayout {
-  const list = row.parentElement;
-  const rows = list ? [...list.querySelectorAll<HTMLElement>('[data-question-id]')] : [row];
-  const ids = rows.map((element) => element.dataset.questionId ?? '');
-  const boxes = rows.map((element) => {
-    const box = element.getBoundingClientRect();
-    return { top: box.top, bottom: box.bottom };
-  });
-  const self = Math.max(0, ids.indexOf(id));
-  const gap = list ? Number.parseFloat(getComputedStyle(list).rowGap) || 0 : 0;
-  const own = boxAt(boxes, self);
-  return {
-    ids,
-    boxes,
-    self,
-    step: own.bottom - own.top + gap,
-    min: Math.min(0, boxAt(boxes, 0).top - own.top),
-    max: Math.max(0, boxAt(boxes, boxes.length - 1).bottom - own.bottom),
-  };
-}
-
-function boxAt(boxes: RowLayout['boxes'], index: number) {
-  return boxes[index] ?? { top: 0, bottom: 0 };
-}
-
-/** The most a dragged row moves past the first or last question it can trade with. */
-const RUBBER_MAX = 14;
-
-/**
- * How far a row dragged `overshoot` pixels past its limit actually goes: about
- * a third as far at first, closing on `RUBBER_MAX` however far it is pulled.
- */
-function rubberBand(overshoot: number) {
-  return Math.sign(overshoot) * RUBBER_MAX * (1 - Math.exp(-Math.abs(overshoot) / 40));
-}
-
 /** `questions`, with the ones in `held` back in that order, in the places they fill. */
 function holdOrder(questions: Question[], held: string[]) {
   const byId = new Map(questions.map((question) => [question.id, question]));
@@ -323,42 +282,12 @@ function holdOrder(questions: Question[], held: string[]) {
 }
 
 /**
- * Whose place a dragged row takes: the furthest row its leading edge has
- * passed the middle of, going the way it is moving. Edges rather than the
- * dragged row's own middle, which on a row taller than the rest (the one being
- * viewed, with its chip) could still sit inside its own place with the row
- * already as far as it can go.
- */
-function landingIndex({ boxes, self }: RowLayout, offset: number) {
-  const own = boxAt(boxes, self);
-  const middle = (index: number) => (boxAt(boxes, index).top + boxAt(boxes, index).bottom) / 2;
-  let target = self;
-  if (offset > 0) {
-    for (let i = self + 1; i < boxes.length; i++) {
-      if (middle(i) <= own.bottom + offset) target = i;
-    }
-  } else if (offset < 0) {
-    for (let i = self - 1; i >= 0; i--) {
-      if (middle(i) >= own.top + offset) target = i;
-    }
-  }
-  return target;
-}
-
-/**
  * How tall the card for the question in play is right now, if there is one.
  * The add form opens at that height: its box starts empty, a line tall, and
  * the card's question may run to more.
  */
 function liveCardHeight() {
   return document.querySelector<HTMLElement>('[data-agenda-card]')?.getBoundingClientRect().height;
-}
-
-/** How far the dragged row travels to sit in the gap opened at `target`. */
-function landingOffset({ boxes, self }: RowLayout, target: number) {
-  const own = boxAt(boxes, self);
-  const there = boxAt(boxes, target);
-  return target > self ? there.bottom - own.bottom : there.top - own.top;
 }
 
 /**
@@ -463,16 +392,27 @@ export function AgendaPanel({
   const press = useRef<{
     id: string;
     pointerId: number;
-    startY: number;
+    /** The row pressed: what lifts, and whose list it moves in. */
+    row: HTMLLIElement;
     /** Where the rows sat when it became a drag. */
     layout?: RowLayout;
     /** The row whose place it would take, as an index into the layout. */
     target?: number;
+    /** How far each row it has passed has slid, as last drawn. */
+    shifts?: Record<string, number>;
   } | null>(null);
   const swallowClick = useRef(false);
   // The move is sent once the dropped row has eased into its gap.
   const placeTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(placeTimer.current), []);
+  // Stops following a press's pointer (`followPointer`), if one is held.
+  const stopFollowing = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      window.clearTimeout(placeTimer.current);
+      stopFollowing.current?.();
+    },
+    [],
+  );
   // The new order arrives with every row already where it puts them, so the
   // slides come off in the very render that brings it: a frame later, and the
   // new order would flash with the old offsets still on it. Until it comes
@@ -510,7 +450,7 @@ export function AgendaPanel({
       if (Math.abs(delta) < 0.5) continue;
       row.animate([{ transform: `translateY(${delta}px)` }, { transform: 'none' }], {
         duration: REORDER_MS,
-        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+        easing: REORDER_EASING,
       });
     }
   }, [shownDrag]);
@@ -847,7 +787,103 @@ export function AgendaPanel({
    *
    * A press that does not travel is still a click: on the text, it puts that
    * question's board up. The keyboard moves it from its text (`reorderKeys`).
+   *
+   * Once pressed, the pointer is followed on the window (`followPointer`), not
+   * on the row: the rail's list can scroll the row out from under it, and a
+   * let-go anywhere must still end the drag. The window's listeners call these
+   * through `dragHandlers`, so they always act on the render that is current.
    */
+  function onDragMove(travelled: number) {
+    const started = press.current;
+    if (!started) return;
+    if (!started.layout) {
+      // A few pixels of wobble is still a click.
+      if (Math.abs(travelled) < 4) return;
+      // Captured only now it is a drag, so a click still lands on the text.
+      try {
+        started.row.setPointerCapture(started.pointerId);
+      } catch {
+        // The window hears it regardless.
+      }
+      started.layout = measureRows(started.row, started.id, 'data-question-id');
+    }
+    const { min, max } = started.layout;
+    const offset = Math.min(max, Math.max(min, travelled));
+    const target = landingIndex(started.layout, offset);
+    started.target = target;
+    // Every row between its place and the one it would take slides one place
+    // towards where it came from.
+    const shifts = slideShifts(started.layout, target);
+    started.shifts = shifts;
+    // Past the first or last, the row gives a little and no more, so the end
+    // is felt rather than hit; let go, it springs back.
+    const give = rubberBand(travelled - offset);
+    setDrag({ id: started.id, offset: offset + give, shifts, settling: false });
+  }
+
+  function onDragUp() {
+    const started = press.current;
+    press.current = null;
+    const layout = started?.layout;
+    if (!started || !layout || started.target === undefined) return;
+    swallowClick.current = true;
+    const { id } = started;
+    const { ids, self } = layout;
+    const target = started.target;
+    const onto = ids[target];
+    if (target === self || !onto) {
+      // Back where it started: ease home.
+      setDrag({ id, offset: 0, shifts: {}, settling: true });
+      return;
+    }
+    const expected = droppedOrder(layout, target);
+    const list = started.row.parentElement;
+    if (list) {
+      const listTop = list.getBoundingClientRect().top;
+      const shifts = started.shifts ?? {};
+      landed.current = {
+        list,
+        tops: Object.fromEntries(
+          ids.map((rowId, i) => [
+            rowId,
+            boxAt(layout.boxes, i).top -
+              listTop +
+              (i === self ? landingOffset(layout, target) : (shifts[rowId] ?? 0)),
+          ]),
+        ),
+      };
+    }
+    setDrag((current) => ({
+      id,
+      shifts: current?.shifts ?? {},
+      // Into the gap the other rows have opened.
+      offset: landingOffset(layout, target),
+      settling: true,
+      expected: expected.join(),
+      held: ids,
+    }));
+    // Sent once the row is at rest in the gap, so the new order lands on rows
+    // that have stopped moving rather than on one mid-slide.
+    placeTimer.current = window.setTimeout(() => {
+      void place(id, onto).then((ok) => {
+        if (!ok) {
+          landed.current = null;
+          setDrag(
+            (current) => current && { ...current, offset: 0, shifts: {}, expected: undefined },
+          );
+        }
+      });
+    }, REORDER_MS);
+  }
+
+  function onDragCancel() {
+    press.current = null;
+    setDrag(null);
+  }
+
+  const dragHandlers = useRef({ move: onDragMove, up: onDragUp, cancel: onDragCancel });
+  dragHandlers.current = { move: onDragMove, up: onDragUp, cancel: onDragCancel };
+
   function dragWiring(question: Question) {
     if (!isLeader || question.status !== 'pending') return {};
     // Any question still to come can make way for a dragged one, the card's
@@ -879,94 +915,25 @@ export function AgendaPanel({
           // otherwise be what moves: the browser drags the selection instead
           // and cancels this press, so the row never lifts.
           window.getSelection()?.removeAllRanges();
-          press.current = { id: question.id, pointerId: event.pointerId, startY: event.clientY };
+          const row = event.currentTarget;
+          press.current = { id: question.id, pointerId: event.pointerId, row };
+          stopFollowing.current?.();
+          stopFollowing.current = followPointer(
+            { pointerId: event.pointerId, startY: event.clientY, list: row.parentElement },
+            {
+              move: (travelled) => dragHandlers.current.move(travelled),
+              up: () => {
+                stopFollowing.current = null;
+                dragHandlers.current.up();
+              },
+              cancel: () => {
+                stopFollowing.current = null;
+                dragHandlers.current.cancel();
+              },
+            },
+          );
         },
         onDragStart: (event: React.DragEvent<HTMLLIElement>) => event.preventDefault(),
-        onPointerMove: (event: React.PointerEvent<HTMLLIElement>) => {
-          const started = press.current;
-          if (!started || started.pointerId !== event.pointerId) return;
-          const travelled = event.clientY - started.startY;
-          if (!started.layout) {
-            // A few pixels of wobble is still a click.
-            if (Math.abs(travelled) < 4) return;
-            event.currentTarget.setPointerCapture(event.pointerId);
-            started.layout = measureRows(event.currentTarget, question.id);
-          }
-          const { ids, self, step, min, max } = started.layout;
-          const offset = Math.min(max, Math.max(min, travelled));
-          const target = landingIndex(started.layout, offset);
-          started.target = target;
-          // Every row between its place and the one it would take slides one
-          // place towards where it came from.
-          const shifts: Record<string, number> = {};
-          for (let i = Math.min(self, target); i <= Math.max(self, target); i++) {
-            const id = ids[i];
-            if (i !== self && id) shifts[id] = target > self ? -step : step;
-          }
-          // Past the first or last, the row gives a little and no more, so
-          // the end is felt rather than hit; let go, it springs back.
-          const give = rubberBand(travelled - offset);
-          setDrag({ id: question.id, offset: offset + give, shifts, settling: false });
-        },
-        onPointerUp: (event: React.PointerEvent<HTMLLIElement>) => {
-          const started = press.current;
-          press.current = null;
-          const layout = started?.layout;
-          if (!layout || started.target === undefined) return;
-          swallowClick.current = true;
-          const { ids, self } = layout;
-          const target = started.target;
-          const onto = ids[target];
-          if (target === self || !onto) {
-            // Back where it started: ease home.
-            setDrag({ id: question.id, offset: 0, shifts: {}, settling: true });
-            return;
-          }
-          const expected = ids.filter((id) => id !== question.id);
-          expected.splice(target, 0, question.id);
-          const list = event.currentTarget.parentElement;
-          if (list) {
-            const listTop = list.getBoundingClientRect().top;
-            const shifts = drag?.shifts ?? {};
-            landed.current = {
-              list,
-              tops: Object.fromEntries(
-                ids.map((id, i) => [
-                  id,
-                  boxAt(layout.boxes, i).top -
-                    listTop +
-                    (i === self ? landingOffset(layout, target) : (shifts[id] ?? 0)),
-                ]),
-              ),
-            };
-          }
-          setDrag((current) => ({
-            id: question.id,
-            shifts: current?.shifts ?? {},
-            // Into the gap the other rows have opened.
-            offset: landingOffset(layout, target),
-            settling: true,
-            expected: expected.join(),
-            held: ids,
-          }));
-          // Sent once the row is at rest in the gap, so the new order lands
-          // on rows that have stopped moving rather than on one mid-slide.
-          placeTimer.current = window.setTimeout(() => {
-            void place(question.id, onto).then((ok) => {
-              if (!ok) {
-                landed.current = null;
-                setDrag(
-                  (current) =>
-                    current && { ...current, offset: 0, shifts: {}, expected: undefined },
-                );
-              }
-            });
-          }, REORDER_MS);
-        },
-        onPointerCancel: () => {
-          press.current = null;
-          setDrag(null);
-        },
         // The press that ended a drag is not also a click on the text.
         onClickCapture: (event: React.MouseEvent<HTMLLIElement>) => {
           if (!swallowClick.current) return;

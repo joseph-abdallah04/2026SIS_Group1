@@ -1694,3 +1694,176 @@ a.rt-sticky-link:focus-visible {
     color: #b42318;
   }
 }
+
+/*
+ * Session setup (F04/F05): the lobby's warm paper, lit from the top, under a
+ * column of quiet panels.
+ */
+.rt-setup-page {
+  background: radial-gradient(ellipse at 50% 0%, #fdf9f1 0%, #f6f0e4 55%, #efe6d6 100%);
+}
+
+/*
+ * A question arriving (from a template, an undo, a paste or Enter) slides up
+ * into its place, one after another down the list. `translate` rather than
+ * `transform`, which a drag sets inline on the same row; and `backwards`, so
+ * once in place nothing is left holding it.
+ */
+@keyframes rt-setup-row-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.rt-setup-row-in {
+  animation: rt-setup-row-in 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--rt-row-index, 0) * 60ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-setup-row-in {
+    animation: none;
+  }
+}
+
+/*
+ * "Your room is open": the table appears, its chairs pull in, the code flips
+ * in, and a bar fills while the waiting room loads (`RoomSetMoment`). Only
+ * ever played with motion allowed; with less, the page goes straight on.
+ */
+.rt-room-table {
+  background: radial-gradient(circle at 50% 36%, #fffaf0 0%, #fbf1dd 45%, #efdcb6 100%);
+  box-shadow:
+    0 0 0 5px #b98a52,
+    0 0 0 7px #8f6334,
+    0 10px 24px rgb(90 60 25 / 0.25);
+  animation: rt-room-table 550ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rt-room-glow {
+  background: radial-gradient(circle, rgb(255 196 100 / 0.55), rgb(255 196 100 / 0) 66%);
+  animation: rt-room-glow 1.6s ease-out 400ms both;
+}
+
+.rt-room-chair {
+  background: linear-gradient(180deg, #dcbd8f, #c19761);
+  box-shadow: inset 0 0 0 1px rgb(110 74 36 / 0.25);
+  animation: rt-room-chair 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(250ms + var(--rt-chair-index, 0) * 70ms);
+}
+
+.rt-room-host {
+  box-shadow: 0 0 0 3px #f7efe0;
+  animation: rt-room-pop 400ms cubic-bezier(0.22, 1, 0.36, 1) 850ms both;
+}
+
+.rt-room-code .rt-code-tile {
+  animation: rt-room-tile 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n) {
+  animation-delay: 950ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 2) {
+  animation-delay: 1000ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 3) {
+  animation-delay: 1050ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 4) {
+  animation-delay: 1100ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 6) {
+  animation-delay: 1200ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 7) {
+  animation-delay: 1250ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 8) {
+  animation-delay: 1300ms;
+}
+
+.rt-room-code .rt-code-tile:nth-child(n + 9) {
+  animation-delay: 1350ms;
+}
+
+.rt-room-bar {
+  width: 0;
+  animation: rt-room-bar 1.4s ease-in-out 900ms forwards;
+}
+
+@keyframes rt-room-table {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+
+@keyframes rt-room-glow {
+  0% {
+    opacity: 0;
+    scale: 0.6;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.5;
+    scale: 1.05;
+  }
+}
+
+@keyframes rt-room-chair {
+  from {
+    opacity: 0;
+    translate: var(--rt-chair-from, 0 0);
+  }
+}
+
+@keyframes rt-room-pop {
+  from {
+    scale: 0.3;
+    opacity: 0;
+  }
+}
+
+@keyframes rt-room-tile {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) rotateX(70deg);
+  }
+}
+
+@keyframes rt-room-bar {
+  to {
+    width: 100%;
+  }
+}
+
+/* `RoomSetMoment` skips the scene with less motion asked for; should one ever
+   be on screen regardless, it is shown set rather than played. */
+@media (prefers-reduced-motion: reduce) {
+  .rt-room-table,
+  .rt-room-glow,
+  .rt-room-chair,
+  .rt-room-host,
+  .rt-room-code .rt-code-tile,
+  .rt-room-bar {
+    animation: none;
+  }
+
+  .rt-room-bar {
+    width: 100%;
+  }
+}

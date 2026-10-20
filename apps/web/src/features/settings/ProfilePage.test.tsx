@@ -26,6 +26,10 @@ vi.mock('../../lib/auth', async () => {
   return { ...actual, clearToken: () => clearTokenMock() };
 });
 vi.mock('../../lib/socket', () => ({ disconnectSocket: () => disconnectSocketMock() }));
+vi.mock('../../lib/currentUser', () => ({
+  getCurrentUserId: () => 'u1',
+  useCurrentUserId: () => 'u1',
+}));
 
 function renderPage() {
   return render(
@@ -163,6 +167,8 @@ describe('ProfilePage', () => {
     it('deletes the account, clears the session, and redirects to /login on confirm', async () => {
       vi.mocked(authApi.getMe).mockResolvedValue({ user: USER });
       vi.mocked(authApi.deleteAccount).mockResolvedValue({ ok: true });
+      // A session being set up, kept in this browser for this account.
+      localStorage.setItem('rt_setup_draft:u1', '{}');
       const user = userEvent.setup();
       renderPage();
 
@@ -175,6 +181,7 @@ describe('ProfilePage', () => {
       await waitFor(() =>
         expect(authApi.deleteAccount).toHaveBeenCalledWith({ password: 'hunter2' }),
       );
+      expect(localStorage.getItem('rt_setup_draft:u1')).toBeNull();
       expect(clearTokenMock).toHaveBeenCalled();
       expect(disconnectSocketMock).toHaveBeenCalled();
       expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true });

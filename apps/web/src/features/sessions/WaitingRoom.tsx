@@ -28,7 +28,6 @@ import {
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { SessionDetail } from './useSessionDetail';
 import { EndSessionControl } from './EndSessionControl';
-import { InviteButton } from './InviteButton';
 import { LeaveSessionControl } from './LeaveSessionControl';
 import { LobbyAgenda } from './LobbyAgenda';
 import { LobbyInfoCard } from './LobbyInfoCard';
@@ -266,27 +265,26 @@ export function WaitingRoom({ session, onLeftLobby, sidePanel: heldPanel }: Wait
             />
           )
         }
+        // Only one of these two is ever drawn: the mic, or — once voice has
+        // given up — its Reconnect in the mic's place. A session with no call
+        // has neither; its status line says "No call". No Invite here, unlike
+        // the board: the info card holds the code, Copy link and Present, and
+        // People has its own invite.
         controls={
-          <>
-            {/* Only one of these two is ever drawn: the mic, or — once voice
-                has given up — its Reconnect in the mic's place. A session with
-                no call has neither; its status line says "No call". */}
-            {session.voiceEnabled ? (
-              <>
-                <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
-                <MicToggle
-                  compact
-                  name={localName(voice.participants)}
-                  micEnabled={voice.micEnabled}
-                  micStatus={voice.micStatus}
-                  status={voice.status}
-                  busy={voice.micBusy}
-                  toggle={voice.toggleMic}
-                />
-              </>
-            ) : null}
-            {session.code ? <InviteButton code={session.code} /> : null}
-          </>
+          session.voiceEnabled ? (
+            <>
+              <VoiceReconnect status={voice.status} error={voice.error} retry={voice.retry} />
+              <MicToggle
+                compact
+                name={localName(voice.participants)}
+                micEnabled={voice.micEnabled}
+                micStatus={voice.micStatus}
+                status={voice.status}
+                busy={voice.micBusy}
+                toggle={voice.toggleMic}
+              />
+            </>
+          ) : undefined
         }
         exit={
           isLeader ? (

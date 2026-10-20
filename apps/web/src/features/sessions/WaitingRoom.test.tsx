@@ -308,14 +308,14 @@ describe('WaitingRoom', () => {
       expect(screen.queryByText('Connected')).not.toBeInTheDocument();
     });
 
-    it('invites from the header, like the board', async () => {
-      const user = userEvent.setup();
+    // Two ways to invite are enough: the info card and People. The header's
+    // Invite, which the board keeps, would be a third.
+    it('invites from the info card, not the header', () => {
       render(<WaitingRoom session={session} onLeftLobby={() => undefined} />);
 
-      await user.click(screen.getByRole('button', { name: 'Invite people' }));
-      expect(screen.getByRole('textbox', { name: 'Invite link' })).toHaveValue(
-        `${window.location.origin}/join/9FFH-BQWB`,
-      );
+      expect(screen.queryByRole('button', { name: 'Invite people' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copy invite link' })).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: '9FFH-BQWB' })).toBeInTheDocument();
     });
 
     it('gives a member Leave instead of End', () => {
