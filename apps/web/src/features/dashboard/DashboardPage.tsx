@@ -7,6 +7,7 @@ import { JoinByCodeForm } from '../sessions/JoinByCodeForm';
 import { liveMembershipOf, useSessions } from '../sessions/useSessions';
 import { AppHeader, useMe } from './AppHeader';
 import type { DashboardState } from './dashboardState';
+import { greetingFor } from './greeting';
 import { DraftCard, PastSessionRow } from './SessionItems';
 
 type Filter = 'all' | 'led';
@@ -146,16 +147,21 @@ export function DashboardPage() {
   const listed = (sessions ?? []).filter((s) => s.status === 'draft' || s.status === 'ended');
   const narrowed = query.trim().length > 0 || filter === 'led';
 
-  // A welcome the first time, with nothing here yet; after that, a nudge to
-  // get on with it. Written only once both the name and the list are in, so
-  // it never changes under somebody's eyes.
+  // The display line (see `greetingFor`). Chosen once a visit, once both the
+  // name and the list are in, so it never changes under somebody's eyes, not
+  // even when a session is deleted from the list below.
+  const [greeting, setGreeting] = useState<string | null>(null);
   const firstName = user?.displayName.trim().split(/\s+/)[0];
-  const greeting =
-    firstName && sessions
-      ? listed.length === 0
-        ? `Welcome to RoundTable, ${firstName}`
-        : `Let’s decide, ${firstName}`
-      : null;
+  useEffect(() => {
+    if (greeting || !user || !firstName || !sessions) return;
+    setGreeting(
+      greetingFor({
+        firstName,
+        sessionDates: listed.map((session) => session.createdAt),
+        accountCreatedAt: user.createdAt,
+      }),
+    );
+  }, [greeting, user, firstName, sessions, listed]);
 
   return (
     <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
@@ -182,8 +188,10 @@ export function DashboardPage() {
             >
               Run a decision meeting.
             </h2>
-            <p className="mt-1.5 text-[13px] text-rt-ink-muted">
-              Write a short agenda, bring your team in, and leave with answers on record.
+            {/* No word left alone on the last line: wrapped with care where the
+                browser can, and "on record" kept together where it cannot. */}
+            <p className="mt-1.5 text-[13px] text-pretty text-rt-ink-muted">
+              Set the agenda, bring your team in, and leave with answers on&nbsp;record.
             </p>
             <div className="mt-auto pt-5">
               <Link

@@ -86,7 +86,9 @@ export function PastSessionRow({
 }) {
   const decision = session.decision;
   return (
-    <li className="group relative flex items-center has-[[aria-expanded=true]]:z-20 gap-x-4 gap-y-1.5 border-b border-rt-tertiary/60 px-3 py-3.5 transition-colors last:border-b-0 hover:bg-rt-surface-alt sm:px-4">
+    // Under the pointer, a rounded fill, as the box it sits in is rounded; the
+    // lines either side of it give way, so neither cuts across its corners.
+    <li className="group relative flex items-center has-[[aria-expanded=true]]:z-20 gap-x-4 gap-y-1.5 rounded-xl border-b border-rt-tertiary/60 px-3 py-3.5 transition-colors last:border-b-0 hover:border-transparent hover:bg-rt-surface-alt has-[+li:hover]:border-transparent sm:px-4">
       <div className="min-w-0 flex-1">
         <h3 className="text-[14px] font-semibold text-rt-ink">
           <Link

@@ -17,7 +17,13 @@ vi.mock('../sessions/useSessions', async () => {
 
 vi.mock('../auth/api', () => ({
   getMe: async () => ({
-    user: { id: 'u1', email: 'mo@team.com', displayName: 'Mohamad Eldhaibi', createdAt: '' },
+    // A new account, so an empty list is a first visit.
+    user: {
+      id: 'u1',
+      email: 'mo@team.com',
+      displayName: 'Mohamad Eldhaibi',
+      createdAt: new Date().toISOString(),
+    },
   }),
   logout: vi.fn(),
 }));
@@ -63,9 +69,12 @@ beforeEach(() => {
 });
 
 describe('dashboard', () => {
-  it('greets by first name: a nudge once there is history, a welcome before', async () => {
+  // Which of the two depends on how old the latest session is (see greeting.test).
+  it('greets by first name once there is history', async () => {
     renderPage();
-    expect(await screen.findByText('Let’s decide, Mohamad')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/^(Let’s decide|It’s been a while), Mohamad$/),
+    ).toBeInTheDocument();
   });
 
   it('welcomes a first visit by name', async () => {

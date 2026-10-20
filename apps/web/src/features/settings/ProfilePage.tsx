@@ -271,7 +271,7 @@ export function ProfilePage() {
                 />
               </span>
             </label>
-            <p className={FIELD_HINT}>Used to sign in. It can’t be changed here.</p>
+            <p className={FIELD_HINT}>Used to sign in. It can’t be changed.</p>
           </div>
 
           {validationError ? (
