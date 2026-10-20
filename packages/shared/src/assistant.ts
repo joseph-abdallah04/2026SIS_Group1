@@ -414,6 +414,10 @@ export const ASSISTANT_ERRORS = {
     title: 'An API key is needed',
     hint: 'Enter your API key the first time you save a provider. After that you can leave it blank to keep the saved one.',
   },
+  LLM_KEY_REQUIRED_FOR_NEW_HOST: {
+    title: 'A new provider needs its own API key',
+    hint: 'Your saved key is only ever sent to the provider it was saved for. Enter the key for this one.',
+  },
   LLM_CONFIG_SAVE_FAILED: {
     title: 'Your provider settings could not be saved',
     hint: 'Log out and back in, then save again. If it keeps happening, report the code.',

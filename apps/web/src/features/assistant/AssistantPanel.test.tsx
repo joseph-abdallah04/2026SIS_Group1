@@ -57,6 +57,8 @@ function tools(
 ): CreativeToolsContextValue {
   return {
     activeTool: null,
+    studioPeeking: false,
+    setStudioPeeking: () => undefined,
     draftScope: { sessionId: 's1', questionId: 'q1', viewerId: 'u1' },
     extensionSource: null,
     isReusing: false,

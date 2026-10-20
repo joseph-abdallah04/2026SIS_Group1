@@ -1,6 +1,6 @@
-import { Fragment } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 
-import { lineAttributes, STICKY_LINE_CLASS, STICKY_LINK_CLASS } from './stickyDom';
+import { lineAttributes, lineStyle, STICKY_LINE_CLASS, STICKY_LINK_CLASS } from './stickyDom';
 import {
   linkRuns,
   segmentStyle,
@@ -41,7 +41,12 @@ export function StickyText({
   return (
     <>
       {stickyBlocks(note).map((block, index) => (
-        <div key={index} className={STICKY_LINE_CLASS} {...lineAttributes(block)}>
+        <div
+          key={index}
+          className={STICKY_LINE_CLASS}
+          style={lineStyle(block) as CSSProperties | undefined}
+          {...lineAttributes(block)}
+        >
           {block.segments.length ? (
             linkRuns(block.segments).map((run, part) => {
               const runs = run.segments.map((segment, each) => (

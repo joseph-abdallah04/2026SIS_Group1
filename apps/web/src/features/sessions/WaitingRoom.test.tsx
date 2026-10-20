@@ -355,6 +355,10 @@ describe('WaitingRoom', () => {
       const panel = screen.getByRole('complementary', { name: 'Side panel' });
       expect(within(panel).getAllByText('In the waiting room')).toHaveLength(2);
       expect(within(panel).getByText(/Everyone joins on the board/)).toBeInTheDocument();
+
+      // Pressed again, the faces put the list away.
+      await user.click(screen.getByRole('button', { name: /Close the people list/ }));
+      expect(within(panel).queryByText(/Everyone joins on the board/)).not.toBeInTheDocument();
     });
 
     it('gives the leader Mute all in a call session', async () => {

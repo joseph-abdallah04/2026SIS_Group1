@@ -1,6 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
+import { showsFocusRing } from '../../lib/focus';
+
 type TooltipPlacement = 'top' | 'right' | 'bottom' | 'left';
 
 const PLACEMENT_CLASSES: Record<TooltipPlacement, string> = {
@@ -173,10 +175,20 @@ export function Tooltip({
       className="relative inline-flex"
       onPointerEnter={show}
       onPointerLeave={hide}
-      onFocusCapture={show}
+      // On focus only when it came from the keyboard. Focus put back on the
+      // control after a pointer press (closing the full-screen invite it
+      // opened, say) is not somebody asking what it does, and with the
+      // pointer already elsewhere nothing would ever take the bubble away.
+      onFocusCapture={(event) => {
+        if (showsFocusRing(event.target)) show();
+      }}
       onBlurCapture={hide}
       // A tooltip must never survive the thing it describes being pressed.
       onPointerDown={hide}
+      // And can always be put away from the keyboard.
+      onKeyDownCapture={(event) => {
+        if (event.key === 'Escape') hide();
+      }}
     >
       {children}
       {portal && tip ? createPortal(tip, document.body) : tip}

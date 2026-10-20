@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionSummary } from '@roundtable/shared';
@@ -14,11 +15,16 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('../sessions/useSessions', async () => {
-  const actual = await vi.importActual<typeof import('../sessions/useSessions')>(
-    '../sessions/useSessions',
-  );
+  const actual =
+    await vi.importActual<typeof import('../sessions/useSessions')>('../sessions/useSessions');
   return { ...actual, useSessions: vi.fn() };
 });
+
+// The header's avatar asks who is signed in.
+vi.mock('../auth/api', () => ({
+  getMe: () => new Promise(() => {}),
+  logout: vi.fn(),
+}));
 
 vi.mock('./ProfilePage', () => ({
   ProfilePage: () => <div>Profile tab</div>,
@@ -112,7 +118,37 @@ describe('SettingsPage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('Profile tab')).toBeInTheDocument();
+    // A trail back to the dashboard, as well as the link beside the sections.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Dashboard',
+      }),
+    ).toHaveAttribute('href', '/dashboard');
+  });
+
+  it('moves between its sections, keeping both mounted', async () => {
+    vi.mocked(useSessions).mockReturnValue({
+      sessions: [idle],
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    });
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('tab', { name: /ai assistant/i }));
+    expect(screen.getByRole('tab', { name: /ai assistant/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByText('Assistant tab')).toBeVisible();
+    expect(screen.getByText('Profile tab')).not.toBeVisible();
   });
 });

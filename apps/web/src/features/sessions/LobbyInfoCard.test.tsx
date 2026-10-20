@@ -37,6 +37,21 @@ describe('LobbyInfoCard', () => {
     expect(screen.queryByText(/not here yet/)).not.toBeInTheDocument();
   });
 
+  // The room just opened: its code flips in here, where it is shared from,
+  // and only then. Any other time it is simply there.
+  it('flips the code in only when the room has just opened', () => {
+    const { unmount } = renderCard({ codeArriving: true });
+    expect(screen.getByRole('img', { name: 'K7NP-3WQZ' }).parentElement).toHaveClass(
+      'rt-code-arrive',
+    );
+    unmount();
+
+    renderCard();
+    expect(screen.getByRole('img', { name: 'K7NP-3WQZ' }).parentElement).not.toHaveClass(
+      'rt-code-arrive',
+    );
+  });
+
   it('says when the leader is not here, and only once that is known', () => {
     const { rerender } = renderCard({ leaderHere: null });
     expect(screen.queryByText(/not here yet/)).not.toBeInTheDocument();

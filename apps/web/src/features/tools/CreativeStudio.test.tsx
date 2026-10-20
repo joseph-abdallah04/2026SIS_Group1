@@ -12,7 +12,10 @@ vi.mock('./drawing/DrawingEditor', () => ({ DrawingEditor: () => null }));
 vi.mock('./diagram/DiagramEditor', () => ({ DiagramEditor: () => null }));
 
 let tools: Partial<CreativeToolsContextValue> = {};
-vi.mock('./CreativeToolsContext', () => ({ useCreativeTools: () => tools }));
+vi.mock('./CreativeToolsContext', async () => {
+  const { createContext } = await import('react');
+  return { CreativeToolsContext: createContext(null), useCreativeTools: () => tools };
+});
 
 const { CreativeStudio } = await import('./CreativeStudio');
 

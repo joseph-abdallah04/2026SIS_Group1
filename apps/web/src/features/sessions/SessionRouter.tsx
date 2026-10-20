@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { SessionPinboard } from '../pinboard/SessionPinboard';
 import { useSidePanel } from '../sidepanel';
@@ -14,6 +14,7 @@ import { useSessionPhaseListener } from './useSessionPhaseListener';
 import { useQuestionAddedListener } from './useQuestionAddedListener';
 import { useQuestionUpdatedListener } from './useQuestionUpdatedListener';
 import { WaitingRoom } from './WaitingRoom';
+import type { WaitingRoomState } from './waitingRoomState';
 
 /**
  * `/sessions/:id` has one route but a render that depends entirely on
@@ -55,6 +56,19 @@ export function SessionRouter() {
   useQuestionAddedListener(sessionId, applyAddedQuestion);
   // F41: the leader turning a question's vote on or off.
   useQuestionUpdatedListener(sessionId, applyUpdatedQuestion);
+
+  // The room has just been opened (`JUST_OPENED`): the waiting room flips its
+  // code in, once. Taken off the history entry straight away, so a refresh
+  // or coming Back shows the code as it is.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [justOpened, setJustOpened] = useState(false);
+  const arrivedOpened = Boolean((location.state as WaitingRoomState | null)?.justOpened);
+  useEffect(() => {
+    if (!arrivedOpened) return;
+    setJustOpened(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [arrivedOpened, navigate, location.pathname]);
 
   if (!sessionId) {
     return (
@@ -103,7 +117,12 @@ export function SessionRouter() {
           {/* `refresh` keeps this page up until the board is ready to replace
               it, in the same render: the board's room joins then cancel this
               page's deferred leaves, and nobody drops out of the room. */}
-          <WaitingRoom session={session} onLeftLobby={refresh} sidePanel={sidePanel} />
+          <WaitingRoom
+            session={session}
+            onLeftLobby={refresh}
+            sidePanel={sidePanel}
+            justOpened={justOpened}
+          />
         </>
       );
     case 'active':

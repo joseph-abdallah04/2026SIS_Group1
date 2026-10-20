@@ -33,7 +33,7 @@ describe('JoinByCodeForm', () => {
     const user = userEvent.setup();
     render(<JoinByCodeForm />);
 
-    await user.type(screen.getByPlaceholderText(/have a code/i), 'ZZZZ-ZZZZ');
+    await user.type(screen.getByLabelText('Session code'), 'ZZZZ-ZZZZ');
     await user.click(screen.getByRole('button', { name: 'Join' }));
 
     expect(await screen.findByRole('dialog', { name: UNKNOWN_JOIN_TITLE })).toBeInTheDocument();
@@ -45,7 +45,7 @@ describe('JoinByCodeForm', () => {
     const user = userEvent.setup();
     render(<JoinByCodeForm />);
 
-    await user.type(screen.getByPlaceholderText(/have a code/i), 'K7NP-3WQZ');
+    await user.type(screen.getByLabelText('Session code'), 'K7NP-3WQZ');
     await user.click(screen.getByRole('button', { name: 'Join' }));
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/join/K7NP-3WQZ'));

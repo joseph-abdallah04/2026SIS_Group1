@@ -5,8 +5,8 @@ import { RoundTableLogo } from '../../../components/RoundTableLogo';
 interface SetupHeaderProps {
   /** Where the leader is: "New session", "Edit draft". */
   current: string;
-  /** How things stand: "Not saved yet", "Draft". */
-  status: string;
+  /** How things stand: "Draft", "Not joinable yet". None where the page says it already. */
+  status?: string;
   /** The breadcrumb back to the dashboard. The page decides whether to ask first. */
   onDashboard: () => void;
   /** Cancel: back to where the leader came from. None on a page with nothing to cancel. */
@@ -26,7 +26,7 @@ export function SetupHeader({ current, status, onDashboard, onCancel }: SetupHea
         <button
           type="button"
           onClick={onDashboard}
-          className="shrink-0 rounded-md font-medium text-rt-ink-muted hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
+          className="shrink-0 cursor-pointer rounded-md font-medium text-rt-ink-muted hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
         >
           Dashboard
         </button>
@@ -35,16 +35,18 @@ export function SetupHeader({ current, status, onDashboard, onCancel }: SetupHea
           {current}
         </h1>
       </nav>
-      <span className="hidden items-center gap-1.5 text-[11.5px] whitespace-nowrap text-rt-ink-muted sm:inline-flex">
-        <span aria-hidden className="size-1.5 rounded-full bg-[#c9bfae]" />
-        {status}
-      </span>
+      {status ? (
+        <span className="hidden items-center gap-1.5 text-[11.5px] whitespace-nowrap text-rt-ink-muted sm:inline-flex">
+          <span aria-hidden className="size-1.5 rounded-full bg-[#c9bfae]" />
+          {status}
+        </span>
+      ) : null}
       <span aria-hidden className="min-w-3 flex-1" />
       {onCancel ? (
         <button
           type="button"
           onClick={onCancel}
-          className="h-8 shrink-0 rounded-full px-3 text-[12.5px] font-semibold text-rt-ink-muted hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
+          className="h-8 shrink-0 cursor-pointer rounded-full px-3 text-[12.5px] font-semibold text-rt-ink-muted hover:bg-rt-ink/[0.06] hover:text-rt-ink focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none"
         >
           Cancel
         </button>

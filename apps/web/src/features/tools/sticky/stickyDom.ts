@@ -33,6 +33,42 @@ export function lineAttributes(block: StickyBlock): Record<string, string> {
   };
 }
 
+/** The room a one-character marker ("1.", "a.", "•") takes, in em. */
+const MARKER_WIDTH = 1.15;
+
+/** The gap between a marker and its words, in em. */
+const MARKER_GAP = 0.35;
+
+/** How far a nested item's marker starts before its parent's words, in em. */
+const NESTED_OVERLAP = 0.25;
+
+/**
+ * The room a list's markers take, in em: wide enough for the longest label it
+ * has ("10.", "viii."), at roughly the width of a bold figure a character.
+ */
+function markerWidth(labelWidth: number | null): number {
+  return labelWidth === null ? MARKER_WIDTH : Math.max(MARKER_WIDTH, labelWidth * 0.6 + 0.3);
+}
+
+const em = (value: number) => `${Number(value.toFixed(3))}em`;
+
+/**
+ * Where a list line's marker and words sit, as the custom properties the
+ * stylesheet reads: room for its own list's widest label, and an indent that
+ * starts each level just past where the list it is nested in starts its words.
+ */
+export function lineStyle(block: StickyBlock): Record<string, string> | undefined {
+  if (!block.list) return undefined;
+  const indent = block.outerLabelWidths.reduce<number>(
+    (total, labelWidth) => total + markerWidth(labelWidth) + MARKER_GAP - NESTED_OVERLAP,
+    0,
+  );
+  return {
+    '--rt-list-indent': em(indent),
+    '--rt-marker-width': em(markerWidth(block.labelWidth)),
+  };
+}
+
 function runNode(segment: StickySegment): Node {
   if (segment.styles.length === 0) return document.createTextNode(segment.text);
   const span = document.createElement('span');
@@ -68,6 +104,9 @@ export function fillWithNote(element: HTMLElement, content: StickyContent) {
       line.className = STICKY_LINE_CLASS;
       for (const [name, value] of Object.entries(lineAttributes(block))) {
         line.setAttribute(name, value);
+      }
+      for (const [name, value] of Object.entries(lineStyle(block) ?? {})) {
+        line.style.setProperty(name, value);
       }
       // An empty line still needs its height, and somewhere for a caret.
       if (block.segments.length === 0) line.append(document.createElement('br'));

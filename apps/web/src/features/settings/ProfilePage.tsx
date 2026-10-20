@@ -1,29 +1,33 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 import { updateProfileSchema } from '@roundtable/shared/schemas';
 
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 import { ApiClientError } from '../../lib/api';
 import { clearToken } from '../../lib/auth';
 import { getCurrentUserId } from '../../lib/currentUser';
 import { disconnectSocket } from '../../lib/socket';
 import { deleteAccount, getMe, updateProfile } from '../auth/api';
 import { forgetSetup } from '../sessions/setup/setupAutosave';
-
-const INPUT_CLASSES =
-  'w-full rounded-full border border-rt-tertiary bg-rt-surface px-5 py-3 text-sm text-rt-ink placeholder:text-rt-ink-faint focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:outline-none';
-
-const LABEL_CLASSES =
-  'flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted';
+import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
+import {
+  FIELD,
+  FIELD_HINT,
+  PRIMARY_BUTTON,
+  SETTINGS_CARD,
+  SETTINGS_CARD_TITLE,
+  TEXT_INPUT,
+} from './settingsStyles';
 
 /**
- * Account deletion. The typed-confirmation gate is the password field itself — the
- * button stays disabled until it's non-empty — plus a second, explicit
- * ConfirmDialog step before anything irreversible actually fires, same
- * pattern as ending/leaving a live session elsewhere in this app.
+ * Account deletion. Asked for in two steps: the button only opens the
+ * question, and the question will not go ahead until the password is typed
+ * into it, so nothing irreversible fires from a single stray press.
  *
  * On success this clears the token and drops the socket exactly like
- * logout (`pages/index.tsx`'s `onLogout`) before navigating away — there is
+ * logout (`AppHeader`'s `onLogout`) before navigating away — there is
  * no account left to have a session for.
  */
 function DeleteAccountSection() {
@@ -51,39 +55,31 @@ function DeleteAccountSection() {
   }
 
   return (
-    <div className="mt-10 border-t border-dashed border-rt-tertiary pt-6">
-      <h2 className="text-sm font-semibold text-red-600">Delete account</h2>
-      <p className="mt-1 max-w-xl text-sm text-rt-ink-muted">
-        Permanently deletes your account. Sessions you led and proposals you posted stay in place,
-        credited to "Deleted user". You'll need to end or leave any session you're currently in
-        first. This cannot be undone.
-      </p>
-
-      <label className="mt-4 flex max-w-xs flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-rt-ink-muted">
-        Confirm your password
-        <input
-          type="password"
-          autoComplete="current-password"
-          className={INPUT_CLASSES}
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setError(null);
-          }}
-        />
-      </label>
-
-      {error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600">
-          {error}
+    <section
+      aria-labelledby="delete-account-title"
+      className={`${SETTINGS_CARD} flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between`}
+    >
+      <div className="max-w-xl">
+        <h2 id="delete-account-title" className="text-[16px] font-semibold text-rt-ink">
+          Delete account
+        </h2>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-rt-ink-muted">
+          Removes your account for good. Sessions you led and proposals you posted stay, credited to
+          “Deleted user”.
         </p>
-      ) : null}
-
+        {error ? (
+          <p role="alert" className="mt-2 text-[13px] text-red-600">
+            {error}
+          </p>
+        ) : null}
+      </div>
       <button
         type="button"
-        onClick={() => setConfirming(true)}
-        disabled={password.length === 0}
-        className="mt-4 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={() => {
+          setPassword('');
+          setConfirming(true);
+        }}
+        className="inline-flex min-h-11 shrink-0 cursor-pointer items-center self-start rounded-full border border-red-200 bg-rt-surface px-5 text-[14px] font-semibold text-red-700 transition-colors hover:border-red-300 hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:outline-none sm:self-center"
       >
         Delete account
       </button>
@@ -94,26 +90,37 @@ function DeleteAccountSection() {
           confirmLabel="Delete account"
           confirmingLabel="Deleting…"
           busy={deleting}
+          confirmDisabled={password.length === 0}
           onConfirm={() => void onConfirm()}
           onCancel={() => setConfirming(false)}
         >
           <p>
-            This permanently deletes your account and logs you out immediately. Sessions you led and
-            proposals you posted stay in place, credited to "Deleted user". This cannot be undone.
+            This permanently deletes your account and logs you out. Sessions you led and proposals
+            you posted stay in place, credited to “Deleted user”. This cannot be undone.
           </p>
+          <PasswordInput
+            label="Type your password to confirm"
+            className="mt-4 flex flex-col gap-2 text-[13px] font-semibold text-rt-ink"
+            inputClassName={TEXT_INPUT}
+            autoComplete="current-password"
+            autoFocus
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </ConfirmDialog>
       ) : null}
-    </div>
+    </section>
   );
 }
 
 /**
- * Content for the "Profile" tab of /settings — no page chrome of its own,
- * that lives in SettingsPage (the tab shell).
+ * Content for the "Profile" section of /settings — no page chrome of its own,
+ * that lives in SettingsPage (the shell around the sections).
  */
 export function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [userId, setUserId] = useState('');
   const [email, setEmail] = useState('');
   // The last value confirmed by the server — the rollback target if a save fails.
   const [savedDisplayName, setSavedDisplayName] = useState('');
@@ -128,6 +135,7 @@ export function ProfilePage() {
     getMe()
       .then(({ user }) => {
         if (cancelled) return;
+        setUserId(user.id);
         setEmail(user.email);
         setDisplayName(user.displayName);
         setSavedDisplayName(user.displayName);
@@ -197,59 +205,94 @@ export function ProfilePage() {
     );
   }
 
+  const swatch = swatchForId(userId);
+  // Nothing to save until the name differs from what is saved.
+  const unchanged = displayName === savedDisplayName;
+
   return (
-    <div>
-      <p className="mb-8 max-w-xl text-sm text-rt-ink-muted">
-        Your display name is what teammates see in waiting rooms, participant lists, and voting
-        screens.
-      </p>
+    <div className="flex flex-col gap-6">
+      <section aria-labelledby="profile-title" className={SETTINGS_CARD}>
+        <h2 id="profile-title" className={SETTINGS_CARD_TITLE}>
+          Profile
+        </h2>
 
-      <div className="mb-6 flex flex-col gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-rt-ink-muted">
-          Email
-        </span>
-        <span className="text-sm text-rt-ink">{email}</span>
-      </div>
-
-      <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
-        <label className={LABEL_CLASSES}>
-          Display name
-          <input
-            className={INPUT_CLASSES}
-            autoComplete="off"
-            type="text"
-            value={displayName}
-            onChange={(e) => {
-              setDisplayName(e.target.value);
-              setJustSaved(false);
-            }}
-            maxLength={50}
-            required
-          />
-        </label>
-
-        {validationError ? (
-          <p role="alert" className="text-sm text-red-600">
-            {validationError}
-          </p>
-        ) : null}
-        {saveError ? (
-          <p role="alert" className="text-sm text-red-600">
-            {saveError}
-          </p>
-        ) : null}
-
-        <div className="flex items-center justify-end gap-4 border-t border-dashed border-rt-tertiary pt-6">
-          {justSaved ? <span className="text-sm text-rt-primary-deep">Saved.</span> : null}
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-full bg-rt-secondary px-6 py-3 text-sm font-semibold text-rt-ink transition-colors hover:bg-rt-secondary-deep hover:text-white focus-visible:ring-2 focus-visible:ring-rt-primary-deep focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        <div className="mt-6 flex items-center gap-4 border-b border-rt-tertiary/70 pb-6">
+          <span
+            aria-hidden
+            className="flex size-16 shrink-0 items-center justify-center rounded-full text-[20px] font-semibold"
+            style={{ background: swatch.background, color: swatch.color }}
           >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+            {initialsFromName(savedDisplayName)}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[16px] font-semibold text-rt-ink">{savedDisplayName}</p>
+            <p className="mt-0.5 text-[13px] text-rt-ink-muted">
+              Your initials show on your proposals and in the people list.
+            </p>
+          </div>
         </div>
-      </form>
+
+        <form onSubmit={onSubmit} noValidate className="mt-6 flex flex-col gap-6">
+          <div>
+            <label className={FIELD}>
+              Display name
+              <input
+                className={TEXT_INPUT}
+                autoComplete="off"
+                type="text"
+                value={displayName}
+                onChange={(e) => {
+                  setDisplayName(e.target.value);
+                  setJustSaved(false);
+                }}
+                maxLength={50}
+                required
+              />
+            </label>
+            <p className={FIELD_HINT}>
+              What teammates see in lobbies, the people list and on your proposals.
+            </p>
+          </div>
+
+          <div>
+            <label className={FIELD}>
+              Email
+              <span className="relative">
+                <input
+                  className={`${TEXT_INPUT} cursor-default bg-rt-surface-alt pr-11 text-rt-ink-muted`}
+                  type="email"
+                  value={email}
+                  readOnly
+                />
+                <Lock
+                  aria-hidden
+                  size={15}
+                  className="absolute top-1/2 right-4 -translate-y-1/2 text-rt-ink-faint"
+                />
+              </span>
+            </label>
+            <p className={FIELD_HINT}>Used to sign in. It can’t be changed.</p>
+          </div>
+
+          {validationError ? (
+            <p role="alert" className="text-sm text-red-600">
+              {validationError}
+            </p>
+          ) : null}
+          {saveError ? (
+            <p role="alert" className="text-sm text-red-600">
+              {saveError}
+            </p>
+          ) : null}
+
+          <div className="flex items-center justify-end gap-4">
+            {justSaved ? <span className="text-sm text-rt-secondary-deep">Saved.</span> : null}
+            <button type="submit" disabled={saving || unchanged} className={PRIMARY_BUTTON}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </form>
+      </section>
 
       <DeleteAccountSection />
     </div>

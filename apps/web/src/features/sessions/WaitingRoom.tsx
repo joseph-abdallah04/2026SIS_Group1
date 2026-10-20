@@ -58,6 +58,8 @@ interface WaitingRoomProps {
    * the lobby holds its own.
    */
   sidePanel?: SidePanelControl;
+  /** The leader has just opened the room: the join code flips in, once. */
+  justOpened?: boolean;
 }
 
 function questionCount(n: number): string {
@@ -79,7 +81,12 @@ function peopleSeated(n: number): string {
  * panel at laptop widths, the table comes first and the cards scroll under it,
  * and on a phone People and Chat rise from a bar along the bottom.
  */
-export function WaitingRoom({ session, onLeftLobby, sidePanel: heldPanel }: WaitingRoomProps) {
+export function WaitingRoom({
+  session,
+  onLeftLobby,
+  sidePanel: heldPanel,
+  justOpened = false,
+}: WaitingRoomProps) {
   const reduceMotion = useMediaQuery(REDUCED_MOTION);
   // The 3-2-1 everyone sees when the leader starts, then the board.
   const { moment, begin: beginStartMoment } = useStartMoment(onLeftLobby, reduceMotion);
@@ -261,7 +268,8 @@ export function WaitingRoom({ session, onLeftLobby, sidePanel: heldPanel }: Wait
             <PeopleSnapshot
               participants={roster}
               leaderId={session.leaderId}
-              onOpen={() => panel.open('people')}
+              onToggle={() => panel.toggle('people')}
+              listOpen={panel.tab === 'people'}
             />
           )
         }
@@ -320,6 +328,7 @@ export function WaitingRoom({ session, onLeftLobby, sidePanel: heldPanel }: Wait
                 leaderName={leaderName}
                 leaderHere={leaderHere}
                 code={session.code}
+                codeArriving={justOpened}
               />
             </aside>
             <section aria-label="The table" className="rt-lobby-stage rt-table-stage">

@@ -46,7 +46,7 @@ function question(position: number, status: QuestionStatus, votingEnabled = true
 const inList = (text: string) => within(screen.getByRole('list')).getByText(text);
 
 /** Opens a question to edit, picks how it ends, and saves. */
-async function endsWith(choice: 'A vote' | 'Brainstorm', number = 1) {
+async function endsWith(choice: 'Vote' | 'Brainstorm', number = 1) {
   await userEvent.click(screen.getByRole('button', { name: `Edit question ${number}` }));
   await userEvent.click(screen.getByRole('radio', { name: choice }));
   await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -723,7 +723,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
   it('lets the leader turn the vote back on mid-discussion, from the card', async () => {
     renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
 
-    await endsWith('A vote');
+    await endsWith('Vote');
 
     expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q1', { votingEnabled: true });
   });
@@ -790,7 +790,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Finish discussion' }));
     await userEvent.click(screen.getByRole('button', { name: 'Edit question 1' }));
 
-    expect(screen.getByRole('radio', { name: 'A vote' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Vote' })).toBeDisabled();
   });
 
   it('adds a brainstorm-only question when the leader turns its vote off first', async () => {
@@ -809,7 +809,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     );
     // Back to the default for the next one.
     await userEvent.click(await screen.findByRole('button', { name: 'Add question' }));
-    expect(screen.getByRole('radio', { name: 'A vote' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Vote' })).toHaveAttribute('aria-checked', 'true');
   });
 });
 
@@ -854,7 +854,8 @@ describe('AgendaPanel card', () => {
     expect(card).toContainElement(screen.getByRole('button', { name: 'Start discussion' }));
   });
 
-  it('shows the discussion clock, and no count line under the question', () => {
+  // The header carries the discussion clock, so the card does not repeat it.
+  it('shows no discussion clock and no count line under the question', () => {
     render(
       <AgendaPanel
         sessionId="s1"
@@ -862,15 +863,10 @@ describe('AgendaPanel card', () => {
         viewingQuestionId="q1"
         isLeader={false}
         proposalCount={5}
-        timer={{
-          questionId: 'q1',
-          startedAt: new Date().toISOString(),
-          durationSeconds: 300,
-        }}
       />,
     );
 
-    expect(screen.getByRole('timer')).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.queryByText(/proposals?\b/)).not.toBeInTheDocument();
   });
 
@@ -1182,6 +1178,14 @@ describe('AgendaPanel reordering', () => {
         toQuestionId: 'q2',
       }),
     );
+
+    // Review of 64fbe30: let go off its row, that drag's click never landed to clear
+    // the "swallow the next click" flag, so the leader's next click did nothing.
+    const next = inList('Question 3');
+    fireEvent.pointerDown(next.closest('li')!, { button: 0, pointerId: 2, clientY: 240 });
+    fireEvent.pointerUp(next.closest('li')!, { pointerId: 2, clientY: 240 });
+    fireEvent.click(next);
+    expect(onView).toHaveBeenCalledWith('q3');
   });
 
   // A rail scrolled under a held row moves the rows, not the pointer: the row

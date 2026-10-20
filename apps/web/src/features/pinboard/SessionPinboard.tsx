@@ -521,11 +521,6 @@ export function SessionPinboard({
                 proposalCount={
                   board.questionStatus === 'discussion' ? board.items.length : undefined
                 }
-                timer={
-                  board.discussionTimer && board.questionId
-                    ? { questionId: board.questionId, ...board.discussionTimer }
-                    : null
-                }
               />
             }
             boardLock={{
@@ -582,25 +577,38 @@ export function SessionPinboard({
               <PeopleSnapshot
                 participants={roster}
                 leaderId={board.leaderId}
-                onOpen={() => sidePanel.open('people')}
+                onToggle={() => sidePanel.toggle('people')}
+                listOpen={sidePanel.tab === 'people'}
               />
             }
             invite={joinCode ? <InviteButton code={joinCode} /> : null}
             clock={<SessionClock startedAt={startedAt} />}
             reactToProposal={reactToProposal}
             onSelectProposal={onSelectProposal}
+            // The room's discussion clock, the only place it is shown. Kept
+            // while this person looks at another question's board, named for
+            // the question it times, since the line beside it then describes
+            // the board being looked at instead.
             headerTimer={
-              !viewingQuestion &&
               board.discussionTimer &&
               (board.questionStatus === 'discussion' ||
                 (board.questionStatus === 'voting' && voting.phase === 'shortlisting')) ? (
-                <PhaseTimer
-                  inline
-                  startedAt={board.discussionTimer.startedAt}
-                  durationSeconds={board.discussionTimer.durationSeconds}
-                  allowOvertime
-                  label="Discussion"
-                />
+                <span>
+                  {viewingQuestion && board.questionPosition != null
+                    ? `Q${board.questionPosition + 1}: `
+                    : null}
+                  <PhaseTimer
+                    inline
+                    startedAt={board.discussionTimer.startedAt}
+                    durationSeconds={board.discussionTimer.durationSeconds}
+                    allowOvertime
+                    label={
+                      viewingQuestion && board.questionPosition != null
+                        ? `Question ${board.questionPosition + 1} discussion`
+                        : 'Discussion'
+                    }
+                  />
+                </span>
               ) : null
             }
             sidePanel={

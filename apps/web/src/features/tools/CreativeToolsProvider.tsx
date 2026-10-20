@@ -38,6 +38,7 @@ export function CreativeToolsProvider({
   // with it everywhere below.
   const [extensionKind, setExtensionKind] = useState<'extend' | 'reuse'>('extend');
   const [editSource, setEditSource] = useState<BoardItem | null>(null);
+  const [studioPeeking, setStudioPeeking] = useState(false);
   const activeTool = parseToolKind(searchParams.get('tool'));
   const submission = useProposalSubmission({
     extensionSource,
@@ -131,6 +132,8 @@ export function CreativeToolsProvider({
     <CreativeToolsContext.Provider
       value={{
         activeTool,
+        studioPeeking,
+        setStudioPeeking,
         draftScope: { sessionId, questionId, viewerId },
         extensionSource,
         isReusing: extensionSource !== null && extensionKind === 'reuse',

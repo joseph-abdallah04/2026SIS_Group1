@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -13,7 +14,12 @@ import type { StickyColor } from '@roundtable/shared';
 import { Button } from '../../../components/ui/Button';
 import { showsFocusRing } from '../../../lib/focus';
 import { closingFades } from '../../../lib/motion';
-import { CENTRED_ON_WINDOW, placeAboveBoardToolbar } from '../../pinboard/boardPopup';
+import {
+  boardToolbarElements,
+  CENTRED_ON_WINDOW,
+  EDGE_PX,
+  placeAboveBoardToolbar,
+} from '../../pinboard/boardPopup';
 import { STICKY_RADIUS, STICKY_SHADOW, STICKY_THEMES } from '../../pinboard/pinboardTokens';
 import { prepareStickyText, STICKY_MAX_LINES, STICKY_TEXT_LIMIT } from '../artifactLimits';
 import { useCreativeTools } from '../CreativeToolsContext';
@@ -48,11 +54,13 @@ const EXIT_MS = 150;
 /** The toolbar button for the tool that is already open. */
 const OPEN_TOOL_BUTTON = '[data-creative-toolbar] button[aria-pressed="true"]';
 /**
- * How tall the note grows before it scrolls: about a dozen lines at the popup's
- * size, which a note at the limit in ordinary prose stays within, and short
- * enough that the popup and its close button stay on a small laptop's screen.
+ * How tall the note may grow before its room has been measured: about a dozen
+ * lines, short enough for the popup and its close button to stay on a small
+ * laptop's screen. Measured straight away, before anything is painted.
  */
 const NOTE_MAX_HEIGHT_PX = 360;
+/** The note's own least height, as its `min-h` below. */
+const NOTE_MIN_HEIGHT_PX = 124;
 
 /** Where the popup rests over the board; see `placeAboveBoardToolbar`. */
 const placeAboveFooter = () =>
@@ -145,11 +153,72 @@ export function StickyEditor() {
   const theme = STICKY_THEMES[color];
   const [placement, setPlacement] = useState(placeAboveFooter);
 
-  useEffect(() => {
-    const onResize = () => setPlacement(placeAboveFooter());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+  /**
+   * Measured again whenever what it rests on moves, not only when the window
+   * does. The board changes width under an open popup — the agenda folded or
+   * dragged, a panel opened, one still sliding in when the popup opened — and
+   * the toolbar with it, and a popup placed once would be left off to one side.
+   *
+   * Except on its way out. Opening a side panel is a press outside the popup,
+   * so the popup fades while that panel slides in and narrows the board, and
+   * following it would slide the popup across the screen as it fades.
+   */
+  useLayoutEffect(() => {
+    const update = () => {
+      if (!closingRef.current) setPlacement(placeAboveFooter());
+    };
+    update();
+    window.addEventListener('resize', update);
+    const elements = boardToolbarElements();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (elements && observer) {
+      observer.observe(elements.toolbar);
+      observer.observe(elements.row);
+    }
+    return () => {
+      window.removeEventListener('resize', update);
+      observer?.disconnect();
+    };
   }, []);
+
+  /**
+   * How tall the note grows before it scrolls: all the room there is. Resting
+   * on the toolbar, the popup grows upward, so that is up to just below the
+   * top of the board; centred on the window, the window less its margins.
+   * Whatever else is on the paper (its label, its formatting bar, its foot)
+   * comes off first. So on a tall screen even a full note never scrolls, and
+   * on a small one it scrolls only once it would otherwise run off the board.
+   *
+   * The rest of the paper is measured as the form less the frame round the
+   * note, which stays true while the note eases to a new height.
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  const [noteMaxHeight, setNoteMaxHeight] = useState(NOTE_MAX_HEIGHT_PX);
+  useLayoutEffect(() => {
+    const form = formRef.current;
+    const frame = form?.querySelector('#sticky-text')?.parentElement;
+    if (!form || !frame) return;
+    const measure = () => {
+      const rest = form.offsetHeight - frame.offsetHeight;
+      const room =
+        placement && typeof placement.bottom === 'number'
+          ? window.innerHeight -
+            placement.bottom -
+            Math.max(
+              0,
+              document.querySelector('[data-board-frame]')?.getBoundingClientRect().top ?? 0,
+            ) -
+            EDGE_PX
+          : window.innerHeight - EDGE_PX * 2;
+      const next = Math.max(NOTE_MIN_HEIGHT_PX, Math.floor(room - rest));
+      setNoteMaxHeight((current) => (current === next ? current : next));
+    };
+    measure();
+    // The rest of the paper changes height too: an error line under the note.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(form);
+    return () => observer?.disconnect();
+  }, [placement]);
 
   /**
    * Nothing to acknowledge. The sticky lands on the board directly behind this
@@ -194,6 +263,8 @@ export function StickyEditor() {
     exitTimer.current = null;
     closingRef.current = false;
     setClosing(false);
+    // It stopped following the board while it faded.
+    setPlacement(placeAboveFooter());
   }, []);
 
   useEffect(
@@ -348,6 +419,7 @@ export function StickyEditor() {
           what is positioned, and in the workbench that position is itself a
           transform, which an animated one would overwrite. */}
       <form
+        ref={formRef}
         className={`${closing ? 'rt-sticky-popup-fade' : 'rt-sticky-popup-rise'} p-6`}
         // Bare paper, exactly as it will sit on the board: no outline, square
         // corners, and the shadow that falls below it.
@@ -397,7 +469,7 @@ export function StickyEditor() {
             lineLimit={STICKY_MAX_LINES}
             autoFocus
             readOnly={closing}
-            maxHeight={NOTE_MAX_HEIGHT_PX}
+            maxHeight={noteMaxHeight}
             placeholder="Capture the idea in one clear note"
             onFormatChange={setFormat}
             onChange={(next) => {

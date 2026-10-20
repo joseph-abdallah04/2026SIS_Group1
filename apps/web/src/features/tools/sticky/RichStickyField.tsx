@@ -30,6 +30,7 @@ import {
   type StickyMarkStyle,
 } from '@roundtable/shared';
 
+import { OverlayScrollbar } from '../../../components/OverlayScrollbar';
 import { fillWithNote, STICKY_HREF_ATTRIBUTE, STICKY_STYLES_ATTRIBUTE } from './stickyDom';
 import {
   autoLinkBefore,
@@ -1245,7 +1246,7 @@ export const RichStickyField = forwardRef<RichStickyFieldHandle, RichStickyField
     const empty = value.text.length === 0 && !value.lines[0];
 
     return (
-      <div ref={wrapperRef} className="relative">
+      <div ref={wrapperRef} className="group/scroll relative">
         <div
           ref={frameRef}
           className="relative overflow-hidden transition-[height] duration-150 ease-out motion-reduce:transition-none"
@@ -1270,17 +1271,17 @@ export const RichStickyField = forwardRef<RichStickyFieldHandle, RichStickyField
             contentEditable={!readOnly}
             suppressContentEditableWarning
             spellCheck
-            // A slim bar on the paper rather than the system's own, and a
-            // scroll that stops at the end of the note rather than carrying on
-            // to whatever is behind it.
+            // The app's own slim bar rather than the system's (on Windows, a
+            // grey gutter with arrows), and a scroll that stops at the end of
+            // the note rather than carrying on to whatever is behind it.
             className={`wrap-break-word whitespace-pre-wrap outline-none ${
-              maxHeight
-                ? 'overflow-y-auto overscroll-contain [scrollbar-color:rgba(8,12,21,0.22)_transparent] scrollbar-thin'
-                : ''
+              maxHeight ? 'rt-no-scrollbar overflow-y-auto overscroll-contain' : ''
             } ${className}`}
             style={{ ...style, ...(maxHeight ? { maxHeight } : {}) }}
           />
         </div>
+        {/* In the paper's margin, beside the note rather than over its words. */}
+        {maxHeight ? <OverlayScrollbar scroller={rootRef} className="top-0 -right-4 bottom-0" /> : null}
         {linkEditor && !readOnly ? (
           <LinkEditor
             key={linkEditor.opened}

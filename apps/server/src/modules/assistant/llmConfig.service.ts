@@ -65,7 +65,7 @@ export async function saveLlmConfig(
 
   const apiKeyEncrypted = input.apiKey
     ? encryptSecret(input.apiKey, encryptionSecret())
-    : await existingApiKeyEncrypted(userId);
+    : await existingApiKeyEncrypted(userId, input.baseUrl);
   const data = { baseUrl: input.baseUrl, model: input.model, apiKeyEncrypted };
 
   try {
@@ -89,15 +89,47 @@ export async function saveLlmConfig(
   return { baseUrl: input.baseUrl, model: input.model, hasKey: true };
 }
 
-/** The stored ciphertext, for a save that did not supply a new key. */
-async function existingApiKeyEncrypted(userId: string): Promise<string> {
+/**
+ * The host a base URL calls, for telling one provider from another. A URL that
+ * will not parse has none, so it never matches.
+ */
+function hostOf(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A key on file is only ever sent where it was saved for. Without this, a save
+ * or a test that left the key blank (keep the saved one) but changed the base
+ * URL would hand, say, an OpenAI secret to Groq, or to any host typed in.
+ */
+function assertSameHost(storedBaseUrl: string, baseUrl: string): void {
+  const stored = hostOf(storedBaseUrl);
+  if (stored === null || stored !== hostOf(baseUrl)) {
+    throw new ApiError(
+      400,
+      assistantErrorMessage('LLM_KEY_REQUIRED_FOR_NEW_HOST'),
+      'LLM_KEY_REQUIRED_FOR_NEW_HOST',
+    );
+  }
+}
+
+/**
+ * The stored ciphertext, for a save that did not supply a new key: kept only
+ * for the same provider (`assertSameHost`).
+ */
+async function existingApiKeyEncrypted(userId: string, baseUrl: string): Promise<string> {
   const row = await prisma.userLLMConfig.findUnique({
     where: { userId },
-    select: { apiKeyEncrypted: true },
+    select: { baseUrl: true, apiKeyEncrypted: true },
   });
   if (!row) {
     throw new ApiError(400, assistantErrorMessage('LLM_KEY_REQUIRED'), 'LLM_KEY_REQUIRED');
   }
+  assertSameHost(row.baseUrl, baseUrl);
   return row.apiKeyEncrypted;
 }
 
@@ -171,9 +203,11 @@ export async function testLlmConfig(
     } else if (override.apiKey) {
       credentials = { baseUrl: override.baseUrl, model: override.model, apiKey: override.apiKey };
     } else {
-      // Testing a new base URL or model against the key already on file — the browser has
-      // no way to send a key it was never given back.
+      // Testing a new model, or a new path on the same host, against the key already on
+      // file — the browser has no way to send a key it was never given back. Never a new
+      // host: the key is only sent where it was saved for.
       const stored = await getLlmCredentials(userId);
+      assertSameHost(stored.baseUrl, override.baseUrl);
       credentials = { baseUrl: override.baseUrl, model: override.model, apiKey: stored.apiKey };
     }
   } catch (cause) {
