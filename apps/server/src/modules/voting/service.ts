@@ -669,6 +669,58 @@ export async function listEndedVoteOutcomes(
   }));
 }
 
+/** How long a decision's words can be on the dashboard; it shows one line. */
+const DECISION_TEXT_MAX = 140;
+
+/** What a winning card that is not a sticky is called, having no words of its own. */
+const DECISION_KIND_LABELS = {
+  drawing: 'A drawing',
+  diagram: 'A diagram',
+  image: 'An image',
+} as const;
+
+/**
+ * Each session's decisions, in agenda order, as one line each: the winning
+ * sticky's words, or what kind of card won. For the dashboard, which shows the
+ * first and how many more.
+ *
+ * Only questions a vote closed with a single winner count; a tie, or a
+ * question that never reached a vote, decided nothing on its own. Reads a
+ * sticky's words straight from the stored card and nothing else of it, so a
+ * winning picture is never loaded just to be named.
+ *
+ * The caller decides which sessions the viewer may see.
+ */
+export async function listSessionDecisions(
+  sessionIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const decisions = new Map<string, string[]>();
+  if (sessionIds.length === 0) return decisions;
+  const rows = await prisma.$queryRaw<
+    { sessionId: string; type: keyof typeof DECISION_KIND_LABELS | 'sticky'; text: string | null }[]
+  >`
+    SELECT q."sessionId" AS "sessionId", p.type::text AS type,
+           CASE WHEN p.type = 'sticky' THEN p."artifactJson"->>'text' END AS text
+    FROM answers a
+    JOIN questions q ON q.id = a."questionId"
+    JOIN proposals p ON p.id = a."winningProposalId"
+    WHERE q."sessionId" = ANY(${[...sessionIds]}::text[])
+    ORDER BY q.position ASC
+  `;
+  for (const row of rows) {
+    const words = row.type === 'sticky' ? (row.text ?? '').replace(/\s+/g, ' ').trim() : '';
+    const line =
+      row.type === 'sticky'
+        ? words.length > DECISION_TEXT_MAX
+          ? `${words.slice(0, DECISION_TEXT_MAX - 1).trimEnd()}…`
+          : words
+        : DECISION_KIND_LABELS[row.type];
+    if (!line) continue;
+    decisions.set(row.sessionId, [...(decisions.get(row.sessionId) ?? []), line]);
+  }
+  return decisions;
+}
+
 export async function getSessionVoteOutcomes(sessionId: string): Promise<QuestionVoteOutcome[]> {
   const rounds = await prisma.votingRound.findMany({
     where: { sessionId },

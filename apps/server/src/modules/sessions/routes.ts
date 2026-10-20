@@ -17,6 +17,7 @@ import {
 import { requireAuth, verifiedUserId } from '../../middleware/auth.js';
 import { ApiError } from '../../middleware/error.js';
 import { sessionRoom, type RealtimeServer } from '../../realtime/types.js';
+import { listSessionDecisions } from '../voting/index.js';
 import {
   assertSessionMember,
   addSessionQuestion,
@@ -107,12 +108,21 @@ export function createSessionsRoutes(io: RealtimeServer): Router {
     }
   });
 
-  // Dashboard list
+  // Dashboard list, each ended session with what it decided (from voting, so
+  // this module never reads votes or answers itself).
   sessionsRoutes.get('/', requireAuth, async (req, res, next) => {
     try {
       const userId = req.userId!;
       const sessions = await listSessionsForUser(userId);
-      res.json(sessions);
+      const ended = sessions.filter((session) => session.status === 'ended');
+      const decisions = await listSessionDecisions(ended.map((session) => session.id));
+      res.json(
+        sessions.map((session) => {
+          if (session.status !== 'ended') return session;
+          const [first, ...rest] = decisions.get(session.id) ?? [];
+          return { ...session, decision: first ? { text: first, more: rest.length } : null };
+        }),
+      );
     } catch (err) {
       next(err);
     }

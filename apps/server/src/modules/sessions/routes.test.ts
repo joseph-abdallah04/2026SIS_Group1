@@ -33,6 +33,9 @@ const emitBoardLock = vi.fn();
 const setQuestionVoting = vi.fn();
 const startSession = vi.fn();
 const updateSessionDraft = vi.fn();
+const listSessionDecisions = vi.fn(async (): Promise<Map<string, string[]>> => new Map());
+
+vi.mock('../voting/index.js', () => ({ listSessionDecisions }));
 
 // Identity is injected here so the handlers can be exercised without JWT
 // signing — `requireAuth` itself is covered in middleware/auth.test.ts.
@@ -692,6 +695,29 @@ describe('draft edit, delete, open, create, join', () => {
       const res = await request({ path: '/api/sessions' });
       expect(res.status).toBe(200);
       expect(listSessionsForUser).toHaveBeenCalledWith('u1');
+    });
+  });
+
+  it('GET / says what each ended session decided, and nothing for the rest', async () => {
+    listSessionsForUser.mockResolvedValue([
+      { id: 'draft', status: 'draft' },
+      { id: 'decided', status: 'ended' },
+      { id: 'undecided', status: 'ended' },
+    ]);
+    listSessionDecisions.mockResolvedValueOnce(
+      new Map([['decided', ['Group by account', 'A drawing', 'Ship Friday']]]),
+    );
+    const { io } = createFakeIo();
+    await withServer(io, async (request) => {
+      const res = await request({ path: '/api/sessions' });
+      expect(res.status).toBe(200);
+      // Only the ended ones are asked about.
+      expect(listSessionDecisions).toHaveBeenCalledWith(['decided', 'undecided']);
+      expect(res.body).toEqual([
+        { id: 'draft', status: 'draft' },
+        { id: 'decided', status: 'ended', decision: { text: 'Group by account', more: 2 } },
+        { id: 'undecided', status: 'ended', decision: null },
+      ]);
     });
   });
 });

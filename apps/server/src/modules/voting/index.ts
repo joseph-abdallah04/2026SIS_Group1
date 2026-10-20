@@ -8,5 +8,6 @@ export {
   getShortlistState,
   getVotingState,
   listEndedVoteOutcomes,
+  listSessionDecisions,
 } from './service.js';
 export type { QuestionVoteOutcome } from './service.js';

@@ -17,6 +17,7 @@ const itemFindMany = vi.fn();
 const voteUpsert = vi.fn();
 const answerUpsert = vi.fn();
 const roundFindMany = vi.fn();
+const queryRaw = vi.fn();
 
 const tx = {
   votingRound: { findUnique: roundFindUnique, create: roundCreate, update: roundUpdate },
@@ -36,6 +37,7 @@ vi.mock('../../db.js', () => ({
     vote: { upsert: voteUpsert },
     answer: { upsert: answerUpsert },
     $transaction: (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
+    $queryRaw: queryRaw,
   },
 }));
 
@@ -66,6 +68,7 @@ const {
   pickWinningProposalId,
   getSessionVoteOutcomes,
   listEndedVoteOutcomes,
+  listSessionDecisions,
   expireOpenVotingIfDue,
 } = await import('./service.js');
 const { scheduleVotingDeadline, cancelVotingDeadline } = await import('./deadlines.js');
@@ -781,5 +784,32 @@ describe('getVotingBroadcast', () => {
     );
 
     await expect(getVotingBroadcast('s1')).resolves.toMatchObject({ voterStatuses: null });
+  });
+});
+
+describe('listSessionDecisions', () => {
+  it('asks nothing of the database for no sessions', async () => {
+    await expect(listSessionDecisions([])).resolves.toEqual(new Map());
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('gives each session its decisions in order, one line each', async () => {
+    queryRaw.mockResolvedValueOnce([
+      { sessionId: 's1', type: 'sticky', text: 'Group by\n  account   vs app' },
+      { sessionId: 's1', type: 'drawing', text: null },
+      { sessionId: 's2', type: 'sticky', text: 'x'.repeat(200) },
+      // A sticky with no words names nothing, so it is left out.
+      { sessionId: 's2', type: 'sticky', text: '   ' },
+      { sessionId: 's3', type: 'image', text: null },
+    ]);
+
+    const decisions = await listSessionDecisions(['s1', 's2', 's3']);
+
+    expect(decisions.get('s1')).toEqual(['Group by account vs app', 'A drawing']);
+    const long = decisions.get('s2')!;
+    expect(long).toHaveLength(1);
+    expect(long[0]).toHaveLength(140);
+    expect(long[0]!.endsWith('…')).toBe(true);
+    expect(decisions.get('s3')).toEqual(['An image']);
   });
 });

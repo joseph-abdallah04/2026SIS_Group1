@@ -11,6 +11,8 @@ interface SessionCardActionsProps {
   title: string;
   status: SessionStatus;
   onDeleted: () => void;
+  /** Where the ⋯ sits in what holds it: by default, the top-right corner. */
+  placement?: string;
 }
 
 /**
@@ -22,6 +24,7 @@ export function SessionCardActions({
   title,
   status,
   onDeleted,
+  placement = 'absolute top-2 right-2',
 }: SessionCardActionsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -57,7 +60,7 @@ export function SessionCardActions({
     <>
       <div
         ref={rootRef}
-        className={`absolute top-2 right-2 z-10 ${
+        className={`${placement} z-10 ${
           menuOpen
             ? 'opacity-100'
             : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'

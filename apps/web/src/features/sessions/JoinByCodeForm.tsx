@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
 import { normalizeSessionCode } from '@roundtable/shared';
 
 import { Button } from '../../components/ui/Button';
@@ -43,25 +44,35 @@ export function JoinByCodeForm() {
     <>
       <form
         onSubmit={(event) => void handleSubmit(event)}
-        className="flex flex-col gap-3 rounded-2xl bg-rt-secondary-wash px-4 py-4"
+        aria-labelledby="join-session-title"
+        className="flex flex-col rounded-3xl bg-rt-secondary-wash p-6 sm:p-7"
       >
-        <p className="text-[13px] font-semibold text-rt-ink">Join a session</p>
-        <div className="flex items-center gap-2">
+        <p className="text-[11px] font-semibold tracking-[0.12em] text-rt-secondary-deep uppercase">
+          Join a session
+        </p>
+        <h2 id="join-session-title" className="mt-2 text-[20px] font-semibold tracking-[-0.01em]">
+          Got a code? Jump straight in.
+        </h2>
+        <p className="mt-1.5 text-[13px] text-rt-ink-muted">
+          Your session leader shares a code like{' '}
+          <span className="whitespace-nowrap">K7NP-3WQZ</span>.
+        </p>
+        <div className="mt-auto flex items-center gap-2 pt-5">
+          <label htmlFor="join-session-code" className="sr-only">
+            Session code
+          </label>
           <input
+            id="join-session-code"
             autoComplete="off"
             type="text"
             value={code}
             onChange={(event) => setCode(event.target.value)}
-            placeholder="Have a code? e.g. K7NP-3WQZ"
-            className="min-h-10 flex-1 rounded-full border border-transparent bg-rt-surface px-3 text-[13px] text-rt-ink outline-none focus-visible:ring-2 focus-visible:ring-rt-ink focus-visible:ring-offset-2 focus-visible:ring-offset-rt-secondary-wash"
+            placeholder="e.g. K7NP-3WQZ"
+            className="min-h-12 min-w-0 flex-1 rounded-full border border-rt-secondary/30 bg-rt-surface px-5 text-[15px] font-semibold tracking-[0.08em] text-rt-ink uppercase outline-none placeholder:font-normal placeholder:tracking-normal placeholder:text-rt-ink-faint placeholder:normal-case focus-visible:border-rt-secondary focus-visible:ring-2 focus-visible:ring-rt-secondary/30"
           />
-          <Button
-            type="submit"
-            variant="secondary"
-            disabled={checking}
-            className="border-transparent bg-white hover:bg-rt-surface-alt"
-          >
+          <Button type="submit" disabled={checking} className="min-h-12 px-5 text-[14px]">
             {checking ? 'Checking…' : 'Join'}
+            {checking ? null : <ArrowRight aria-hidden size={15} strokeWidth={2.4} />}
           </Button>
         </div>
       </form>

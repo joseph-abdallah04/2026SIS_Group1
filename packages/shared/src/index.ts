@@ -48,6 +48,12 @@ export interface SessionSummary {
    * §4), so "is this session mine right now?" needs its own flag.
    */
   isCurrentMember: boolean;
+  /**
+   * An ended session's first decision, in agenda order, and how many more it
+   * made: the winning sticky's words, or what kind of card won. Null when it
+   * decided nothing (only ties, brainstorms, skips); absent before it ended.
+   */
+  decision?: { text: string; more: number } | null;
 }
 
 // === auth module ===
