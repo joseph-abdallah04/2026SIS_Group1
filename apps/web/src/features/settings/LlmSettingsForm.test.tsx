@@ -72,6 +72,29 @@ describe('AI assistant settings', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
+  // Review of 64fbe30: switching provider must not reuse the saved key at the new address.
+  it('asks for the new provider’s own key when the provider changes', async () => {
+    vi.mocked(api.fetchLlmConfig).mockResolvedValue({
+      config: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', hasKey: true },
+    });
+    const user = userEvent.setup();
+    render(<LlmSettingsForm />);
+
+    // Same provider: the saved key is kept, and only a change is needed to save.
+    await user.click(await screen.findByRole('button', { name: 'gpt-4o' }));
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+
+    // Another provider: its own key, before Save or Test.
+    await user.click(screen.getByRole('radio', { name: /groq/i }));
+    expect(screen.getByText(/only ever sent to the provider it was saved for/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled();
+
+    await user.type(screen.getByLabelText('API key'), 'gsk-test');
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test connection' })).not.toBeDisabled();
+  });
+
   it('opens a saved custom provider as Custom, and can disconnect it', async () => {
     vi.mocked(api.fetchLlmConfig).mockResolvedValue({
       config: { baseUrl: 'https://llm.example.com/v1', model: 'house-model', hasKey: true },

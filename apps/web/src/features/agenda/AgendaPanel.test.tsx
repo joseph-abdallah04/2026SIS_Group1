@@ -1178,6 +1178,14 @@ describe('AgendaPanel reordering', () => {
         toQuestionId: 'q2',
       }),
     );
+
+    // Review of 64fbe30: let go off its row, that drag's click never landed to clear
+    // the "swallow the next click" flag, so the leader's next click did nothing.
+    const next = inList('Question 3');
+    fireEvent.pointerDown(next.closest('li')!, { button: 0, pointerId: 2, clientY: 240 });
+    fireEvent.pointerUp(next.closest('li')!, { pointerId: 2, clientY: 240 });
+    fireEvent.click(next);
+    expect(onView).toHaveBeenCalledWith('q3');
   });
 
   // A rail scrolled under a held row moves the rows, not the pointer: the row

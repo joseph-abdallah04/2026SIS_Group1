@@ -885,6 +885,10 @@ export function AgendaPanel({
       liProps: {
         ...droppable,
         onPointerDown: (event: React.PointerEvent<HTMLLIElement>) => {
+          // A new press is never the end of the last drag. Released off the row, that
+          // drag's click never landed here to clear the flag, and it would swallow
+          // this press's click instead (review of 64fbe30).
+          swallowClick.current = false;
           if (event.button !== 0 || drag) return;
           // Its own controls are their own presses.
           if ((event.target as HTMLElement).closest('[data-no-drag]')) return;

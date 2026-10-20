@@ -159,8 +159,22 @@ export function LlmSettingsForm({
     return parsed.success ? parsed.data : null;
   }, [baseUrl, apiKey, model]);
 
-  /** First-time setup has nothing stored to fall back on. */
-  const needsKey = !hasStoredKey && apiKey.trim() === '';
+  /**
+   * The saved key only works for the provider it was saved for: the server will not send
+   * it to another host (`LLM_KEY_REQUIRED_FOR_NEW_HOST`), so switching provider, with one
+   * click on its card, asks for that provider's key rather than failing on Save.
+   */
+  const keyHost = (url: string) => {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return null;
+    }
+  };
+  const savedKeyFits =
+    hasStoredKey && saved !== null && keyHost(saved.baseUrl) === keyHost(baseUrl);
+  /** First-time setup, or a new provider, has no key on file to fall back on. */
+  const needsKey = !savedKeyFits && apiKey.trim() === '';
   const canSubmit = Boolean(draft) && !needsKey;
   const changed =
     apiKey.trim() !== '' || saved === null || saved.baseUrl !== baseUrl || saved.model !== model;
@@ -275,7 +289,7 @@ export function LlmSettingsForm({
             type="password"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
-            placeholder={hasStoredKey ? '•••••••••••••• (saved)' : 'sk-…'}
+            placeholder={savedKeyFits ? '•••••••••••••• (saved)' : 'sk-…'}
             autoComplete="off"
           />
         </label>
@@ -302,7 +316,7 @@ export function LlmSettingsForm({
           <button
             type="button"
             onClick={() => void handleTest()}
-            disabled={testing || (!draft && needsKey)}
+            disabled={testing || needsKey}
             className="rt-assistant-setup-secondary"
           >
             {testing ? 'Testing…' : 'Test'}
@@ -480,15 +494,17 @@ export function LlmSettingsForm({
               inputClassName={`${TEXT_INPUT} ${MONO}`}
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder={hasStoredKey ? '•••••••••••••• (saved)' : 'sk-…'}
+              placeholder={savedKeyFits ? '•••••••••••••• (saved)' : 'sk-…'}
               autoComplete="off"
             />
             <p className={FIELD_HINT}>
-              {hasStoredKey
+              {savedKeyFits
                 ? 'A key is saved. Leave this blank to keep it, or type a new one to replace it.'
-                : choice?.local
-                  ? 'Local servers ignore the key, so any text works, such as “local”.'
-                  : 'Find it in your provider’s dashboard under API keys. It is stored encrypted and never shown again.'}
+                : hasStoredKey
+                  ? 'Your saved key is only ever sent to the provider it was saved for. Enter the key for this one.'
+                  : choice?.local
+                    ? 'Local servers ignore the key, so any text works, such as “local”.'
+                    : 'Find it in your provider’s dashboard under API keys. It is stored encrypted and never shown again.'}
             </p>
           </div>
 
@@ -545,7 +561,7 @@ export function LlmSettingsForm({
           <button
             type="button"
             onClick={() => void handleTest()}
-            disabled={testing || (!draft && needsKey)}
+            disabled={testing || needsKey}
             className={SECONDARY_BUTTON}
           >
             {testing ? 'Testing…' : 'Test connection'}

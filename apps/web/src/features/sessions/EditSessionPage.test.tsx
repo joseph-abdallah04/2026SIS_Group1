@@ -61,14 +61,27 @@ describe('EditSessionPage', () => {
     vi.mocked(api.post).mockReset();
   });
 
-  it('goes back to the dashboard on Cancel, and from the header', async () => {
+  // Review of 64fbe30: Cancel always asks, as on the create page; the header's
+  // Dashboard asks only when there is something to lose.
+  it('asks on Cancel even with nothing changed, then goes back to the dashboard', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    const dialog = screen.getByRole('dialog', { name: 'Stop editing this draft?' });
+    expect(dialog).toHaveTextContent('the draft stays as it is');
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Stop editing' }));
     expect(navigateMock).toHaveBeenLastCalledWith('/dashboard');
+  });
+
+  it('goes straight back from the header when nothing has changed', async () => {
+    const user = userEvent.setup();
+    renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Dashboard' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(navigateMock).toHaveBeenLastCalledWith('/dashboard');
   });
 

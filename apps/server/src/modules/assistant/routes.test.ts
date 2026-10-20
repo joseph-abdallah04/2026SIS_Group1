@@ -394,6 +394,78 @@ describe('llm-config endpoints (F33)', () => {
     }
   });
 
+  // Review of 64fbe30: switching provider with a key saved reused that key at the new
+  // provider's address, so an OpenAI secret could go to Groq or to any host typed in.
+  describe('a saved key only goes where it was saved for', () => {
+    const OTHER_HOST = 'https://other.example.test/v1';
+
+    it('refuses to keep the saved key for a different host', async () => {
+      await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify(CONFIG),
+      });
+      const before = configs.get('demo-user-alice');
+
+      const response = await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify({ baseUrl: OTHER_HOST, model: CONFIG.model }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: 'LLM_KEY_REQUIRED_FOR_NEW_HOST' });
+      // Nothing changed: still the old provider, with its own key.
+      expect(configs.get('demo-user-alice')).toEqual(before);
+    });
+
+    it('takes a new key for a different host', async () => {
+      await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify(CONFIG),
+      });
+      const response = await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify({ baseUrl: OTHER_HOST, model: CONFIG.model, apiKey: 'sk-other' }),
+      });
+      expect(response.status).toBe(200);
+      expect(configs.get('demo-user-alice')?.baseUrl).toBe(OTHER_HOST);
+    });
+
+    it('still keeps the saved key for another path on the same host', async () => {
+      await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify(CONFIG),
+      });
+      const response = await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify({ baseUrl: 'https://api.example.test/v2', model: CONFIG.model }),
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it('will not test the saved key against a different host', async () => {
+      await fetch(`${base}/api/me/llm-config`, {
+        method: 'PUT',
+        headers: authed(),
+        body: JSON.stringify(CONFIG),
+      });
+      const response = await fetch(`${base}/api/me/llm-config/test`, {
+        method: 'POST',
+        headers: authed(),
+        body: JSON.stringify({ baseUrl: OTHER_HOST, model: CONFIG.model }),
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        code: 'LLM_KEY_REQUIRED_FOR_NEW_HOST',
+      });
+    });
+  });
+
   it('tests a new model against the stored key', async () => {
     await fetch(`${base}/api/me/llm-config`, {
       method: 'PUT',

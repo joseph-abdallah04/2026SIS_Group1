@@ -39,8 +39,8 @@ const ACTIONS: SetupAction[] = [
  *
  * The same page as creating one, without the templates. Saving, Cancel and
  * Dashboard all go back to the dashboard, where the draft is opened from;
- * saving says so there and points the draft out. Unsaved changes are asked
- * about first.
+ * saving says so there and points the draft out. Cancel always asks first, as
+ * on the create page; Dashboard asks only when there are changes to lose.
  *
  * Opening the room saves the edits first, then opens it for joining (F06)
  * and goes straight to the waiting room. Saved but not opened, it goes to the
@@ -94,7 +94,9 @@ export function EditSessionPage() {
         current="Edit draft"
         status="Draft"
         onDashboard={() => leaveFor('/dashboard')}
-        onCancel={() => leaveFor('/dashboard')}
+        // Cancel always asks, as it does when creating one; it says whether
+        // anything would be lost.
+        onCancel={() => setLeavingFor('/dashboard')}
       />
 
       {!editable && (
@@ -167,12 +169,15 @@ export function EditSessionPage() {
 
       {leavingFor && (
         <ConfirmDialog
-          title="Discard your changes?"
-          confirmLabel="Discard"
+          title={unsaved ? 'Discard your changes?' : 'Stop editing this draft?'}
+          confirmLabel={unsaved ? 'Discard' : 'Stop editing'}
+          cancelLabel="Keep editing"
           onConfirm={() => navigate(leavingFor)}
           onCancel={() => setLeavingFor(null)}
         >
-          The draft keeps what it had before you started editing.
+          {unsaved
+            ? 'The draft keeps what it had before you started editing.'
+            : 'Nothing has changed, so the draft stays as it is.'}
         </ConfirmDialog>
       )}
     </main>
