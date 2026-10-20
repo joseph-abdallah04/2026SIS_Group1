@@ -7,8 +7,10 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { PasswordInput } from '../../components/ui/PasswordInput';
 import { ApiClientError } from '../../lib/api';
 import { clearToken } from '../../lib/auth';
+import { getCurrentUserId } from '../../lib/currentUser';
 import { disconnectSocket } from '../../lib/socket';
 import { deleteAccount, getMe, updateProfile } from '../auth/api';
+import { forgetSetup } from '../sessions/setup/setupAutosave';
 import { initialsFromName, swatchForId } from '../sessions/waitingRoomSeats';
 import {
   FIELD,
@@ -40,6 +42,8 @@ function DeleteAccountSection() {
     setError(null);
     try {
       await deleteAccount({ password });
+      // Nothing of the account's is left behind in this browser either.
+      forgetSetup(getCurrentUserId());
       clearToken();
       disconnectSocket();
       navigate('/login', { replace: true });

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -67,5 +67,27 @@ describe('TimerDurationFields', () => {
     await user.type(seconds, '20');
     await user.tab();
     expect(seconds).toHaveValue('15');
+  });
+
+  // B1: a page scroll that crosses a timer scrolls the page; the wheel only
+  // steps a unit the leader is already in.
+  it('ignores the wheel until the unit has focus', () => {
+    render(<Harness />);
+    const minutes = screen.getByRole('spinbutton', { name: 'Discussion timer minutes' });
+
+    const passing = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true });
+    act(() => {
+      minutes.dispatchEvent(passing);
+    });
+    expect(passing.defaultPrevented).toBe(false);
+    expect(minutes).toHaveValue('00');
+
+    act(() => minutes.focus());
+    const stepping = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true });
+    act(() => {
+      minutes.dispatchEvent(stepping);
+    });
+    expect(stepping.defaultPrevented).toBe(true);
+    expect(screen.getByRole('spinbutton', { name: 'Discussion timer minutes' })).toHaveValue('01');
   });
 });

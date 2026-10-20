@@ -10,7 +10,10 @@ import {
 interface TimerDurationFieldsProps {
   id: string;
   label: string;
-  hint: string;
+  /** Shown under the spinners; left out where the field is explained elsewhere. */
+  hint?: string;
+  /** The label is for screen readers only: the field sits under its own heading. */
+  hideLabel?: boolean;
   maxSeconds: number;
   value: TimerDurationParts;
   onChange: (next: TimerDurationParts) => void;
@@ -25,13 +28,15 @@ function snapToStep(n: number, min: number, max: number, step: number): number {
 
 /**
  * One optional session clock as hour / minute / 15-second spinners. Arrows
- * (or the wheel) step the value; typing a number jumps to it. Native `<select>`
- * lists and number-input validation bubbles are both avoided.
+ * (or the wheel, once a unit has focus) step the value; typing a number jumps
+ * to it. Native `<select>` lists and number-input validation bubbles are both
+ * avoided.
  */
 export function TimerDurationFields({
   id,
   label,
   hint,
+  hideLabel = false,
   maxSeconds,
   value,
   onChange,
@@ -53,7 +58,10 @@ export function TimerDurationFields({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span id={`${id}-label`} className="text-[12.5px] font-medium text-rt-ink">
+      <span
+        id={`${id}-label`}
+        className={hideLabel ? 'sr-only' : 'text-[12.5px] font-medium text-rt-ink'}
+      >
         {label}
       </span>
       <div
@@ -94,7 +102,7 @@ export function TimerDurationFields({
           onChange={(seconds) => commit({ ...value, seconds })}
         />
       </div>
-      <p className="text-[11px] leading-snug text-rt-ink-faint">{hint}</p>
+      {hint ? <p className="text-[11px] leading-snug text-rt-ink-faint">{hint}</p> : null}
     </div>
   );
 }
@@ -131,7 +139,10 @@ function UnitSpinner({
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
+    // Only once the leader is in this field: otherwise the page scrolls past
+    // it, and a scroll that happens to cross a timer does not change it.
     const onWheel = (e: WheelEvent) => {
+      if (!el.contains(document.activeElement)) return;
       e.preventDefault();
       stepByRef.current(e.deltaY < 0 ? 1 : -1);
     };

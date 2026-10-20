@@ -4,8 +4,10 @@ import type { User } from '@roundtable/shared';
 
 import { RoundTableLogo } from '../../components/RoundTableLogo';
 import { clearToken } from '../../lib/auth';
+import { getCurrentUserId } from '../../lib/currentUser';
 import { disconnectSocket } from '../../lib/socket';
 import { getMe, logout } from '../auth/api';
+import { forgetSetup } from '../sessions/setup/setupAutosave';
 import { AccountMenu } from './AccountMenu';
 
 /** The signed-in person, for the avatar. Null until it arrives, or if it fails. */
@@ -41,11 +43,13 @@ export function AppHeader({ page }: { page: 'Dashboard' | 'Settings' }) {
   // client dropping it *is* the logout (see auth's `/logout` route) — a network
   // error must not leave someone stuck logged in. Also drops the socket
   // singleton, otherwise a same-tab login as someone else would keep the
-  // previous identity's live connection around.
+  // previous identity's live connection around, and lets go of any session
+  // setup this browser was keeping for them (a shared computer).
   async function onLogout() {
     try {
       await logout();
     } finally {
+      forgetSetup(getCurrentUserId());
       clearToken();
       disconnectSocket();
       navigate('/login', { replace: true });

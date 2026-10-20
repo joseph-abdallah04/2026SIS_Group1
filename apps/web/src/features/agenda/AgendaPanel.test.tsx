@@ -1151,6 +1151,73 @@ describe('AgendaPanel reordering', () => {
     expect(onView).not.toHaveBeenCalled();
   });
 
+  // The row can slide out from under the pointer (the rail scrolls, the row is
+  // held at its limit), so a let-go anywhere must still place it.
+  it('places a dragged question however far from its row it is let go', async () => {
+    renderPanel({
+      questions: [
+        question(0, 'discussion'),
+        question(1, 'pending'),
+        question(2, 'pending'),
+        question(3, 'pending'),
+      ],
+      activeQuestionId: 'q1',
+    });
+    const dragged = inList('Question 4').closest('li')!;
+    inList('Question 1').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 0, 200, 90);
+    inList('Question 2').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 100, 200, 90);
+    inList('Question 3').closest('li')!.getBoundingClientRect = () => new DOMRect(0, 200, 200, 90);
+    dragged.getBoundingClientRect = () => new DOMRect(0, 300, 200, 90);
+
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 300 });
+    fireEvent.pointerMove(document.body, { pointerId: 1, clientY: 140 });
+    fireEvent.pointerUp(document.body, { pointerId: 1, clientY: 140 });
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q4/move', {
+        toQuestionId: 'q2',
+      }),
+    );
+  });
+
+  // A rail scrolled under a held row moves the rows, not the pointer: the row
+  // lands where the pointer is over the list, not where it was on the screen.
+  it('counts the rail scrolling under a held question as travel', async () => {
+    renderPanel({
+      questions: [
+        question(0, 'discussion'),
+        question(1, 'pending'),
+        question(2, 'pending'),
+        question(3, 'pending'),
+      ],
+      activeQuestionId: 'q1',
+    });
+    let scrolled = 0;
+    const dragged = inList('Question 2').closest('li')!;
+    const list = dragged.parentElement!;
+    list.getBoundingClientRect = () => new DOMRect(0, -scrolled, 200, 400);
+    inList('Question 1').closest('li')!.getBoundingClientRect = () =>
+      new DOMRect(0, 0 - scrolled, 200, 90);
+    dragged.getBoundingClientRect = () => new DOMRect(0, 100 - scrolled, 200, 90);
+    inList('Question 3').closest('li')!.getBoundingClientRect = () =>
+      new DOMRect(0, 200 - scrolled, 200, 90);
+    inList('Question 4').closest('li')!.getBoundingClientRect = () =>
+      new DOMRect(0, 300 - scrolled, 200, 90);
+
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientY: 140 });
+    fireEvent.pointerMove(document.body, { pointerId: 1, clientY: 150 });
+    // The rail scrolls 200px under a still pointer: question 2 is now over 4.
+    scrolled = 200;
+    fireEvent.scroll(list);
+    fireEvent.pointerUp(document.body, { pointerId: 1, clientY: 150 });
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/sessions/s1/questions/q2/move', {
+        toQuestionId: 'q4',
+      }),
+    );
+  });
+
   it('slides the other rows out of the way, and stops at the first and last questions', async () => {
     renderPanel({
       questions: [
