@@ -22,6 +22,7 @@ import {
   type RowLayout,
 } from '../../lib/dragReorder';
 import { CARD_INK, REACTION_HOVER_FILL, REACTION_ON_BORDER } from '../pinboard/pinboardTokens';
+import { EndsWithChoice } from '../sessions/EndsWithChoice';
 import { useAddSessionQuestion } from '../sessions/useAddSessionQuestion';
 import { useMoveQuestion } from '../sessions/useMoveQuestion';
 import { useSetQuestionPhase, type QuestionPhaseTarget } from '../sessions/useSetQuestionPhase';
@@ -212,9 +213,8 @@ function LengthCount({ length }: { length: number }) {
 }
 
 /**
- * F41: how a question finishes, as two choices side by side — a vote, or a
- * brainstorm that ends with the board as it is. The same control when adding a
- * question and when editing one, so the choice looks the same both times.
+ * F41: how a question finishes, labelled. The same choice as setting a session
+ * up (`EndsWithChoice`), when adding a question and when editing one.
  */
 function EndsWith({
   votingEnabled,
@@ -230,40 +230,21 @@ function EndsWith({
 }) {
   // Both forms can be open at once, so the label's id cannot be a fixed one.
   const labelId = useId();
-  const option = (value: boolean, label: string) => {
-    const on = votingEnabled === value;
-    return (
-      <button
-        type="button"
-        role="radio"
-        aria-checked={on}
-        disabled={disabled}
-        onClick={() => {
-          if (!on) onChange(value);
-        }}
-        className={`rounded-full font-semibold whitespace-nowrap transition-colors ${stretch ? 'flex-1 px-2.5 py-0.5' : 'px-3 py-1'} text-[11.5px] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-rt-secondary disabled:opacity-60 ${
-          on ? 'bg-white text-rt-ink shadow-sm' : 'text-rt-ink-muted hover:text-rt-ink'
-        }`}
-      >
-        {label}
-      </button>
-    );
-  };
   return (
     <div className={`flex flex-wrap items-center gap-y-1.5 ${stretch ? 'gap-x-2' : 'gap-x-2.5'}`}>
       <span id={labelId} className="text-[11.5px] whitespace-nowrap text-rt-ink-muted">
         Ends with
       </span>
-      <div
-        role="radiogroup"
+      {/* Filling the row, but never narrower than its two words: on a narrow
+          panel it drops under "Ends with" and fills that line instead. */}
+      <EndsWithChoice
         aria-labelledby={labelId}
-        // Filling the row, but never narrower than its two words: on a narrow
-        // panel it drops under "Ends with" and fills that line instead.
-        className={`inline-flex rounded-full bg-rt-ink/[0.06] p-0.5 ${stretch ? 'flex-1' : ''}`}
-      >
-        {option(true, 'A vote')}
-        {option(false, 'Brainstorm')}
-      </div>
+        votingEnabled={votingEnabled}
+        onChange={onChange}
+        disabled={disabled}
+        size="sm"
+        stretch={stretch}
+      />
     </div>
   );
 }

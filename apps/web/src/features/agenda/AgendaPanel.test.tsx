@@ -46,7 +46,7 @@ function question(position: number, status: QuestionStatus, votingEnabled = true
 const inList = (text: string) => within(screen.getByRole('list')).getByText(text);
 
 /** Opens a question to edit, picks how it ends, and saves. */
-async function endsWith(choice: 'A vote' | 'Brainstorm', number = 1) {
+async function endsWith(choice: 'Vote' | 'Brainstorm', number = 1) {
   await userEvent.click(screen.getByRole('button', { name: `Edit question ${number}` }));
   await userEvent.click(screen.getByRole('radio', { name: choice }));
   await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -723,7 +723,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
   it('lets the leader turn the vote back on mid-discussion, from the card', async () => {
     renderPanel({ questions: [question(0, 'discussion', false)], activeQuestionId: 'q1' });
 
-    await endsWith('A vote');
+    await endsWith('Vote');
 
     expect(patch).toHaveBeenCalledWith('/api/sessions/s1/questions/q1', { votingEnabled: true });
   });
@@ -790,7 +790,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Finish discussion' }));
     await userEvent.click(screen.getByRole('button', { name: 'Edit question 1' }));
 
-    expect(screen.getByRole('radio', { name: 'A vote' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Vote' })).toBeDisabled();
   });
 
   it('adds a brainstorm-only question when the leader turns its vote off first', async () => {
@@ -809,7 +809,7 @@ describe('AgendaPanel brainstorm-only questions (F41)', () => {
     );
     // Back to the default for the next one.
     await userEvent.click(await screen.findByRole('button', { name: 'Add question' }));
-    expect(screen.getByRole('radio', { name: 'A vote' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Vote' })).toHaveAttribute('aria-checked', 'true');
   });
 });
 

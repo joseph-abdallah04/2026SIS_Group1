@@ -251,10 +251,13 @@ describe('SessionQuestionsForm questions', () => {
     const user = userEvent.setup();
     const onSubmit = renderWith(['What ships first?', 'Any wild ideas?']);
 
-    const second = within(screen.getByRole('group', { name: 'Question 2: vote or ideas only' }));
-    expect(second.getByRole('button', { name: 'Vote' })).toHaveAttribute('aria-pressed', 'true');
-    await user.click(second.getByRole('button', { name: 'Ideas' }));
-    expect(second.getByRole('button', { name: 'Ideas' })).toHaveAttribute('aria-pressed', 'true');
+    const second = within(screen.getByRole('radiogroup', { name: 'Question 2 ends with' }));
+    expect(second.getByRole('radio', { name: 'Vote' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(second.getByRole('radio', { name: 'Brainstorm' }));
+    expect(second.getByRole('radio', { name: 'Brainstorm' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
 
     await user.click(open());
     expect(onSubmit).toHaveBeenCalledWith(

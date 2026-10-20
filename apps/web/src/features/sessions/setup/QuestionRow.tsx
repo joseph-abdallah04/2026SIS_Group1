@@ -1,4 +1,4 @@
-import { GripVertical, Lightbulb, SquareCheckBig, X } from 'lucide-react';
+import { GripVertical, X } from 'lucide-react';
 import type {
   ClipboardEventHandler,
   CSSProperties,
@@ -7,6 +7,7 @@ import type {
   DragEventHandler,
 } from 'react';
 
+import { EndsWithChoice } from '../EndsWithChoice';
 import type { SetupQuestion } from './useSessionSetupForm';
 
 /** The counter shows once a question is within this many characters of the limit. */
@@ -74,14 +75,6 @@ export function QuestionRow({
   const counting = length >= maxLength - COUNTER_WITHIN;
   // Past what a new question may be. A draft's older long one still saves.
   const over = length > maxLength;
-  const kind = (on: boolean, tone: 'vote' | 'ideas') =>
-    `flex h-8 cursor-pointer items-center gap-[5px] rounded-full px-3 text-[12.5px] font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none max-sm:px-2 ${
-      on
-        ? tone === 'vote'
-          ? 'bg-white text-rt-secondary-deep shadow-[0_0_0_1px_rgba(224,163,60,0.6),0_1px_2px_rgba(60,40,20,0.14)]'
-          : 'bg-white text-[#9a6a1c] shadow-[0_0_0_1px_rgba(154,106,28,0.4),0_1px_2px_rgba(60,40,20,0.14)]'
-        : 'text-rt-ink-muted hover:text-rt-ink'
-    }`;
 
   return (
     <li
@@ -154,32 +147,14 @@ export function QuestionRow({
           </span>
         ) : null}
       </span>
-      <span
-        role="group"
-        aria-label={`Question ${number}: vote or ideas only`}
-        className="flex shrink-0 rounded-full border border-rt-tertiary/70 bg-rt-surface-alt p-0.5"
-      >
-        <button
-          type="button"
-          aria-pressed={question.votingEnabled}
-          title="The team votes on this question"
-          onClick={() => onVoting(true)}
-          className={kind(question.votingEnabled, 'vote')}
-        >
-          <SquareCheckBig aria-hidden size={13} />
-          <span className="max-sm:sr-only">Vote</span>
-        </button>
-        <button
-          type="button"
-          aria-pressed={!question.votingEnabled}
-          title="Brainstorm only: the team adds ideas, and nobody votes"
-          onClick={() => onVoting(false)}
-          className={kind(!question.votingEnabled, 'ideas')}
-        >
-          <Lightbulb aria-hidden size={13} />
-          <span className="max-sm:sr-only">Ideas</span>
-        </button>
-      </span>
+      {/* The agenda's own choice, so a question ends the same way in both. */}
+      <EndsWithChoice
+        aria-label={`Question ${number} ends with`}
+        votingEnabled={question.votingEnabled}
+        onChange={onVoting}
+        iconsOnPhone
+        look="outlined"
+      />
       <button
         type="button"
         onClick={onRemove}
