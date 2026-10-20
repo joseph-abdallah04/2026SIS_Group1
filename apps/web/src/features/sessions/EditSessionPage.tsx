@@ -1,16 +1,34 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { DoorOpen } from 'lucide-react';
+import type { Session } from '@roundtable/shared';
 
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { api, ApiClientError } from '../../lib/api';
+import type { DashboardState } from '../dashboard/dashboardState';
+import type { DraftPageState } from './CreateSessionPage';
 import { SessionQuestionsForm, type SetupAction } from './SessionQuestionsForm';
+import { RoomSetMoment } from './setup/RoomSetMoment';
 import { SetupHeader } from './setup/SetupHeader';
 import { useLeaveWarning } from './setup/useLeaveWarning';
 import { useDeleteSession } from './useDeleteSession';
 import { useSessionDetail } from './useSessionDetail';
 import { useUpdateSession } from './useUpdateSession';
 
+/**
+ * Save for later, or open the room now (the primary, and Ctrl/⌘+Enter), as on
+ * the create page: drafts are opened from the dashboard straight into this
+ * page, so this is where a draft is started.
+ */
 const ACTIONS: SetupAction[] = [
-  { kind: 'save', label: 'Save changes', busyLabel: 'Saving…', primary: true },
+  { kind: 'save', label: 'Save changes', busyLabel: 'Saving…' },
+  {
+    kind: 'open',
+    label: 'Open the room',
+    busyLabel: 'Opening…',
+    primary: true,
+    icon: <DoorOpen aria-hidden size={16} />,
+  },
 ];
 
 /**
@@ -19,9 +37,14 @@ const ACTIONS: SetupAction[] = [
  * of what this page lets you attempt, so the checks here are for a better
  * error message, not the real guard.
  *
- * The same page as creating one, without the templates. Saving or Cancel goes
- * back to the draft it came from, Dashboard to the dashboard; either way,
- * unsaved changes are asked about first.
+ * The same page as creating one, without the templates. Saving, Cancel and
+ * Dashboard all go back to the dashboard, where the draft is opened from;
+ * saving says so there and points the draft out. Unsaved changes are asked
+ * about first.
+ *
+ * Opening the room saves the edits first, then opens it for joining (F06),
+ * plays the "room set" moment and goes on to the waiting room. Saved but not
+ * opened, it goes to the draft page, which says why, as creating one does.
  */
 export function EditSessionPage() {
   const { id } = useParams<{ id: string }>();
@@ -32,10 +55,28 @@ export function EditSessionPage() {
   const { remove, deleting, error: deleteError } = useDeleteSession();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
-  // Refresh or close would throw the edits away without a word.
-  useLeaveWarning(unsaved);
+  // Which button is at work: held through opening, and while the room-set
+  // moment plays over the form, so nothing is sent twice.
+  const [busy, setBusy] = useState<string | null>(null);
+  // Opened: its title and join code, while the moment plays.
+  const [opened, setOpened] = useState<{ title: string; code: string | null } | null>(null);
+  // Refresh or close would throw the edits away without a word; once the
+  // room is open there is nothing left to lose.
+  useLeaveWarning(unsaved && !opened);
   const [leavingFor, setLeavingFor] = useState<string | null>(null);
   const draftPath = `/sessions/${sessionId}`;
+
+  async function saveAndOpen(input: Parameters<typeof update>[0]) {
+    if (!(await update(input))) return false;
+    try {
+      const open = await api.post<Session>(`/api/sessions/${sessionId}/open`, {});
+      setOpened({ title: input.title, code: open.code });
+    } catch (err) {
+      const openError = err instanceof ApiClientError ? err.message : 'Failed to open the session';
+      navigate(draftPath, { replace: true, state: { openError } satisfies DraftPageState });
+    }
+    return true;
+  }
 
   async function handleDelete() {
     const ok = await remove(sessionId);
@@ -55,7 +96,7 @@ export function EditSessionPage() {
         current="Edit draft"
         status="Draft"
         onDashboard={() => leaveFor('/dashboard')}
-        onCancel={() => leaveFor(draftPath)}
+        onCancel={() => leaveFor('/dashboard')}
       />
 
       {!editable && (
@@ -83,11 +124,22 @@ export function EditSessionPage() {
           initialVoiceEnabled={session.voiceEnabled}
           onUnsavedWorkChange={setUnsaved}
           actions={ACTIONS}
-          busy={submitting ? 'save' : null}
+          busy={busy ?? (submitting ? 'save' : null)}
           error={updateError}
-          onSubmit={async (input) => {
+          onSubmit={async (input, kind) => {
+            setBusy(kind);
+            if (kind === 'open') {
+              if (!(await saveAndOpen(input))) setBusy(null);
+              return;
+            }
             const updated = await update(input);
-            if (updated) navigate(draftPath);
+            if (updated) {
+              navigate('/dashboard', {
+                state: { savedDraftId: sessionId } satisfies DashboardState,
+              });
+            } else {
+              setBusy(null);
+            }
           }}
           footerStart={
             <button
@@ -100,6 +152,15 @@ export function EditSessionPage() {
           }
         />
       )}
+
+      {opened ? (
+        <RoomSetMoment
+          title={opened.title}
+          code={opened.code}
+          // The session is open now, so its page is the waiting room.
+          onDone={() => navigate(draftPath, { replace: true })}
+        />
+      ) : null}
 
       {confirmingDelete && (
         <ConfirmDialog

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useCurrentUserId } from '../../lib/currentUser';
+import type { DashboardState } from '../dashboard/dashboardState';
 import { CreateSessionForm, type OpenedSession } from './CreateSessionForm';
 import { RoomSetMoment } from './setup/RoomSetMoment';
 import { clearSetup, setupAutosaveKey } from './setup/setupAutosave';
@@ -46,7 +47,7 @@ export function CreateSessionPage() {
     navigate('/dashboard');
   }
 
-  /** Asks first only when there is something to lose. */
+  /** The breadcrumb: asks first only when there is something to lose. */
   function leave() {
     if (unsaved) setConfirmingLeave(true);
     else goToDashboard();
@@ -61,11 +62,12 @@ export function CreateSessionPage() {
 
   return (
     <main className="rt-setup-page flex h-dvh flex-col overflow-hidden text-rt-ink">
+      {/* Cancel always asks, being a decision to drop the session; it says
+          whether anything would be lost. */}
       <SetupHeader
         current="New session"
-        status="Not saved yet"
         onDashboard={leave}
-        onCancel={leave}
+        onCancel={() => setConfirmingLeave(true)}
       />
       <CreateSessionForm
         templates={templates}
@@ -74,7 +76,12 @@ export function CreateSessionPage() {
         onUnsavedWorkChange={setUnsaved}
         onSaved={(id) => {
           finish();
-          toSession(id);
+          // Saved for later: back to where it is picked up again, which
+          // points it out.
+          navigate('/dashboard', {
+            replace: true,
+            state: { savedDraftId: id } satisfies DashboardState,
+          });
         }}
         onOpened={(session) => {
           finish();
@@ -92,15 +99,18 @@ export function CreateSessionPage() {
       ) : null}
       {confirmingLeave && (
         <ConfirmDialog
-          title="Discard this session?"
-          confirmLabel="Discard"
+          title={unsaved ? 'Discard this session?' : 'Cancel this session?'}
+          confirmLabel={unsaved ? 'Discard' : 'Cancel session'}
+          cancelLabel="Keep editing"
           onConfirm={() => {
             finish();
             goToDashboard();
           }}
           onCancel={() => setConfirmingLeave(false)}
         >
-          Nothing has been saved. The title and questions you've entered will be lost.
+          {unsaved
+            ? "Nothing has been saved. The title and questions you've entered will be lost."
+            : 'You haven’t written anything yet, so nothing will be lost.'}
         </ConfirmDialog>
       )}
     </main>

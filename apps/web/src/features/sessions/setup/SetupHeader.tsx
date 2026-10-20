@@ -5,8 +5,8 @@ import { RoundTableLogo } from '../../../components/RoundTableLogo';
 interface SetupHeaderProps {
   /** Where the leader is: "New session", "Edit draft". */
   current: string;
-  /** How things stand: "Not saved yet", "Draft". */
-  status: string;
+  /** How things stand: "Draft", "Not joinable yet". None where the page says it already. */
+  status?: string;
   /** The breadcrumb back to the dashboard. The page decides whether to ask first. */
   onDashboard: () => void;
   /** Cancel: back to where the leader came from. None on a page with nothing to cancel. */
@@ -35,10 +35,12 @@ export function SetupHeader({ current, status, onDashboard, onCancel }: SetupHea
           {current}
         </h1>
       </nav>
-      <span className="hidden items-center gap-1.5 text-[11.5px] whitespace-nowrap text-rt-ink-muted sm:inline-flex">
-        <span aria-hidden className="size-1.5 rounded-full bg-[#c9bfae]" />
-        {status}
-      </span>
+      {status ? (
+        <span className="hidden items-center gap-1.5 text-[11.5px] whitespace-nowrap text-rt-ink-muted sm:inline-flex">
+          <span aria-hidden className="size-1.5 rounded-full bg-[#c9bfae]" />
+          {status}
+        </span>
+      ) : null}
       <span aria-hidden className="min-w-3 flex-1" />
       {onCancel ? (
         <button

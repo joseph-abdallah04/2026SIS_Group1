@@ -623,7 +623,9 @@ export function SessionQuestionsForm({
               key={action.kind}
               type="button"
               disabled={!!form.notReady || busy !== null}
-              title={form.notReady ?? undefined}
+              // The shortcut is said on hover, not drawn on the button: most
+              // people never use it, and the badge only crowded the label.
+              title={form.notReady ?? (action.primary ? `${action.label} (Ctrl+Enter)` : undefined)}
               onClick={() => void submit(action.kind)}
               className={`inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full px-[18px] text-[13.5px] font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed sm:flex-none ${
                 action.primary
@@ -633,14 +635,6 @@ export function SessionQuestionsForm({
             >
               {action.icon}
               {isBusy ? action.busyLabel : action.label}
-              {action.primary && !isBusy ? (
-                <kbd
-                  aria-hidden
-                  className="hidden rounded-[5px] border border-b-2 border-current px-1 font-sans text-[10.5px] leading-[15px] opacity-55 sm:inline"
-                >
-                  Ctrl ↵
-                </kbd>
-              ) : null}
             </button>
           );
         })}

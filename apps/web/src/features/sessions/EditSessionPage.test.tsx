@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,7 +33,12 @@ vi.mock('./useUpdateSession', () => ({
 vi.mock('./useDeleteSession', () => ({
   useDeleteSession: () => ({ remove: vi.fn(), deleting: false, error: null }),
 }));
+vi.mock('../../lib/api', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/api')>('../../lib/api');
+  return { ...actual, api: { get: vi.fn(), post: vi.fn() } };
+});
 
+const { api, ApiClientError } = await import('../../lib/api');
 const { EditSessionPage } = await import('./EditSessionPage');
 
 function renderPage() {
@@ -46,20 +51,22 @@ function renderPage() {
   );
 }
 
-// B6: the edit page had no way out but the browser's Back, and saving went to
-// the dashboard instead of back to the draft.
+// B6: the edit page had no way out but the browser's Back. Every way out now
+// goes to the dashboard, where drafts are opened from (straight into this
+// page), and saving points the draft out there.
 describe('EditSessionPage', () => {
   beforeEach(() => {
     navigateMock.mockClear();
     updateMock.mockReset();
+    vi.mocked(api.post).mockReset();
   });
 
-  it('goes back to the draft on Cancel, and to the dashboard from the header', async () => {
+  it('goes back to the dashboard on Cancel, and from the header', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(navigateMock).toHaveBeenLastCalledWith('/sessions/s1');
+    expect(navigateMock).toHaveBeenLastCalledWith('/dashboard');
 
     await user.click(screen.getByRole('button', { name: 'Dashboard' }));
     expect(navigateMock).toHaveBeenLastCalledWith('/dashboard');
@@ -75,7 +82,7 @@ describe('EditSessionPage', () => {
     expect(navigateMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Discard' }));
-    expect(navigateMock).toHaveBeenCalledWith('/sessions/s1');
+    expect(navigateMock).toHaveBeenCalledWith('/dashboard');
   });
 
   // Code review: the create page warned before refresh or close, the edit page did not.
@@ -93,7 +100,7 @@ describe('EditSessionPage', () => {
     expect(changed.defaultPrevented).toBe(true);
   });
 
-  it('goes back to the draft once saved', async () => {
+  it('goes back to the dashboard once saved, pointing the draft out', async () => {
     const user = userEvent.setup();
     updateMock.mockResolvedValue(draft);
     renderPage();
@@ -102,6 +109,54 @@ describe('EditSessionPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Roadmap v2' }));
-    expect(navigateMock).toHaveBeenCalledWith('/sessions/s1');
+    expect(navigateMock).toHaveBeenCalledWith('/dashboard', { state: { savedDraftId: 's1' } });
+  });
+
+  // Drafts open from the dashboard straight into this page, so it is where one
+  // is started: the edits are saved, then the room opens.
+  it('saves and opens the room, then goes on to the waiting room', async () => {
+    const user = userEvent.setup();
+    updateMock.mockResolvedValue(draft);
+    vi.mocked(api.post).mockResolvedValue({ ...draft, status: 'lobby', code: 'K7NP-3WQZ' });
+    renderPage();
+
+    await user.type(screen.getByLabelText('Session title'), ' v2');
+    await user.click(screen.getByRole('button', { name: /open the room/i }));
+
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Roadmap v2' }));
+    expect(api.post).toHaveBeenCalledWith('/api/sessions/s1/open', {});
+    await waitFor(
+      () => expect(navigateMock).toHaveBeenCalledWith('/sessions/s1', { replace: true }),
+      { timeout: 4000 },
+    );
+  });
+
+  it('goes to the draft, which says why, when the room will not open', async () => {
+    const user = userEvent.setup();
+    updateMock.mockResolvedValue(draft);
+    vi.mocked(api.post).mockRejectedValue(
+      new ApiClientError(409, 'Add a question first', 'NO_QUESTIONS'),
+    );
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /open the room/i }));
+
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith('/sessions/s1', {
+        replace: true,
+        state: { openError: 'Add a question first' },
+      }),
+    );
+  });
+
+  it('does not open the room when saving the edits fails', async () => {
+    const user = userEvent.setup();
+    updateMock.mockResolvedValue(null);
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /open the room/i }));
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

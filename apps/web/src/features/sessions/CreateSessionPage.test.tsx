@@ -106,7 +106,11 @@ describe('CreateSessionPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save as draft' }));
 
     expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ voiceEnabled: true }));
-    expect(navigateMock).toHaveBeenCalledWith('/sessions/s7', { replace: true });
+    // Back to the dashboard, which points the new draft out.
+    expect(navigateMock).toHaveBeenCalledWith('/dashboard', {
+      replace: true,
+      state: { savedDraftId: 's7' },
+    });
   });
 
   it('asks before abandoning an unsaved session for the dashboard', async () => {
@@ -131,14 +135,39 @@ describe('CreateSessionPage', () => {
     expect(screen.getByRole('dialog', { name: 'Discard this session?' })).toBeInTheDocument();
   });
 
-  // B5: an empty form has nothing to lose, so there is nothing to ask.
-  it('goes straight back from an empty form', async () => {
+  // B5: an empty form has nothing to lose, so the way back to the dashboard
+  // does not ask.
+  it('goes straight back to the dashboard from an empty form', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Dashboard' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(navigateMock).toHaveBeenCalledWith('/dashboard');
+  });
+
+  // Cancel is a decision to drop the session, so it always asks, and says
+  // when nothing would be lost.
+  it('asks on Cancel even from an empty form', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    const dialog = screen.getByRole('dialog', { name: 'Cancel this session?' });
+    expect(dialog).toHaveTextContent('nothing will be lost');
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel session' }));
     expect(navigateMock).toHaveBeenCalledWith('/dashboard');
+  });
+
+  it('has no "not saved" status in the header', () => {
+    renderPage();
+    expect(screen.queryByText(/not saved/i)).not.toBeInTheDocument();
   });
 
   // B5: refresh or close used to throw a filled form away without a word.
@@ -176,7 +205,7 @@ describe('CreateSessionPage', () => {
       'Which one action do we commit to?',
     );
     // A template's own content is nothing to lose.
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Dashboard' }));
     expect(navigateMock).toHaveBeenCalledWith('/dashboard');
   });
 
