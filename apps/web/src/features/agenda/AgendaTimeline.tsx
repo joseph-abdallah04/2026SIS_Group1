@@ -1,4 +1,4 @@
-import { Check, Eye, ScreenShare, SkipForward } from 'lucide-react';
+import { Check, Eye, GripVertical, ScreenShare, SkipForward } from 'lucide-react';
 import { useEffect, useRef, type LiHTMLAttributes, type ReactNode } from 'react';
 
 import { OverlayScrollbar } from '../../components/OverlayScrollbar';
@@ -357,6 +357,23 @@ export function AgendaStep({
         </div>
       ) : (
         <>
+          {/* A row that can be picked up says so under the pointer: a grip in
+              its left margin, level with its node, so nothing moves when it
+              shows. Kept while it is carried, and on no other row meanwhile. */}
+          {movable ? (
+            <GripVertical
+              aria-hidden
+              size={12}
+              strokeWidth={2.25}
+              className={`pointer-events-none absolute top-3.25 -left-px text-rt-ink-faint transition-opacity duration-150 ${
+                dragging
+                  ? 'opacity-100'
+                  : shift === undefined
+                    ? 'opacity-0 group-focus-within/step:opacity-100 group-hover/step:opacity-100'
+                    : 'opacity-0'
+              }`}
+            />
+          ) : null}
           {/* Level with the first line of the text. */}
           <span className="flex shrink-0">
             <StepNode state={state} number={number} />
