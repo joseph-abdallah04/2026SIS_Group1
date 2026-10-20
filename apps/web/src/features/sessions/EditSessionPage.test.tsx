@@ -125,9 +125,11 @@ describe('EditSessionPage', () => {
 
     expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Roadmap v2' }));
     expect(api.post).toHaveBeenCalledWith('/api/sessions/s1/open', {});
-    await waitFor(
-      () => expect(navigateMock).toHaveBeenCalledWith('/sessions/s1', { replace: true }),
-      { timeout: 4000 },
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith('/sessions/s1', {
+        replace: true,
+        state: { justOpened: true },
+      }),
     );
   });
 

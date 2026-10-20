@@ -4,12 +4,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useCurrentUserId } from '../../lib/currentUser';
 import type { DashboardState } from '../dashboard/dashboardState';
-import { CreateSessionForm, type OpenedSession } from './CreateSessionForm';
-import { RoomSetMoment } from './setup/RoomSetMoment';
+import { CreateSessionForm } from './CreateSessionForm';
 import { clearSetup, setupAutosaveKey } from './setup/setupAutosave';
 import { SetupHeader } from './setup/SetupHeader';
 import { useLeaveWarning } from './setup/useLeaveWarning';
 import { findTemplate, useSessionTemplates } from './templates';
+import { JUST_OPENED } from './waitingRoomState';
 
 /** What the draft page is handed when "Open the room" made the draft but could not open it. */
 export interface DraftPageState {
@@ -24,13 +24,10 @@ export function CreateSessionPage() {
   const [template] = useState(() => findTemplate(templates, params.get('template')));
   const [confirmingLeave, setConfirmingLeave] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
-  // The room just opened, while its moment plays.
-  const [opened, setOpened] = useState<OpenedSession | null>(null);
   const autosaveKey = setupAutosaveKey(useCurrentUserId());
   // Saved, opened or discarded: done with. From then on the form keeps
   // nothing in this browser, so no save still waiting can put back the copy
-  // just let go of, while this page stays up (the room-set moment) or before
-  // it has gone.
+  // just let go of before this page has gone.
   const [finished, setFinished] = useState(false);
 
   function finish() {
@@ -40,8 +37,8 @@ export function CreateSessionPage() {
 
   // Refresh, close or typing a new address would lose it all without a word.
   // (In-app Back is covered by the copy kept in this browser instead.) Once
-  // the room is open there is nothing left to lose.
-  useLeaveWarning(unsaved && !opened);
+  // it is saved or open there is nothing left to lose.
+  useLeaveWarning(unsaved && !finished);
 
   function goToDashboard() {
     navigate('/dashboard');
@@ -86,17 +83,11 @@ export function CreateSessionPage() {
         onOpened={(session) => {
           finish();
           // Made, but it would not open: to the draft, which says why.
+          // Open: straight into the waiting room, where the code arrives.
           if (session.openError) toSession(session.sessionId, session.openError);
-          else setOpened(session);
+          else navigate(`/sessions/${session.sessionId}`, JUST_OPENED);
         }}
       />
-      {opened ? (
-        <RoomSetMoment
-          title={opened.title}
-          code={opened.code}
-          onDone={() => toSession(opened.sessionId)}
-        />
-      ) : null}
       {confirmingLeave && (
         <ConfirmDialog
           title={unsaved ? 'Discard this session?' : 'Cancel this session?'}

@@ -8,10 +8,10 @@ import { useCurrentUserId } from '../../lib/currentUser';
 import type { DraftPageState } from './CreateSessionPage';
 import { LobbyAgenda } from './LobbyAgenda';
 import { FactLine } from './setup/FactLine';
-import { RoomSetMoment } from './setup/RoomSetMoment';
 import { sessionFacts } from './setup/setupSummary';
 import { SetupHeader } from './setup/SetupHeader';
 import type { SessionDetail } from './useSessionDetail';
+import { JUST_OPENED } from './waitingRoomState';
 
 interface SessionDraftPageProps {
   session: SessionDetail;
@@ -21,17 +21,15 @@ interface SessionDraftPageProps {
 
 /**
  * A saved draft (F04), and F06's "open for joining": the setup pages' look,
- * with the questions as the lobby will show them. Opening plays the "room
- * set" moment, then the waiting room takes over (via `onOpened`); the join
- * code and link live there, next to the people who are arriving. Edit goes
+ * with the questions as the lobby will show them. Opening hands straight over
+ * to the waiting room (via `onOpened`); the join code and link live there,
+ * next to the people who are arriving, and flip in as it opens. Edit goes
  * back to the form (F05), so a typo is one click away rather than via the
  * dashboard.
  */
 export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
   const navigate = useNavigate();
   const [opening, setOpening] = useState(false);
-  // Opened: its code, while the moment plays.
-  const [opened, setOpened] = useState<{ code: string | null } | null>(null);
   // Arriving from "Open the room" when the draft was made but would not open.
   const location = useLocation();
   const arrival = location.state as DraftPageState | null;
@@ -49,8 +47,11 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
     setOpening(true);
     setError(null);
     try {
-      const open = await api.post<Session>(`/api/sessions/${session.id}/open`, {});
-      setOpened({ code: open.code });
+      await api.post<Session>(`/api/sessions/${session.id}/open`, {});
+      // Open: this same page becomes the waiting room, told it has just
+      // opened so the code arrives there.
+      navigate(location.pathname, JUST_OPENED);
+      onOpened();
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : 'Failed to open the session');
       setOpening(false);
@@ -120,8 +121,6 @@ export function SessionDraftPage({ session, onOpened }: SessionDraftPageProps) {
           )}
         </div>
       </div>
-
-      {opened ? <RoomSetMoment title={session.title} code={opened.code} onDone={onOpened} /> : null}
     </main>
   );
 }

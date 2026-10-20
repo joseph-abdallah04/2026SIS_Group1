@@ -8,12 +8,12 @@ import { api, ApiClientError } from '../../lib/api';
 import type { DashboardState } from '../dashboard/dashboardState';
 import type { DraftPageState } from './CreateSessionPage';
 import { SessionQuestionsForm, type SetupAction } from './SessionQuestionsForm';
-import { RoomSetMoment } from './setup/RoomSetMoment';
 import { SetupHeader } from './setup/SetupHeader';
 import { useLeaveWarning } from './setup/useLeaveWarning';
 import { useDeleteSession } from './useDeleteSession';
 import { useSessionDetail } from './useSessionDetail';
 import { useUpdateSession } from './useUpdateSession';
+import { JUST_OPENED } from './waitingRoomState';
 
 /**
  * Save for later, or open the room now (the primary, and Ctrl/⌘+Enter), as on
@@ -42,9 +42,9 @@ const ACTIONS: SetupAction[] = [
  * saving says so there and points the draft out. Unsaved changes are asked
  * about first.
  *
- * Opening the room saves the edits first, then opens it for joining (F06),
- * plays the "room set" moment and goes on to the waiting room. Saved but not
- * opened, it goes to the draft page, which says why, as creating one does.
+ * Opening the room saves the edits first, then opens it for joining (F06)
+ * and goes straight to the waiting room. Saved but not opened, it goes to the
+ * draft page, which says why, as creating one does.
  */
 export function EditSessionPage() {
   const { id } = useParams<{ id: string }>();
@@ -55,22 +55,20 @@ export function EditSessionPage() {
   const { remove, deleting, error: deleteError } = useDeleteSession();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [unsaved, setUnsaved] = useState(false);
-  // Which button is at work: held through opening, and while the room-set
-  // moment plays over the form, so nothing is sent twice.
+  // Which button is at work: held through opening, until the page has moved
+  // on, so nothing is sent twice.
   const [busy, setBusy] = useState<string | null>(null);
-  // Opened: its title and join code, while the moment plays.
-  const [opened, setOpened] = useState<{ title: string; code: string | null } | null>(null);
-  // Refresh or close would throw the edits away without a word; once the
-  // room is open there is nothing left to lose.
-  useLeaveWarning(unsaved && !opened);
+  // Refresh or close would throw the edits away without a word.
+  useLeaveWarning(unsaved && busy !== 'open');
   const [leavingFor, setLeavingFor] = useState<string | null>(null);
   const draftPath = `/sessions/${sessionId}`;
 
   async function saveAndOpen(input: Parameters<typeof update>[0]) {
     if (!(await update(input))) return false;
     try {
-      const open = await api.post<Session>(`/api/sessions/${sessionId}/open`, {});
-      setOpened({ title: input.title, code: open.code });
+      await api.post<Session>(`/api/sessions/${sessionId}/open`, {});
+      // Open: its page is the waiting room now, where the code arrives.
+      navigate(draftPath, JUST_OPENED);
     } catch (err) {
       const openError = err instanceof ApiClientError ? err.message : 'Failed to open the session';
       navigate(draftPath, { replace: true, state: { openError } satisfies DraftPageState });
@@ -152,15 +150,6 @@ export function EditSessionPage() {
           }
         />
       )}
-
-      {opened ? (
-        <RoomSetMoment
-          title={opened.title}
-          code={opened.code}
-          // The session is open now, so its page is the waiting room.
-          onDone={() => navigate(draftPath, { replace: true })}
-        />
-      ) : null}
 
       {confirmingDelete && (
         <ConfirmDialog

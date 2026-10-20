@@ -67,11 +67,11 @@ describe('CreateSessionPage', () => {
       expect.objectContaining({ title: 'Roadmap', voiceEnabled: false }),
     );
     expect(createMock).not.toHaveBeenCalled();
-    // No motion in the suite, so the room-set moment hands straight on.
+    // Straight to the waiting room, told it has just opened so the code arrives.
     await waitFor(() =>
       expect(navigateMock).toHaveBeenCalledWith('/sessions/s9', {
         replace: true,
-        state: undefined,
+        state: { justOpened: true },
       }),
     );
     // Nothing left to pick up: it is a room now.
@@ -210,8 +210,8 @@ describe('CreateSessionPage', () => {
   });
 
   // Pick up where you left off: what was being written is kept in this browser.
-  // Code review: once a room is made, this form must not send again while the
-  // room-set moment plays over it.
+  // Code review: once a room is made, this form must not send again on its
+  // way out.
   it('stays busy once the room has been opened', async () => {
     const user = userEvent.setup();
     createAndOpenMock.mockResolvedValue({ sessionId: 's9', opened: true, code: 'K7NP-3WQZ' });
@@ -227,8 +227,8 @@ describe('CreateSessionPage', () => {
   });
 
   // Review of 60a1c15: a save timer set by the last keystroke fired after
-  // "Open the room" had cleared the kept copy (the form stays up during the
-  // room-set moment), so the next New session offered back a session that
+  // "Open the room" had cleared the kept copy (the form stayed up a moment
+  // after), so the next New session offered back a session that
   // already existed, and picking it up would have made a duplicate.
   it('keeps nothing once the room is opened, even straight after typing', async () => {
     const user = userEvent.setup();

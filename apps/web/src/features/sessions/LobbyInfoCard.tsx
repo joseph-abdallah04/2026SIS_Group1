@@ -28,6 +28,8 @@ interface LobbyInfoCardProps {
   leaderHere: boolean | null;
   /** Null once the session cannot be joined (it never is, in the lobby). */
   code: string | null;
+  /** The room has just opened: the code's tiles flip in, one after another. */
+  codeArriving?: boolean;
 }
 
 /**
@@ -44,6 +46,7 @@ export function LobbyInfoCard({
   leaderName,
   leaderHere,
   code,
+  codeArriving = false,
 }: LobbyInfoCardProps) {
   const { copied, failed, copy } = useInviteCopy<'link' | 'code'>();
   const [presenting, setPresenting] = useState(false);
@@ -79,7 +82,9 @@ export function LobbyInfoCard({
           <p className="mb-2.5 text-[10px] font-semibold tracking-[0.16em] text-rt-ink-faint uppercase">
             Invite
           </p>
-          <CodeTiles code={code} />
+          <div className={codeArriving ? 'rt-code-arrive' : undefined}>
+            <CodeTiles code={code} />
+          </div>
           <div className="mt-3 flex items-center gap-1.5">
             <button
               type="button"

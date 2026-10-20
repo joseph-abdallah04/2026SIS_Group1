@@ -1733,138 +1733,55 @@ a.rt-sticky-link:focus-visible {
 }
 
 /*
- * "Your room is open": the table appears, its chairs pull in, the code flips
- * in, and a bar fills while the waiting room loads (`RoomSetMoment`). Only
- * ever played with motion allowed; with less, the page goes straight on.
+ * The room just opened: in the waiting room, the join code's tiles flip in one
+ * after another, where the code is shared from. Once only (`justOpened`), and
+ * shown set where less motion is asked for.
  */
-.rt-room-table {
-  background: radial-gradient(circle at 50% 36%, #fffaf0 0%, #fbf1dd 45%, #efdcb6 100%);
-  box-shadow:
-    0 0 0 5px #b98a52,
-    0 0 0 7px #8f6334,
-    0 10px 24px rgb(90 60 25 / 0.25);
-  animation: rt-room-table 550ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.rt-code-arrive .rt-code-tile {
+  animation: rt-code-tile-in 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.rt-room-glow {
-  background: radial-gradient(circle, rgb(255 196 100 / 0.55), rgb(255 196 100 / 0) 66%);
-  animation: rt-room-glow 1.6s ease-out 400ms both;
+.rt-code-arrive .rt-code-tile:nth-child(n) {
+  animation-delay: 150ms;
 }
 
-.rt-room-chair {
-  background: linear-gradient(180deg, #dcbd8f, #c19761);
-  box-shadow: inset 0 0 0 1px rgb(110 74 36 / 0.25);
-  animation: rt-room-chair 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(250ms + var(--rt-chair-index, 0) * 70ms);
+.rt-code-arrive .rt-code-tile:nth-child(n + 2) {
+  animation-delay: 200ms;
 }
 
-.rt-room-host {
-  box-shadow: 0 0 0 3px #f7efe0;
-  animation: rt-room-pop 400ms cubic-bezier(0.22, 1, 0.36, 1) 850ms both;
+.rt-code-arrive .rt-code-tile:nth-child(n + 3) {
+  animation-delay: 250ms;
 }
 
-.rt-room-code .rt-code-tile {
-  animation: rt-room-tile 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.rt-code-arrive .rt-code-tile:nth-child(n + 4) {
+  animation-delay: 300ms;
 }
 
-.rt-room-code .rt-code-tile:nth-child(n) {
-  animation-delay: 950ms;
+.rt-code-arrive .rt-code-tile:nth-child(n + 6) {
+  animation-delay: 400ms;
 }
 
-.rt-room-code .rt-code-tile:nth-child(n + 2) {
-  animation-delay: 1000ms;
+.rt-code-arrive .rt-code-tile:nth-child(n + 7) {
+  animation-delay: 450ms;
 }
 
-.rt-room-code .rt-code-tile:nth-child(n + 3) {
-  animation-delay: 1050ms;
+.rt-code-arrive .rt-code-tile:nth-child(n + 8) {
+  animation-delay: 500ms;
 }
 
-.rt-room-code .rt-code-tile:nth-child(n + 4) {
-  animation-delay: 1100ms;
+.rt-code-arrive .rt-code-tile:nth-child(n + 9) {
+  animation-delay: 550ms;
 }
 
-.rt-room-code .rt-code-tile:nth-child(n + 6) {
-  animation-delay: 1200ms;
-}
-
-.rt-room-code .rt-code-tile:nth-child(n + 7) {
-  animation-delay: 1250ms;
-}
-
-.rt-room-code .rt-code-tile:nth-child(n + 8) {
-  animation-delay: 1300ms;
-}
-
-.rt-room-code .rt-code-tile:nth-child(n + 9) {
-  animation-delay: 1350ms;
-}
-
-.rt-room-bar {
-  width: 0;
-  animation: rt-room-bar 1.4s ease-in-out 900ms forwards;
-}
-
-@keyframes rt-room-table {
-  from {
-    opacity: 0;
-    scale: 0.6;
-  }
-}
-
-@keyframes rt-room-glow {
-  0% {
-    opacity: 0;
-    scale: 0.6;
-  }
-  40% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0.5;
-    scale: 1.05;
-  }
-}
-
-@keyframes rt-room-chair {
-  from {
-    opacity: 0;
-    translate: var(--rt-chair-from, 0 0);
-  }
-}
-
-@keyframes rt-room-pop {
-  from {
-    scale: 0.3;
-    opacity: 0;
-  }
-}
-
-@keyframes rt-room-tile {
+@keyframes rt-code-tile-in {
   from {
     opacity: 0;
     transform: translateY(-8px) rotateX(70deg);
   }
 }
 
-@keyframes rt-room-bar {
-  to {
-    width: 100%;
-  }
-}
-
-/* `RoomSetMoment` skips the scene with less motion asked for; should one ever
-   be on screen regardless, it is shown set rather than played. */
 @media (prefers-reduced-motion: reduce) {
-  .rt-room-table,
-  .rt-room-glow,
-  .rt-room-chair,
-  .rt-room-host,
-  .rt-room-code .rt-code-tile,
-  .rt-room-bar {
+  .rt-code-arrive .rt-code-tile {
     animation: none;
-  }
-
-  .rt-room-bar {
-    width: 100%;
   }
 }

@@ -64,7 +64,7 @@ export function CreateSessionForm({
       error={error}
       onSubmit={async (input, kind) => {
         // Held busy once it has gone through, until the page has moved on:
-        // the room-set moment plays over this form, which must not send again.
+        // this form must not send again on its way out.
         setBusy(kind);
         if (kind === 'open') {
           const result = await createAndOpen(input);
