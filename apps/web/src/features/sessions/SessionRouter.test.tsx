@@ -50,6 +50,37 @@ vi.mock('./WaitingRoom', () => ({
   },
 }));
 
+vi.mock('./SessionEndedPage', async () => {
+  const { useSearchParams } = await import('react-router-dom');
+  return {
+    SessionEndedPage: ({ justEnded }: { justEnded?: boolean }) => {
+      const [, setParams] = useSearchParams();
+      return (
+        <div>
+          <p>{justEnded ? 'Summary, just ended' : 'Summary'}</p>
+          <button type="button" onClick={() => setParams({ view: 'boards' })}>
+            To the boards
+          </button>
+        </div>
+      );
+    },
+  };
+});
+
+vi.mock('./SessionArchive', async () => {
+  const { useSearchParams } = await import('react-router-dom');
+  return {
+    SessionArchive: () => {
+      const [, setParams] = useSearchParams();
+      return (
+        <button type="button" onClick={() => setParams({})}>
+          Back to summary
+        </button>
+      );
+    },
+  };
+});
+
 vi.mock('../pinboard/SessionPinboard', () => ({
   SessionPinboard: ({ sidePanel }: { sidePanel: SidePanelControl }) => {
     boardPanel = sidePanel;
@@ -67,7 +98,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function session(status: 'lobby' | 'active') {
+function session(status: 'lobby' | 'active' | 'ended') {
   return {
     id: 's1',
     code: 'ABCD-EFGH',
@@ -84,9 +115,9 @@ function session(status: 'lobby' | 'active') {
   };
 }
 
-function renderRouter() {
+function renderRouter(path = '/sessions/s1') {
   return render(
-    <MemoryRouter initialEntries={['/sessions/s1']}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/sessions/:id" element={<SessionRouter />} />
       </Routes>
@@ -144,5 +175,44 @@ describe('SessionRouter: lobby → board', () => {
     await user.click(screen.getByRole('button', { name: 'Started' }));
     await screen.findByText('Board');
     expect(boardPanel?.tab).toBe('people');
+  });
+});
+
+describe('SessionRouter: the meeting ends', () => {
+  it('tells the summary it has just ended when this page had it live', async () => {
+    const user = userEvent.setup();
+    get.mockResolvedValueOnce(session('lobby'));
+    renderRouter();
+    await screen.findByText('Lobby');
+
+    // The lobby's `onLeftLobby` refreshes; here the session comes back ended.
+    get.mockResolvedValueOnce(session('ended'));
+    await user.click(screen.getByRole('button', { name: 'Started' }));
+
+    expect(await screen.findByText('Summary, just ended')).toBeInTheDocument();
+  });
+
+  it('does not, for a session that was already over when it was opened', async () => {
+    get.mockResolvedValueOnce(session('ended'));
+    renderRouter();
+
+    expect(await screen.findByText('Summary')).toBeInTheDocument();
+    expect(screen.queryByText('Summary, just ended')).toBeNull();
+  });
+
+  it('marks the moment once: back from the boards is not arriving again', async () => {
+    const user = userEvent.setup();
+    get.mockResolvedValueOnce(session('lobby'));
+    renderRouter();
+    await screen.findByText('Lobby');
+    get.mockResolvedValueOnce(session('ended'));
+    await user.click(screen.getByRole('button', { name: 'Started' }));
+    await screen.findByText('Summary, just ended');
+
+    await user.click(screen.getByRole('button', { name: 'To the boards' }));
+    await user.click(await screen.findByRole('button', { name: 'Back to summary' }));
+
+    expect(await screen.findByText('Summary')).toBeInTheDocument();
+    expect(screen.queryByText('Summary, just ended')).toBeNull();
   });
 });

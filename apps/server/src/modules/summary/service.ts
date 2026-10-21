@@ -59,6 +59,7 @@ export async function getSessionSummary(
           skipReason: question.skipReason,
           votingEnabled: false,
           proposals: discussed ? await listProposals(question.id) : [],
+          otherProposals: [],
           winnerProposalId: null,
           tiedProposalIds: [],
           tallies: [],
@@ -68,12 +69,34 @@ export async function getSessionSummary(
 
       const outcome = outcomeByQuestion.get(question.id);
       const shortlistedIds = (outcome?.proposalIds ?? []).slice(0, SHORTLIST_MAX);
-      const board = shortlistedIds.length > 0 ? await listProposals(question.id) : [];
+      // The session ended on it mid-discussion, so the vote never opened and
+      // there is no shortlist: its ideas are the record, as a brainstorm's are.
+      if (question.status === 'discussion' && shortlistedIds.length === 0) {
+        return {
+          id: question.id,
+          position: question.position,
+          text: question.text,
+          status: question.status,
+          skipReason: question.skipReason,
+          votingEnabled: true,
+          proposals: await listProposals(question.id),
+          otherProposals: [],
+          winnerProposalId: null,
+          tiedProposalIds: [],
+          tallies: [],
+          votedCount: 0,
+        };
+      }
+      // Every card the question gathered, shortlisted or not, so the recap can
+      // show what did not make the ballot too. A question never reached has
+      // nothing on its board to read.
+      const board = question.status === 'pending' ? [] : await listProposals(question.id);
       const byId = new Map(board.map((item) => [item.id, item]));
       const proposals = shortlistedIds.flatMap((id) => {
         const item = byId.get(id);
         return item ? [item] : [];
       });
+      const shortlisted = new Set(shortlistedIds);
       return {
         id: question.id,
         position: question.position,
@@ -82,6 +105,7 @@ export async function getSessionSummary(
         skipReason: question.skipReason,
         votingEnabled: true,
         proposals,
+        otherProposals: board.filter((item) => !shortlisted.has(item.id)),
         winnerProposalId: outcome?.winnerProposalId ?? null,
         tiedProposalIds: outcome?.tiedProposalIds ?? [],
         tallies: outcome?.tallies ?? [],
@@ -100,20 +124,27 @@ export async function getSessionSummary(
     participants: members.map((member) => ({
       userId: member.userId,
       displayName: member.displayName,
-      isLeader: member.userId === session.leaderId,
+      // Both are null once their accounts are deleted, and two deleted
+      // accounts are not the same person.
+      isLeader: session.leaderId !== null && member.userId === session.leaderId,
     })),
     questions,
   };
 }
 
-/** S04: same recap as JSON, laid out as a PDF the client can download. */
+/**
+ * S04: same recap as JSON, laid out as a PDF the client can download. Times
+ * are written in the viewer's zone when they send one, so the file says what
+ * the page said; UTC otherwise.
+ */
 export async function getSessionSummaryPdf(
   sessionId: string,
   viewerId: string,
+  options: { timeZone?: string } = {},
 ): Promise<{ pdf: Buffer; filename: string }> {
   const summary = await getSessionSummary(sessionId, viewerId);
   return {
-    pdf: await renderSessionRecapPdf(summary),
+    pdf: await renderSessionRecapPdf(summary, options),
     filename: recapPdfFilename(summary.title),
   };
 }

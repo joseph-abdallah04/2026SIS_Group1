@@ -1733,6 +1733,136 @@ a.rt-sticky-link:focus-visible {
 }
 
 /*
+ * The meeting summary (F31). It arrives once, in order: the hero, "At a
+ * glance", then each question rising into place one after another. Each
+ * progress segment fills in turn, each vote bar grows to its share, and a
+ * light crosses a decision once. `--rt-recap-i` is the order. Nothing moves
+ * again after that, and none of it moves where less motion is asked for.
+ */
+@keyframes rt-recap-rise {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+  }
+}
+
+.rt-recap-rise {
+  animation: rt-recap-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--rt-recap-i, 0) * 70ms);
+}
+
+@keyframes rt-recap-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.rt-recap-seg,
+.rt-recap-bar {
+  transform-origin: left center;
+  animation: rt-recap-grow 700ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--rt-recap-i, 0) * 70ms + 250ms);
+}
+
+.rt-recap-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.6) 50%, transparent 65%);
+  translate: -120% 0;
+  animation: rt-recap-sweep 1.3s 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes rt-recap-sweep {
+  to {
+    translate: 120% 0;
+  }
+}
+
+/* A question jumped to from "At a glance": a brief amber glow, so the eye finds it. */
+.rt-recap-flash {
+  animation: rt-recap-flash 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rt-recap-flash {
+  25% {
+    box-shadow: 0 0 0 5px rgb(224 163 60 / 0.35);
+  }
+}
+
+/* A skipped question's segment: hatched, passed over rather than missing. */
+.rt-recap-hatched {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-rt-tertiary) 0 1.5px,
+    transparent 1.5px 4px
+  );
+}
+
+/* Votes so far on a ballot that never closed: striped, so it does not read as a result. */
+.rt-recap-interim {
+  background-image: repeating-linear-gradient(135deg, #bdbdbd 0 4px, #d6d6d6 4px 8px);
+}
+
+/*
+ * "That's a wrap": paper falling over the top of the page once, the moment
+ * the meeting ends in front of someone. Each piece drifts sideways (`--rt-x`)
+ * and turns (`--rt-r`) its own way, then is gone; `both`, so none is seen
+ * before its turn or left behind after.
+ */
+.rt-recap-confetti i {
+  position: absolute;
+  top: -16px;
+  width: 9px;
+  height: 7px;
+  opacity: 0;
+  animation: rt-recap-fall 1.5s cubic-bezier(0.25, 0.6, 0.4, 1) both;
+}
+
+@keyframes rt-recap-fall {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0);
+  }
+  10%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--rt-x, 0), 380px) rotate(var(--rt-r, 360deg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-recap-rise,
+  .rt-recap-seg,
+  .rt-recap-bar,
+  .rt-recap-flash,
+  .rt-recap-confetti i {
+    animation: none;
+  }
+
+  .rt-recap-confetti {
+    display: none;
+  }
+
+  .rt-recap-banner::after {
+    animation: none;
+    display: none;
+  }
+}
+
+@media print {
+  .rt-recap-rise,
+  .rt-recap-seg,
+  .rt-recap-bar {
+    animation: none;
+  }
+}
+
+/*
  * The room just opened: in the waiting room, the join code's tiles flip in one
  * after another, where the code is shared from. Once only (`justOpened`), and
  * shown set where less motion is asked for.

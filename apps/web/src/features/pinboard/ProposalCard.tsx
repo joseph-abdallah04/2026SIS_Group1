@@ -222,7 +222,9 @@ export function CardFoot({
               leader, and the viewer does not need telling who they are. */}
           {isAuthorLeader && !isOwnedByViewer ? (
             <span title="Session leader" className="ml-1 text-[9.5px]" style={{ color: OWNED_INK }}>
-              L
+              {/* A tooltip is not read out: the letter is drawn, the words are heard. */}
+              <span aria-hidden>L</span>
+              <span className="sr-only">, session leader</span>
             </span>
           ) : null}
         </span>

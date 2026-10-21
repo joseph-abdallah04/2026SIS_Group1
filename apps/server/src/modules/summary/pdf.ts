@@ -1,5 +1,7 @@
 import PDFDocument from 'pdfkit';
 import {
+  recapEmptyMessage,
+  recapQuestionOutcome,
   recapQuestionStatusLabel,
   type BoardItem,
   type SessionRecap,
@@ -16,23 +18,45 @@ const MARGIN = 56;
 /** Space between the two columns of a brainstorm's idea grid, and between its rows. */
 const IDEA_GAP = 14;
 
-function formatWhen(iso: string | null): string | null {
+/**
+ * The zone to write times in: the one asked for, if it is a real IANA zone,
+ * and UTC otherwise. The name comes from the client, so it is checked against
+ * what `Intl` knows rather than trusted.
+ */
+export function recapTimeZone(requested: string | undefined): string {
+  if (!requested || requested.length > 64) return 'UTC';
+  try {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: requested }).resolvedOptions().timeZone;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function formatWhen(iso: string | null, timeZone: string): string | null {
   if (!iso) return null;
   const when = new Date(iso);
   if (Number.isNaN(when.getTime())) return null;
   const day = when.toLocaleString('en-GB', {
-    timeZone: 'UTC',
+    timeZone,
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   });
   const time = when.toLocaleString('en-GB', {
-    timeZone: 'UTC',
+    timeZone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   });
-  return `${day}, ${time} UTC`;
+  // Named, so a reader in another zone is not misled: "UTC", or the zone's
+  // short name for that date ("GMT+10", "BST").
+  const zone =
+    timeZone === 'UTC'
+      ? 'UTC'
+      : (new Intl.DateTimeFormat('en-GB', { timeZone, timeZoneName: 'short' })
+          .formatToParts(when)
+          .find((part) => part.type === 'timeZoneName')?.value ?? timeZone);
+  return `${day}, ${time} ${zone}`;
 }
 
 function tallyFor(tallies: VotingTally[], proposalId: string): VotingTally | null {
@@ -163,15 +187,18 @@ function writeQuestion(
     .fontSize(9)
     .text(recapQuestionStatusLabel(question), { width });
 
-  if (!question.votingEnabled) {
+  const outcome = recapQuestionOutcome(question);
+
+  // A brainstorm, or a vote the session ended on before it opened: the ideas
+  // are the record, every one of them.
+  if (outcome.kind === 'discussed' || outcome.kind === 'not-voted') {
     const ideas = question.proposals;
-    const discussed = question.status === 'answered' || question.status === 'discussion';
     if (ideas.length > 0) {
       doc.text(ideaCount(ideas.length), { width });
     }
     doc.moveDown(0.45);
     if (ideas.length === 0) {
-      if (discussed) doc.text('No ideas were added.', { width });
+      doc.text(recapEmptyMessage(question), { width });
       doc.moveDown(0.8);
       return;
     }
@@ -189,7 +216,17 @@ function writeQuestion(
 
   const featured = featuredProposals(question);
   if (featured.length === 0) {
-    doc.text('Nothing was decided for this question.', { width });
+    // Nothing was decided, and the line above already says which way; this
+    // says why, where there is more to say than the label.
+    const why =
+      outcome.kind === 'vote-open'
+        ? 'The session ended while the ballot was open, so there is no result.'
+        : outcome.kind === 'no-votes'
+          ? 'The ballot closed without a vote.'
+          : outcome.kind === 'not-reached'
+            ? recapEmptyMessage(question)
+            : null;
+    if (why) doc.text(why, { width });
     doc.moveDown(0.8);
     return;
   }
@@ -218,7 +255,7 @@ function writeQuestion(
   doc.moveDown(0.4);
 }
 
-function writeRecap(doc: PDFKit.PDFDocument, summary: SessionRecap) {
+function writeRecap(doc: PDFKit.PDFDocument, summary: SessionRecap, timeZone: string) {
   const width = doc.page.width - MARGIN * 2;
 
   doc
@@ -239,9 +276,9 @@ function writeRecap(doc: PDFKit.PDFDocument, summary: SessionRecap) {
   doc.x = MARGIN;
   doc.y = ruleY + 14;
 
-  const createdAt = formatWhen(summary.createdAt);
-  const startedAt = formatWhen(summary.startedAt);
-  const endedAt = formatWhen(summary.endedAt);
+  const createdAt = formatWhen(summary.createdAt, timeZone);
+  const startedAt = formatWhen(summary.startedAt, timeZone);
+  const endedAt = formatWhen(summary.endedAt, timeZone);
   const dates = [
     createdAt && `Created ${createdAt}`,
     startedAt && `Started ${startedAt}`,
@@ -278,8 +315,15 @@ function writeRecap(doc: PDFKit.PDFDocument, summary: SessionRecap) {
   });
 }
 
-/** S04: the F31 recap as a downloadable PDF. Same facts, no extra ranking. */
-export function renderSessionRecapPdf(summary: SessionRecap): Promise<Buffer> {
+/**
+ * S04: the F31 recap as a downloadable PDF. Same facts, no extra ranking.
+ * Times are in `timeZone` when it is a real one (see `recapTimeZone`).
+ */
+export function renderSessionRecapPdf(
+  summary: SessionRecap,
+  { timeZone }: { timeZone?: string } = {},
+): Promise<Buffer> {
+  const zone = recapTimeZone(timeZone);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
@@ -297,7 +341,7 @@ export function renderSessionRecapPdf(summary: SessionRecap): Promise<Buffer> {
     });
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
-    writeRecap(doc, summary);
+    writeRecap(doc, summary, zone);
     doc.end();
   });
 }

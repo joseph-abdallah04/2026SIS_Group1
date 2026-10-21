@@ -18,6 +18,7 @@ import {
   PROPOSAL_KIND_LABEL,
   type ExportFormat,
 } from '../pinboard/proposalExport';
+import { RecapEnlarge } from './RecapEnlarge';
 
 /**
  * One card on the meeting summary, with the actions a finished meeting still
@@ -65,7 +66,9 @@ export function RecapProposalCard({
 
   const sections: ProposalMenuItem[][] = [
     [
-      ...(hasArtwork(item) && !enlargedOpen
+      // A note opens large too, in the same view, so every card is looked
+      // at closely the same way on the summary.
+      ...((hasArtwork(item) || isSticky) && !enlargedOpen
         ? [
             {
               id: 'enlarge',
@@ -87,10 +90,18 @@ export function RecapProposalCard({
     <div
       ref={cardRef}
       data-menu-open={menu ? 'true' : undefined}
-      className={`group relative ${menu ? 'outline-2 outline-offset-4' : ''}`}
+      className={`group relative ${menu ? 'outline-2 outline-offset-4' : ''} ${isSticky ? 'cursor-zoom-in' : ''}`}
       style={{
         borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
         outlineColor: menu ? MENU_TARGET_OUTLINE : undefined,
+      }}
+      // A press on a note opens it large, as a press on a drawing's plate does;
+      // not one on its menu or a link in it, and not the end of selecting words.
+      onClick={(event) => {
+        if (!isSticky) return;
+        if ((event.target as HTMLElement).closest('a, button')) return;
+        if (window.getSelection()?.toString()) return;
+        setEnlargedOpen(true);
       }}
       onContextMenu={(event) => {
         if (!hasActions) return;
@@ -118,6 +129,13 @@ export function RecapProposalCard({
             if (!anchor) return;
             setMenu((open) => (open ? null : anchor));
           }}
+        />
+      ) : null}
+      {isSticky && enlargedOpen ? (
+        <RecapEnlarge
+          item={item}
+          openedFrom={cardRef.current}
+          onClose={() => setEnlargedOpen(false)}
         />
       ) : null}
       {menu ? (

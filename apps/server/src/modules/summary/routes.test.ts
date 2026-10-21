@@ -11,11 +11,7 @@ const getSessionSummary = vi.fn();
 const getSessionSummaryPdf = vi.fn();
 
 vi.mock('../../middleware/auth.js', () => ({
-  requireAuth: (
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction,
-  ) => {
+  requireAuth: (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const userId = req.headers['x-test-user-id'];
     if (typeof userId !== 'string' || !userId) {
       res.status(401).json({ error: 'Missing authentication token', code: 'MISSING_TOKEN' });
@@ -93,11 +89,17 @@ describe('GET /api/sessions/:sessionId/summary.pdf', () => {
     const res = await request();
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/pdf/);
-    expect(res.headers.get('content-disposition')).toBe(
-      'attachment; filename="Roadmap-recap.pdf"',
-    );
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="Roadmap-recap.pdf"');
     expect(res.headers.get('cache-control')).toBe('private, no-store');
     expect(res.body.subarray(0, 5).toString()).toBe('%PDF-');
-    expect(getSessionSummaryPdf).toHaveBeenCalledWith('s1', 'u1');
+    expect(getSessionSummaryPdf).toHaveBeenCalledWith('s1', 'u1', {});
+  });
+
+  it('hands the viewer’s time zone on, so the file’s times match the page', async () => {
+    const res = await request({ path: '/api/sessions/s1/summary.pdf?tz=Australia%2FSydney' });
+    expect(res.status).toBe(200);
+    expect(getSessionSummaryPdf).toHaveBeenCalledWith('s1', 'u1', {
+      timeZone: 'Australia/Sydney',
+    });
   });
 });
