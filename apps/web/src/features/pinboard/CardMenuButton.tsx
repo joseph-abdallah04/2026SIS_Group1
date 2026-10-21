@@ -18,10 +18,13 @@ export function CardMenuButton({
   buttonRef,
   open,
   onToggle,
+  label = 'Proposal actions',
 }: {
   buttonRef: React.RefObject<HTMLButtonElement>;
   open: boolean;
   onToggle: () => void;
+  /** Its name, where several sit in a list and each has to say whose it is. */
+  label?: string;
 }) {
   // Pulled out by the same amount on both axes, so it sits centred on the
   // card's top-right corner rather than tucked inside it.
@@ -31,7 +34,7 @@ export function CardMenuButton({
       type="button"
       onClick={onToggle}
       title="Proposal actions"
-      aria-label="Proposal actions"
+      aria-label={label}
       aria-haspopup="menu"
       aria-expanded={open}
       className={`absolute -top-2.5 -right-2.5 inline-flex h-5.5 w-5.5 items-center justify-center rounded-full border shadow-sm transition-[opacity,background-color,border-color,color] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-primary ${

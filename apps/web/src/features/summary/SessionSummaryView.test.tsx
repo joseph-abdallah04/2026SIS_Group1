@@ -476,12 +476,47 @@ describe('SessionSummaryView card actions', () => {
   it('gives cards no menu unless the page asks for one', () => {
     render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" />);
     expect(screen.queryByRole('button', { name: 'Proposal actions' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Actions: / })).toBeNull();
+  });
+
+  // A card that did not win is only a row; it can still be copied and exported.
+  it('opens a ranked card’s menu from the end of its row', async () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Actions: The UI' }));
+    expect(menuLabels()).toEqual(['Enlarge', 'Copy text']);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Copy text' }));
+    expect(copyText).toHaveBeenCalledWith('The UI');
+
+    await userEvent.click(screen.getByRole('button', { name: /^Actions: A diagram/ }));
+    expect(menuLabels()).toEqual(['Enlarge', 'Export']);
+  });
+
+  it('enlarges a ranked card from its menu, and comes back to the menu', async () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    const more = screen.getByRole('button', { name: 'Actions: The UI' });
+    await userEvent.click(more);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Enlarge' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(more).toHaveFocus();
+  });
+
+  it('opens a ranked card’s menu on a right-click of its row', () => {
+    render(<SessionSummaryView summary={WITH_CANVAS} viewerId="u2" cardActions />);
+
+    const row = screen.getByRole('button', { name: 'Actions: The UI' }).closest('li')!;
+    expect(fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })).toBe(false);
+    expect(menuLabels()).toEqual(['Enlarge', 'Copy text']);
   });
 
   it('opens the same menu as the board, less anything that changes a card', async () => {
     render(<SessionSummaryView summary={CANVAS_WINS} viewerId="u2" cardActions />);
 
-    // The winner is a card on the page; the ranked rows are pictures of theirs.
+    // The winner is a card on the page; the ranked rows have a ⋯ of their own.
     const buttons = screen.getAllByRole('button', { name: 'Proposal actions' });
     expect(buttons).toHaveLength(1);
     await userEvent.click(buttons[0]!);
