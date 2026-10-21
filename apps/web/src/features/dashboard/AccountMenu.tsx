@@ -55,7 +55,7 @@ export function AccountMenu({ user, onLogout }: { user: User | null; onLogout: (
         >
           {user ? initialsFromName(user.displayName) : null}
         </span>
-        <ChevronDown aria-hidden size={14} className="text-rt-ink-muted" />
+        <ChevronDown aria-hidden size={14} className="hidden text-rt-ink-muted sm:block" />
       </button>
 
       {open ? (

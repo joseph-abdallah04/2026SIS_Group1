@@ -500,6 +500,12 @@ export interface SessionRecapQuestion {
   /** Why it was skipped, when the leader said. */
   skipReason?: string | null;
   proposals: BoardItem[];
+  /**
+   * A vote question's other cards: on its board but never shortlisted, oldest
+   * first. Empty for a brainstorm, whose `proposals` are already every idea.
+   * Optional so a recap from before it existed still reads.
+   */
+  otherProposals?: BoardItem[];
   winnerProposalId: string | null;
   tiedProposalIds: string[];
   tallies: VotingTally[];
@@ -526,40 +532,111 @@ export interface SessionRecap {
 }
 
 /**
- * Past-tense label for the recap (screen and PDF). A question left in
- * `voting` with a shortlist or result still reads as answered once the
- * session is over. A brainstorm question (F41) reads as discussed rather
- * than answered — nobody chose an answer — and so does one the session ended
- * on mid-discussion: it had no vote to reach, and the archive's agenda counts
- * it as done for the same reason.
+ * What became of one question, read from the recap alone. The page and the
+ * PDF both say it from this, so the two never disagree.
+ *
+ * - `decided` / `tied`: a closed vote with a result. A vote skipped after it
+ *   closed still decided something (the dashboard counts it), so it reads as
+ *   decided, with `skippedAfter` to say so.
+ * - `no-votes`: the ballot closed and nobody voted.
+ * - `vote-open`: the session ended with the shortlist or the ballot still
+ *   open. Any tallies are the votes so far, not a result: the server only
+ *   names a winner once a round closes, and ending a session closes none.
+ * - `not-voted`: a vote question the session ended on mid-discussion.
+ * - `discussed`: a brainstorm (F41) that was reached; it has no winner.
+ * - `skipped`, `not-reached`: never settled, and nothing to show for it.
+ */
+export type RecapOutcome =
+  | { kind: 'decided'; winnerProposalId: string; skippedAfter: boolean }
+  | { kind: 'tied'; tiedProposalIds: string[] }
+  | { kind: 'no-votes' }
+  | { kind: 'vote-open' }
+  | { kind: 'not-voted' }
+  | { kind: 'discussed' }
+  | { kind: 'skipped' }
+  | { kind: 'not-reached' };
+
+export type RecapOutcomeKind = RecapOutcome['kind'];
+
+export function recapQuestionOutcome(question: SessionRecapQuestion): RecapOutcome {
+  const { status } = question;
+  if (!question.votingEnabled) {
+    if (status === 'answered' || status === 'discussion') return { kind: 'discussed' };
+    return status === 'skipped' ? { kind: 'skipped' } : { kind: 'not-reached' };
+  }
+  if (question.winnerProposalId) {
+    return {
+      kind: 'decided',
+      winnerProposalId: question.winnerProposalId,
+      skippedAfter: status === 'skipped',
+    };
+  }
+  if (question.tiedProposalIds.length > 0) {
+    return { kind: 'tied', tiedProposalIds: question.tiedProposalIds };
+  }
+  switch (status) {
+    case 'skipped':
+      return { kind: 'skipped' };
+    case 'answered':
+      return { kind: 'no-votes' };
+    case 'voting':
+      // Ended before anything was shortlisted: as good as never voted on.
+      return question.proposals.length > 0 || question.votedCount > 0
+        ? { kind: 'vote-open' }
+        : { kind: 'not-voted' };
+    case 'discussion':
+      return { kind: 'not-voted' };
+    case 'pending':
+      return { kind: 'not-reached' };
+  }
+}
+
+/** The outcome in a word or two, for its chip on the page and its line in the PDF. */
+export const RECAP_OUTCOME_LABEL: Record<RecapOutcomeKind, string> = {
+  decided: 'Decided',
+  tied: 'Tied',
+  'no-votes': 'No votes cast',
+  'vote-open': 'Vote not closed',
+  'not-voted': 'Not voted on',
+  discussed: 'Discussed',
+  skipped: 'Skipped',
+  'not-reached': 'Not reached',
+};
+
+/**
+ * The outcome as one past-tense line, with the skip reason when the leader
+ * gave one: why a question was passed over is as much part of the record as
+ * what another decided. The PDF prints this under each question; the page
+ * shows the reason on a line of its own.
  */
 export function recapQuestionStatusLabel(question: SessionRecapQuestion): string {
-  // Skipped, with the reason when the leader gave one: why a question was
-  // passed over is as much part of the record as what another decided.
-  if (question.status === 'skipped') {
-    return question.skipReason ? `Skipped: ${question.skipReason}` : 'Skipped';
+  const outcome = recapQuestionOutcome(question);
+  const reason = question.skipReason?.trim();
+  if (outcome.kind === 'skipped') return reason ? `Skipped: ${reason}` : 'Skipped';
+  if (outcome.kind === 'decided' && outcome.skippedAfter) {
+    return reason ? `Decided, then skipped: ${reason}` : 'Decided, then skipped';
   }
-  if (!question.votingEnabled) {
-    if (question.status === 'answered' || question.status === 'discussion') {
-      return 'Discussed';
-    }
-    return 'Not reached';
-  }
-  if (
-    question.status === 'voting' &&
-    (question.winnerProposalId ||
-      question.tiedProposalIds.length > 0 ||
-      question.proposals.length > 0)
-  ) {
-    return 'Answered';
-  }
-  switch (question.status) {
-    case 'pending':
-    case 'discussion':
-    case 'voting':
-      return 'Not reached';
-    case 'answered':
-      return 'Answered';
+  return RECAP_OUTCOME_LABEL[outcome.kind];
+}
+
+/**
+ * What a question with nothing to show says instead, by outcome. Only the
+ * outcomes that can come with no cards are named.
+ */
+export function recapEmptyMessage(question: SessionRecapQuestion): string {
+  switch (recapQuestionOutcome(question).kind) {
+    case 'discussed':
+      return 'No ideas were added.';
+    case 'skipped':
+      return 'Skipped before anything was shortlisted.';
+    case 'not-reached':
+      return 'The session ended before this question.';
+    case 'not-voted':
+      return 'No ideas were added, and the vote never opened.';
+    case 'vote-open':
+      return 'The session ended before anything was shortlisted.';
+    default:
+      return 'Nothing was shortlisted.';
   }
 }
 

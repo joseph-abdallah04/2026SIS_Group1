@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Sparkles, UserRound, type LucideIcon } from 'lucide-react';
 
+import { AppPage } from '../../components/AppPage';
 import { AppHeader, useMe } from '../dashboard/AppHeader';
 import { liveMembershipOf, useSessions } from '../sessions/useSessions';
 import { LlmSettingsForm } from './LlmSettingsForm';
@@ -48,20 +49,20 @@ export function SettingsPage() {
 
   // Do not paint Profile (and its delete-account control) until we know this
   // person is not in a lobby or live session.
+  const header = <AppHeader current="Settings" user={user} />;
+
   if (loading || liveSession) {
     return (
-      <main className="min-h-screen bg-rt-surface px-6 py-10 md:px-16">
-        <p className="text-sm text-rt-ink-muted">
+      <AppPage header={header}>
+        <p className="mx-auto w-full max-w-5xl px-4 py-8 text-sm text-rt-ink-muted sm:px-6 sm:py-10">
           {liveSession ? 'Taking you back to your live session…' : 'Loading…'}
         </p>
-      </main>
+      </AppPage>
     );
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      <AppHeader page="Settings" user={user} />
-
+    <AppPage header={header}>
       <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
         <h1 className="text-[28px] font-semibold tracking-[-0.02em]">Settings</h1>
 
@@ -141,6 +142,6 @@ export function SettingsPage() {
           </div>
         </div>
       </div>
-    </main>
+    </AppPage>
   );
 }

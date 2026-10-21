@@ -123,13 +123,28 @@ describe('getSessionSummary', () => {
       votedCount: 3,
     });
     expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2']);
-    expect(listProposals).toHaveBeenCalledTimes(1);
+    // What did not make the ballot is kept too, beside it.
+    expect(summary.questions[0]?.otherProposals?.map((item) => item.id)).toEqual(['p3']);
     expect(summary.questions[1]).toMatchObject({
       id: 'q2',
       status: 'skipped',
       winnerProposalId: null,
       proposals: [],
+      otherProposals: [],
     });
+  });
+
+  it('does not read the board of a vote question the session never reached', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[0]!, status: 'pending' as const }],
+    });
+    getSessionVoteOutcomes.mockResolvedValue([]);
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]).toMatchObject({ proposals: [], otherProposals: [] });
+    expect(listProposals).not.toHaveBeenCalled();
   });
 
   // F41: a brainstorm question has no vote, so its recap is the whole board.
@@ -163,6 +178,68 @@ describe('getSessionSummary', () => {
     const summary = await getSessionSummary('s1', 'u2');
 
     expect(summary.questions[0]?.proposals).toHaveLength(3);
+  });
+
+  it('lists the ideas of a vote question the session ended on mid-discussion', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[0]!, status: 'discussion' as const }],
+    });
+    getSessionVoteOutcomes.mockResolvedValue([]);
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]).toMatchObject({
+      status: 'discussion',
+      votingEnabled: true,
+      winnerProposalId: null,
+      tallies: [],
+      votedCount: 0,
+    });
+    expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  // Review of 1bddadf: ended while the leader was still picking the shortlist,
+  // nothing ticked, the ideas fell to `otherProposals`, so the recap said no
+  // ideas were added right above "Ideas on the board".
+  it('lists the ideas of a vote question the session ended on while shortlisting', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[0]!, status: 'voting' as const }],
+    });
+    getSessionVoteOutcomes.mockResolvedValue([
+      {
+        questionId: ENDED.questions[0]!.id,
+        proposalIds: [],
+        winnerProposalId: null,
+        tiedProposalIds: [],
+        tallies: [],
+        votedCount: 0,
+      },
+    ]);
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]).toMatchObject({
+      status: 'voting',
+      votingEnabled: true,
+      winnerProposalId: null,
+      otherProposals: [],
+    });
+    expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('marks nobody as leader when the leader’s account is gone', async () => {
+    getSessionWithQuestions.mockResolvedValue({ ...ENDED, leaderId: null });
+    listSessionParticipants.mockResolvedValue([
+      { userId: null, displayName: 'Deleted user', joinedAt: new Date() },
+      { userId: null, displayName: 'Deleted user', joinedAt: new Date() },
+      { userId: 'u2', displayName: 'Ada', joinedAt: new Date() },
+    ]);
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.participants.map((member) => member.isLeader)).toEqual([false, false, false]);
   });
 
   it('does not read the board of a skipped brainstorm question', async () => {

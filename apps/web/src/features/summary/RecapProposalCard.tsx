@@ -18,6 +18,47 @@ import {
   PROPOSAL_KIND_LABEL,
   type ExportFormat,
 } from '../pinboard/proposalExport';
+import { RecapEnlarge } from './RecapEnlarge';
+
+/**
+ * What a card's menu offers on the summary, wherever the card is shown (in
+ * full, or as a row of results): a closer look, a note's words, the artwork
+ * as a file. `onEnlarge` is left out while the card is already enlarged.
+ */
+export function recapCardMenu(
+  item: BoardItem,
+  {
+    onEnlarge,
+    onCopyText,
+    onExport,
+  }: {
+    onEnlarge?: () => void;
+    onCopyText: (item: BoardItem) => void;
+    onExport: (item: BoardItem, format: ExportFormat) => void;
+  },
+): ProposalMenuItem[][] {
+  const isSticky = item.artifactJson.type === 'sticky';
+  return [
+    [
+      // A note opens large too, in the same view, so every card is looked
+      // at closely the same way on the summary.
+      ...((hasArtwork(item) || isSticky) && onEnlarge
+        ? [{ id: 'enlarge', label: 'Enlarge', icon: EnlargeIcon, onSelect: onEnlarge }]
+        : []),
+      ...(isSticky
+        ? [{ id: 'copy', label: 'Copy text', icon: Copy, onSelect: () => onCopyText(item) }]
+        : []),
+      ...exportMenuItems(item, onExport),
+    ],
+  ];
+}
+
+/** The menu's name for screen readers: "Actions for Sticky note by Ada". */
+export function recapCardMenuLabel(item: BoardItem, isOwnedByViewer: boolean): string {
+  return `Actions for ${PROPOSAL_KIND_LABEL[item.type]} by ${
+    isOwnedByViewer ? 'you' : item.authorName
+  }`;
+}
 
 /**
  * One card on the meeting summary, with the actions a finished meeting still
@@ -63,34 +104,29 @@ export function RecapProposalCard({
     };
   };
 
-  const sections: ProposalMenuItem[][] = [
-    [
-      ...(hasArtwork(item) && !enlargedOpen
-        ? [
-            {
-              id: 'enlarge',
-              label: 'Enlarge',
-              icon: EnlargeIcon,
-              onSelect: () => setEnlargedOpen(true),
-            },
-          ]
-        : []),
-      ...(isSticky
-        ? [{ id: 'copy', label: 'Copy text', icon: Copy, onSelect: () => onCopyText(item) }]
-        : []),
-      ...exportMenuItems(item, onExport),
-    ],
-  ];
+  const sections = recapCardMenu(item, {
+    onEnlarge: enlargedOpen ? undefined : () => setEnlargedOpen(true),
+    onCopyText,
+    onExport,
+  });
   const hasActions = sections.some((section) => section.length > 0);
 
   return (
     <div
       ref={cardRef}
       data-menu-open={menu ? 'true' : undefined}
-      className={`group relative ${menu ? 'outline-2 outline-offset-4' : ''}`}
+      className={`group relative ${menu ? 'outline-2 outline-offset-4' : ''} ${isSticky ? 'cursor-zoom-in' : ''}`}
       style={{
         borderRadius: isSticky ? STICKY_RADIUS : CARD_RADIUS,
         outlineColor: menu ? MENU_TARGET_OUTLINE : undefined,
+      }}
+      // A press on a note opens it large, as a press on a drawing's plate does;
+      // not one on its menu or a link in it, and not the end of selecting words.
+      onClick={(event) => {
+        if (!isSticky) return;
+        if ((event.target as HTMLElement).closest('a, button')) return;
+        if (window.getSelection()?.toString()) return;
+        setEnlargedOpen(true);
       }}
       onContextMenu={(event) => {
         if (!hasActions) return;
@@ -120,13 +156,18 @@ export function RecapProposalCard({
           }}
         />
       ) : null}
+      {isSticky && enlargedOpen ? (
+        <RecapEnlarge
+          item={item}
+          openedFrom={cardRef.current}
+          onClose={() => setEnlargedOpen(false)}
+        />
+      ) : null}
       {menu ? (
         <ProposalActionsMenu
           anchor={menu}
           sections={sections}
-          label={`Actions for ${PROPOSAL_KIND_LABEL[item.type]} by ${
-            isOwnedByViewer ? 'you' : item.authorName
-          }`}
+          label={recapCardMenuLabel(item, isOwnedByViewer)}
           onClose={closeMenu}
           ignore={menuButtonRef}
         />

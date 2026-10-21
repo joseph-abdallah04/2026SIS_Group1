@@ -70,6 +70,28 @@ export function SessionRouter() {
     navigate(location.pathname, { replace: true, state: null });
   }, [arrivedOpened, navigate, location.pathname]);
 
+  // The meeting ended while this page had it live: the summary marks the
+  // moment ("That's a wrap"). Told from the status this page last showed, so
+  // opening an ended session later, from the dashboard, never plays it. Kept
+  // in state from the render before (React's way of remembering a previous
+  // value), so the summary has it from its first render. Once only: looking
+  // at the boards and coming back is not arriving again.
+  const status = session?.status ?? null;
+  const viewingBoards = params.get('view') === 'boards';
+  const [seen, setSeen] = useState<{
+    sessionId: string;
+    status: string | null;
+    justEnded: boolean;
+  }>({ sessionId, status: null, justEnded: false });
+  if (seen.sessionId !== sessionId) {
+    setSeen({ sessionId, status, justEnded: false });
+  } else if (status !== null && status !== seen.status) {
+    const fromLive = seen.status === 'lobby' || seen.status === 'active';
+    setSeen({ sessionId, status, justEnded: status === 'ended' && fromLive });
+  } else if (seen.justEnded && viewingBoards) {
+    setSeen({ ...seen, justEnded: false });
+  }
+
   if (!sessionId) {
     return (
       <main className="flex h-screen items-center justify-center bg-rt-surface">
@@ -143,10 +165,10 @@ export function SessionRouter() {
         </>
       );
     case 'ended':
-      return params.get('view') === 'boards' ? (
+      return viewingBoards ? (
         <SessionArchive session={session} />
       ) : (
-        <SessionEndedPage session={session} />
+        <SessionEndedPage session={session} justEnded={seen.justEnded} />
       );
   }
 }

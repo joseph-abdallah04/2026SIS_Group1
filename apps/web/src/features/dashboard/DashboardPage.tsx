@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Check, Plus, Search } from 'lucide-react';
 import type { SessionSummary } from '@roundtable/shared';
 
+import { AppPage } from '../../components/AppPage';
 import { JoinByCodeForm } from '../sessions/JoinByCodeForm';
 import { liveMembershipOf, useSessions } from '../sessions/useSessions';
 import { AppHeader, useMe } from './AppHeader';
@@ -164,10 +165,8 @@ export function DashboardPage() {
   }, [greeting, user, firstName, sessions, listed]);
 
   return (
-    <main className="flex min-h-screen flex-col bg-rt-surface text-rt-ink">
-      {/* Its heading is the page's: the cards below say what can be done here. */}
-      <AppHeader page="Dashboard" user={user} />
-
+    // Its heading is the bar's: the cards below say what can be done here.
+    <AppPage header={<AppHeader current="Dashboard" user={user} />}>
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8 sm:px-6 sm:py-10">
         {/* The page's one display line. Its height is kept while the name
             loads, so the cards below never jump down when it arrives. */}
@@ -325,7 +324,7 @@ export function DashboardPage() {
                   <SectionHeading
                     title="Past sessions"
                     count={past.length}
-                    hint="Open any one to see its board and recap"
+                    hint="Open a session to see its board and recap"
                   />
                   <div className="rounded-2xl border border-rt-tertiary/70 px-2 py-2 sm:px-3">
                     {byMonth(past).map((group) => (
@@ -360,6 +359,6 @@ export function DashboardPage() {
           </p>
         ) : null}
       </div>
-    </main>
+    </AppPage>
   );
 }

@@ -20,6 +20,8 @@ import {
   CARD_RADIUS,
   REACTION_HOVER_FILL,
   REACTION_ON_BORDER,
+  STICKY_RADIUS,
+  STICKY_SHADOW,
   THUMB_BACKGROUND,
 } from './pinboardTokens';
 
@@ -41,13 +43,26 @@ const MIN_WIDTH_PX = 280;
 const BYLINE_PX = 30;
 
 /**
- * How large it opens, and where: as large as the board has room for,
- * in the one frame every proposal opens in.
+ * A note opened large is a bigger sticky, not a window: square, and only as
+ * big as a note needs to be read at arm's length, so it still reads as one
+ * sheet of paper held up rather than the screen filling with colour.
  */
-function panelStyle(room: BoardPopupRoom | null): CSSProperties {
-  const maxWidth = Math.min(MAX_WIDTH_PX, room?.maxWidth ?? window.innerWidth - EDGE_PX * 2);
+const PAPER_MAX_PX = 460;
+const PAPER_MIN_PX = 260;
+
+/**
+ * How large it opens, and where: as large as the board has room for,
+ * in the one frame every proposal opens in. On `paper`, a square sheet.
+ */
+function panelStyle(room: BoardPopupRoom | null, paper = false): CSSProperties {
+  const maxWidth = Math.min(
+    paper ? PAPER_MAX_PX : MAX_WIDTH_PX,
+    room?.maxWidth ?? window.innerWidth - EDGE_PX * 2,
+  );
   const maxHeight = room?.maxHeight ?? window.innerHeight - EDGE_PX * 2;
-  const width = Math.max(MIN_WIDTH_PX, Math.min(maxWidth, (maxHeight - BYLINE_PX) * FRAME_ASPECT));
+  const width = paper
+    ? Math.max(Math.min(PAPER_MIN_PX, maxWidth), Math.min(maxWidth, maxHeight - BYLINE_PX))
+    : Math.max(MIN_WIDTH_PX, Math.min(maxWidth, (maxHeight - BYLINE_PX) * FRAME_ASPECT));
   return {
     ...(room
       ? {
@@ -254,7 +269,17 @@ export function ProposalEnlarge({
   );
 }
 
-function EnlargedView({
+/**
+ * The enlarged view itself, for a surface that has its own way in: the meeting
+ * summary opens it from a card's picture in a list of results, and opens a
+ * sticky note in it too, so every card is looked at closely the same way.
+ *
+ * `paper`, a note's paper colour, opens it as a sticky held up close: a
+ * square sheet with square corners, no outline and a paper shadow, the byline
+ * on the paper rather than on a strip of its own, and no zoom, because words
+ * are read rather than inspected (a long note scrolls instead).
+ */
+export function EnlargedView({
   item,
   artwork,
   byline,
@@ -263,6 +288,7 @@ function EnlargedView({
   onClose,
   exportFormat,
   onExport,
+  paper,
 }: {
   item: BoardItem;
   artwork: ReactNode;
@@ -273,7 +299,9 @@ function EnlargedView({
   /** The way in that was pressed, which says which surface this is over. */
   openedFrom: HTMLElement | null;
   onClose: () => void;
+  paper?: string;
 }) {
+  const onPaper = paper !== undefined;
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   useEffect(() => {
@@ -282,12 +310,12 @@ function EnlargedView({
 
   // In the middle of the board, over the cards it was opened from, as large as
   // the board has room for.
-  const [style, setStyle] = useState(() => panelStyle(popupRoomFrom(openedFrom)));
+  const [style, setStyle] = useState(() => panelStyle(popupRoomFrom(openedFrom), onPaper));
   useEffect(() => {
-    const onResize = () => setStyle(panelStyle(popupRoomFrom(openedFrom)));
+    const onResize = () => setStyle(panelStyle(popupRoomFrom(openedFrom), onPaper));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [openedFrom]);
+  }, [openedFrom, onPaper]);
 
   /**
    * How close the artwork is, and where it has been dragged to.
@@ -405,8 +433,21 @@ function EnlargedView({
       tabIndex={-1}
       // Being fixed, this is also what the close in its corner is placed
       // against — it has to sit over the frame without being inside it.
-      className="rt-enlarge-open fixed z-50 flex flex-col overflow-hidden border bg-rt-surface shadow-[0_10px_28px_rgba(8,12,21,0.16)] outline-none"
-      style={{ ...style, borderColor: CARD_BORDER, borderRadius: CARD_RADIUS }}
+      className={`rt-enlarge-open fixed z-50 flex flex-col overflow-hidden outline-none ${
+        onPaper ? '' : 'border bg-rt-surface shadow-[0_10px_28px_rgba(8,12,21,0.16)]'
+      }`}
+      style={
+        onPaper
+          ? // Bare paper, as a sticky is on the board: square corners, no
+            // outline, and its shadow, deeper for being held up off the page.
+            {
+              ...style,
+              background: paper,
+              borderRadius: STICKY_RADIUS,
+              boxShadow: `${STICKY_SHADOW}, 0 18px 40px -12px rgba(8,12,21,0.28)`,
+            }
+          : { ...style, borderColor: CARD_BORDER, borderRadius: CARD_RADIUS }
+      }
       /**
        * Nothing pressed in here reaches the card it was opened from. This is
        * drawn on the page, but React carries its events up the tree it belongs
@@ -421,89 +462,99 @@ function EnlargedView({
       <>
         {/* The artwork takes whatever the board leaves, in the one frame every
             proposal opens in, and moves within it once it is taken in close. */}
-        <div
-          ref={frameRef}
-          role="button"
-          tabIndex={0}
-          aria-label={close ? 'Zoom out' : 'Zoom in'}
-          // Nothing in here is text to be picked up: a press zooms, and a drag
-          // moves the canvas. Without this, dragging highlighted the labels
-          // drawn on the canvas as though they were being selected to copy.
-          className="relative min-h-0 flex-1 overflow-hidden select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-ink"
-          style={{
-            background: THUMB_BACKGROUND,
-            aspectRatio: FRAME_ASPECT,
-            // The magnifier says what a press does — in, then out again —
-            // whether or not the canvas is being dragged under it.
-            cursor: close ? 'zoom-out' : 'zoom-in',
-            // The drag is the frame's, not the browser's idea of a scroll.
-            touchAction: 'none',
-          }}
-          onPointerDown={(event) => {
-            // The left button zooms and drags. A right press belongs to the
-            // menu it opens, and a middle one to the board's own panning.
-            if (event.button !== 0) return;
-            // Capture keeps a drag that wanders off the frame coming back here,
-            // where it is available: a synthesised press has no pointer to
-            // capture, and losing the press with it would cost the zoom itself.
-            try {
-              event.currentTarget.setPointerCapture(event.pointerId);
-            } catch {
-              // Nothing to capture; the frame's own handlers still see the drag.
-            }
-            drag.current = { x: event.clientX, y: event.clientY, pan, moved: false };
-          }}
-          onPointerMove={(event) => {
-            const held = drag.current;
-            const frame = frameRef.current?.getBoundingClientRect();
-            if (!held || !close || !frame) return;
-            const moved = {
-              x: event.clientX - held.x,
-              y: event.clientY - held.y,
-            };
-            if (!held.moved && Math.hypot(moved.x, moved.y) < DRAG_SLOP_PX) return;
-            held.moved = true;
-            setDragging(true);
-            setPan(withinFrame({ x: held.pan.x + moved.x, y: held.pan.y + moved.y }, frame));
-          }}
-          onPointerUp={(event) => {
-            if (event.button !== 0) return;
-            const held = drag.current;
-            drag.current = null;
-            setDragging(false);
-            // A press that went nowhere is a press, not a drag.
-            if (held && !held.moved) toggleClose({ x: event.clientX, y: event.clientY });
-          }}
-          // A canvas is not artwork to be dragged out of the page either.
-          onDragStart={(event) => event.preventDefault()}
-          onPointerCancel={() => {
-            drag.current = null;
-            setDragging(false);
-          }}
-          // Only a keyboard press lands here with no pointer behind it; a mouse
-          // press is already dealt with above, and would otherwise count twice.
-          onClick={(event) => {
-            if (event.detail === 0) toggleClose();
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            toggleClose();
-          }}
-        >
+        {!onPaper ? (
           <div
-            className={`absolute inset-0 ${
-              dragging
-                ? ''
-                : 'transition-transform duration-150 ease-out motion-reduce:transition-none'
-            }`}
+            ref={frameRef}
+            role="button"
+            tabIndex={0}
+            aria-label={close ? 'Zoom out' : 'Zoom in'}
+            // Nothing in here is text to be picked up: a press zooms, and a drag
+            // moves the canvas. Without this, dragging highlighted the labels
+            // drawn on the canvas as though they were being selected to copy.
+            className="relative min-h-0 flex-1 overflow-hidden select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-rt-ink"
             style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${close ? ZOOM : 1})`,
+              background: THUMB_BACKGROUND,
+              aspectRatio: FRAME_ASPECT,
+              // The magnifier says what a press does — in, then out again —
+              // whether or not the canvas is being dragged under it.
+              cursor: close ? 'zoom-out' : 'zoom-in',
+              // The drag is the frame's, not the browser's idea of a scroll.
+              touchAction: 'none',
             }}
+            onPointerDown={(event) => {
+              // The left button zooms and drags. A right press belongs to the
+              // menu it opens, and a middle one to the board's own panning.
+              if (event.button !== 0) return;
+              // Capture keeps a drag that wanders off the frame coming back here,
+              // where it is available: a synthesised press has no pointer to
+              // capture, and losing the press with it would cost the zoom itself.
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId);
+              } catch {
+                // Nothing to capture; the frame's own handlers still see the drag.
+              }
+              drag.current = { x: event.clientX, y: event.clientY, pan, moved: false };
+            }}
+            onPointerMove={(event) => {
+              const held = drag.current;
+              const frame = frameRef.current?.getBoundingClientRect();
+              if (!held || !close || !frame) return;
+              const moved = {
+                x: event.clientX - held.x,
+                y: event.clientY - held.y,
+              };
+              if (!held.moved && Math.hypot(moved.x, moved.y) < DRAG_SLOP_PX) return;
+              held.moved = true;
+              setDragging(true);
+              setPan(withinFrame({ x: held.pan.x + moved.x, y: held.pan.y + moved.y }, frame));
+            }}
+            onPointerUp={(event) => {
+              if (event.button !== 0) return;
+              const held = drag.current;
+              drag.current = null;
+              setDragging(false);
+              // A press that went nowhere is a press, not a drag.
+              if (held && !held.moved) toggleClose({ x: event.clientX, y: event.clientY });
+            }}
+            // A canvas is not artwork to be dragged out of the page either.
+            onDragStart={(event) => event.preventDefault()}
+            onPointerCancel={() => {
+              drag.current = null;
+              setDragging(false);
+            }}
+            // Only a keyboard press lands here with no pointer behind it; a mouse
+            // press is already dealt with above, and would otherwise count twice.
+            onClick={(event) => {
+              if (event.detail === 0) toggleClose();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              toggleClose();
+            }}
+          >
+            <div
+              className={`absolute inset-0 ${
+                dragging
+                  ? ''
+                  : 'transition-transform duration-150 ease-out motion-reduce:transition-none'
+              }`}
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${close ? ZOOM : 1})`,
+              }}
+            >
+              {artwork}
+            </div>
+          </div>
+        ) : (
+          // Read, not inspected: a square of the paper, without the zoom.
+          <div
+            className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+            style={{ aspectRatio: 1 }}
           >
             {artwork}
           </div>
-        </div>
+        )}
         {/* Saving the artwork, beside the close. Outside the frame for the
             reason the close below gives: the frame captures the pointer, and
             would take this press for a zoom. Ahead of the close in the tab
@@ -538,7 +589,11 @@ function EnlargedView({
         >
           <X aria-hidden="true" size={15} strokeWidth={2.2} />
         </button>
-        <div className="border-t" style={{ borderColor: CARD_BORDER }}>
+        {/* On paper the byline is written on the note itself, as on the board. */}
+        <div
+          className={onPaper ? '' : 'border-t'}
+          style={onPaper ? undefined : { borderColor: CARD_BORDER }}
+        >
           {byline}
         </div>
       </>

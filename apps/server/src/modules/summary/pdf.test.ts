@@ -99,7 +99,7 @@ describe('renderSessionRecapPdf', () => {
     expect(body).toContain('What ships first?');
     expect(body).toContain('Winner');
     expect(body).toContain('Skipped');
-    expect(body).toContain('Nothing was decided for this question.');
+    expect(body).not.toContain('Nothing was decided');
     expect(body).not.toContain('Bea');
     expect(body).not.toContain('The UI');
     expect(imageXObjectCount(pdf)).toBeGreaterThan(0);
@@ -151,6 +151,83 @@ describe('renderSessionRecapPdf', () => {
     expect(body).not.toContain('votes cast');
     expect(body).not.toContain('Nothing was decided');
     expect(imageXObjectCount(pdf)).toBeGreaterThanOrEqual(ideas.length);
+  });
+
+  it('writes times in UTC unless given a real zone, then in that zone', async () => {
+    const utc = pdfText(await renderSessionRecapPdf(RECAP));
+    expect(utc).toContain('01:00 UTC');
+
+    // 01:00 UTC on 1 September is 11:00 in Sydney (UTC+10 until October).
+    const sydney = pdfText(await renderSessionRecapPdf(RECAP, { timeZone: 'Australia/Sydney' }));
+    expect(sydney).toContain('11:00');
+    expect(sydney).not.toContain('UTC');
+
+    const nonsense = pdfText(await renderSessionRecapPdf(RECAP, { timeZone: 'Not/AZone' }));
+    expect(nonsense).toContain('01:00 UTC');
+  });
+
+  it('says a closed vote with no ballots had no votes, not that it was answered', async () => {
+    const body = pdfText(
+      await renderSessionRecapPdf({
+        ...RECAP,
+        questions: [
+          {
+            ...RECAP.questions[0]!,
+            winnerProposalId: null,
+            tallies: [
+              { proposalId: 'p1', votes: 0, percent: 0 },
+              { proposalId: 'p2', votes: 0, percent: 0 },
+            ],
+            votedCount: 0,
+          },
+        ],
+      }),
+    );
+    expect(body).toContain('No votes cast');
+    expect(body).toContain('The ballot closed without a vote.');
+    expect(body).not.toContain('Answered');
+  });
+
+  it('says a vote the session ended on mid-ballot has no result yet', async () => {
+    const body = pdfText(
+      await renderSessionRecapPdf({
+        ...RECAP,
+        questions: [{ ...RECAP.questions[0]!, status: 'voting', winnerProposalId: null }],
+      }),
+    );
+    expect(body).toContain('Vote not closed');
+    expect(body).toContain('The session ended while the ballot was open');
+    expect(body).not.toContain('Winner');
+  });
+
+  it('pictures the ideas of a vote question the session ended on mid-discussion', async () => {
+    const pdf = await renderSessionRecapPdf({
+      ...RECAP,
+      questions: [
+        {
+          ...RECAP.questions[0]!,
+          status: 'discussion',
+          winnerProposalId: null,
+          tallies: [],
+          votedCount: 0,
+        },
+      ],
+    });
+    const body = pdfText(pdf);
+    expect(body).toContain('Not voted on');
+    expect(body).toContain('2 ideas');
+    expect(imageXObjectCount(pdf)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps the result of a vote skipped after it closed', async () => {
+    const body = pdfText(
+      await renderSessionRecapPdf({
+        ...RECAP,
+        questions: [{ ...RECAP.questions[0]!, status: 'skipped', skipReason: 'Settled already' }],
+      }),
+    );
+    expect(body).toContain('Decided, then skipped: Settled already');
+    expect(body).toContain('Winner');
   });
 
   it('says so when a discussed brainstorm question got no ideas', async () => {
