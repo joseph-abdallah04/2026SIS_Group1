@@ -199,6 +199,36 @@ describe('getSessionSummary', () => {
     expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2', 'p3']);
   });
 
+  // Review of 1bddadf: ended while the leader was still picking the shortlist,
+  // nothing ticked, the ideas fell to `otherProposals`, so the recap said no
+  // ideas were added right above "Ideas on the board".
+  it('lists the ideas of a vote question the session ended on while shortlisting', async () => {
+    getSessionWithQuestions.mockResolvedValue({
+      ...ENDED,
+      questions: [{ ...ENDED.questions[0]!, status: 'voting' as const }],
+    });
+    getSessionVoteOutcomes.mockResolvedValue([
+      {
+        questionId: ENDED.questions[0]!.id,
+        proposalIds: [],
+        winnerProposalId: null,
+        tiedProposalIds: [],
+        tallies: [],
+        votedCount: 0,
+      },
+    ]);
+
+    const summary = await getSessionSummary('s1', 'u2');
+
+    expect(summary.questions[0]).toMatchObject({
+      status: 'voting',
+      votingEnabled: true,
+      winnerProposalId: null,
+      otherProposals: [],
+    });
+    expect(summary.questions[0]?.proposals.map((item) => item.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+
   it('marks nobody as leader when the leader’s account is gone', async () => {
     getSessionWithQuestions.mockResolvedValue({ ...ENDED, leaderId: null });
     listSessionParticipants.mockResolvedValue([

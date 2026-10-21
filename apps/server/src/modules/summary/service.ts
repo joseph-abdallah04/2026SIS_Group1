@@ -69,9 +69,15 @@ export async function getSessionSummary(
 
       const outcome = outcomeByQuestion.get(question.id);
       const shortlistedIds = (outcome?.proposalIds ?? []).slice(0, SHORTLIST_MAX);
-      // The session ended on it mid-discussion, so the vote never opened and
-      // there is no shortlist: its ideas are the record, as a brainstorm's are.
-      if (question.status === 'discussion' && shortlistedIds.length === 0) {
+      // The session ended on it before anything was shortlisted, mid-discussion
+      // or with the leader still picking the shortlist (voting, nothing ticked
+      // yet), so the vote never opened: its ideas are the record, as a
+      // brainstorm's are. Otherwise they would fall to `otherProposals`, and
+      // the recap say no ideas were added right above the ideas themselves.
+      if (
+        (question.status === 'discussion' || question.status === 'voting') &&
+        shortlistedIds.length === 0
+      ) {
         return {
           id: question.id,
           position: question.position,
