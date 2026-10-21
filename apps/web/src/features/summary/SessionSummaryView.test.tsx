@@ -93,6 +93,11 @@ describe('SessionSummaryView', () => {
     expect(screen.getByText('45 min')).toBeInTheDocument();
     expect(screen.getByText('Live call')).toBeInTheDocument();
     expect(screen.getByText('Led by Jordan Hale')).toBeInTheDocument();
+    // The outcome card: how many were decided, of how many, and a legend.
+    const outcome = screen.getByRole('region', { name: '1 decided · 1 skipped, of 2 questions' });
+    expect(outcome).toHaveTextContent('1 of 2 decided');
+    expect(outcome).toHaveTextContent('2 questions');
+    expect(within(outcome).getAllByRole('listitem', { hidden: true })).toHaveLength(2);
     // B13: the page's sections and each question are headings, in order.
     expect(screen.getByRole('heading', { level: 2, name: 'At a glance' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Questions' })).toBeInTheDocument();
@@ -103,8 +108,8 @@ describe('SessionSummaryView', () => {
   it('names the leader first and you second, and lists everyone on demand', async () => {
     render(<SessionSummaryView summary={RECAP} viewerId="u2" />);
 
-    const people = screen.getByRole('button', { name: /Who took part/ });
-    expect(people).toHaveTextContent('Jordan, you and 1 other');
+    const people = screen.getByRole('button', { name: 'Who took part: Jordan, you and 1 other' });
+    expect(people).toHaveTextContent('3 people');
     await userEvent.click(people);
 
     const list = screen.getByText('3 took part').parentElement!;

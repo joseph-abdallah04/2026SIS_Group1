@@ -5,7 +5,6 @@ import { ArrowLeft, LayoutDashboard, RotateCw } from 'lucide-react';
 import { AppPage } from '../../components/AppPage';
 import { useCurrentUserId } from '../../lib/currentUser';
 import { AppHeader, useMe } from '../dashboard/AppHeader';
-import { formatDay } from '../dashboard/SessionItems';
 import { DownloadRecapButton } from '../summary/DownloadRecapButton';
 import { RECAP_HEADER_BUTTON, RECAP_HEADER_BUTTON_SECONDARY } from '../summary/recapButtons';
 import { RecapStatus, useRecapStatus } from '../summary/RecapStatus';
@@ -94,16 +93,7 @@ export function SessionEndedPage({
   );
 
   return (
-    <AppPage
-      header={
-        <AppHeader
-          current="Recap"
-          user={user}
-          status={session.endedAt ? `Ended ${formatDay(session.endedAt)}` : undefined}
-          actions={actions}
-        />
-      }
-    >
+    <AppPage header={<AppHeader current="Recap" user={user} actions={actions} />}>
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
         <Link
           to="/dashboard"

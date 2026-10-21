@@ -1,4 +1,5 @@
 import {
+  RECAP_OUTCOME_LABEL,
   recapQuestionOutcome,
   type BoardItem,
   type RecapOutcomeKind,
@@ -146,39 +147,49 @@ export function metaLine(question: SessionRecapQuestion): string | null {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
-export interface OutcomeCounts {
-  decided: number;
-  tied: number;
-  discussed: number;
-  skipped: number;
-  /** Everything else: no votes, a vote left open, not voted on, not reached. */
-  unsettled: number;
+/** The order outcomes are counted in: what was settled first, then what was left. */
+const OUTCOME_ORDER: RecapOutcomeKind[] = [
+  'decided',
+  'tied',
+  'discussed',
+  'no-votes',
+  'vote-open',
+  'not-voted',
+  'skipped',
+  'not-reached',
+];
+
+export interface OutcomeTally {
+  kind: RecapOutcomeKind;
+  count: number;
+  /** "decided", "not reached": the question's own badge, to follow a number. */
+  label: string;
 }
 
-export function outcomeCounts(questions: SessionRecapQuestion[]): OutcomeCounts {
-  const counts: OutcomeCounts = { decided: 0, tied: 0, discussed: 0, skipped: 0, unsettled: 0 };
+/**
+ * How many questions ended each way, in the words of their badges, leaving
+ * out what did not happen.
+ */
+export function outcomeTally(questions: SessionRecapQuestion[]): OutcomeTally[] {
+  const counts = new Map<RecapOutcomeKind, number>();
   for (const question of questions) {
-    const kind: RecapOutcomeKind = recapQuestionOutcome(question).kind;
-    if (kind === 'decided' || kind === 'tied' || kind === 'discussed' || kind === 'skipped') {
-      counts[kind] += 1;
-    } else {
-      counts.unsettled += 1;
-    }
+    const kind = recapQuestionOutcome(question).kind;
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
-  return counts;
+  return OUTCOME_ORDER.flatMap((kind) => {
+    const count = counts.get(kind) ?? 0;
+    return count > 0 ? [{ kind, count, label: RECAP_OUTCOME_LABEL[kind].toLowerCase() }] : [];
+  });
 }
 
-/** "2 decided · 1 tied · 1 skipped", leaving out what did not happen. */
-export function countsLine(counts: OutcomeCounts): string {
-  return [
-    counts.decided ? `${counts.decided} decided` : null,
-    counts.tied ? `${counts.tied} tied` : null,
-    counts.discussed ? `${counts.discussed} discussed` : null,
-    counts.skipped ? `${counts.skipped} skipped` : null,
-    counts.unsettled ? `${counts.unsettled} not settled` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+/** How many ended one way: 0 when none did. */
+export function tallyOf(tally: OutcomeTally[], kind: RecapOutcomeKind): number {
+  return tally.find((row) => row.kind === kind)?.count ?? 0;
+}
+
+/** "2 decided · 1 tied · 1 not reached". */
+export function tallyLine(tally: OutcomeTally[]): string {
+  return tally.map(({ count, label }) => `${count} ${label}`).join(' · ');
 }
 
 /** Everyone who took part: the leader first, then you, then the rest in the order they joined. */
@@ -228,9 +239,9 @@ export function durationText(minutes: number): string {
 }
 
 export interface MeetingFacts {
-  /** "Tue 14 Oct", for the eyebrow. */
+  /** "Tue, Oct 14", first on the facts line. */
   day: string;
-  /** "10:02–10:47 · 45 min · Live call · Led by Maya Chen" as separate facts. */
+  /** "10:02 to 10:47 · 45 min · Live call · Led by Maya Chen" as separate facts. */
   facts: string[];
 }
 
@@ -253,7 +264,7 @@ export function meetingFacts(
   });
   const facts: string[] = [];
   if (started && ended) {
-    facts.push(`${clock(started)}–${clock(ended)}`);
+    facts.push(`${clock(started)} to ${clock(ended)}`);
     facts.push(durationText(Math.round((ended.getTime() - started.getTime()) / 60000)));
   } else if (ended) {
     facts.push(`Ended ${clock(ended)}`);

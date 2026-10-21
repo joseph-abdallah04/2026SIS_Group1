@@ -12,16 +12,17 @@ import {
   answerLine,
   buildsOnText,
   cardLabel,
-  countsLine,
   durationText,
   findCard,
   ideaWallLayout,
   meetingFacts,
   metaLine,
   orderedPeople,
-  outcomeCounts,
+  outcomeTally,
   peopleLine,
   rankedProposals,
+  tallyLine,
+  tallyOf,
 } from './recapModel';
 
 function sticky(id: string, text: string, authorId = 'u2', authorName = 'Ada'): BoardItem {
@@ -213,15 +214,23 @@ describe('the lines the page says', () => {
     ).toBeNull();
   });
 
-  it('sums up the meeting, leaving out what did not happen', () => {
-    const counts = outcomeCounts([
+  it('sums up the meeting in the badges’ words, leaving out what did not happen', () => {
+    const tally = outcomeTally([
+      q({ status: 'pending', winnerProposalId: null }),
       VOTE,
       q({ winnerProposalId: null, tiedProposalIds: ['a', 'b'] }),
       q({ votingEnabled: false }),
-      q({ status: 'pending', winnerProposalId: null }),
+      VOTE,
     ]);
-    expect(counts).toEqual({ decided: 1, tied: 1, discussed: 1, skipped: 0, unsettled: 1 });
-    expect(countsLine(counts)).toBe('1 decided · 1 tied · 1 discussed · 1 not settled');
+    expect(tally.map(({ kind, count }) => [kind, count])).toEqual([
+      ['decided', 2],
+      ['tied', 1],
+      ['discussed', 1],
+      ['not-reached', 1],
+    ]);
+    expect(tallyLine(tally)).toBe('2 decided · 1 tied · 1 discussed · 1 not reached');
+    expect(tallyOf(tally, 'decided')).toBe(2);
+    expect(tallyOf(tally, 'skipped')).toBe(0);
   });
 });
 

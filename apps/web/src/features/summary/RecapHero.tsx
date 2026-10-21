@@ -4,7 +4,14 @@ import { recapQuestionOutcome, RECAP_OUTCOME_LABEL, type SessionRecap } from '@r
 
 import { Popover } from '../../components/ui/Popover';
 import { FactLine } from '../sessions/setup/FactLine';
-import { countsLine, meetingFacts, orderedPeople, outcomeCounts, peopleLine } from './recapModel';
+import {
+  meetingFacts,
+  orderedPeople,
+  outcomeTally,
+  peopleLine,
+  tallyLine,
+  tallyOf,
+} from './recapModel';
 import { Avatar, SEGMENT_CLASS } from './recapUi';
 
 /** Faces shown before the rest are counted ("+9"). */
@@ -24,15 +31,17 @@ function PeopleStack({ summary, viewerId }: { summary: SessionRecap; viewerId: s
   const more = people.length - shown.length;
 
   return (
-    // Its own width, wrapping under the track rather than squeezing the names.
-    <div className="relative -ml-1 max-w-full flex-none">
+    // A pill at the end of the facts line: the faces and how many, the names
+    // a press away.
+    <div className="relative max-w-full flex-none">
       <button
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        className="flex max-w-full cursor-pointer items-center gap-2.5 rounded-full py-1 pr-2.5 pl-1 text-left text-[12.5px] text-rt-ink-muted transition-colors hover:bg-rt-surface-alt focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-expanded:bg-rt-surface-alt"
+        aria-label={`Who took part: ${peopleLine(people)}`}
+        className="flex max-w-full cursor-pointer items-center gap-2 rounded-full border border-rt-tertiary/70 bg-rt-surface py-0.5 pr-2.5 pl-0.5 text-left text-[12.5px] text-rt-ink transition-colors hover:bg-rt-surface-alt focus-visible:ring-2 focus-visible:ring-rt-secondary focus-visible:outline-none aria-expanded:bg-rt-surface-alt"
       >
         <span className="flex shrink-0 -space-x-1.5">
           {shown.map(({ person, key }) => (
@@ -47,11 +56,10 @@ function PeopleStack({ summary, viewerId }: { summary: SessionRecap; viewerId: s
             </span>
           ) : null}
         </span>
-        <span className="min-w-0 truncate">
-          <span className="sr-only">Who took part: </span>
-          <span className="font-semibold text-rt-ink">{peopleLine(people)}</span>
+        <span aria-hidden className="font-semibold whitespace-nowrap">
+          {people.length} {people.length === 1 ? 'person' : 'people'}
         </span>
-        <ChevronDown aria-hidden size={14} className="shrink-0" />
+        <ChevronDown aria-hidden size={14} className="shrink-0 text-rt-ink-muted" />
       </button>
       <Popover
         open={open}
@@ -95,21 +103,29 @@ function PeopleStack({ summary, viewerId }: { summary: SessionRecap; viewerId: s
   );
 }
 
-/** How it went, question by question: one segment each, coloured by what became of it. */
+/**
+ * How it went, in a card of its own, since it is what the page is opened for:
+ * how many were decided, one segment a question coloured by what became of it,
+ * and a legend in the same colours and the same words as the questions'
+ * badges. A session of only brainstorms counts what was discussed instead, as
+ * none of it was put to a vote.
+ */
 function OutcomeTrack({ summary }: { summary: SessionRecap }) {
   const total = summary.questions.length;
   if (total === 0) return null;
-  const counts = outcomeCounts(summary.questions);
-  const line = countsLine(counts);
+  const tally = outcomeTally(summary.questions);
+  const anyVote = summary.questions.some((question) => question.votingEnabled);
+  const headline = anyVote
+    ? `${tallyOf(tally, 'decided')} of ${total} decided`
+    : `${tallyOf(tally, 'discussed')} of ${total} discussed`;
   return (
-    <div
-      role="img"
-      aria-label={`${line}, of ${total} ${total === 1 ? 'question' : 'questions'}`}
-      className="flex w-full max-w-md min-w-0 flex-col gap-2"
+    <section
+      aria-label={`${tallyLine(tally)}, of ${total} ${total === 1 ? 'question' : 'questions'}`}
+      className="flex flex-col gap-3 rounded-3xl border border-rt-tertiary/70 bg-rt-surface p-5 sm:p-6"
     >
-      <div aria-hidden className="flex items-baseline gap-3 text-[12.5px] text-rt-ink-muted">
-        <span className="min-w-0">{line}</span>
-        <span className="ml-auto hidden shrink-0 tabular-nums sm:inline">
+      <div aria-hidden className="flex items-baseline gap-3">
+        <p className="text-[16px] font-semibold tracking-[-0.01em] text-rt-ink">{headline}</p>
+        <span className="ml-auto shrink-0 text-[12.5px] text-rt-ink-muted tabular-nums">
           {total} {total === 1 ? 'question' : 'questions'}
         </span>
       </div>
@@ -129,7 +145,17 @@ function OutcomeTrack({ summary }: { summary: SessionRecap }) {
           );
         })}
       </div>
-    </div>
+      <ul aria-hidden className="flex flex-wrap gap-x-5 gap-y-1.5 text-[12.5px] text-rt-ink-muted">
+        {tally.map(({ kind, count, label }) => (
+          <li key={kind} className="flex items-center gap-1.5">
+            <span className={`size-2.5 shrink-0 rounded-[3px] ${SEGMENT_CLASS[kind]}`} />
+            <span>
+              <span className="font-semibold text-rt-ink tabular-nums">{count}</span> {label}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -176,8 +202,8 @@ function Confetti() {
 
 /**
  * The top of the summary (I1): what the meeting was, when, who was there and
- * how it went, in the dashboard's language — the eyebrow, the title in Lora,
- * one quiet line of facts, the faces and the progress track.
+ * how it went, in the dashboard's language — the title, one quiet line of
+ * facts ending in the faces, and the outcome card under them.
  */
 export function RecapHero({
   summary,
@@ -203,18 +229,15 @@ export function RecapHero({
           </p>
         </>
       ) : null}
-      <p className="text-[11px] font-bold tracking-[0.12em] text-rt-secondary-deep uppercase">
-        Session recap · {day}
-      </p>
-      <h1 className="font-serif text-[30px] leading-[1.12] font-normal tracking-[-0.02em] text-balance break-words text-rt-ink sm:text-[40px]">
+      <h1 className="text-[30px] leading-[1.12] font-bold tracking-[-0.02em] text-balance break-words text-rt-ink sm:text-[36px]">
         {summary.title}
       </h1>
-      {facts.length > 0 ? <FactLine facts={facts} className="text-[13px]" /> : null}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-8 gap-y-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <FactLine facts={[day, ...facts]} className="text-[13px]" />
         <PeopleStack summary={summary} viewerId={viewerId} />
-        <div className="flex min-w-[min(100%,16rem)] flex-1">
-          <OutcomeTrack summary={summary} />
-        </div>
+      </div>
+      <div className="mt-3">
+        <OutcomeTrack summary={summary} />
       </div>
     </div>
   );

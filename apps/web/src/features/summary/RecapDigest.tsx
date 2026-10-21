@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import { recapQuestionOutcome, type SessionRecap } from '@roundtable/shared';
 
-import { answerLine, outcomeCounts } from './recapModel';
+import { answerLine } from './recapModel';
 import { OutcomeChip, QuestionNumber } from './recapUi';
 
 /** The id of a question's card, for "At a glance" to jump to. */
@@ -43,21 +43,16 @@ export function RecapDigest({
   viewerId: string | null;
 }) {
   if (summary.questions.length === 0) return null;
-  const decided = outcomeCounts(summary.questions).decided;
+  // The counts are the outcome card's, just above; this is the answers.
   return (
     <section
       aria-labelledby="recap-glance"
       className="rt-recap-rise flex flex-col gap-3"
       style={{ ['--rt-recap-i' as string]: 1 }}
     >
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 id="recap-glance" className="mr-auto text-[19px] font-semibold tracking-[-0.01em]">
-          At a glance
-        </h2>
-        <p className="text-[12.5px] text-rt-ink-muted">
-          {decided} of {summary.questions.length} decided
-        </p>
-      </div>
+      <h2 id="recap-glance" className="text-[19px] font-semibold tracking-[-0.01em]">
+        At a glance
+      </h2>
       <ol className="@container flex flex-col rounded-3xl border border-rt-tertiary/70 bg-rt-surface p-1.5 sm:p-2">
         {summary.questions.map((question, index) => {
           const kind = recapQuestionOutcome(question).kind;
